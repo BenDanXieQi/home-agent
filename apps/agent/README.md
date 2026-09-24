@@ -4,15 +4,11 @@ Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连�
 
 ## 初始化
 
-根目录执行：
+首次配置和日常启动统一见[项目启动说明](../../README.md#启动)。单独开发 Agent 使用根目录 `bun run dev:agent`，需先准备依赖和数据库。
 
-```sh
-bun run db:up
-bun run db:agent:setup
-bun run dev
-```
+根目录 `db:migrate` 先执行 backend 迁移，再调用 Agent 的官方 `setup()`，可重复执行；部署和升级适配器时先运行。仅初始化 Agent 可执行 `bun run --cwd apps/agent db:setup`。服务启动不自动改表。初始化账号需要 schema/表创建权限，运行账号需相应读写权限。连接池上限 5，连接等待超时 10 秒，SQL 执行超时 30 秒。SIGINT/SIGTERM 最多等待 HTTP 请求 30 秒，再强制断开；随后 drain telemetry 中的活动执行并关闭连接池。
 
-`db:agent:setup` 显式调用官方 `setup()`，可重复执行；部署和升级适配器时先运行。服务启动不自动改表。初始化账号需要 schema/表创建权限，运行账号需相应读写权限。连接池上限 5，连接等待超时 10 秒，SQL 执行超时 30 秒。SIGINT/SIGTERM 最多等待 HTTP 请求 30 秒，再强制断开；随后 drain telemetry 中的活动执行并关闭连接池。
+根目录 `dev` 包含只读 `db:check`，核对 checkpoint 迁移记录及表读取；单独启动 Agent 不包含该检查。检查不验证写权限。升级适配器时需同步核对 `scripts/db-check.ts` 中的迁移版本要求。
 
 ## 对话
 

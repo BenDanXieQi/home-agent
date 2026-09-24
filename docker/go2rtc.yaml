@@ -1,0 +1,13 @@
+# Local development: published ports are restricted to the host loopback.
+api:
+  listen: ":1984"
+rtsp:
+  listen: ":8554"
+webrtc:
+  listen: ":8555"
+  candidates:
+    - 127.0.0.1:8555
+  ice_servers: []
+log:
+  level: info
+streams: {}

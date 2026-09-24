@@ -13,7 +13,8 @@
     "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
-    "db:setup": "bun --env-file=../../.env scripts/db-setup.ts"
+    "db:setup": "bun --env-file=../../.env scripts/db-setup.ts",
+    "db:check": "bun --env-file=../../.env scripts/db-check.ts"
   },
   "dependencies": {
     "@langchain/core": "catalog:",

@@ -4,7 +4,7 @@ React + Vite 本机服务连接页面，支持编辑 Agent、go2rtc 地址、保
 
 ## 运行
 
-在仓库根目录执行 `bun run dev`，访问 <http://127.0.0.1:5173/>。开发服务器将 `/api` 代理到 `BACKEND_HOST:BACKEND_PORT`，默认 `127.0.0.1:3000`；配置读取根目录 `.env`。
+首次准备见[项目启动说明](../../README.md#启动)。在仓库根目录执行 `bun run dev`，访问 <http://127.0.0.1:5173/>。开发服务器将 `/api` 代理到 `BACKEND_HOST:BACKEND_PORT`，默认 `127.0.0.1:3000`；配置读取根目录 `.env`。
 
 `bun run start` 构建后由 backend 提供页面与 API，默认地址为 <http://127.0.0.1:3000/>。`bun run --filter @home-agent/web preview` 仅预览静态构建，不提供 API 代理；完整功能使用 backend 托管入口。
 

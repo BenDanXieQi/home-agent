@@ -54,11 +54,11 @@ export const errorDefinitions = {
   },
   database_not_configured: {
     status: 503,
-    message: "Configure the Agent database and run db:agent:setup.",
+    message: "Configure the Agent database and run db:migrate.",
   },
   persistence_unavailable: {
     status: 503,
-    message: "Check the Agent database and run db:agent:setup.",
+    message: "Check the Agent database and run db:migrate.",
   },
   thread_busy: {
     status: 409,

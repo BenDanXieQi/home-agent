@@ -1,7 +1,9 @@
 node_modules/
+# Local runtime configuration; defaults are versioned and initialized by bun run setup.
 /config/
 .pnpm-store/
 .turbo/
+/.codegraph/
 dist/
 coverage/
 .env

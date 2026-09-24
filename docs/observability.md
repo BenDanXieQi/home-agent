@@ -1,6 +1,8 @@
-# 追踪接入
+# Backend 与 Agent 全链路追踪
 
 当前实现采用标准 OpenTelemetry JS SDK、`@hono/otel` 和 OTLP/HTTP protobuf exporter。backend 与 Agent 各自有一个 Provider，使用 AsyncLocalStorage 上下文管理和 W3C `traceparent` / `tracestate` 传播。默认不导出数据；开启后默认记录全部 trace。
+
+全链路追踪由 `packages/observability` 提供共享能力，在 backend 和 Agent 中接入，通过 LangSmith 查看和分析。聊天链路的人工验收步骤见[聊天人工验收](chat-verification.md)。
 
 ## 运行
 

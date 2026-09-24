@@ -35,9 +35,8 @@ const errorMessages = {
   agent_timeout: "Agent 请求超时，请稍后重试。",
   agent_unavailable: "无法连接 Agent，请检查地址和服务进程。",
   model_not_configured: "请配置 AGENT_MODEL 和 OPENAI_API_KEY。",
-  database_not_configured: "请配置 Agent 数据库并运行 db:agent:setup。",
-  persistence_unavailable:
-    "会话存储不可用，请检查数据库并运行 db:agent:setup。",
+  database_not_configured: "请配置 Agent 数据库并运行 db:migrate。",
+  persistence_unavailable: "会话存储不可用，请检查数据库并运行 db:migrate。",
   thread_busy: "当前会话仍在运行，请等待结束后再发送。",
   request_cancelled: "请求已取消。",
   run_timeout: "Agent 执行超时。",
