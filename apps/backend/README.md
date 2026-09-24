@@ -8,7 +8,7 @@
 
 ```sh
 bun run dev:backend  # 单独启动 backend
-bun run dev         # 启动 Web、backend 和 Agent
+bun run dev         # 等待 Docker 依赖就绪，再启动 Web、backend 和 Agent
 bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 ```
 
@@ -67,13 +67,15 @@ src/
 
 ```sh
 bun run db:up        # 启动本地数据库，需先启动 Docker
-bun run db:migrate   # 应用迁移
-bun run db:check     # 检查 PostgreSQL 与 TimescaleDB
+bun run db:migrate   # 执行 backend 迁移和 Agent checkpoint 初始化
+bun run db:check     # 只读检查 backend 迁移、TimescaleDB 和 Agent checkpoint
 bun run db:generate  # 根据 schema 生成迁移
 bun run db:studio    # 数据库管理界面
 bun run db:down      # 停止容器，保留数据卷
 ```
 
 本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
+
+`db:check` 核对 backend 迁移时间戳、文件哈希和 TimescaleDB 扩展，再执行 Agent 检查；不写入数据，不验证写权限或完整表结构。缺少迁移时运行 `db:migrate`；已执行的迁移文件被修改时，应恢复原文件并新增迁移。
 
 目前尚无业务表，初始迁移仅启用 TimescaleDB。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。

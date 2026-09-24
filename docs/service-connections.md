@@ -2,6 +2,8 @@
 
 backend 首次启动在仓库根目录自动创建 `config/config.yaml` 与相邻的 `config.schema.json`，无需复制示例。整个 `/config/` 忽略 Git。已有 YAML 不覆盖；默认路径不受启动工作目录影响，仓库内 `src` 与 `dist` 入口使用同一文件。
 
+此文件只保存服务地址；go2rtc 自身的流配置位于 `config/go2rtc/go2rtc.yaml`。容器启动和配置模板见[本地基建](../README.md#本地基建)。
+
 ```yaml
 # yaml-language-server: $schema=./config.schema.json
 services:
