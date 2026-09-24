@@ -1,0 +1,33 @@
+{
+  "name": "@home-agent/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "scripts": {
+    "dev": "bun --env-file=../../.env --bun vite",
+    "build": "bun run check-types && bun --bun vite build",
+    "preview": "bun --env-file=../../.env --bun vite preview",
+    "lint": "oxlint --config .oxlintrc.json --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --config .oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "check-types": "tsc -b"
+  },
+  "dependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "@home-agent/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@home-agent/typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "vite": "catalog:"
+  }
+}

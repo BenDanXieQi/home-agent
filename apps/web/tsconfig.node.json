@@ -1,0 +1,7 @@
+{
+  "extends": "@home-agent/typescript-config/bun.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+  },
+  "include": ["vite.config.ts"]
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "ui": "tui",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/.oxlintrc.json",
+        "$TURBO_ROOT$/apps/web/.oxlintrc.json"
+      ]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "start": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
+    },
+    "lint:fix": {
+      "cache": false
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "@home-agent/backend#build": {
+      "dependsOn": ["^build", "@home-agent/web#build"],
+      "outputs": ["dist/**"]
+    }
+  },
+  "globalPassThroughEnv": [
+    "NODE_ENV",
+    "AGENT_HOST",
+    "AGENT_PORT",
+    "AGENT_MODEL",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "LANGSMITH_API_KEY",
+    "LANGSMITH_PROJECT",
+    "LANGSMITH_ENDPOINT",
+    "LANGSMITH_TRACING",
+    "LANGSMITH_TRACING_V2",
+    "LANGCHAIN_TRACING_V2",
+    "LANGCHAIN_TRACING",
+    "AGENT_RUN_TIMEOUT_MS",
+    "BACKEND_HOST",
+    "BACKEND_PORT",
+    "AGENT_BASE_URL",
+    "BACKEND_REQUEST_TIMEOUT_MS",
+    "BACKEND_SHUTDOWN_TIMEOUT_MS",
+    "LANGSMITH_WORKSPACE_ID",
+    "OTEL_TRACES_EXPORTER",
+    "OTEL_EXPORTER_OTLP_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+    "OTEL_EXPORTER_OTLP_HEADERS",
+    "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
+    "OTEL_INCLUDE_CONTENT",
+    "DATABASE_URL",
+    "AGENT_DATABASE_URL"
+  ]
+}

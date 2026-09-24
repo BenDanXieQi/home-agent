@@ -1,0 +1,39 @@
+# Agent persistence
+
+Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连接 PostgreSQL。默认复用根目录 `DATABASE_URL`；可用 `AGENT_DATABASE_URL` 指定独立账号或数据库。状态表位于固定的 `agent_state` schema，使用普通 PostgreSQL 表，由 checkpointer 管理，不属于 backend 的 Drizzle schema，也不转换为 TimescaleDB hypertable。
+
+## 初始化
+
+根目录执行：
+
+```sh
+bun run db:up
+bun run db:agent:setup
+bun run dev
+```
+
+`db:agent:setup` 显式调用官方 `setup()`，可重复执行；部署和升级适配器时先运行。服务启动不自动改表。初始化账号需要 schema/表创建权限，运行账号需相应读写权限。连接池上限 5，连接等待超时 10 秒，SQL 执行超时 30 秒。SIGINT/SIGTERM 最多等待 HTTP 请求 30 秒，再强制断开；随后 drain telemetry 中的活动执行并关闭连接池。
+
+## 对话
+
+向 backend 的 `POST /api/chat` 发送：
+
+```json
+{ "message": "你好" }
+```
+
+从 `X-Thread-Id` 响应头或 SSE `run_started` 获取生成的 UUID。续聊发送：
+
+```json
+{ "message": "继续刚才的话题", "threadId": "上次返回的 UUID" }
+```
+
+Agent 将其映射为 LangGraph 的 `configurable.thread_id`，只追加本次消息；`runId` 标识单次执行。`run_started` 包含 `persistent: true`，表示持久化执行模式，并非此次执行已完成。采用 `durability: "sync"`，只有图执行完成后才发送 `run_completed`。失败或取消时可能已经保存用户输入与中间状态，不代表自动回滚；重新发送同一消息会成为新输入，目前没有请求去重和自动重试接口。
+
+未配置数据库返回 503；数据库连接或 checkpoint 表不可用时，在 SSE 开始前返回 503。同一会话的并发请求返回 409，不排队；锁覆盖存储预检查到图执行结束（包括失败与取消）。这是单进程内的保护，扩容多进程之前需增加跨进程协调。`/health` 的 `persistenceConfigured` 仅表示已注入持久化组件。
+
+运行超时会取消模型执行，并向仍连接的客户端发送 `run_failed`，最多等待 1 秒发送与关闭，随后强制断开。客户端主动断开时直接取消，不再发送事件。客户端必须将未收到 `run_completed` 或 `run_failed` 的流结束视为异常，不能把 EOF 当成成功；失败后也不应自动重发消息。同会话锁在后台执行结束后释放，而非在 SSE 关闭时释放。
+
+当前仍仅限可信本机使用，尚无身份认证和会话归属校验，UUID 不是权限控制。存储含完整消息内容，与 OTel 是否采集内容无关。尚未添加长期记忆 Store、自动历史清理、会话列表、恢复任务调度或 SSE 断线续传；checkpoint 支持后续开发恢复能力，不代表这些产品能力已经实现。
+
+依据：[LangGraph JS 持久化](https://docs.langchain.com/oss/javascript/langgraph/persistence)、[官方 PostgreSQL 适配器](https://github.com/langchain-ai/langgraphjs/tree/main/libs/checkpoint-postgres)。
