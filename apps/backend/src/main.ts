@@ -1,19 +1,39 @@
-import { join } from "node:path";
+import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
-import { loadConfig } from "./config";
+import { loadEnvironment } from "./environment";
 import { createDatabase } from "./db";
+import {
+  createConnectionStore,
+  resolveConnectionConfigPath,
+} from "./connections/store";
 
-const config = loadConfig();
+const environment = loadEnvironment();
 const telemetry = initializeTelemetry("home-agent-backend");
 const { createApp } = await import("./app");
+const connectionStore = createConnectionStore(
+  resolveConnectionConfigPath(resolvePath(import.meta.dir, "../../..")),
+);
+try {
+  await connectionStore.initialize();
+} catch (error) {
+  console.warn(
+    "服务配置初始化失败；请修复配置文件，相关调用将在下次请求恢复。",
+    error instanceof Error ? error.message : "未知错误",
+  );
+}
 
-const database = config.DATABASE_URL
-  ? createDatabase(config.DATABASE_URL)
+const database = environment.DATABASE_URL
+  ? createDatabase(environment.DATABASE_URL)
   : undefined;
-const app = createApp(join(import.meta.dir, "public"), config, database?.db);
+const app = createApp(
+  join(import.meta.dir, "public"),
+  environment,
+  database?.db,
+  connectionStore,
+);
 const server = Bun.serve({
-  hostname: config.BACKEND_HOST,
-  port: config.BACKEND_PORT,
+  hostname: environment.BACKEND_HOST,
+  port: environment.BACKEND_PORT,
   fetch: app.fetch,
   idleTimeout: 0,
 });
@@ -31,7 +51,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           new Promise<false>((resolve) => {
             drainTimer = setTimeout(
               () => resolve(false),
-              config.BACKEND_SHUTDOWN_TIMEOUT_MS,
+              environment.BACKEND_SHUTDOWN_TIMEOUT_MS,
             );
           }),
         ]);

@@ -1,4 +1,0 @@
-{
-  "extends": "@home-agent/typescript-config/base.json",
-  "include": ["src/**/*.ts"]
-}

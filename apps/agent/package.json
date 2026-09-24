@@ -23,7 +23,8 @@
     "zod": "catalog:",
     "@home-agent/observability": "workspace:*",
     "@langchain/langgraph-checkpoint-postgres": "catalog:",
-    "pg": "catalog:"
+    "pg": "catalog:",
+    "@home-agent/api": "workspace:*"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",

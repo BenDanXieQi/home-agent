@@ -1,10 +1,10 @@
 import { sql } from "drizzle-orm";
-import { loadConfig } from "../src/config";
+import { loadEnvironment } from "../src/environment";
 import { createDatabase } from "../src/db";
 
-const config = loadConfig();
-if (!config.DATABASE_URL) throw new Error("DATABASE_URL is required");
-const database = createDatabase(config.DATABASE_URL);
+const environment = loadEnvironment();
+if (!environment.DATABASE_URL) throw new Error("DATABASE_URL is required");
+const database = createDatabase(environment.DATABASE_URL);
 try {
   const versions = await database.db.execute(sql`
     SELECT current_setting('server_version') AS postgres_version,

@@ -13,26 +13,29 @@
     "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
-    "test": "bun test tests",
+    "test": "bun test ./tests --pass-with-no-tests",
     "db:generate": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs generate",
     "db:migrate": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs migrate",
     "db:studio": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs studio",
     "db:check": "bun --env-file=../../.env scripts/db-check.ts"
   },
   "dependencies": {
-    "postgres": "catalog:",
-    "hono": "catalog:",
-    "zod": "catalog:",
-    "@home-agent/contracts": "workspace:*",
     "@home-agent/observability": "workspace:*",
-    "drizzle-orm": "catalog:"
+    "drizzle-orm": "catalog:",
+    "hono": "catalog:",
+    "postgres": "catalog:",
+    "write-file-atomic": "catalog:",
+    "yaml": "catalog:",
+    "zod": "catalog:",
+    "@home-agent/api": "workspace:*"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
     "@types/bun": "catalog:",
+    "@types/write-file-atomic": "catalog:",
+    "drizzle-kit": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "typescript": "catalog:",
-    "drizzle-kit": "catalog:"
+    "typescript": "catalog:"
   }
 }

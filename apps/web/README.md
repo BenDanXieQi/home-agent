@@ -1,19 +1,19 @@
 # Web
 
-使用 `create-vite@9.2.1 --template react-ts` 初始化，保留模板示例并增加 backend 连接检查。
+React + Vite 本机服务连接页面，支持编辑 Agent、go2rtc 地址、保存配置和查询连接状态。backend 健康状态独立显示。
 
-- React 19.3.0，Vite 8.3.1，`@vitejs/plugin-react` 6.1.1。
-- Vite 8 内置 Rolldown；React 插件使用 Oxc，无需 `rolldown-vite` 别名或 Babel。
-- Oxlint 开启类型感知、React Hooks、Refresh 和可访问性规则；Oxfmt 统一由根目录执行。
-- 版本通过根 `package.json` 的 Bun catalog 管理；TS 配置继承 `packages/typescript-config`。
-- `packages/contracts` 提供浏览器和 backend 共用的 Zod schema，不引入服务端代码。
+## 运行
 
-在仓库根目录执行 `bun run dev`，打开 http://127.0.0.1:5173/。Vite 本身使用 Bun 运行，浏览器中的 React 仍由浏览器执行。
+在仓库根目录执行 `bun run dev`，访问 <http://127.0.0.1:5173/>。开发服务器将 `/api` 代理到 `BACKEND_HOST:BACKEND_PORT`，默认 `127.0.0.1:3000`；配置读取根目录 `.env`。
 
-`/api` 代理到 `BACKEND_HOST:BACKEND_PORT`（默认 `127.0.0.1:3000`），两边读取根目录 `.env`。不要把后端密钥放进 `VITE_*` 环境变量。
+`bun run start` 构建后由 backend 提供页面与 API，默认地址为 <http://127.0.0.1:3000/>。`bun run --filter @home-agent/web preview` 仅预览静态构建，不提供 API 代理；完整功能使用 backend 托管入口。
 
-`bun run build` 后执行 `bun run start`，由 Hono 在 http://127.0.0.1:3000/ 提供页面和 API。`bun run --filter @home-agent/web preview` 仅用于本地预览前端构建，连接检查仍需要运行 backend。
+## 开发约定
 
-React Compiler 沿用官方 react-ts 模板默认：不额外启用。Rolldown 和 Oxc 已生效，不需要开启实验性编译选项。
+- 依赖版本由根 `package.json` 的 Bun catalog 管理，TypeScript 配置继承 `packages/typescript-config`。
+- API schema 和类型从 `@home-agent/api/contracts` 导入。
+- 中文错误及连接状态文案集中在 `src/messages/zh-CN.ts`，按共享错误码显示。
+- 使用 Oxlint 检查类型、React Hooks 和可访问性，Oxfmt 负责格式化；根目录执行 `bun run check`。
+- `VITE_*` 环境变量会暴露给浏览器，不得存放后端密钥。
 
-参考：[Vite 8](https://vite.dev/blog/announcing-vite8)、[Vite 入门](https://vite.dev/guide/)、[Oxlint](https://oxc.rs/docs/guide/usage/linter.html)、[Oxfmt](https://oxc.rs/docs/guide/usage/formatter.html)。
+功能约定见[服务连接配置](../../docs/service-connections.md)，错误契约见[错误处理](../../docs/errors.md)。

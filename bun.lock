@@ -15,6 +15,7 @@
       "name": "@home-agent/agent",
       "version": "0.0.0",
       "dependencies": {
+        "@home-agent/api": "workspace:*",
         "@home-agent/observability": "workspace:*",
         "@langchain/core": "catalog:",
         "@langchain/langgraph": "catalog:",
@@ -37,16 +38,19 @@
       "name": "@home-agent/backend",
       "version": "0.0.0",
       "dependencies": {
-        "@home-agent/contracts": "workspace:*",
+        "@home-agent/api": "workspace:*",
         "@home-agent/observability": "workspace:*",
         "drizzle-orm": "catalog:",
         "hono": "catalog:",
         "postgres": "catalog:",
+        "write-file-atomic": "catalog:",
+        "yaml": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
         "@home-agent/typescript-config": "workspace:*",
         "@types/bun": "catalog:",
+        "@types/write-file-atomic": "catalog:",
         "drizzle-kit": "catalog:",
         "oxlint": "catalog:",
         "oxlint-tsgolint": "catalog:",
@@ -57,7 +61,7 @@
       "name": "@home-agent/web",
       "version": "0.0.0",
       "dependencies": {
-        "@home-agent/contracts": "workspace:*",
+        "@home-agent/api": "workspace:*",
         "react": "catalog:",
         "react-dom": "catalog:",
       },
@@ -73,14 +77,17 @@
         "vite": "catalog:",
       },
     },
-    "packages/contracts": {
-      "name": "@home-agent/contracts",
+    "packages/api": {
+      "name": "@home-agent/api",
       "version": "0.0.0",
       "dependencies": {
+        "@home-agent/observability": "workspace:*",
+        "hono": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
         "@home-agent/typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
         "oxlint": "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript": "catalog:",
@@ -129,6 +136,7 @@
     "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "@types/write-file-atomic": "4.0.3",
     "@vitejs/plugin-react": "6.1.1",
     "drizzle-kit": "0.31.11",
     "drizzle-orm": "0.45.3",
@@ -145,6 +153,8 @@
     "turbo": "2.11.3",
     "typescript": "7.0.2",
     "vite": "8.3.1",
+    "write-file-atomic": "7.0.0",
+    "yaml": "2.8.3",
     "zod": "4.6.5",
   },
   "packages": {
@@ -228,9 +238,9 @@
 
     "@home-agent/agent": ["@home-agent/agent@workspace:apps/agent"],
 
-    "@home-agent/backend": ["@home-agent/backend@workspace:apps/backend"],
+    "@home-agent/api": ["@home-agent/api@workspace:packages/api"],
 
-    "@home-agent/contracts": ["@home-agent/contracts@workspace:packages/contracts"],
+    "@home-agent/backend": ["@home-agent/backend@workspace:apps/backend"],
 
     "@home-agent/observability": ["@home-agent/observability@workspace:packages/observability"],
 
@@ -447,6 +457,8 @@
     "@types/react": ["@types/react@19.3.0", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg=="],
 
     "@types/react-dom": ["@types/react-dom@19.3.0", "", { "peerDependencies": { "@types/react": "^19.3.0" } }, "sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q=="],
+
+    "@types/write-file-atomic": ["@types/write-file-atomic@4.0.3", "", { "dependencies": { "@types/node": "*" } }, "sha512-qdo+vZRchyJIHNeuI1nrpsLw+hnkgqP/8mlaN6Wle/NKhydHmUN9l4p3ZE8yP90AJNJW4uB8HQhedb4f1vNayQ=="],
 
     "@typescript/typescript-aix-ppc64": ["@typescript/typescript-aix-ppc64@7.0.2", "", { "os": "aix", "cpu": "ppc64" }, "sha512-MTKKkWB7p/0E9xi1d1tHtZ5PiLkGEMIq88pK2CubZjOsLtYTLqhgIgi6zepFa+9GHZ6h05NMCkQxGKiPXMxXtQ=="],
 
@@ -716,6 +728,8 @@
 
     "shebang-regex": ["shebang-regex@3.0.0", "", {}, "sha512-7++dFhtcx3353uBaq8DDR4NuxBetBzC7ZQOhmTQInHEd6bSrXdiEyzCvG07Z44UYdLShWUyXt5M/yhz8ekcb1A=="],
 
+    "signal-exit": ["signal-exit@4.1.0", "", {}, "sha512-bzyZ1e88w9O1iNJbKnOlvYTrWPDl46O1bG0D3XInv+9tkPrxrN8jUUTiFlDkkmKWgn1M6CfIA13SuGqOa9Korw=="],
+
     "source-map": ["source-map@0.6.1", "", {}, "sha512-UjgapumWlbMhkBgzT7Ykc5YXUT46F0iKu8SGXq0bcwP5dz/h0Plj6enJqjz1Zbq2l5WaqYnrVbwWOWMyF3F47g=="],
 
     "source-map-js": ["source-map-js@1.2.1", "", {}, "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="],
@@ -746,7 +760,11 @@
 
     "word-wrap": ["word-wrap@1.2.5", "", {}, "sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA=="],
 
+    "write-file-atomic": ["write-file-atomic@7.0.0", "", { "dependencies": { "imurmurhash": "^0.1.4", "signal-exit": "^4.0.1" } }, "sha512-YnlPC6JqnZl6aO4uRc+dx5PHguiR9S6WeoLtpxNT9wIG+BDya7ZNE1q7KOjVgaA73hKhKLpVPgJ5QA9THQ5BRg=="],
+
     "xtend": ["xtend@4.0.2", "", {}, "sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ=="],
+
+    "yaml": ["yaml@2.8.3", "", { "bin": { "yaml": "bin.mjs" } }, "sha512-AvbaCLOO2Otw/lW5bmh9d/WEdcDFdQp2Z2ZUH3pX9U2ihyUY0nvLv7J6TrWowklRGPYbB/IuIMfYgxaCPg5Bpg=="],
 
     "yocto-queue": ["yocto-queue@0.1.0", "", {}, "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="],
 

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const environment = z.object({
+const environmentSchema = z.object({
   DATABASE_URL: z
     .url()
     .refine(
@@ -16,17 +16,6 @@ const environment = z.object({
     .min(1_000)
     .max(300_000)
     .default(30_000),
-  AGENT_BASE_URL: z
-    .url()
-    .refine((value) => {
-      const url = new URL(value);
-      return (
-        ["http:", "https:"].includes(url.protocol) &&
-        !url.username &&
-        !url.password
-      );
-    }, "Use an HTTP(S) URL without embedded credentials")
-    .default("http://127.0.0.1:1811"),
   BACKEND_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -35,12 +24,12 @@ const environment = z.object({
     .default(130_000),
 });
 
-export type Config = z.infer<typeof environment>;
+export type Environment = z.infer<typeof environmentSchema>;
 
-export function loadConfig(
+export function loadEnvironment(
   env: Record<string, string | undefined> = Bun.env,
-): Config {
-  const result = environment.safeParse(env);
+): Environment {
+  const result = environmentSchema.safeParse(env);
   if (!result.success) {
     const fields = result.error.issues
       .map((issue) => issue.path.join("."))
