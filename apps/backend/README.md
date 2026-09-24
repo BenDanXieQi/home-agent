@@ -1,46 +1,79 @@
 # Backend
 
-Hono 4.13.9 + Bun。开发入口为 `src/main.ts`，应用路由和测试入口为 `src/app.ts`。
+基于 Hono + Bun，负责 Web 静态托管、服务连接配置、连接状态检查和聊天转发。模型执行与会话持久化由独立 [Agent](../agent/README.md) 负责。
 
-在仓库根目录执行 `bun run dev`，Turborepo 同时运行 web、backend 和独立 Agent。也可执行 `bun run dev:backend` 单独启动 API；聊天需要 Agent 同时运行。
+## 运行
 
-- 默认地址：`http://127.0.0.1:3000`。
-- `GET /api/health`：本服务健康状态，不表示米家、摄像头或模型已接入。
-- `POST /api/chat`：最多 32 KiB 的 JSON 请求转发到 Agent，保留上游状态并透传 SSE；客户端取消会取消上游请求。
-- 对话请求的可选 `threadId` 原样传给 Agent，`X-Thread-Id` 响应头也透传。会话状态由 Agent 的 `agent_state` schema 管理；backend 不读写 checkpoint 表。
-- 根目录 `.env` 中的 `BACKEND_HOST`、`BACKEND_PORT` 可调整监听地址；`AGENT_BASE_URL` 默认 `http://127.0.0.1:1811`，`BACKEND_REQUEST_TIMEOUT_MS` 默认 130 秒。
-- 收到 SIGINT/SIGTERM 后停止接收新连接，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒）让在途请求完成，超时才强制断开。随后关闭数据库连接池并完成 telemetry 清理；这两步的耗时不包含在请求等待期限内。
-- 生产构建由 Turbo 先构建 web，再复制到 `dist/public`；根目录 `bun run start` 同时启动 backend 和 Agent，由 backend 单端口提供页面和 API。
-- 构建使用 Bun target，依赖保持 external；运行产物需要 workspace 与已安装的依赖，不是单文件独立分发包。
-- 当前仅托管首页及真实静态资源；未知 API 或文件返回 404。增加前端 URL 路由时再配置对应 SPA fallback。
+先按[项目 README](../../README.md)安装依赖并配置根目录 `.env`。以下命令均在仓库根目录执行：
 
-共享 `packages/observability` 负责 OpenTelemetry 与 `@hono/otel` 接入，使用 W3C 追踪上下文连接 Agent。支持关闭导出、本地 console 和 OTLP；可直接接 LangSmith 或 Collector。配置和追踪范围见 [追踪接入](../../docs/observability.md)。
+```sh
+bun run dev:backend  # 单独启动 backend
+bun run dev         # 启动 Web、backend 和 Agent
+bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
+```
 
-参考：[Hono on Bun](https://hono.dev/docs/getting-started/bun)。
+默认监听 `http://127.0.0.1:3000`，通过 `BACKEND_HOST`、`BACKEND_PORT` 调整。当前仅供可信本机使用，尚无用户认证。构建产物需要 workspace 与已安装的依赖。
+
+## 接口
+
+| 接口                       | 职责                                     |
+| -------------------------- | ---------------------------------------- |
+| `GET /api/health`          | backend 存活状态，不检查外围服务或数据库 |
+| `GET /api/config`          | 读取连接配置及可写状态                   |
+| `PUT /api/config`          | 校验并保存完整连接配置                   |
+| `GET /api/services/status` | 检查 Agent 与 go2rtc 的接口是否可用      |
+| `POST /api/chat`           | 将 JSON 请求转发至 Agent，透传响应与 SSE |
+
+连接地址来自根目录 `config/config.yaml`，每次请求重新读取。生成规则、`--config`、接口结构与错误处理见[服务连接配置](../../docs/service-connections.md)。
+
+聊天请求最多 32 KiB，超时由 `BACKEND_REQUEST_TIMEOUT_MS` 控制，默认 130 秒；客户端取消会传递到 Agent。`threadId` 与 `X-Thread-Id` 原样透传，backend 不读写 Agent 的 checkpoint 表。
+
+聊天代理要求上游为本项目 Agent；响应体原样透传，错误连接到其他服务时不会将其 HTML 等响应转换为本项目错误格式。
+
+收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../docs/observability.md)。
+
+## 目录与约定
+
+```text
+src/
+├── main.ts                 # 启动、资源初始化与关闭
+├── app.ts                  # 中间件、子路由与错误处理的组装
+├── app-context.ts          # Hono 请求上下文变量的类型约定
+├── environment.ts          # 环境变量解析
+├── connections/
+│   ├── routes.ts           # 连接配置接口
+│   ├── store.ts            # YAML 路径、校验与读写
+│   └── status.ts           # 服务探测与状态接口
+├── chat/
+│   └── routes.ts           # 聊天转发与流取消
+├── middleware/
+│   └── local-management.ts # 管理接口的 Host／Origin 校验
+└── db/
+    ├── index.ts            # 数据库连接
+    └── schema.ts           # 业务表定义
+```
+
+按功能组织代码，子路由使用 `new Hono<AppContext>()` 创建，由 `app.route()` 挂载。共享 HTTP 中间件放在 `middleware/`；前后端数据契约位于 `packages/api/src/contracts`。
+
+业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../docs/errors.md)。
+
+`app-context.ts` 仅定义请求上下文变量的类型，目前只有 `db`，供路由和中间件共享；数据库实例在启动时创建，由 `app.ts` 注入。`environment.ts` 负责读取和校验进程环境变量。
+
+连接配置路径由 `connections/store.ts` 解析，仓库根目录由顶层入口传入，避免移动功能目录改变用户配置位置。`drizzle/` 存放迁移，`scripts/` 存放开发与构建工具，[`tests/`](tests/README.md) 预留测试目录和约定，当前不包含测试用例。
 
 ## 数据库
 
-使用 Drizzle ORM + Postgres.js，连接 PostgreSQL / TimescaleDB。根目录 `compose.yaml` 固定使用 `timescale/timescaledb:2.30.1-pg18`，只绑定本机 `5432`，数据保存在 Docker named volume。需要先启动 Docker；命令也能找到 macOS Docker Desktop 自带的 CLI。
-
-首次配置根目录 `.env`：从 `.env.example` 复制数据库配置，并将 `POSTGRES_PASSWORD` 和 `DATABASE_URL` 中的密码替换为同一个本地密码。URL 密码包含特殊字符时需 URL 编码。已有数据库卷不会因为修改环境变量而自动修改账号密码。
-
-在仓库根目录执行：
+使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，通过 `c.get("db")` 获取连接；未配置时为 `undefined`，依赖数据库的功能需显式检查。服务启动不自动执行迁移。
 
 ```sh
-bun run db:up        # 启动并等待数据库就绪
-bun run db:migrate   # 应用版本化迁移，启用 TimescaleDB
-bun run db:check     # 通过 Drizzle 查询 PostgreSQL 与 TimescaleDB 版本
+bun run db:up        # 启动本地数据库，需先启动 Docker
+bun run db:migrate   # 应用迁移
+bun run db:check     # 检查 PostgreSQL 与 TimescaleDB
 bun run db:generate  # 根据 schema 生成迁移
-bun run db:studio    # 本地数据库管理界面
+bun run db:studio    # 数据库管理界面
 bun run db:down      # 停止容器，保留数据卷
 ```
 
-`src/db/index.ts` 创建一个共享连接池；`main.ts` 将 Drizzle 实例注入 Hono 的 `c.get("db")`，退出时关闭连接池。未配置 `DATABASE_URL` 时可运行原有 API，此时 `db` 为 `undefined`；数据库业务必须先检查或明确要求数据库可用。`/api/health` 仍为服务存活检查，数据库就绪状态用 `db:check` 检查。连接按需建立，启动服务不会自动执行迁移。
+本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
 
-父应用与子路由使用 `src/env.ts` 的共享 `AppEnv` 类型；新增路由使用 `new Hono<AppEnv>()`，从上下文读取 `db` 时保留类型检查与可选性。
-
-`src/db/schema.ts` 预留业务表定义，目前没有虚构的业务表。初始迁移只启用 TimescaleDB，不创建 hypertable。确定事件结构后，先生成表迁移，再用 `bun run db:generate --custom --name=event-hypertable` 添加 TimescaleDB 专有 SQL，并通过 `db:migrate` 执行。迁移 SQL 与 `drizzle/meta` 一起提交。hypertable 主键及唯一约束必须包含所有分区列；不要依赖 ORM 自动推导 hypertable、压缩或保留策略，也不要用 schema push 替代本项目的迁移流程。
-
-本地容器账号用于开发和迁移。生产部署应另外配置数据库权限、备份和 TLS；连接支持在 `DATABASE_URL` 中设置 `sslmode=require` 等 PostgreSQL 参数。
-
-依据：[Drizzle PostgreSQL](https://orm.drizzle.team/docs/get-started-postgresql)、[自定义 SQL 迁移](https://orm.drizzle.team/docs/kit-custom-migrations)、[TimescaleDB 唯一约束](https://docs.timescale.com/use-timescale/latest/hypertables/hypertables-and-unique-indexes/)。
+目前尚无业务表，初始迁移仅启用 TimescaleDB。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。

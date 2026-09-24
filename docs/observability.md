@@ -4,7 +4,7 @@
 
 ## 运行
 
-根目录复制 `.env.example` 为 `.env`，配置模型。`bun run dev` 同时启动 web、backend、Agent；`bun run start` 构建后启动 backend 和 Agent。浏览器界面仍只有健康状态，聊天目前通过 HTTP 使用：
+按[运行说明](../README.md)配置根目录 `.env`，设置模型并完成数据库初始化。`bun run dev` 同时启动 web、backend、Agent；`bun run start` 构建后启动 backend 和 Agent。首页提供服务连接配置、连接状态和 backend 健康状态，聊天通过 HTTP 使用：
 
 ```sh
 curl -N http://127.0.0.1:3000/api/chat \
@@ -34,7 +34,7 @@ LANGSMITH_PROJECT=home-agent
 
 无需 Collector 即可使用。若已经有 Collector，设置完整的 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，例如 `http://127.0.0.1:4318/v1/traces`，或设置不含信号路径的 `OTEL_EXPORTER_OTLP_ENDPOINT`。自定义 endpoint 使用标准 `OTEL_EXPORTER_OTLP_TRACES_HEADERS` / `OTEL_EXPORTER_OTLP_HEADERS`（逗号分隔、值可 URL 编码），不会自动收到 LangSmith 密钥。LangSmith 转发凭据配置在 Collector 中。
 
-## 已覆盖的链路
+## 追踪链路
 
 ```text
 backend POST /api/chat                   SERVER
@@ -48,20 +48,23 @@ backend POST /api/chat                   SERVER
 
 `@hono/otel` 的 SERVER span 在 Hono handler 返回时结束；它的耗时不是整个 SSE 的持续时间。检查流式耗时应查看 `agent.run` 和 backend CLIENT span。HTTP 200 后模型仍可能失败，检查 Agent 执行 span 与 `run_failed` 事件，而不能仅看 HTTP 状态。
 
-超时或断开会触发 AbortSignal 并关闭 SSE，包括解除慢客户端导致的写入背压；这种情况下不保证收到最后一个事件。普通模型错误在连接仍可用时发送 `run_failed`。退出时停止请求、给活跃执行最多 10 秒收尾，再关闭并 flush exporter。强制终止进程无法保证导出。
+超时或断开会触发 AbortSignal 并关闭 SSE，包括解除慢客户端导致的写入背压；这种情况下不保证收到最后一个事件。普通模型错误在连接仍可用时发送 `run_failed`。
+
+退出时先停止接收请求并等待在途请求：backend 使用 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），Agent 为 30 秒；超时则强制关闭连接。追踪模块随后最多等待 10 秒让已登记操作结束，再关闭 exporter。这 10 秒不是整个进程的停机期限；数据库关闭和 exporter 导出另需时间。强制终止进程无法保证导出。
 
 ## 代码边界
 
 - `packages/observability`：SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、关闭与导出。
-- `apps/backend/src/chat.ts`：受限 JSON 请求和 SSE 透明转发，不解析模型内容。
+- `apps/backend/src/chat/routes.ts`：受限 JSON 请求和 SSE 透明转发，不解析模型内容。
+- `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
 - `apps/agent/src/http/chat.ts`：在请求上下文内运行完整 SSE 生命周期。
 - `apps/agent/src/graph/home-agent.ts`：在实际模型调用边界生成 LLM span。
 
-新增工具、数据库或设备操作时，在对应业务边界调用 `withSpan`；内部服务 HTTP 调用使用 `tracedFetch` 并消费或取消响应体。它目前不是任意 LangGraph 节点、工具和 SDK 内部重试的自动埋点器。当前只有一个模型节点，所以显式边界足够覆盖现有应用。
+业务操作通过 `withSpan` 显式埋点；内部服务 HTTP 调用使用 `tracedFetch` 并消费或取消响应体。LangGraph 节点、工具和 SDK 内部重试不会自动生成独立 span。
 
 不填写 `langsmith.trace.id`、`langsmith.span.id` 等覆盖字段，保持原生 OTLP trace/span ID 和父子关系。保留整个祖先链，不只导出 LLM span：LangSmith 官方说明，引用了始终未导出父级的子 span 会过期丢失，即使接收请求返回 200。
 
-项目不启用 LangSmith REST callback；初始化时关闭环境变量触发的 LangChain/LangSmith 自动 tracing，避免重复调用树。LangSmith JS 的 experimental OTel 路线不能直接视为 LangGraph callback 的替代：当前安装版本的 translator 会使用已有 active span，并不会替每个 callback 创建独立 span。本实现使用官方支持的通用 OTel ingestion。
+项目使用通用 OTel ingestion，不启用 LangSmith REST callback。当前安装的 LangChain 会在四个 tracing 环境开关中任意一个为 `true` 时启用自动追踪，因此初始化时统一关闭这些触发开关，避免重复调用树和意外采集内容。追踪导出由 `OTEL_TRACES_EXPORTER` 控制。
 
 当前服务默认只监听本机，无用户鉴权。对外开放前，应在可信入口处理外部传入的追踪上下文；随意接受一个未导出的外部 parent 也会影响 LangSmith 的完整树展示。
 
@@ -72,5 +75,3 @@ backend POST /api/chat                   SERVER
 - [OTel JavaScript instrumentation](https://opentelemetry.io/docs/languages/js/instrumentation/)
 - [OTel context propagation](https://opentelemetry.io/docs/languages/js/propagation/)
 - [LangSmith OTel 接收、属性映射、Collector 与父子关系](https://docs.langchain.com/langsmith/trace-with-opentelemetry)
-- [LangSmith JS OTel 支持范围说明](https://support.langchain.com/articles/7335403634-how-do-i-use-opentelemetry-otel-with-langsmith)（历史支持文章，接入时也核对了安装版本源码）
-- [上下文传播讨论 #1725](https://github.com/langchain-ai/langsmith-sdk/issues/1725)（Python 历史案例，用于区分导出与执行上下文）

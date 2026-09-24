@@ -1,44 +1,36 @@
+import { AppError } from "@home-agent/api/errors";
+import { errorResponse, readJsonBody } from "@home-agent/api/errors/hono";
 import { tracedFetch } from "@home-agent/observability";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { Config } from "./config";
-import type { AppEnv } from "./env";
+import type { Environment } from "../environment";
+import type { AppContext } from "../app-context";
+import type { ConnectionStore } from "../connections/store";
 
-export function createChatRoutes(config: Config) {
-  const app = new Hono<AppEnv>();
+export function createChatRoutes(
+  environment: Environment,
+  connectionStore: ConnectionStore,
+) {
+  const app = new Hono<AppContext>();
   app.post(
     "/",
     bodyLimit({
       maxSize: 32_768,
       onError: (c) =>
-        c.json(
-          {
-            error: "request_too_large",
-            message: "Maximum body size is 32 KiB",
-          },
-          413,
+        errorResponse(
+          c,
+          new AppError("request_too_large", { params: { maxBytes: 32768 } }),
         ),
     }),
     async (c) => {
-      const contentType = c.req.header("content-type")?.split(";")[0]?.trim();
-      if (contentType?.toLowerCase() !== "application/json") {
-        return c.json(
-          { error: "content_type_required", message: "Use application/json" },
-          415,
-        );
-      }
-      let input: unknown;
-      try {
-        input = await c.req.json();
-      } catch {
-        return c.json(
-          { error: "invalid_request", message: "Provide a valid JSON body" },
-          400,
-        );
-      }
+      // Keep this request's address even if the file changes during its stream.
+      const connectionConfig = await connectionStore.read();
+      const input = await readJsonBody(c);
 
       const disconnected = new AbortController();
-      const timeout = AbortSignal.timeout(config.BACKEND_REQUEST_TIMEOUT_MS);
+      const timeout = AbortSignal.timeout(
+        environment.BACKEND_REQUEST_TIMEOUT_MS,
+      );
       const signal = AbortSignal.any([
         c.req.raw.signal,
         disconnected.signal,
@@ -48,7 +40,7 @@ export function createChatRoutes(config: Config) {
       let upstream: Response;
       try {
         upstream = await tracedFetch(
-          new URL("/api/chat", config.AGENT_BASE_URL),
+          new URL("/api/chat", connectionConfig.services.agent.url),
           {
             method: "POST",
             headers: {
@@ -59,15 +51,14 @@ export function createChatRoutes(config: Config) {
             signal,
           },
         );
-      } catch {
-        return c.json(
-          timeout.aborted
-            ? { error: "agent_timeout", message: "The agent request timed out" }
-            : {
-                error: "agent_unavailable",
-                message: "The agent could not be reached",
-              },
-          timeout.aborted ? 504 : 502,
+      } catch (cause) {
+        throw new AppError(
+          c.req.raw.signal.aborted
+            ? "request_cancelled"
+            : timeout.aborted
+              ? "agent_timeout"
+              : "agent_unavailable",
+          { cause },
         );
       }
 

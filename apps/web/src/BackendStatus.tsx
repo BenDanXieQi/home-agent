@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { healthSchema } from "@home-agent/contracts";
+import { healthSchema } from "@home-agent/api/contracts";
 
 export function BackendStatus() {
   const [status, setStatus] = useState("正在连接 backend…");

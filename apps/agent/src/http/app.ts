@@ -1,6 +1,7 @@
 import { httpTracing, telemetryStatus } from "@home-agent/observability";
 import { Hono } from "hono";
-import { HTTPException } from "hono/http-exception";
+import { AppError } from "@home-agent/api/errors";
+import { errorResponse, handleHttpError } from "@home-agent/api/errors/hono";
 import { secureHeaders } from "hono/secure-headers";
 import type { Config } from "../config";
 import { createHomeAgent } from "../graph/home-agent";
@@ -27,10 +28,7 @@ export function createApp(config: Config, database?: AgentDatabase) {
     "/api/chat",
     createChatRoutes(agent, config.AGENT_RUN_TIMEOUT_MS, database),
   );
-  app.notFound((c) => c.json({ error: "not_found" }, 404));
-  app.onError((error, c) => {
-    if (error instanceof HTTPException) return error.getResponse();
-    return c.json({ error: "internal_server_error" }, 500);
-  });
+  app.notFound((c) => errorResponse(c, new AppError("not_found")));
+  app.onError(handleHttpError);
   return app;
 }

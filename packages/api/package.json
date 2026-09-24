@@ -1,10 +1,12 @@
 {
-  "name": "@home-agent/contracts",
+  "name": "@home-agent/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    "./contracts": "./src/contracts/index.ts",
+    "./errors": "./src/errors/index.ts",
+    "./errors/hono": "./src/errors/hono.ts"
   },
   "scripts": {
     "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
@@ -12,12 +14,15 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
+    "@home-agent/observability": "workspace:*",
+    "hono": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@types/bun": "catalog:"
   }
 }

@@ -69,6 +69,8 @@ export function initializeTelemetry(serviceName: string) {
   const config = result.data;
   includeContent = config.OTEL_INCLUDE_CONTENT === "true";
   // This application exports a single OTel tree, never parallel LangSmith REST runs.
+  // The installed @langchain/core enables tracing if ANY of these flags is true.
+  // Disable every trigger to prevent duplicate exports and unintended content capture.
   process.env.LANGSMITH_TRACING = "false";
   process.env.LANGSMITH_TRACING_V2 = "false";
   process.env.LANGCHAIN_TRACING = "false";

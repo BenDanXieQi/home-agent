@@ -1,3 +1,10 @@
+import type { RunFailedEvent } from "@home-agent/api/contracts";
+import {
+  AppError,
+  errorPayload,
+  validationIssues,
+} from "@home-agent/api/errors";
+import { errorResponse, readJsonBody } from "@home-agent/api/errors/hono";
 import {
   context,
   withSpan,
@@ -47,76 +54,35 @@ export function createChatRoutes(
     bodyLimit({
       maxSize: 32_768,
       onError: (c) =>
-        c.json(
-          {
-            error: "request_too_large",
-            message: "Maximum body size is 32 KiB",
-          },
-          413,
+        errorResponse(
+          c,
+          new AppError("request_too_large", { params: { maxBytes: 32768 } }),
         ),
     }),
     async (c) => {
-      if (
-        c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() !==
-        "application/json"
-      ) {
-        return c.json(
-          { error: "content_type_required", message: "Use application/json" },
-          415,
-        );
-      }
-      const input = chatInput.safeParse(
-        await c.req.json().catch(() => undefined),
-      );
+      const input = chatInput.safeParse(await readJsonBody(c));
       if (!input.success)
-        return c.json(
-          {
-            error: "invalid_request",
-            message:
-              "Provide a message of 1–16000 characters and an optional UUID threadId",
-          },
-          400,
-        );
-      if (!agent)
-        return c.json(
-          {
-            error: "model_not_configured",
-            message: "Set AGENT_MODEL and OPENAI_API_KEY to enable chat",
-          },
-          503,
-        );
-
-      if (!database)
-        return c.json(
-          {
-            error: "database_not_configured",
-            message:
-              "Set AGENT_DATABASE_URL or DATABASE_URL and run db:agent:setup",
-          },
-          503,
-        );
+        throw new AppError("invalid_request", {
+          issues: validationIssues(input.error),
+        });
+      if (!agent) throw new AppError("model_not_configured");
+      if (!database) throw new AppError("database_not_configured");
       const threadId = input.data.threadId ?? crypto.randomUUID();
       if (activeThreads.has(threadId))
-        return c.json({ error: "thread_busy", threadId }, 409);
+        throw new AppError("thread_busy", { params: { threadId } });
       activeThreads.add(threadId);
       try {
         // Check storage before returning an SSE success status or calling the model.
         await database.checkpointer.getTuple({
           configurable: { thread_id: threadId },
         });
-      } catch {
+      } catch (cause) {
         activeThreads.delete(threadId);
-        return c.json(
-          {
-            error: "persistence_unavailable",
-            message: "Check the database and run db:agent:setup",
-          },
-          503,
-        );
+        throw new AppError("persistence_unavailable", { cause });
       }
       if (c.req.raw.signal.aborted) {
         activeThreads.delete(threadId);
-        return new Response(null, { status: 499 });
+        throw new AppError("request_cancelled");
       }
       const runId = crypto.randomUUID();
       c.header("X-Thread-Id", threadId);
@@ -162,8 +128,13 @@ export function createChatRoutes(
                           data: JSON.stringify({
                             runId,
                             threadId,
-                            error: "run_aborted_or_timed_out",
-                          }),
+                            error: errorPayload(
+                              new AppError("run_timeout", {
+                                params: { timeoutMs },
+                              }),
+                              currentTraceId(),
+                            ),
+                          } satisfies RunFailedEvent),
                         });
                       }
                       await stream.close();
@@ -229,8 +200,11 @@ export function createChatRoutes(
                     await emit("run_failed", {
                       runId,
                       threadId,
-                      error: "agent_execution_failed",
-                    });
+                      error: errorPayload(
+                        new AppError("agent_execution_failed"),
+                        currentTraceId(),
+                      ),
+                    } satisfies RunFailedEvent);
                   }
                 } finally {
                   signal.removeEventListener("abort", onAbort);
