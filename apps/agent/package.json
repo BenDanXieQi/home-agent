@@ -1,0 +1,36 @@
+{
+  "name": "@home-agent/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/main.ts",
+    "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
+    "start": "bun --env-file=../../.env dist/main.js",
+    "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "check-types": "tsc --noEmit",
+    "db:setup": "bun --env-file=../../.env scripts/db-setup.ts"
+  },
+  "dependencies": {
+    "@langchain/core": "catalog:",
+    "@langchain/langgraph": "catalog:",
+    "@langchain/openai": "catalog:",
+    "hono": "catalog:",
+    "zod": "catalog:",
+    "@home-agent/observability": "workspace:*",
+    "@langchain/langgraph-checkpoint-postgres": "catalog:",
+    "pg": "catalog:"
+  },
+  "devDependencies": {
+    "@home-agent/typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
+    "@types/pg": "catalog:"
+  }
+}

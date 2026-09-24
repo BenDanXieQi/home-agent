@@ -1,0 +1,84 @@
+{
+  "name": "home-agent",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "bun",
+      "version": ">=1.4.2"
+    }
+  },
+  "scripts": {
+    "dev": "turbo run dev --filter=@home-agent/web --filter=@home-agent/backend --filter=@home-agent/agent",
+    "dev:backend": "turbo run dev --filter=@home-agent/backend",
+    "dev:web": "turbo run dev --filter=@home-agent/web",
+    "build": "turbo run build",
+    "start": "turbo run start --filter=@home-agent/backend --filter=@home-agent/agent",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check-types": "turbo run check-types",
+    "check": "bun run format:check && bun run lint && bun run check-types",
+    "test": "turbo run test",
+    "dev:agent": "turbo run dev --filter=@home-agent/agent",
+    "start:agent": "turbo run start --filter=@home-agent/agent",
+    "db:generate": "bun run --cwd apps/backend db:generate",
+    "db:migrate": "bun run --cwd apps/backend db:migrate",
+    "db:check": "bun run --cwd apps/backend db:check",
+    "db:studio": "bun run --cwd apps/backend db:studio",
+    "db:up": "bun scripts/db-local.ts up",
+    "db:down": "bun scripts/db-local.ts down",
+    "db:agent:setup": "bun run --cwd apps/agent db:setup"
+  },
+  "devDependencies": {
+    "@hono/cli": "^0.2.0-next.9",
+    "eslint-plugin-turbo": "catalog:",
+    "oxfmt": "catalog:",
+    "turbo": "catalog:"
+  },
+  "workspaces": {
+    "packages": [
+      "apps/*",
+      "packages/*"
+    ],
+    "catalog": {
+      "postgres": "3.4.9",
+      "@langchain/core": "1.2.12",
+      "@langchain/langgraph": "1.4.17",
+      "@langchain/openai": "1.5.13",
+      "@types/bun": "1.4.2",
+      "eslint-plugin-turbo": "2.11.3",
+      "hono": "4.13.9",
+      "langsmith": "0.10.5",
+      "oxfmt": "0.70.0",
+      "oxlint": "1.85.0",
+      "oxlint-tsgolint": "7.0.2003",
+      "turbo": "2.11.3",
+      "typescript": "7.0.2",
+      "zod": "4.6.5",
+      "vite": "8.3.1",
+      "@vitejs/plugin-react": "6.1.1",
+      "react": "19.3.0",
+      "react-dom": "19.3.0",
+      "@types/react": "19.3.0",
+      "@types/react-dom": "19.3.0",
+      "@hono/otel": "1.1.2",
+      "@opentelemetry/api": "1.9.1",
+      "@opentelemetry/context-async-hooks": "2.11.0",
+      "@opentelemetry/core": "2.11.0",
+      "@opentelemetry/resources": "2.11.0",
+      "@opentelemetry/sdk-trace-base": "2.11.0",
+      "@opentelemetry/exporter-trace-otlp-proto": "0.222.0",
+      "drizzle-orm": "0.45.3",
+      "drizzle-kit": "0.31.11",
+      "@langchain/langgraph-checkpoint-postgres": "1.0.5",
+      "pg": "8.23.0",
+      "@types/pg": "8.23.1"
+    }
+  }
+}

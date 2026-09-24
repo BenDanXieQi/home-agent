@@ -1,0 +1,38 @@
+{
+  "name": "@home-agent/backend",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch src/main.ts",
+    "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external && bun scripts/copy-web.ts",
+    "start": "bun --env-file=../../.env dist/main.js",
+    "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "check-types": "tsc --noEmit",
+    "test": "bun test tests",
+    "db:generate": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs generate",
+    "db:migrate": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs migrate",
+    "db:studio": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs studio",
+    "db:check": "bun --env-file=../../.env scripts/db-check.ts"
+  },
+  "dependencies": {
+    "postgres": "catalog:",
+    "hono": "catalog:",
+    "zod": "catalog:",
+    "@home-agent/contracts": "workspace:*",
+    "@home-agent/observability": "workspace:*",
+    "drizzle-orm": "catalog:"
+  },
+  "devDependencies": {
+    "@home-agent/typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
+    "drizzle-kit": "catalog:"
+  }
+}
