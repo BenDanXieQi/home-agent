@@ -7,8 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
-    "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "lint": "oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
-    "@types/bun": "catalog:"
+    "@types/bun": "catalog:",
+    "@home-agent/oxlint-config": "workspace:*"
   }
 }

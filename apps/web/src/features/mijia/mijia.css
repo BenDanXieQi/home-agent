@@ -1,0 +1,241 @@
+@layer components {
+  .device-filters {
+    @apply mb-4 flex flex-wrap items-center justify-between gap-3;
+  }
+  .filter-tabs {
+    @apply flex items-center gap-1;
+  }
+  .filter-tabs button {
+    @apply rounded-md px-3 py-1.5 text-xs text-muted hover:bg-sidebar data-[state=active]:bg-sidebar data-[state=active]:font-medium data-[state=active]:text-ink;
+  }
+  .device-search {
+    @apply relative m-0 flex w-60 items-center;
+  }
+  .device-search svg {
+    @apply absolute left-2.5 text-muted;
+  }
+  .device-search input {
+    @apply h-8 pl-8 text-xs;
+  }
+  .device-table {
+    @apply w-full;
+  }
+  .device-table-heading,
+  .device-row {
+    @apply grid grid-cols-[minmax(160px,1.5fr)_minmax(100px,1fr)_90px_90px] items-center gap-5;
+  }
+  .device-table-heading {
+    @apply h-9 border-y border-line bg-sidebar/60 px-3 text-[11px] text-muted;
+  }
+  .device-row {
+    @apply min-h-[72px] border-b border-line px-3 py-3 hover:bg-sidebar/50;
+  }
+  .device-name {
+    @apply flex min-w-0 items-center gap-3;
+  }
+  .device-name strong {
+    @apply truncate text-[13px] font-medium;
+  }
+  .device-symbol {
+    @apply grid size-10 shrink-0 place-items-center rounded-lg bg-sidebar text-muted;
+  }
+  .device-model {
+    @apply truncate font-mono text-[11px] text-muted;
+  }
+  .device-status {
+    @apply flex items-center gap-1.5 text-[11px] text-muted;
+  }
+  .device-status i {
+    @apply size-1.5 rounded-full bg-current;
+  }
+  .device-status.online {
+    @apply text-sage;
+  }
+  .device-open {
+    @apply flex items-center justify-end gap-1 text-[11px] text-muted hover:text-ink;
+  }
+  .camera-idle {
+    @apply flex h-full min-h-96 flex-col items-center justify-center gap-4 text-xs text-[#878d96];
+  }
+  .mijia-player {
+    @apply h-full;
+  }
+  .mijia-player-heading {
+    @apply flex flex-wrap items-center justify-between gap-3 border-b border-white/10 bg-[#1b1e22] px-5 py-3 text-white;
+  }
+  .mijia-player-heading h3 {
+    @apply text-xs font-medium;
+  }
+  .mijia-player-heading p {
+    @apply mt-1 text-[10px] text-white/40;
+  }
+  .mijia-actions {
+    @apply flex flex-wrap gap-2;
+  }
+  .mijia-player .button {
+    @apply border-white/15 bg-transparent text-white/70 hover:bg-white/10;
+  }
+  .mijia-video-surface {
+    @apply relative aspect-video w-full bg-[#15171a];
+  }
+  .mijia-video-surface video {
+    @apply block size-full object-contain;
+  }
+  .mijia-video-placeholder {
+    @apply absolute inset-0 flex flex-col items-center justify-center gap-3 bg-[#15171a] text-xs text-white/50;
+  }
+  .mijia-video-placeholder > span {
+    @apply text-2xl;
+  }
+  .mijia-playback-status {
+    @apply flex flex-wrap items-center gap-3 border-t border-white/10 px-5 py-3 text-white/50;
+  }
+  .mijia-playback-status p,
+  .mijia-frame-count {
+    @apply text-[11px];
+  }
+  .mijia-frame-count {
+    @apply ml-auto font-mono;
+  }
+  .mijia-muted {
+    @apply p-5 text-xs text-muted;
+  }
+  .login-dialog {
+    @apply fixed left-1/2 top-1/2 z-50 w-[calc(100%-32px)] max-w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-line bg-white p-6 shadow-xl;
+  }
+  .login-body {
+    @apply flex flex-col items-center py-7;
+  }
+  .login-qr,
+  .login-qr-placeholder {
+    @apply grid size-44 place-items-center rounded-lg border border-line bg-white object-contain p-2 text-muted;
+  }
+  .mijia-verification {
+    @apply py-3 text-xs leading-6;
+  }
+  .mijia-verification label {
+    @apply mt-4;
+  }
+  .mijia-verification a {
+    @apply underline underline-offset-4;
+  }
+  .mijia-verification .button {
+    @apply mt-3;
+  }
+  .login-screen {
+    @apply min-h-dvh bg-sidebar;
+  }
+  .login-screen > header {
+    @apply flex h-20 items-center gap-2.5 px-8 text-sm font-semibold;
+  }
+  .login-panel {
+    @apply mx-auto mt-[6vh] w-[calc(100%-32px)] max-w-[400px] rounded-xl border border-line bg-white px-8 py-8 text-center;
+  }
+  .login-panel h1 {
+    @apply text-xl font-semibold;
+  }
+  .login-subtitle {
+    @apply mb-7 mt-3 text-xs leading-6 text-muted;
+  }
+  .login-code {
+    @apply mx-auto grid size-48 place-items-center rounded-lg border border-line bg-sidebar/40 text-muted;
+  }
+  .login-code img {
+    @apply size-full object-contain p-2;
+  }
+  .login-help {
+    @apply mb-5 mt-5 text-xs leading-6 text-muted;
+  }
+  .login-note {
+    @apply mt-8 border-t border-line pt-5 text-[11px] text-muted;
+  }
+  .login-error {
+    @apply mt-4 text-xs leading-6 text-danger;
+  }
+  .camera-wall {
+    @apply grid gap-4;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+  }
+  .camera-tile {
+    @apply min-w-0 overflow-hidden rounded-lg border border-line bg-[#15171a];
+  }
+  .camera-tile-heading {
+    @apply flex items-center justify-between gap-2 bg-[#1b1e22] px-4 py-3 text-xs text-white/80;
+  }
+  .camera-tile-heading span {
+    @apply text-[10px] text-white/40;
+  }
+  .camera-tile .camera-idle {
+    @apply aspect-video min-h-0;
+  }
+  .camera-tile .mijia-player-heading {
+    @apply px-3 py-2.5;
+  }
+  .camera-tile .mijia-player-heading p {
+    @apply hidden;
+  }
+  .camera-tile .mijia-player .button {
+    @apply min-h-6 px-2 py-1 text-[10px];
+  }
+  .camera-tile .mijia-playback-status {
+    @apply px-3 py-2;
+  }
+  .offline-cameras {
+    @apply mt-6 border-t border-line pt-4;
+  }
+  .offline-cameras h2 {
+    @apply mb-2 flex items-center gap-2 text-xs font-medium text-muted;
+  }
+  .offline-cameras h2 span {
+    @apply font-normal;
+  }
+  .offline-cameras ul {
+    @apply m-0 list-none p-0;
+  }
+  .offline-cameras li {
+    @apply flex min-h-10 items-center gap-3 py-2 text-xs text-muted;
+  }
+  .offline-cameras li + li {
+    @apply border-t border-line/60;
+  }
+  .offline-cameras li svg {
+    @apply shrink-0;
+  }
+  .offline-camera-name {
+    @apply min-w-0 flex-1 truncate;
+  }
+  .offline-camera-status {
+    @apply shrink-0 text-[11px];
+  }
+}
+
+@media (max-width: 767px) {
+  .device-filters {
+    align-items: stretch;
+  }
+  .device-search {
+    width: 100%;
+  }
+  .device-table-heading,
+  .device-row {
+    grid-template-columns: minmax(100px, 1fr) 52px;
+    gap: 8px;
+    padding-inline: 4px;
+  }
+  .device-table-heading span:nth-child(2),
+  .device-table-heading span:nth-child(4),
+  .device-model {
+    display: none;
+  }
+  .device-open {
+    grid-column: 1/-1;
+    justify-content: flex-start;
+    padding-left: 48px;
+  }
+  .device-name strong {
+    font-size: 12px;
+  }
+  .camera-idle {
+    min-height: 240px;
+  }
+}

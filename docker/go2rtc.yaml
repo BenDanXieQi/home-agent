@@ -1,4 +1,4 @@
-# Local development: published ports are restricted to the host loopback.
+# Managed launchers override these listeners to the host loopback.
 api:
   listen: ":1984"
 rtsp:

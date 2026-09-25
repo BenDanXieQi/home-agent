@@ -7,12 +7,7 @@
       "outputs": ["dist/**"]
     },
     "lint": {
-      "dependsOn": ["^lint"],
-      "inputs": [
-        "$TURBO_DEFAULT$",
-        "$TURBO_ROOT$/.oxlintrc.json",
-        "$TURBO_ROOT$/apps/web/.oxlintrc.json"
-      ]
+      "dependsOn": ["^lint"]
     },
     "check-types": {
       "dependsOn": ["^check-types"]
@@ -35,11 +30,57 @@
     },
     "@home-agent/backend#build": {
       "dependsOn": ["^build", "@home-agent/web#build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/main.js", "dist/main.js.map", "dist/public/**"]
+    },
+    "@home-agent/web#build": {
+      "dependsOn": ["^build:rpc", "check-types"],
+      "outputs": ["dist/**"],
+      "env": ["VITE_*"]
+    },
+    "//#lint:root": {
+      "dependsOn": ["@home-agent/oxlint-config#lint"],
+      "inputs": [
+        "scripts/**",
+        "oxlint.config.ts",
+        "package.json",
+        "turbo.json"
+      ],
+      "outputs": []
+    },
+    "//#lint:root:fix": {
+      "cache": false
+    },
+    "//#check-types:root": {
+      "dependsOn": ["@home-agent/oxlint-config#check-types"],
+      "inputs": ["scripts/**", "oxlint.config.ts", "package.json"],
+      "outputs": []
+    },
+    "build:rpc": {
+      "dependsOn": ["^check-types"],
+      "outputs": ["dist/rpc/**"]
+    },
+    "dev:rpc": {
+      "cache": false,
+      "persistent": true
+    },
+    "@home-agent/web#check-types": {
+      "dependsOn": ["^check-types", "^build:rpc"]
+    },
+    "@home-agent/web#lint": {
+      "dependsOn": ["^lint", "^build:rpc"]
+    },
+    "@home-agent/web#dev": {
+      "dependsOn": ["^build:rpc"],
+      "with": ["@home-agent/backend#dev:rpc"],
+      "cache": false,
+      "persistent": true
+    },
+    "@home-agent/web#lint:fix": {
+      "dependsOn": ["^build:rpc"],
+      "cache": false
     }
   },
   "globalPassThroughEnv": [
-    "NODE_ENV",
     "AGENT_HOST",
     "AGENT_PORT",
     "AGENT_MODEL",
@@ -65,6 +106,8 @@
     "OTEL_EXPORTER_OTLP_TRACES_HEADERS",
     "OTEL_INCLUDE_CONTENT",
     "DATABASE_URL",
+    "CREDENTIAL_KEY_FILE",
     "AGENT_DATABASE_URL"
-  ]
+  ],
+  "globalEnv": ["NODE_ENV"]
 }

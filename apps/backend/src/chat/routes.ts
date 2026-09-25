@@ -1,18 +1,25 @@
+import { chatInputSchema } from "@home-agent/api/contracts";
 import { AppError } from "@home-agent/api/errors";
-import { errorResponse, readJsonBody } from "@home-agent/api/errors/hono";
+import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
 import { tracedFetch } from "@home-agent/observability";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { Environment } from "../environment";
-import type { AppContext } from "../app-context";
-import type { ConnectionStore } from "../connections/store";
+import { requireLocalAccess } from "@home-agent/api/local-access";
 
-export function createChatRoutes(
-  environment: Environment,
-  connectionStore: ConnectionStore,
-) {
-  const app = new Hono<AppContext>();
-  app.post(
+export type ChatDependencies = {
+  port: number;
+  timeoutMs: number;
+  readAgentUrl: () => Promise<string>;
+};
+
+export function createChatRoutes({
+  port,
+  timeoutMs,
+  readAgentUrl,
+}: ChatDependencies) {
+  const app = new Hono();
+  app.use(requireLocalAccess([port, 5173]));
+  const routes = app.post(
     "/",
     bodyLimit({
       maxSize: 32_768,
@@ -22,15 +29,14 @@ export function createChatRoutes(
           new AppError("request_too_large", { params: { maxBytes: 32768 } }),
         ),
     }),
+    validateJson(chatInputSchema),
     async (c) => {
       // Keep this request's address even if the file changes during its stream.
-      const connectionConfig = await connectionStore.read();
-      const input = await readJsonBody(c);
+      const agentUrl = await readAgentUrl();
+      const input = c.req.valid("json");
 
       const disconnected = new AbortController();
-      const timeout = AbortSignal.timeout(
-        environment.BACKEND_REQUEST_TIMEOUT_MS,
-      );
+      const timeout = AbortSignal.timeout(timeoutMs);
       const signal = AbortSignal.any([
         c.req.raw.signal,
         disconnected.signal,
@@ -39,18 +45,15 @@ export function createChatRoutes(
 
       let upstream: Response;
       try {
-        upstream = await tracedFetch(
-          new URL("/api/chat", connectionConfig.services.agent.url),
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "text/event-stream",
-            },
-            body: JSON.stringify(input),
-            signal,
+        upstream = await tracedFetch(new URL("/api/chat", agentUrl), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "text/event-stream",
           },
-        );
+          body: JSON.stringify(input),
+          signal,
+        });
       } catch (cause) {
         throw new AppError(
           c.req.raw.signal.aborted
@@ -112,5 +115,5 @@ export function createChatRoutes(
       });
     },
   );
-  return app;
+  return routes;
 }

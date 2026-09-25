@@ -1,6 +1,6 @@
 import { AppError } from "./index";
 
-function safeIdentifier(value: unknown): string | undefined {
+function safeIdentifier(value: unknown) {
   return typeof value === "string" &&
     /^[A-Za-z][A-Za-z0-9_.-]{0,79}$/.test(value)
     ? value
@@ -8,7 +8,7 @@ function safeIdentifier(value: unknown): string | undefined {
 }
 
 // Keep source locations, not the stack's message, function names or absolute paths.
-function sourceLocations(stack: string | undefined): string[] {
+function sourceLocations(stack: string | undefined) {
   const locations: string[] = [];
   for (const line of stack?.split("\n").slice(1, 40) ?? []) {
     if (!/^\s+at\s/.test(line)) continue;

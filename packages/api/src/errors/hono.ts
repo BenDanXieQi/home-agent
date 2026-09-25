@@ -1,10 +1,14 @@
 import { errorDefinitions } from "./definitions";
 import { currentTraceId } from "@home-agent/observability";
-import type { Context } from "hono";
+import type { Context, Env } from "hono";
+import { createMiddleware } from "hono/factory";
+import type { ErrorCode } from "../contracts/errors";
 import { HTTPException } from "hono/http-exception";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { AppError, errorPayload } from "./index";
 import { errorDiagnostics } from "./diagnostics";
+import { validationIssues } from "./validation";
+import type { z } from "zod";
 
 export function errorResponse(
   c: Context,
@@ -59,7 +63,7 @@ export function handleHttpError(error: Error, c: Context) {
   return errorResponse(c, applicationError, status);
 }
 
-export async function readJsonBody(c: Context): Promise<unknown> {
+export async function readJsonBody(c: Context) {
   if (
     c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() !==
     "application/json"
@@ -67,8 +71,38 @@ export async function readJsonBody(c: Context): Promise<unknown> {
     throw new AppError("content_type_required");
   }
   try {
-    return await c.req.json();
+    const body: unknown = await c.req.json();
+    return body;
   } catch (cause) {
     throw new AppError("invalid_json", { cause });
   }
+}
+
+export async function readValidatedJson<T>(
+  c: Context,
+  schema: z.ZodType<T>,
+  code: ErrorCode = "invalid_request",
+) {
+  const parsed = schema.safeParse(await readJsonBody(c));
+  if (!parsed.success) {
+    throw new AppError(code, {
+      issues: validationIssues(parsed.error),
+    });
+  }
+  return parsed.data;
+}
+
+/** Preserve the shared JSON/error contract while exposing input types to Hono RPC. */
+export function validateJson<S extends z.ZodType<object>>(
+  schema: S,
+  code: ErrorCode = "invalid_request",
+) {
+  return createMiddleware<
+    Env,
+    string,
+    { in: { json: z.input<S> }; out: { json: z.output<S> } }
+  >(async (c, next) => {
+    c.req.addValidatedData("json", await readValidatedJson(c, schema, code));
+    await next();
+  });
 }

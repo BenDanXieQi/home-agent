@@ -8,16 +8,29 @@
   },
   "scripts": {
     "dev": "bun --env-file=../../.env --bun vite",
-    "build": "bun run check-types && bun --bun vite build",
+    "build": "bun --bun vite build",
     "preview": "bun --env-file=../../.env --bun vite preview",
-    "lint": "oxlint --config .oxlintrc.json --type-aware --max-warnings 0 .",
-    "lint:fix": "oxlint --config .oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "lint": "oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc -b"
   },
   "dependencies": {
+    "@home-agent/api": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/query-core": "^5.103.2",
+    "@tanstack/react-query": "^5.103.2",
+    "@tanstack/react-router": "^1.170.39",
+    "jotai": "^3.0.0",
+    "jotai-tanstack-query": "^0.11.0",
+    "lucide-react": "^1.48.0",
+    "motion": "^13.4.3",
+    "radix-ui": "^1.6.7",
     "react": "catalog:",
     "react-dom": "catalog:",
-    "@home-agent/api": "workspace:*"
+    "react-hook-form": "^7.88.0",
+    "tailwindcss": "^4.3.3",
+    "@home-agent/backend": "workspace:*",
+    "hono": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
@@ -28,6 +41,7 @@
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
-    "vite": "catalog:"
+    "vite": "catalog:",
+    "@home-agent/oxlint-config": "workspace:*"
   }
 }

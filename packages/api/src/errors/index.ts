@@ -21,13 +21,13 @@ export class AppError extends Error {
   }
 }
 
-export function errorPayload(error: AppError, traceId?: string): ApiError {
+export function errorPayload(error: AppError, traceId?: string) {
   return {
     code: error.code,
     message: errorDefinitions[error.code].message,
     ...error.details,
     ...(traceId ? { traceId } : {}),
-  };
+  } satisfies ApiError;
 }
 
 export { validationIssues } from "./validation";

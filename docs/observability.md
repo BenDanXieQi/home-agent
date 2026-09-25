@@ -6,7 +6,7 @@
 
 ## 运行
 
-按[运行说明](../README.md)配置根目录 `.env`，设置模型并完成数据库初始化。`bun run dev` 同时启动 web、backend、Agent；`bun run start` 构建后启动 backend 和 Agent。首页提供服务连接配置、连接状态和 backend 健康状态，聊天通过 HTTP 使用：
+按[运行说明](../README.md)配置根目录 `.env`，设置模型并完成数据库初始化。`bun run dev` 同时启动 web、backend、Agent；`bun run start` 构建后启动 backend 和 Agent。服务设置页提供连接配置与状态，工作台顶部显示 backend 健康状态，聊天通过 HTTP 使用：
 
 ```sh
 curl -N http://127.0.0.1:3000/api/chat \
@@ -15,6 +15,8 @@ curl -N http://127.0.0.1:3000/api/chat \
 ```
 
 请求经过 backend 转发到 Agent。响应头 `x-trace-id`、SSE `run_started.traceId` 和 backend 请求日志中的 `trace_id` 可关联同一次请求。
+
+backend HTTP 日志记录方法、路径、响应状态、处理耗时和 trace ID，不记录 URL query、请求头或请求正文。日志耗时与 SERVER span 一样截止于响应创建，不代表 SSE 或媒体连接的完整持续时间。
 
 本地查看 spans：
 
@@ -59,10 +61,18 @@ backend POST /api/chat                   SERVER
 - `packages/observability`：SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、关闭与导出。
 - `apps/backend/src/chat/routes.ts`：受限 JSON 请求和 SSE 透明转发，不解析模型内容。
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
+- `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。
+- `apps/backend/src/mijia/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。
 - `apps/agent/src/http/chat.ts`：在请求上下文内运行完整 SSE 生命周期。
 - `apps/agent/src/graph/home-agent.ts`：在实际模型调用边界生成 LLM span。
 
-业务操作通过 `withSpan` 显式埋点；内部服务 HTTP 调用使用 `tracedFetch` 并消费或取消响应体。LangGraph 节点、工具和 SDK 内部重试不会自动生成独立 span。
+业务操作通过 `withSpan` 显式埋点；聊天转发和连接探测使用 `tracedFetch` 并消费或取消响应体。米家专用协议在完成错误脱敏后记录 CLIENT span，不记录目标 URL、账号凭据、请求／响应正文或 SDP，也不向 go2rtc 传播追踪上下文；这些 span 描述 backend 发起的调用，尚不包含 go2rtc 内部执行或视频媒体链路。LangGraph 节点、工具和 SDK 内部重试不会自动生成独立 span。
+
+`mijia.session.restore` 覆盖授权读取、恢复与设备校验；`mijia.credentials.read`、`mijia.credentials.save` 和 `mijia.credentials.remove` 分别记录授权读取、导出与持久化、删除。操作失败先经过 span 边界，再转换为页面状态；HTTP 202 仅表示受理，后台结果应查看业务 span。米家业务与下游协议的 `error.type` 只使用各自已定义的静态错误码，内容采集关闭时仍可区分超时、授权拒绝和服务不可达。普通 HTTP 调用记录错误响应的状态码分类；无响应的未知传输错误使用通用分类，不读取任意异常对象的 `code`。
+
+主动取消与故障分开记录：取消只标记 `operation.cancelled`，超时仍记为失败。恢复／绑定／源注册的后台退避、心跳和租约计时器在空的 `ROOT_CONTEXT` 下创建，后续工作不会持续附着在最初请求或安装的 trace 上。每次实际操作使用独立的短 span；同次有限操作内的调用仍保持父子关系，不为等待退避的整个生命周期持有一个 span。
+
+`mijia.go2rtc.heartbeat.check` 覆盖完整心跳检查，包含其下的 HTTP CLIENT span、响应协议校验和租约判断。HTTP 200 不代表心跳业务成功；响应缺少合法的 `playbackIds` 等协议失败会在检查 span 中记录安全错误码和失败状态，再按 go2rtc 运行时会话的租约策略处理；该心跳不负责续期米家云账号凭据。
 
 不填写 `langsmith.trace.id`、`langsmith.span.id` 等覆盖字段，保持原生 OTLP trace/span ID 和父子关系。保留整个祖先链，不只导出 LLM span：LangSmith 官方说明，引用了始终未导出父级的子 span 会过期丢失，即使接收请求返回 200。
 

@@ -1,5 +1,6 @@
 import { httpTracing, telemetryStatus } from "@home-agent/observability";
 import { Hono } from "hono";
+import { requireLocalAccess } from "@home-agent/api/local-access";
 import { AppError } from "@home-agent/api/errors";
 import { errorResponse, handleHttpError } from "@home-agent/api/errors/hono";
 import { secureHeaders } from "hono/secure-headers";
@@ -24,6 +25,7 @@ export function createApp(config: Config, database?: AgentDatabase) {
       tracingIncludesContent: telemetryStatus().includeContent,
     }),
   );
+  app.use("/api/*", requireLocalAccess([config.AGENT_PORT]));
   app.route(
     "/api/chat",
     createChatRoutes(agent, config.AGENT_RUN_TIMEOUT_MS, database),

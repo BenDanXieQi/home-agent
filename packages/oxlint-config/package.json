@@ -1,0 +1,25 @@
+{
+  "name": "@home-agent/oxlint-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./base": "./base.ts",
+    "./react": "./react.ts"
+  },
+  "scripts": {
+    "lint": "oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
+    "check-types": "tsc --noEmit"
+  },
+  "dependencies": {
+    "eslint-plugin-turbo": "catalog:",
+    "oxlint": "catalog:"
+  },
+  "devDependencies": {
+    "@home-agent/typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:"
+  }
+}

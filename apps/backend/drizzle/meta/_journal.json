@@ -8,6 +8,20 @@
       "when": 1790270889578,
       "tag": "0000_enable-timescaledb",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790291423927,
+      "tag": "0001_wise_gamma_corps",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790291798922,
+      "tag": "0002_chemical_master_chief",
+      "breakpoints": true
     }
   ]
 }

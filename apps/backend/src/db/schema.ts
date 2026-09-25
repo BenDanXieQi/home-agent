@@ -1,4 +1,9 @@
-// Add business tables here. Timescale-specific DDL lives in custom migrations.
-// Keep an empty module until the first business schema is defined.
-// oxlint-disable-next-line unicorn/require-module-specifiers
-export {};
+import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+
+export const credentials = pgTable("credentials", {
+  key: text("key").primaryKey(),
+  ciphertext: text("ciphertext").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

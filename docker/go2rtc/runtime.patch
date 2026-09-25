@@ -1,0 +1,668 @@
+diff --git a/internal/streams/producer.go b/internal/streams/producer.go
+--- a/internal/streams/producer.go
++++ b/internal/streams/producer.go
+@@ -5,6 +5,7 @@
+ 	"errors"
+ 	"strings"
+ 	"sync"
++	"sync/atomic"
+ 	"time"
+ 
+ 	"github.com/AlexxIT/go2rtc/pkg/core"
+@@ -31,9 +32,10 @@
+ 	receivers []*core.Receiver
+ 	senders   []*core.Receiver
+ 
+-	state    state
+-	mu       sync.Mutex
+-	workerID int
++	state        state
++	mu           sync.Mutex
++	workerID     int
++	reconnecting atomic.Bool
+ }
+ 
+ const SourceTemplate = "{input}"
+@@ -149,7 +151,7 @@
+ 		return
+ 	}
+ 
+-	log.Debug().Msgf("[streams] start producer url=%s", p.url)
++	log.Debug().Msgf("[streams] start producer url=%s", p.logSource())
+ 
+ 	p.state = stateStart
+ 	p.workerID++
+@@ -158,16 +160,16 @@
+ }
+ 
+ func (p *Producer) worker(conn core.Producer, workerID int) {
+-	if err := conn.Start(); err != nil {
+-		p.mu.Lock()
+-		closed := p.workerID != workerID
++	err := conn.Start()
++	p.mu.Lock()
++	if p.workerID != workerID {
+ 		p.mu.Unlock()
+-
+-		if closed {
+-			return
+-		}
+-
+-		log.Warn().Err(err).Str("url", p.url).Caller().Send()
++		return
++	}
++	p.reconnecting.Store(true)
++	p.mu.Unlock()
++	if err != nil {
++		log.Warn().Err(p.logError(err)).Str("url", p.logSource()).Caller().Send()
+ 	}
+ 
+ 	p.reconnect(workerID, 0)
+@@ -178,15 +180,15 @@
+ 	defer p.mu.Unlock()
+ 
+ 	if p.workerID != workerID {
+-		log.Trace().Msgf("[streams] stop reconnect url=%s", p.url)
+-		return
+-	}
+-
+-	log.Debug().Msgf("[streams] retry=%d to url=%s", retry, p.url)
++		log.Trace().Msgf("[streams] stop reconnect url=%s", p.logSource())
++		return
++	}
++
++	log.Debug().Msgf("[streams] retry=%d to url=%s", retry, p.logSource())
+ 
+ 	conn, err := GetProducer(p.url)
+ 	if err != nil {
+-		log.Debug().Msgf("[streams] producer=%s", err)
++		log.Debug().Msgf("[streams] producer=%s", p.logError(err))
+ 
+ 		timeout := time.Minute
+ 		if retry < 5 {
+@@ -238,6 +240,7 @@
+ 	_ = p.conn.Stop()
+ 	// swap connections
+ 	p.conn = conn
++	p.reconnecting.Store(false)
+ 
+ 	go p.worker(conn, workerID)
+ }
+@@ -257,7 +260,7 @@
+ 		p.workerID++
+ 	}
+ 
+-	log.Debug().Msgf("[streams] stop producer url=%s", p.url)
++	log.Debug().Msgf("[streams] stop producer url=%s", p.logSource())
+ 
+ 	if p.conn != nil {
+ 		_ = p.conn.Stop()
+@@ -265,6 +268,20 @@
+ 	}
+ 
+ 	p.state = stateNone
++	p.reconnecting.Store(false)
+ 	p.receivers = nil
+ 	p.senders = nil
+ }
++
++func (p *Producer) logSource() string {
++	if strings.HasPrefix(p.url, "xiaomi:") {
++		return "xiaomi:[redacted]"
++	}
++	return p.url
++}
++func (p *Producer) logError(err error) error {
++	if err != nil && strings.HasPrefix(p.url, "xiaomi:") {
++		return errors.New("xiaomi: camera connection failed")
++	}
++	return err
++}
+diff --git a/internal/streams/stream.go b/internal/streams/stream.go
+index 984c73e..ce1261f 100644
+--- a/internal/streams/stream.go
++++ b/internal/streams/stream.go
+@@ -128,3 +128,19 @@ func (s *Stream) MarshalJSON() ([]byte, error) {
+ 	}
+ 	return json.Marshal(info)
+ }
++
++// Close releases a private stream whose owner has stopped accepting consumers.
++// Callers must serialize this against their AddConsumer operations.
++func (s *Stream) Close() {
++	s.mu.Lock()
++	consumers := append([]core.Consumer(nil), s.consumers...)
++	s.consumers = nil
++	producers := append([]*Producer(nil), s.producers...)
++	s.mu.Unlock()
++	for _, consumer := range consumers {
++		_ = consumer.Stop()
++	}
++	for _, producer := range producers {
++		producer.stop()
++	}
++}
+diff --git a/internal/xiaomi/xiaomi.go b/internal/xiaomi/xiaomi.go
+index 1801fa8..1c3f4cc 100644
+--- a/internal/xiaomi/xiaomi.go
++++ b/internal/xiaomi/xiaomi.go
+@@ -5,6 +5,7 @@ import (
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
+ 	"net/http"
+ 	"net/url"
+ 	"strings"
+@@ -26,27 +27,29 @@ func Init() {
+ 
+ 	tokens = v.Cfg
+ 
+-	log := app.GetLogger("xiaomi")
+-
+ 	streams.HandleFunc("xiaomi", func(rawURL string) (core.Producer, error) {
+ 		u, err := url.Parse(rawURL)
+ 		if err != nil {
+-			return nil, err
++			return nil, errors.New("xiaomi: camera connection failed")
+ 		}
+ 
+ 		if u.User != nil {
+ 			rawURL, err = getCameraURL(u)
+ 			if err != nil {
+-				return nil, err
++				diagnostic.Report("cloud_lookup", err)
++				return nil, errors.New("xiaomi: camera connection failed")
+ 			}
+ 		}
+ 
+-		log.Debug().Msgf("xiaomi: dial %s", rawURL)
+-
+-		return xiaomi.Dial(rawURL)
++		producer, err := xiaomi.Dial(rawURL)
++		if err != nil {
++			return nil, errors.New("xiaomi: camera connection failed")
++		}
++		return producer, nil
+ 	})
+ 
+ 	api.HandleFunc("api/xiaomi", apiXiaomi)
++	initHomeAgent()
+ }
+ 
+ var tokens map[string]string
+diff --git a/pkg/tutk/conn.go b/pkg/tutk/conn.go
+index e061069..3ec7802 100644
+--- a/pkg/tutk/conn.go
++++ b/pkg/tutk/conn.go
+@@ -175,7 +175,7 @@ func (c *Conn) worker() {
+ 
+ 		switch c.handleMsg(buf[:n]) {
+ 		case msgUnknown:
+-			fmt.Printf("tutk: unknown msg: %x\n", buf[:n])
++			// Unknown packets may contain login material; do not dump them.
+ 		case msgError:
+ 			return
+ 		case msgCommandAck:
+diff --git a/pkg/tutk/dtls/conn_dtls.go b/pkg/tutk/dtls/conn_dtls.go
+index c1d5f6c..7e40d78 100644
+--- a/pkg/tutk/dtls/conn_dtls.go
++++ b/pkg/tutk/dtls/conn_dtls.go
+@@ -247,7 +247,7 @@ func (c *DTLSConn) AVServStart() error {
+ 	}
+ 
+ 	if c.verbose {
+-		fmt.Printf("[SERVER] AV Login request len=%d data:\n%s", n, hexDump(buf[:n]))
++		fmt.Printf("[SERVER] AV Login request len=%d [redacted]\n", n)
+ 	}
+ 
+ 	if n < 24 {
+@@ -341,7 +341,7 @@ func (c *DTLSConn) AVSendAudioData(codec byte, payload []byte, timestampUS uint3
+ 		if err != nil {
+ 			fmt.Printf("[SERVER TX] DTLS Write ERROR: %v\n", err)
+ 		} else {
+-			fmt.Printf("[SERVER TX] len=%d, data:\n%s", n, hexDump(frame))
++			fmt.Printf("[SERVER TX] len=%d [redacted]\n", n)
+ 		}
+ 	}
+ 	return err
+@@ -961,27 +961,3 @@ func (c *DTLSConn) msgIOCtrl(payload []byte) []byte {
+ 	c.seqCmd++
+ 	return b
+ }
+-
+-func hexDump(data []byte) string {
+-	const maxBytes = 650
+-	totalLen := len(data)
+-	truncated := totalLen > maxBytes
+-	if truncated {
+-		data = data[:maxBytes]
+-	}
+-
+-	var result string
+-	for i := 0; i < len(data); i += 16 {
+-		end := min(i+16, len(data))
+-		line := fmt.Sprintf("    %04x:", i)
+-		for j := i; j < end; j++ {
+-			line += fmt.Sprintf(" %02x", data[j])
+-		}
+-		result += line + "\n"
+-	}
+-
+-	if truncated {
+-		result += fmt.Sprintf("    ... (truncated, showing %d of %d bytes)\n", maxBytes, totalLen)
+-	}
+-	return result
+-}
+diff --git a/pkg/xiaomi/cloud.go b/pkg/xiaomi/cloud.go
+--- a/pkg/xiaomi/cloud.go
++++ b/pkg/xiaomi/cloud.go
+@@ -35,6 +35,15 @@
+ 	auth map[string]string
+ }
+ 
++var ErrCloudUnavailable = errors.New("xiaomi: cloud temporarily unavailable")
++
++func cloudResponseError(status int) error {
++	if status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= 500 && status <= 599 {
++		return ErrCloudUnavailable
++	}
++	return nil
++}
++
+ func NewCloud(sid string) *Cloud {
+ 	return &Cloud{
+ 		client: &http.Client{Timeout: 15 * time.Second},
+@@ -97,7 +106,7 @@
+ 		CaptchaURL      string `json:"captchaURL"`
+ 		NotificationURL string `json:"notificationUrl"`
+ 	}
+-	body, err := readLoginResponse(res.Body, &v2)
++	_, err = readLoginResponse(res.Body, &v2)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -117,7 +126,7 @@
+ 	}
+ 
+ 	if v2.Location == "" {
+-		return fmt.Errorf("xiaomi: %s", body)
++		return errors.New("xiaomi: cloud authentication failed")
+ 	}
+ 
+ 	c.auth = nil
+@@ -162,12 +171,12 @@
+ 	var v1 struct {
+ 		Location string `json:"location"`
+ 	}
+-	body, err := readLoginResponse(res.Body, &v1)
++	_, err = readLoginResponse(res.Body, &v1)
+ 	if err != nil {
+ 		return err
+ 	}
+ 	if v1.Location == "" {
+-		return fmt.Errorf("xiaomi: %s", body)
++		return errors.New("xiaomi: cloud authentication failed")
+ 	}
+ 
+ 	return c.finishAuth(v1.Location)
+@@ -284,7 +293,7 @@
+ 		Code       int    `json:"code"`
+ 		CaptchaURL string `json:"captchaURL"`
+ 	}
+-	body, err := readLoginResponse(res.Body, &v2)
++	_, err = readLoginResponse(res.Body, &v2)
+ 	if err != nil {
+ 		return err
+ 	}
+@@ -294,7 +303,7 @@
+ 	}
+ 
+ 	if v2.Code != 0 {
+-		return fmt.Errorf("xiaomi: %s", body)
++		return errors.New("xiaomi: cloud authentication failed")
+ 	}
+ 
+ 	return &LoginError{
+@@ -319,6 +328,9 @@
+ 		return err
+ 	}
+ 	defer res.Body.Close()
++	if err := cloudResponseError(res.StatusCode); err != nil {
++		return err
++	}
+ 
+ 	// LoginWithVerify
+ 	//   - userId, cUserId, serviceToken from cookies
+@@ -355,6 +367,9 @@
+ 		res = res.Request.Response
+ 	}
+ 
++	if serviceToken == "" || c.userID == "" {
++		return errors.New("xiaomi: incomplete cloud session")
++	}
+ 	c.cookies = fmt.Sprintf("userId=%s; cUserId=%s; serviceToken=%s", c.userID, cUserId, serviceToken)
+ 
+ 	return nil
+@@ -370,6 +385,10 @@
+ 
+ 	res, err := c.client.Do(req)
+ 	if err != nil {
++		return err
++	}
++	if err := cloudResponseError(res.StatusCode); err != nil {
++		_ = res.Body.Close()
+ 		return err
+ 	}
+ 
+@@ -382,10 +401,22 @@
+ 		return err
+ 	}
+ 
++	if v1.Location == "" || len(v1.Ssecurity) == 0 {
++		return errors.New("xiaomi: incomplete token login")
++	}
++	c.userID = userID
+ 	c.ssecurity = v1.Ssecurity
+-	c.passToken = v1.PassToken
+-
+-	return c.finishAuth(v1.Location)
++	c.passToken = passToken
++	if v1.PassToken != "" {
++		c.passToken = v1.PassToken
++	}
++	if err := c.finishAuth(v1.Location); err != nil {
++		return err
++	}
++	if c.userID != userID || c.cookies == "" || len(c.ssecurity) == 0 {
++		return errors.New("xiaomi: invalid token session")
++	}
++	return nil
+ }
+ 
+ func (c *Cloud) UserToken() (string, string) {
+@@ -479,7 +510,7 @@
+ 
+ 	body, ok := bytes.CutPrefix(body, []byte("&&&START&&&"))
+ 	if !ok {
+-		return nil, fmt.Errorf("xiaomi: %s", body)
++		return nil, errors.New("xiaomi: cloud authentication failed")
+ 	}
+ 
+ 	return body, json.Unmarshal(body, &v)
+diff --git a/pkg/xiaomi/legacy/producer.go b/pkg/xiaomi/legacy/producer.go
+index 92375fa..018bbc4 100644
+--- a/pkg/xiaomi/legacy/producer.go
++++ b/pkg/xiaomi/legacy/producer.go
+@@ -28,7 +28,7 @@ func Dial(rawURL string) (*Producer, error) {
+ 		return nil, err
+ 	}
+ 
+-	medias, err := probe(client)
++	medias, err := probe(client, query.Get("audio") != "0")
+ 	if err != nil {
+ 		_ = client.Close()
+ 		return nil, err
+@@ -56,7 +56,7 @@ type Producer struct {
+ 
+ const codecXiaobaiPCMA = 1 // chuangmi.camera.xiaobai
+ 
+-func probe(client *Client) ([]*core.Media, error) {
++func probe(client *Client, audio bool) ([]*core.Media, error) {
+ 	_ = client.SetDeadline(time.Now().Add(15 * time.Second))
+ 
+ 	var vcodec, acodec *core.Codec
+@@ -107,7 +107,7 @@ func probe(client *Client) ([]*core.Media, error) {
+ 			}
+ 		}
+ 
+-		if vcodec != nil && acodec != nil {
++		if vcodec != nil && (acodec != nil || !audio) {
+ 			break
+ 		}
+ 	}
+@@ -118,11 +118,13 @@ func probe(client *Client) ([]*core.Media, error) {
+ 			Direction: core.DirectionRecvonly,
+ 			Codecs:    []*core.Codec{vcodec},
+ 		},
+-		{
++	}
++	if acodec != nil {
++		medias = append(medias, &core.Media{
+ 			Kind:      core.KindAudio,
+ 			Direction: core.DirectionRecvonly,
+ 			Codecs:    []*core.Codec{acodec},
+-		},
++		})
+ 	}
+ 	return medias, nil
+ }
+diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
+index 6eaa06c..d8a0e19 100644
+--- a/pkg/xiaomi/miss/client.go
++++ b/pkg/xiaomi/miss/client.go
+@@ -6,6 +6,7 @@ import (
+ 	"encoding/hex"
+ 	"errors"
+ 	"fmt"
++	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
+ 	"net"
+ 	"net/url"
+ 	"time"
+@@ -46,6 +47,7 @@ func NewClient(rawURL string) (*Client, error) {
+ 	query := u.Query()
+ 	key, err := crypto.CalcSharedKey(query.Get("device_public"), query.Get("client_private"))
+ 	if err != nil {
++		diagnostic.Report("key_exchange", err)
+ 		return nil, err
+ 	}
+ 
+@@ -59,20 +61,36 @@ func NewClient(rawURL string) (*Client, error) {
+ 	case "tutk":
+ 		conn, err = tutk.Dial(u.Host, query.Get("uid"), "Miss", "client")
+ 	default:
+-		err = fmt.Errorf("miss: unsupported vendor %s", s)
++		err = errors.New("miss: unsupported vendor")
++		diagnostic.Report("camera_vendor", err)
+ 	}
+ 
+ 	if err != nil {
+ 		return nil, err
+ 	}
+ 
++	// Bound authentication and StartMedia reads; probe installs its own deadline.
++	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+ 	err = login(conn, query.Get("client_public"), query.Get("sign"))
+ 	if err != nil {
++		diagnostic.Report("camera_auth", err)
+ 		_ = conn.Close()
+ 		return nil, err
+ 	}
+ 
+-	return &Client{Conn: conn, key: key, model: model}, nil
++	client := &Client{Conn: conn, key: key, model: model}
++	client.startCommandLoop()
++	return client, nil
++}
++
++func (c *Client) startCommandLoop() {
++	go func() {
++		for {
++			if _, _, err := c.Conn.ReadCommand(); err != nil {
++				return
++			}
++		}
++	}()
+ }
+ 
+ type Client struct {
+@@ -116,7 +134,7 @@ func login(conn Conn, clientPublic, sign string) error {
+ 	}
+ 
+ 	if !bytes.Contains(data, []byte(`"result":"success"`)) {
+-		return fmt.Errorf("miss: auth: %s", data)
++		return errors.New("miss: authentication rejected")
+ 	}
+ 
+ 	return nil
+diff --git a/pkg/xiaomi/miss/cs2/conn.go b/pkg/xiaomi/miss/cs2/conn.go
+index 1bea07c..a37c889 100644
+--- a/pkg/xiaomi/miss/cs2/conn.go
++++ b/pkg/xiaomi/miss/cs2/conn.go
+@@ -5,6 +5,7 @@ import (
+ 	"bytes"
+ 	"encoding/binary"
+ 	"fmt"
++	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
+ 	"io"
+ 	"net"
+ 	"sync"
+@@ -63,6 +64,7 @@ const (
+ func handshake(host, transport string) (net.Conn, error) {
+ 	conn, err := newUDPConn(host, 32108)
+ 	if err != nil {
++		diagnostic.Report("cs2_socket", err)
+ 		return nil, err
+ 	}
+ 
+@@ -73,6 +75,7 @@ func handshake(host, transport string) (net.Conn, error) {
+ 		return res[1] == msgPunchPkt
+ 	})
+ 	if err != nil {
++		diagnostic.Report("cs2_discovery", err)
+ 		_ = conn.Close()
+ 		return nil, err
+ 	}
+@@ -90,6 +93,7 @@ func handshake(host, transport string) (net.Conn, error) {
+ 		return res[1] == msgUDP || res[1] == msgTCP
+ 	})
+ 	if err != nil {
++		diagnostic.Report("cs2_handshake", err)
+ 		_ = conn.Close()
+ 		return nil, err
+ 	}
+@@ -99,9 +103,12 @@ func handshake(host, transport string) (net.Conn, error) {
+ 	if res[1] == msgTCP {
+ 		_ = conn.Close()
+ 		//host := fmt.Sprintf("%d.%d.%d.%d:%d", b[31], b[30], b[29], b[28], uint16(b[27])<<8|uint16(b[26]))
+-		return newTCPConn(conn.RemoteAddr().String())
++		tcp, err := newTCPConn(conn.RemoteAddr().String())
++		diagnostic.Report("cs2_tcp", err)
++		return tcp, err
+ 	}
+ 
++	diagnostic.Report("cs2_udp", nil)
+ 	return conn, nil
+ }
+ 
+@@ -122,6 +129,9 @@ func (c *Conn) worker() {
+ 			return
+ 		}
+ 
++		if n < 4 || buf[0] != magic {
++			continue
++		}
+ 		// 0  f1d0  magic
+ 		// 2  005d  size = total size + 4
+ 		// 4  d1    magic
+@@ -129,7 +139,13 @@ func (c *Conn) worker() {
+ 		// 6  0000  seq
+ 		switch buf[1] {
+ 		case msgDrw:
++			if n < 8 {
++				continue
++			}
+ 			ch := buf[5]
++			if int(ch) >= len(c.channels) || c.channels[ch] == nil {
++				continue
++			}
+ 			channel := c.channels[ch]
+ 
+ 			if c.isTCP {
+@@ -168,7 +184,7 @@ func (c *Conn) worker() {
+ 				c.cmdAck()
+ 			}
+ 		default:
+-			fmt.Printf("%s: unknown msg: %x\n", "cs2", buf[:n])
++			// Unknown packets may contain keys; never dump them to logs.
+ 		}
+ 	}
+ }
+@@ -324,7 +340,7 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
+ 			return 0, err
+ 		}
+ 
+-		if string(addr.IP) == string(c.addr.IP) || n >= 8 {
++		if addr.IP.Equal(c.addr.IP) && n >= 4 {
+ 			//log.Printf("<- %x", b[:n])
+ 			return
+ 		}
+@@ -341,9 +357,17 @@ func (c *udpConn) RemoteAddr() net.Addr {
+ }
+ 
+ func (c *udpConn) WriteUntil(req []byte, ok func(res []byte) bool) ([]byte, error) {
++	writeErrors := make(chan error, 1)
+ 	var t *time.Timer
+ 	t = time.AfterFunc(1, func() {
+-		if _, err := c.Write(req); err == nil && t != nil {
++		if _, err := c.Write(req); err != nil {
++			diagnostic.Report("cs2_send", err)
++			writeErrors <- err
++			// Wake the read immediately and preserve the original send failure.
++			_ = c.UDPConn.SetReadDeadline(time.Now())
++			return
++		}
++		if t != nil {
+ 			t.Reset(time.Second)
+ 		}
+ 	})
+@@ -354,10 +378,15 @@ func (c *udpConn) WriteUntil(req []byte, ok func(res []byte) bool) ([]byte, erro
+ 	for {
+ 		n, addr, err := c.UDPConn.ReadFromUDP(buf)
+ 		if err != nil {
+-			return nil, err
++			select {
++			case sendError := <-writeErrors:
++				return nil, sendError
++			default:
++				return nil, err
++			}
+ 		}
+ 
+-		if string(addr.IP) != string(c.addr.IP) || n < 16 {
++		if !addr.IP.Equal(c.addr.IP) || n < 16 {
+ 			continue // skip messages from another IP
+ 		}
+ 
+diff --git a/pkg/xiaomi/miss/producer.go b/pkg/xiaomi/miss/producer.go
+index eeaa496..a562710 100644
+--- a/pkg/xiaomi/miss/producer.go
++++ b/pkg/xiaomi/miss/producer.go
+@@ -2,6 +2,7 @@ package miss
+ 
+ import (
+ 	"fmt"
++	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
+ 	"net/url"
+ 	"time"
+ 
+@@ -28,16 +29,19 @@ func Dial(rawURL string) (core.Producer, error) {
+ 
+ 	err = client.StartMedia(query.Get("channel"), query.Get("subtype"), query.Get("audio"))
+ 	if err != nil {
++		diagnostic.Report("camera_start", err)
+ 		_ = client.Close()
+ 		return nil, err
+ 	}
+ 
+ 	medias, err := probe(client, query.Get("audio") != "0")
+ 	if err != nil {
++		diagnostic.Report("camera_probe", err)
+ 		_ = client.Close()
+ 		return nil, err
+ 	}
+ 
++	diagnostic.Report("camera_probe", nil)
+ 	return &Producer{
+ 		Connection: core.Connection{
+ 			ID:         core.NewID(),

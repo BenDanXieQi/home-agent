@@ -81,3 +81,7 @@ export type ConfigResponse = z.infer<typeof configResponseSchema>;
 export type ServiceStatus = z.infer<typeof serviceStatusSchema>;
 export type ServicesStatus = z.infer<typeof servicesStatusSchema>;
 export * from "./errors";
+
+export * from "./operations";
+
+export * from "./chat";

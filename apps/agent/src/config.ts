@@ -48,9 +48,7 @@ const environment = z.object({
 
 export type Config = z.infer<typeof environment>;
 
-export function loadConfig(
-  env: Record<string, string | undefined> = Bun.env,
-): Config {
+export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
   const result = environment.safeParse(env);
   if (!result.success) {
     const fields = result.error.issues
