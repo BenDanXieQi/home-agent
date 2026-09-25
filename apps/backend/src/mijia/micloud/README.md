@@ -27,7 +27,11 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 
 若小米返回 `notificationUrl`，状态为 `security-required`。用户打开小米安全验证页面请求短信或邮件验证码，再通过 `submitSecurityCode()` 提交收到的数字验证码。验证码通过同次登录的 cookie 会话提交至小米验证接口；账号 token 不需要用户搬运。仅支持上游的 `authStart` 页面及电话／邮件验证类型，其他验证类型报告 `unsupported-security`。安全验证仍受原二维码过期时间约束。
 
-`getDevices()` 使用这个实例完成的设备会话。`getCredentials()` 明确包含上游会话导出遗漏的 `passToken`，供 backend 比较续期前后的凭据，并通过 `Go2RtcAdapter` 将凭据安装到 go2rtc 运行时会话。设备与摄像头统一使用中国大陆区域 `cn`；其他区域被拒绝。
+`getDevices()` 使用这个实例完成的设备会话，并通过 `getHomes()` 查询 `/v2/homeroom/gethome` 与归属分页 `/v2/homeroom/get_dev_room_page`，合并家庭和房间。设备与目录请求使用同一 RC4 签名传输，未找到归属时返回空值，不推测安装位置。`homes.ts` 负责目录响应校验、分页和归属映射。
+
+`getDeviceSpec()` 通过独立的 `spec.ts` 客户端读取 `miot-spec.org` 的公开型号 URN、规格实例和中文翻译，按 MiLoCo 精简规格结构解析属性访问能力与动作输入，使用 `writeable`、`value_range`、`in_params` 等字段；不对外输出事件或动作输出。该客户端不接收 Cookie、token 或设备控制凭据。规格不是实时属性值，不执行设备读取、订阅或控制。接口结构与缓存规则见[米家与摄像头](../../../../../docs/mijia.md#家庭房间与设备能力)。
+
+`getCredentials()` 明确包含上游会话导出遗漏的 `passToken`，供 backend 比较续期前后的凭据，并通过 `Go2RtcAdapter` 将凭据安装到 go2rtc 运行时会话。设备与摄像头统一使用中国大陆区域 `cn`；其他区域被拒绝。
 
 登录完成后清理账号登录 Cookie，只保留限于设备 API 主机和 `/app` 路径的协议 Cookie。STS 的 `serviceToken` 与设备协议要求的 `yetAnotherServiceToken` 使用相同的绝对过期时间；设备会话不会把登录 `passToken` 发送到设备 API。
 

@@ -2,6 +2,8 @@
 
 基于 React、Vite、Tailwind CSS 4、TanStack Router / Query、Jotai、React Hook Form、Radix 与 Motion 的本机家庭工作台。
 
+当前提供账号登录、设备列表、摄像头预览和服务设置，尚无聊天、家庭语义展示或建模界面。视频预览只展示摄像头画面，不包含人物识别或活动判断。项目的家庭语义目标见[领域模型规划](../../docs/plans/household-model.md)，不属于当前页面已实现能力。
+
 ## 运行
 
 在仓库根目录执行 `bun run dev`，访问 <http://127.0.0.1:5173/>。Vite 将 `/api` 代理到根目录 `.env` 中配置的 backend 地址。生产环境执行 `bun run start`，通过 backend 的 HTTP 端口访问。Vite 静态预览不提供 API 代理。
