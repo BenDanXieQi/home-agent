@@ -25,14 +25,14 @@ Step 2 按本文件的 G1—G11、H1—H6 完成账号、登录、目录和播�
 
 协议将可公开的状态命名为 `projection`。它只包含明确允许公开的字段，内容如下：
 
-| 数据类别（`entity`） | 标识与内容 |
-| --- | --- |
-| `account`、`login`、`connection`、`media`、`household`、`projection_health` | 各只有一份，使用固定 key；分别表示账号、登录、连接操作、媒体、家庭选择和整体健康。退出时更新为空状态。 |
-| `home`、`room`、`device` | key 分别为 `{ account_id, home_id }`、`{ account_id, home_id, room_id }`、`{ account_id, device_id }`；保留云端字段、归属和本地补充信息。 |
-| `spec` | 用规格标识 URN 和版本区分；多个设备可以引用同一份规格。 |
-| `latest` | 用 `{ device_id, siid, piid }` 标识属性；包含最近值、来源、时间和质量。 |
-| `source_health` | 用 `source_id` 标识来源；包含连接、认证、订阅覆盖和当前采集实例 `collection_generation` 的状态。 |
-| `rule_status` | 用 `rule_id` 标识规则；值为 `{ rule_id, rule_version, enabled, status, reason }`，status 为 `active \| suspended \| disabled`，reason 使用共享的安全原因枚举。 |
+| 数据类别（`entity`）                                                        | 标识与内容                                                                                                                                                     |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `account`、`login`、`connection`、`media`、`household`、`projection_health` | 各只有一份，使用固定 key；分别表示账号、登录、连接操作、媒体、家庭选择和整体健康。退出时更新为空状态。                                                         |
+| `home`、`room`、`device`                                                    | key 分别为 `{ account_id, home_id }`、`{ account_id, home_id, room_id }`、`{ account_id, device_id }`；保留云端字段、归属和本地补充信息。                      |
+| `spec`                                                                      | 用规格标识 URN 和版本区分；多个设备可以引用同一份规格。                                                                                                        |
+| `latest`                                                                    | 用 `{ device_id, siid, piid }` 标识属性；包含最近值、来源、时间和质量。                                                                                        |
+| `source_health`                                                             | 用 `source_id` 标识来源；包含连接、认证、订阅覆盖和当前采集实例 `collection_generation` 的状态。                                                               |
+| `rule_status`                                                               | 用 `rule_id` 标识规则；值为 `{ rule_id, rule_version, enabled, status, reason }`，status 为 `active \| suspended \| disabled`，reason 使用共享的安全原因枚举。 |
 
 页面和 Agent 接收相同的完整状态，按各自需要选取显示内容。Step 6 的规则事件通过另一条连接发送，不与这里的设备状态变化混用。
 
@@ -49,12 +49,12 @@ Step 2 按本文件的 G1—G11、H1—H6 完成账号、登录、目录和播�
 
 - [ ] **G2：实现以下四种消息。** 一次提交涉及的变化放进同一条 `state_change`，一起校验、一起生效。例如移除设备时，同时移除它的属性和能力引用。心跳、重连通知和没有公共变化的处理不增加版本；同值上报若更新时间或质量，仍是公共变化。
 
-| SSE 消息名 | 必需字段 | 含义 |
-| --- | --- | --- |
-| `snapshot` | `scope_epoch`、`sequence`、`projection` | 完整快照，替换客户端保存的整份状态。 |
-| `state_change` | `scope_epoch`、`sequence`、`changes` | 该版本的全部变化，全部成功后才更新页面。 |
-| `resync_required` | `scope_epoch`、`sequence`、`reason` | 要求重新连接；可附 `retry_after_ms`，不推进版本。 |
-| `heartbeat` | `scope_epoch`、`sequence` | 表示连接仍在工作，不表示设备在线或数据新鲜。 |
+| SSE 消息名        | 必需字段                                | 含义                                              |
+| ----------------- | --------------------------------------- | ------------------------------------------------- |
+| `snapshot`        | `scope_epoch`、`sequence`、`projection` | 完整快照，替换客户端保存的整份状态。              |
+| `state_change`    | `scope_epoch`、`sequence`、`changes`    | 该版本的全部变化，全部成功后才更新页面。          |
+| `resync_required` | `scope_epoch`、`sequence`、`reason`     | 要求重新连接；可附 `retry_after_ms`，不推进版本。 |
+| `heartbeat`       | `scope_epoch`、`sequence`               | 表示连接仍在工作，不表示设备在线或数据新鲜。      |
 
 `changes` 只支持两种操作：`{ op: "upsert", entity, key, value }` 新增或替换一个完整条目；`{ op: "remove", entity, key }` 删除条目。每类数据都有固定的 key/value 格式，key 必须与值中的身份相符。整批数据校验失败时不应用其中任何一项。
 
@@ -72,14 +72,14 @@ Step 2 按本文件的 G1—G11、H1—H6 完成账号、登录、目录和播�
 
 这些限制防止异常响应或慢客户端持续占用内存。Step 2、Step 3 和 SSE 共用配置，容量按 UTF-8 JSON 序列化后的字节数计算。1 MiB 为 1,048,576 字节。
 
-| 项目 | 默认限制 | 达到限制时 |
-| --- | --- | --- |
-| `latest` | 2 MiB，最多 20,000 个属性，两者先到者生效 | 拒绝本次超限更新，标明受影响的覆盖。 |
-| 家庭、房间、设备目录与规格 | 合计 4 MiB | 目录整批拒收，保留当前家庭上次完整目录；规格保留原版本或显示未就绪。 |
-| 账号、登录、媒体、健康、规则状态及协议开销 | 合计 2 MiB | 保留报告容量错误和存储错误所需的空间。 |
-| 完整快照或单条业务消息 | 8 MiB，包含版本和消息结构 | 不能截断后冒充完整状态。 |
-| 每连接待发变化 | 最多 256 条或 2 MiB，包含正在发送的变化；另允许一份最多 8 MiB 的快照 | 关闭该连接，客户端稍后从新快照恢复。 |
-| SSE 连接 | 状态连接最多 16 条；Step 6 的规则事件连接另最多 2 条 | 建立订阅前返回 503，默认 `Retry-After: 30`。 |
+| 项目                                       | 默认限制                                                             | 达到限制时                                                           |
+| ------------------------------------------ | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `latest`                                   | 2 MiB，最多 20,000 个属性，两者先到者生效                            | 拒绝本次超限更新，标明受影响的覆盖。                                 |
+| 家庭、房间、设备目录与规格                 | 合计 4 MiB                                                           | 目录整批拒收，保留当前家庭上次完整目录；规格保留原版本或显示未就绪。 |
+| 账号、登录、媒体、健康、规则状态及协议开销 | 合计 2 MiB                                                           | 保留报告容量错误和存储错误所需的空间。                               |
+| 完整快照或单条业务消息                     | 8 MiB，包含版本和消息结构                                            | 不能截断后冒充完整状态。                                             |
+| 每连接待发变化                             | 最多 256 条或 2 MiB，包含正在发送的变化；另允许一份最多 8 MiB 的快照 | 关闭该连接，客户端稍后从新快照恢复。                                 |
+| SSE 连接                                   | 状态连接最多 16 条；Step 6 的规则事件连接另最多 2 条                 | 建立订阅前返回 503，默认 `Retry-After: 30`。                         |
 
 候选状态通过容量检查后才提交；大小计数与状态一起更新，不为每次属性上报重新序列化整个家庭。发送快照前再校验最终大小；如果仍超限，报告容量检查错误并停止发布，不能靠反复重连处理同一个超大快照。
 
@@ -102,7 +102,7 @@ Step 2 按本文件的 G1—G11、H1—H6 完成账号、登录、目录和播�
 - [ ] **H1a：等待和解析都有上限。** 响应头最多等待 10 秒，只接受成功状态和 `text/event-stream`；503 按服务器要求稍后重试。响应头到达后最多等 30 秒收齐第一份快照，之后使用 G8 的断流期限。分段交给标准解析器，缓冲上限默认是 9 × 1,024 × 1,024 个字符；库按字符计数，所以收到完整消息后仍要检查其 UTF-8 数据不超过 8 MiB，再解析 JSON。出错或取消就释放读取器和解析器，走同一重连流程。
 - [ ] **H2：每个标签页只存一份状态。** 一个浏览器标签页只建一条状态连接。快照和变化更新同一份缓存，现有 Jotai 从中派生显示值。
 - [ ] **H3：移除被订阅替代的轮询。** 删除米家状态的 `refetchInterval` 和窗口聚焦、重连时的重复 HTTP 拉取。标签页重新可见时检查 SSE，必要时重连；无关的服务设置查询继续保留。
-- [ ] **H4：账号页面以订阅状态为准。** `AccountGate`、`use-login.ts` 和命令处理等待状态同步后再决定页面。命令响应只说明操作结果，不覆盖后台状态。二维码材料按当前 `id` 和 `material_version` 读取，同版本请求合并；显示前再次匹配，尝试变化时清除旧材料。失败显示错误、允许重试。属性读取复用现有扫码会话，不增加独立授权页面；扫码材料、Cookie 和 token 不进入家庭状态。推送鉴权及状态采用 Step 1 实际核实并启用的契约，扫码有效不能代替推送连接与订阅确认。
+- [ ] **H4：账号页面以订阅状态为准。** `AccountGate`、`use-login.ts` 和命令处理等待状态同步后再决定页面。命令响应只说明操作结果，不覆盖后台状态。二维码材料按当前 `id` 和 `material_version` 读取，同版本请求合并；显示前再次匹配，尝试变化时清除旧材料。失败显示错误、允许重试。账号页面沿用现有扫码登录流程，属性读取与推送不新增 OAuth、额外授权页面或第二套登录状态；扫码材料、Cookie 和 token 不进入家庭状态。推送鉴权及状态采用 Step 1 在此前提下实际核实并启用的契约；未具备的能力展示具体限制，不提示用户另做 OAuth，扫码有效也不能代替推送连接与订阅确认。
 - [ ] **H5：播放跟随家庭和媒体状态。** 新播放须满足 Step 2 B6，且家庭标识、媒体 revision（媒体模块的当前版本）和绑定状态仍有效。播放可用性由媒体连接决定，不用目录在线字段或轮询时间判断。SSE 短暂中断时保留已有播放器；切家、退出账号时立即释放。
 - [ ] **H6：切家允许暂时不可用。** 选择器显示“被管理家庭”，说明更换会停止旧家庭的感知、自动化和观看。命令携带已同步状态的 `scope_epoch` 和目标 `home_id`；接收新家庭标识后清空旧内容，显示初始化进度或错误，失败后允许重新选择、重试。房间、分类、在线和能力筛选只影响本页显示；在线筛选使用 `availability`，未知状态单独显示；搜索同时匹配云端名称和本地别名。
 
@@ -117,20 +117,20 @@ Step 2 按本文件的 G1—G11、H1—H6 完成账号、登录、目录和播�
 
 按所属步骤实现接口，不提前注册空路由。已有命令继续使用，页面状态统一通过订阅更新。
 
-| 接口 | 用途 |
-| --- | --- |
-| `GET /api/mijia/events` | 本文件的状态 SSE，未登录也可连接。 |
-| `GET /api/mijia/state` | 显式诊断时读取内存中的安全快照。 |
-| `PUT /api/mijia/scope/homes` | Step 2 的家庭选择。 |
-| `POST /api/mijia/devices/refresh` | Step 2 的目录、规格重新同步。 |
-| `POST /api/mijia/properties/read` | Step 3 的一次性读取。 |
-| `POST /api/mijia/connection/retry` | 账号、媒体、目录及当前家庭失败订阅的重试。 |
-| 登录、验证、退出 | 现有账号命令。 |
-| `GET /api/mijia/login/:id/material` | 按需读取当前登录材料。 |
-| 播放预约、SDP、释放 | 现有播放命令，媒体继续走 WebRTC。 |
-| `GET /api/mijia/history/observations`、`/history/events`、`/history/summary` | Step 4 的历史明细、设备事件和汇总。 |
-| `GET /api/mijia/semantic-events` | Step 6 的独立规则事件流。 |
-| `GET /api/mijia/perception-rules`、`PUT /api/mijia/perception-rules/:rule_id` | Step 6 的规则读取和配置。 |
+| 接口                                                                          | 用途                                       |
+| ----------------------------------------------------------------------------- | ------------------------------------------ |
+| `GET /api/mijia/events`                                                       | 本文件的状态 SSE，未登录也可连接。         |
+| `GET /api/mijia/state`                                                        | 显式诊断时读取内存中的安全快照。           |
+| `PUT /api/mijia/scope/homes`                                                  | Step 2 的家庭选择。                        |
+| `POST /api/mijia/devices/refresh`                                             | Step 2 的目录、规格重新同步。              |
+| `POST /api/mijia/properties/read`                                             | Step 3 的一次性读取。                      |
+| `POST /api/mijia/connection/retry`                                            | 账号、媒体、目录及当前家庭失败订阅的重试。 |
+| 登录、验证、退出                                                              | 现有账号命令。                             |
+| `GET /api/mijia/login/:id/material`                                           | 按需读取当前登录材料。                     |
+| 播放预约、SDP、释放                                                           | 现有播放命令，媒体继续走 WebRTC。          |
+| `GET /api/mijia/history/observations`、`/history/events`、`/history/summary`  | Step 4 的历史明细、设备事件和汇总。        |
+| `GET /api/mijia/semantic-events`                                              | Step 6 的独立规则事件流。                  |
+| `GET /api/mijia/perception-rules`、`PUT /api/mijia/perception-rules/:rule_id` | Step 6 的规则读取和配置。                  |
 
 家庭列表、当前家庭和规格从订阅状态读取，删除 `/scope/homes` 的 GET、`/home` 和 `/devices/:did/spec` 查询。配置、别名、采集统计和诊断录制沿用 Step 3 的本机配置与报告，不额外增加管理接口。
 

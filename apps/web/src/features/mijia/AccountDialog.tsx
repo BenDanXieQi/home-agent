@@ -1,7 +1,7 @@
 import { Dialog } from "radix-ui";
 import { X, UserRound } from "lucide-react";
 import { Button } from "../../components/Button";
-import { LoginFlow } from "./LoginFlow";
+import { RequestFeedback } from "../../components/RequestFeedback";
 import { useLogin } from "./use-login";
 
 export default function AccountDialog() {
@@ -43,7 +43,11 @@ export default function AccountDialog() {
             退出米家登录
           </Button>
         </div>
-        <LoginFlow />
+        <RequestFeedback
+          fetchError={flow.fetchError}
+          error={flow.error}
+          refresh={flow.refresh}
+        />
       </Dialog.Content>
     </Dialog.Portal>
   );

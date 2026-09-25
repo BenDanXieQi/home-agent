@@ -21,12 +21,13 @@ import (
 const homeAgentLease = 60 * time.Second
 
 type homeAgentSession struct {
-	id      string
-	alias   string
-	region  string
-	expires atomic.Int64
-	cameras map[string]*homeAgentCameraState
-	retired map[string]time.Time
+	id          string
+	alias       string
+	region      string
+	expires     atomic.Int64
+	cameras     map[string]*homeAgentCameraState
+	retired     map[string]time.Time
+	dualCameras map[string]*homeAgentDualCamera
 }
 
 var homeAgentCurrent atomic.Pointer[homeAgentSession]
@@ -212,7 +213,7 @@ func homeAgentInstall(w http.ResponseWriter, r *http.Request) {
 	// Clear first so failed installation cannot retain an old account's picture.
 	homeAgentClear()
 	cloud := xiaomi.NewCloud(AppXiaomiHome)
-	err := cloud.LoginWithToken(body.UserID, body.PassToken)
+	err := cloud.LoginHomeAgentSession(body.UserID, body.PassToken)
 	if r.Context().Err() != nil {
 		return
 	}
@@ -258,6 +259,10 @@ func homeAgentClear() {
 		delete(session.cameras, key)
 		homeAgentCloseCamera(camera)
 	}
+	for _, camera := range session.dualCameras {
+		camera.source.Close()
+	}
+	session.dualCameras = nil
 	cloudsMu.Lock()
 	delete(clouds, session.alias)
 	cloudsMu.Unlock()

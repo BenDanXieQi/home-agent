@@ -1,7 +1,6 @@
-import { MiCloud } from "./micloud";
-import type { CredentialStore } from "../credentials/store";
-import { mijiaOperation } from "./operation";
-
+import { MiCloud } from "../protocols/micloud";
+import { type CredentialStore } from "../../credentials/store";
+import { mijiaOperation } from "../operation";
 /** Prepare a candidate without changing the current account or durable authorization. */
 export async function renewAccountSession(
   account: MiCloud,

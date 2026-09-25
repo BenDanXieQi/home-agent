@@ -184,6 +184,30 @@ export const performMijiaAtom = atom(
     }
   },
 );
+
+export const mijiaCanStartLoginAutomaticallyAtom = atom((get) => {
+  const state = get(mijiaStateAtom);
+  const command = get(commandStateAtom);
+  return (
+    !!state &&
+    !get(mijiaFetchErrorAtom) &&
+    !command.pending &&
+    !(command.type === "startLogin" && command.error) &&
+    (state.account.status === "idle" ||
+      state.account.status === "reauth_required") &&
+    !(state.account.status === "idle" && state.binding.status === "error") &&
+    (state.loginAttempt.status === "idle" ||
+      state.loginAttempt.status === "expired")
+  );
+});
+
+export const startMijiaLoginAutomaticallyAtom = atom(null, async (get, set) => {
+  // Recheck shared state at dispatch: StrictMode or another mounted consumer
+  // must not replace the attempt that the first caller has already started.
+  if (!get(mijiaCanStartLoginAutomaticallyAtom)) return;
+  await set(performMijiaAtom, { type: "startLogin" });
+});
+
 export const refreshMijiaAtom = atom(null, async (get) => {
   const command = get(commandStateAtom);
   if (command.pending && command.type !== "verifyLogin") return;

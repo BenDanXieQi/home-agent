@@ -1,12 +1,12 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { MijiaState } from "@home-agent/api/mijia";
-import type { MiCloud, MiCloudDevice } from "./micloud";
+import type { MiCloud, MiCloudDevice } from "../protocols/micloud";
 import { Go2RtcAdapter } from "./go2rtc-adapter";
 import { PlaybackManager } from "./playback-manager";
-import { CameraSourceManager } from "./camera-sources";
-import { RetryTimer } from "./retry-timer";
-import { MijiaError, isRecoverableMijiaError, safeMijiaError } from "./errors";
-import { mijiaOperation } from "./operation";
+import { CameraSourceManager } from "./camera-source-manager";
+import { RetryTimer } from "../retry-timer";
+import { MijiaError, isRecoverableMijiaError, safeMijiaError } from "../errors";
+import { mijiaOperation } from "../operation";
 
 type BindingTask = {
   account: MiCloud;
@@ -183,9 +183,15 @@ export class MediaSession {
   async clearAdapter() {
     if (!this.mediaAdapter) return;
     // Retain the previous instance until cleanup succeeds, even if YAML changed.
-    await mijiaOperation("cleanup", "go2rtc_cleanup", () =>
-      this.mediaAdapter!.close(),
-    );
+    try {
+      await mijiaOperation("cleanup", "go2rtc_cleanup", () =>
+        this.mediaAdapter!.close(),
+      );
+    } catch (error) {
+      const failure = safeMijiaError(error, "go2rtc_cleanup");
+      this.state = { status: "error", error: failure.toPayload() };
+      throw failure;
+    }
     this.mediaAdapter = undefined;
   }
 

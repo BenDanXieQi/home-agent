@@ -6,10 +6,11 @@ import {
 } from "@home-agent/api/mijia";
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { Go2RtcAdapter } from "./go2rtc-adapter";
-import { MijiaError } from "./errors";
-import { mijiaOperation } from "./operation";
+import type { CameraSourceManager } from "./camera-source-manager";
+import { MijiaError } from "../errors";
+import { mijiaOperation } from "../operation";
 
-type CameraTarget = { adapter: Go2RtcAdapter; sourceId: string };
+type CameraTarget = Awaited<ReturnType<CameraSourceManager["prepare"]>>;
 type Reservation = {
   phase: "reserved";
   id: string;

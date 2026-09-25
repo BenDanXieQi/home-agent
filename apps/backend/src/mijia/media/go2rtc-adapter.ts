@@ -1,6 +1,6 @@
-import type { CameraSourceSpec } from "./camera-source";
+import type { CameraSourceSpec } from "./camera-source-spec";
 import { mijiaTimeouts } from "@home-agent/api/mijia";
-import type { MiCloudCredentials } from "./micloud";
+import type { MiCloudCredentials } from "../protocols/micloud";
 import {
   context,
   ROOT_CONTEXT,
@@ -154,6 +154,7 @@ export class Go2RtcAdapter {
         sourceId,
         did: camera.deviceId,
         channel: camera.channel,
+        channelCount: camera.channelCount,
         model: camera.model,
         localip: camera.localIp,
       },

@@ -19,11 +19,12 @@ import (
 
 // One private stream per camera channel, shared by its resident consumer and viewers.
 type homeAgentCameraState struct {
-	stream    *streams.Stream
-	ctx       context.Context
-	cancel    context.CancelFunc
-	gate      chan struct{}
-	playbacks map[string]*homeAgentPlaybackState
+	stream        *streams.Stream
+	ctx           context.Context
+	cancel        context.CancelFunc
+	gate          chan struct{}
+	playbacks     map[string]*homeAgentPlaybackState
+	releaseSource func()
 }
 
 var homeAgentModel = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
@@ -41,10 +42,11 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		SessionID string `json:"sessionId"`
 		SourceID  string `json:"sourceId"`
 
-		Did     string `json:"did"`
-		Channel int    `json:"channel"`
-		Model   string `json:"model"`
-		LocalIP string `json:"localip"`
+		Did          string `json:"did"`
+		Channel      int    `json:"channel"`
+		ChannelCount int    `json:"channelCount"`
+		Model        string `json:"model"`
+		LocalIP      string `json:"localip"`
 	}
 	if !homeAgentRead(w, r, &body) {
 		return
@@ -70,7 +72,7 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := net.ParseIP(body.LocalIP)
-	if (body.Channel != 1 && body.Channel != 2) || !homeAgentIdentifier.MatchString(body.Did) || !homeAgentModel.MatchString(body.Model) ||
+	if body.ChannelCount < 1 || body.ChannelCount > 2 || body.Channel < 1 || body.Channel > body.ChannelCount || !homeAgentIdentifier.MatchString(body.Did) || !homeAgentModel.MatchString(body.Model) ||
 		(!strings.Contains(body.Model, ".camera.") && !strings.Contains(body.Model, ".cateye.")) ||
 		ip == nil || !ip.IsPrivate() || ip.To4() == nil {
 		homeAgentError(w, "camera_unavailable", http.StatusBadRequest)
@@ -85,9 +87,14 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	// Private streams never enter the global stream registry or configuration.
 	ctx, cancel := context.WithCancel(context.Background())
+	stream := streams.NewStream(source.String())
+	var releaseSource func()
+	if body.ChannelCount == 2 {
+		stream, releaseSource = homeAgentDualStream(session, source, body.Channel)
+	}
 	session.cameras[body.SourceID] = &homeAgentCameraState{
-		stream: streams.NewStream(source.String()),
-		ctx:    ctx, cancel: cancel, gate: make(chan struct{}, 1),
+		stream: stream, releaseSource: releaseSource,
+		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
 		playbacks: make(map[string]*homeAgentPlaybackState),
 	}
 	homeAgentCapture(session, session.cameras[body.SourceID])
@@ -99,6 +106,9 @@ func homeAgentCloseCamera(camera *homeAgentCameraState) {
 		return
 	}
 	camera.cancel()
+	if camera.releaseSource != nil {
+		camera.releaseSource()
+	}
 	// Close cannot race AddConsumer. Retired cameras finish their own bounded dial
 	// and cleanup without blocking heartbeats, DELETE or a new camera's stream.
 	go func() {

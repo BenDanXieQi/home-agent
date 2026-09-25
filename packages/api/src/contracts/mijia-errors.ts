@@ -1,8 +1,32 @@
 // Shared wire codes, HTTP statuses and safe messages. Never include upstream data.
 export const mijiaErrorDefinitions = {
+  mijia_invalid_input: {
+    status: 400,
+    message: "米家请求参数无效。",
+  },
+  mijia_device_not_found: {
+    status: 404,
+    message: "当前账号设备列表中没有此设备，请刷新设备列表。",
+  },
+  mijia_spec_unavailable: {
+    status: 404,
+    message: "该设备没有可用的 MIoT 能力规格。",
+  },
+  mijia_spec_invalid_response: {
+    status: 502,
+    message: "设备规格服务返回了无法识别的数据，请稍后重试。",
+  },
+  mijia_spec_failed: {
+    status: 502,
+    message: "无法读取设备能力规格，请检查网络后重试。",
+  },
   mijia_credential_storage: {
     status: 503,
     message: "无法安全读取或保存米家授权，请检查数据库、迁移和凭据加密密钥。",
+  },
+  mijia_property_not_readable: {
+    status: 400,
+    message: "所选属性不属于当前设备的可读取规格。",
   },
   mijia_network: {
     status: 502,

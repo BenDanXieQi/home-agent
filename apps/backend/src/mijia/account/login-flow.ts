@@ -1,8 +1,8 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type { MijiaLoginAttempt } from "@home-agent/api/mijia";
-import { MiCloud } from "./micloud";
-import { MijiaError, safeMijiaError } from "./errors";
-import { mijiaOperation } from "./operation";
+import { MiCloud } from "../protocols/micloud";
+import { MijiaError, safeMijiaError } from "../errors";
+import { mijiaOperation } from "../operation";
 
 export type LoginCandidate = {
   id: string;
