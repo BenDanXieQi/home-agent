@@ -1,59 +1,60 @@
 // Adapted from homebridge-miot/lib/protocol/MiCloud.js at the commit in ../README.md.
 // Copyright (c) 2025 Marcin. MIT license; see ../LICENSE.
 import { createHash, randomInt, randomBytes } from "node:crypto";
+import { z } from "zod";
 import { MiCloudError } from "./errors";
+import {
+  readHomes,
+  deviceLocations,
+  homeLocation,
+  type DeviceLocation,
+} from "./homes";
+import { MiotSpecClient } from "./spec";
 import { cryptRc4 } from "./rc4";
 import { savedSessionSchema, type MiCloudSavedSession } from "./session";
-import { MiCloudTransport, trustedUrl, type RequestOptions } from "./transport";
+import {
+  MiCloudTransport,
+  trustedUrl,
+  type RequestOptions,
+  type RequestStartObserver,
+} from "./transport";
+import {
+  MIOT_PROPERTY_BATCH_SIZE,
+  MIOT_PROPERTY_TIMEOUT_MS,
+  miotPropertyAddressSchema,
+  type MiotPropertyAddress,
+} from "./properties";
 
 export type { MiCloudSavedSession } from "./session";
 
 export type MiCloudRegion = MiCloudSavedSession["region"];
 
 /** Server-only raw data. Project a field whitelist before returning devices to a browser. */
-export interface MiCloudDevice {
+export interface MiCloudDevice extends Partial<DeviceLocation> {
   did: string;
   name?: string;
   model?: string;
   isOnline?: boolean;
-  room_id?: string;
-  room_name?: string;
+  spec_type?: string;
   [key: string]: unknown;
 }
 
 /** Server-only credentials for the camera adapter. Never serialize into API responses. */
-export type MiCloudCredentials = Pick<
-  MiCloudSavedSession,
-  "userId" | "passToken" | "region"
->;
+export type MiCloudCredentials = ReturnType<MiCloud["getCredentials"]>;
 
-export interface MiCloudQrLogin {
-  qrImage: string;
-  expiresAt: number;
-  pollIntervalMs: number;
-}
-
-export type MiCloudLoginResult =
-  | { status: "pending" }
-  | { status: "expired" }
-  | { status: "security-required"; verificationUrl: string }
-  | { status: "authenticated" };
-
-type JsonObject = Record<string, unknown>;
+const objectSchema = z.looseObject({});
+type JsonObject = z.infer<typeof objectSchema>;
 type Session = Pick<MiCloudSavedSession, "ssecurity" | "userId" | "passToken">;
 const ACCOUNT_URL = "https://account.xiaomi.com";
 const STS_URL = "https://sts.api.io.mi.com/sts";
 const DEVICE_URL = "https://api.io.mi.com/app/home/device_list";
 
-function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function object(value: unknown) {
-  if (!isObject(value)) {
+  const parsed = objectSchema.safeParse(value);
+  if (!parsed.success) {
     throw new MiCloudError("invalid-response");
   }
-  return value;
+  return parsed.data;
 }
 
 function text(value: unknown) {
@@ -102,6 +103,7 @@ function seconds(
 
 /** Owns one cloud identity; renewal returns an isolated candidate for durable adoption. */
 export class MiCloud {
+  readonly #spec = new MiotSpecClient();
   readonly region: MiCloudRegion;
   #identity = {
     clientId: randomCharacters(
@@ -160,20 +162,19 @@ export class MiCloud {
       qrImage: `data:${mime};base64,${qr.body.toString("base64")}`,
       expiresAt: this.#expiresAt,
       pollIntervalMs: seconds(data.timeInterval, 3, 2, 10) * 1000,
-    } satisfies MiCloudQrLogin;
+    };
   }
 
   async pollLogin(signal?: AbortSignal) {
     this.#transport.assertActive(signal);
-    if (this.#session)
-      return { status: "authenticated" } satisfies MiCloudLoginResult;
+    if (this.#session) return { status: "authenticated" as const };
     if (!this.#pollUrl) throw new MiCloudError("invalid-state");
     if (Date.now() >= this.#expiresAt) return this.#expire();
     if (this.#verificationUrl) {
       return {
-        status: "security-required",
+        status: "security-required" as const,
         verificationUrl: this.#verificationUrl,
-      } satisfies MiCloudLoginResult;
+      };
     }
     if (this.#busy) throw new MiCloudError("invalid-state");
     this.#busy = true;
@@ -198,13 +199,13 @@ export class MiCloud {
         throw new MiCloudError("missing-credentials");
       }
       // Upstream keeps non-completed long-poll responses pending until the QR session's deadline.
-      return { status: "pending" } satisfies MiCloudLoginResult;
+      return { status: "pending" as const };
     } catch (error) {
       if (error instanceof MiCloudError && error.code === "expired")
         return this.#expire();
       if (error instanceof MiCloudError && error.code === "timeout") {
         if (Date.now() >= this.#expiresAt) return this.#expire();
-        return { status: "pending" } satisfies MiCloudLoginResult;
+        return { status: "pending" as const };
       }
       throw error;
     } finally {
@@ -385,16 +386,102 @@ export class MiCloud {
       userId: this.#session.userId,
       passToken: this.#session.passToken,
       region: this.region,
-    } satisfies MiCloudCredentials;
+    };
+  }
+
+  getHomes(signal?: AbortSignal) {
+    return readHomes(
+      (path, data, requestSignal) =>
+        this.#deviceRequest(path, data, requestSignal),
+      AbortSignal.any([
+        this.#transport.signal,
+        AbortSignal.timeout(30_000),
+        ...(signal ? [signal] : []),
+      ]),
+    );
+  }
+
+  getDeviceSpec(device: MiCloudDevice, signal?: AbortSignal) {
+    this.#transport.assertActive(signal);
+    return this.#spec.get(
+      device,
+      AbortSignal.any([this.#transport.signal, ...(signal ? [signal] : [])]),
+    );
   }
 
   async getDevices(signal?: AbortSignal) {
+    const requestSignal = AbortSignal.any([
+      this.#transport.signal,
+      AbortSignal.timeout(30_000),
+      ...(signal ? [signal] : []),
+    ]);
+    const [result, homes] = await Promise.all([
+      this.#deviceRequest(
+        "/home/device_list",
+        { getVirtualModel: false, getHuamiDevices: 0 },
+        requestSignal,
+      ),
+      this.getHomes(requestSignal),
+    ]);
+    const list = object(result).list;
+    if (!Array.isArray(list)) throw new MiCloudError("invalid-response");
+    const locations = deviceLocations(homes);
+    this.#transport.assertActive(requestSignal);
+    return list.map((item: unknown) => {
+      const device = object(item);
+      const did = identifier(device.did);
+      if (!did) throw new MiCloudError("invalid-response");
+      const normalized: MiCloudDevice = {
+        ...device,
+        did,
+        ...(locations.get(did) ?? homeLocation()),
+      };
+      return normalized;
+    });
+  }
+
+  /** One batch over this account's existing RC4 session; scheduling belongs to properties/. */
+  async getProperties(
+    properties: readonly MiotPropertyAddress[],
+    signal?: AbortSignal,
+    onRequestStarted?: RequestStartObserver,
+  ) {
+    this.#transport.assertActive(signal);
+    if (
+      properties.length > MIOT_PROPERTY_BATCH_SIZE ||
+      !miotPropertyAddressSchema.array().safeParse(properties).success
+    )
+      throw new MiCloudError("invalid-input");
+    if (properties.length === 0) return [];
+    // Xiaomi SDK: datasource=1 prefers cached values and can use RPC on a cache miss.
+    // https://github.com/MiEcosystem/miot-plugin-sdk/wiki/04-miot_spec
+    const result = await this.#deviceRequest(
+      "/miotspec/prop/get",
+      {
+        datasource: 1,
+        params: properties.map(({ did, siid, piid }) => ({ did, siid, piid })),
+      },
+      signal,
+      MIOT_PROPERTY_TIMEOUT_MS,
+      onRequestStarted,
+    );
+    const parsed = z.array(z.unknown()).safeParse(result);
+    if (!parsed.success) throw new MiCloudError("invalid-response");
+    return parsed.data;
+  }
+
+  async #deviceRequest(
+    path: string,
+    data: Record<string, unknown>,
+    signal?: AbortSignal,
+    timeoutMs?: number,
+    onRequestStarted?: RequestStartObserver,
+  ) {
     this.#transport.assertActive(signal);
     const session = this.#session;
     if (!session || !this.#transport.cookie("serviceToken", DEVICE_URL))
       throw new MiCloudError("authentication");
-    const path = "/home/device_list";
-    const url = new URL(DEVICE_URL);
+    const url = new URL(`/app${path}`, DEVICE_URL);
     const nonceBytes = Buffer.alloc(12);
     randomBytes(8).copy(nonceBytes);
     nonceBytes.writeInt32BE(Math.floor(Date.now() / 60_000), 8);
@@ -404,7 +491,7 @@ export class MiCloud {
       .update(nonceBytes)
       .digest();
     const params: Record<string, string> = {
-      data: JSON.stringify({ getVirtualModel: false, getHuamiDevices: 0 }),
+      data: JSON.stringify(data),
     };
     const signature = () =>
       createHash("sha1")
@@ -439,31 +526,35 @@ export class MiCloud {
         body: new URLSearchParams(params),
       },
       signal,
+      timeoutMs,
+      onRequestStarted,
     );
     const encrypted = response.body.toString("utf8");
     // An unencrypted authentication error must not be decoded as device data.
     if (encrypted.trimStart().startsWith("{")) {
       const error = parseJson(encrypted);
-      if (Number(error.code) === -3 || Number(error.code) === 3)
-        throw new MiCloudError("authentication");
-      throw new MiCloudError("invalid-response");
+      const upstreamCode =
+        typeof error.code === "number" && Number.isSafeInteger(error.code)
+          ? error.code
+          : undefined;
+      const details = upstreamCode === undefined ? {} : { upstreamCode };
+      if (upstreamCode === -3 || upstreamCode === 3)
+        throw new MiCloudError("authentication", details);
+      throw new MiCloudError("invalid-response", details);
     }
     const result = parseJson(
       cryptRc4(key, Buffer.from(encrypted, "base64")).toString("utf8"),
     );
-    if (Number(result.code) === -3 || Number(result.code) === 3)
-      throw new MiCloudError("authentication");
-    if (Number(result.code) !== 0) throw new MiCloudError("invalid-response");
-    const list = object(result.result).list;
-    if (!Array.isArray(list)) throw new MiCloudError("invalid-response");
+    const upstreamCode =
+      typeof result.code === "number" && Number.isSafeInteger(result.code)
+        ? result.code
+        : undefined;
+    const details = upstreamCode === undefined ? {} : { upstreamCode };
+    if (upstreamCode === -3 || upstreamCode === 3)
+      throw new MiCloudError("authentication", details);
+    if (upstreamCode !== 0) throw new MiCloudError("invalid-response", details);
     this.#transport.assertActive(signal);
-    return list.map((item: unknown) => {
-      const device = object(item);
-      const did = identifier(device.did);
-      if (!did) throw new MiCloudError("invalid-response");
-      const normalized: MiCloudDevice = { ...device, did };
-      return normalized;
-    });
+    return result.result;
   }
 
   dispose() {
@@ -485,7 +576,7 @@ export class MiCloud {
     this.#transport.clearCookies();
     this.#pendingCredentials = {};
     this.#verificationUrl = undefined;
-    return { status: "expired" } satisfies MiCloudLoginResult;
+    return { status: "expired" as const };
   }
 
   #requireSecurity(value: unknown) {
@@ -496,9 +587,9 @@ export class MiCloud {
       throw new MiCloudError("unsupported-security");
     this.#verificationUrl = url.toString();
     return {
-      status: "security-required",
+      status: "security-required" as const,
       verificationUrl: this.#verificationUrl,
-    } satisfies MiCloudLoginResult;
+    };
   }
 
   #captureCredentials(data: JsonObject) {
@@ -597,7 +688,7 @@ export class MiCloud {
     this.#pendingCredentials = {};
     this.#pollUrl = undefined;
     this.#verificationUrl = undefined;
-    return { status: "authenticated" } satisfies MiCloudLoginResult;
+    return { status: "authenticated" as const };
   }
 
   async #requestJson(

@@ -1,9 +1,9 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { MijiaState } from "@home-agent/api/mijia";
-import type { MiCloud, MiCloudDevice } from "./micloud";
-import { describeMijiaDevices } from "./devices";
-import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "./errors";
-import { mijiaOperation } from "./operation";
+import type { MiCloud, MiCloudDevice } from "../protocols/micloud";
+import { describeMijiaDevices } from "./mapping";
+import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "../errors";
+import { mijiaOperation } from "../operation";
 
 const DEVICE_DISCOVERY_INTERVAL_MS = 5 * 60_000;
 
@@ -28,6 +28,14 @@ export class DeviceDiscovery {
   private discoveryTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly dependencies: DeviceDependencies) {}
+
+  list() {
+    return [...this.devices];
+  }
+
+  find(id: string) {
+    return this.devices.find((device) => device.did === id);
+  }
 
   get stateSnapshot() {
     return this.state;

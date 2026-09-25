@@ -62,7 +62,7 @@ backend POST /api/chat                   SERVER
 - `apps/backend/src/chat/routes.ts`：受限 JSON 请求和 SSE 透明转发，不解析模型内容。
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
 - `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。
-- `apps/backend/src/mijia/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。
+- `apps/backend/src/mijia/media/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。
 - `apps/agent/src/http/chat.ts`：在请求上下文内运行完整 SSE 生命周期。
 - `apps/agent/src/graph/home-agent.ts`：在实际模型调用边界生成 LLM span。
 

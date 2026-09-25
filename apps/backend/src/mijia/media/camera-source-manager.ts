@@ -1,12 +1,13 @@
-import type { MiCloudDevice } from "./micloud";
+import type { MiCloudDevice } from "../protocols/micloud";
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { Go2RtcAdapter } from "./go2rtc-adapter";
-import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "./errors";
+import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "../errors";
 import type { PlaybackManager } from "./playback-manager";
-import { RetryTimer } from "./retry-timer";
+import { RetryTimer } from "../retry-timer";
 
-import type { CameraSourceSpec } from "./camera-source";
-import { isCamera, cameraChannels } from "./devices";
+import type { CameraSourceSpec } from "./camera-source-spec";
+import { isCamera, cameraChannels } from "../devices/mapping";
+import { cameraChannelCount } from "../protocols/micloud/camera-capabilities";
 type CameraSourceEntry = {
   id: string;
   device: CameraSourceSpec;
@@ -147,6 +148,7 @@ export class CameraSourceManager {
     return {
       deviceId,
       channel,
+      channelCount: cameraChannelCount(device.model),
       model: device.model!,
       ...(typeof device.localip === "string"
         ? { localIp: device.localip }
@@ -168,6 +170,7 @@ export class CameraSourceManager {
       !stream ||
       stream.retiring ||
       stream.device.model !== device.model ||
+      stream.device.channelCount !== device.channelCount ||
       stream.device.localIp !== device.localIp
     ) {
       const removed = stream ? this.retire(key, stream) : Promise.resolve();

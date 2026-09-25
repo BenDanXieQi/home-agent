@@ -1,28 +1,26 @@
-import { restoreAccountSession, renewAccountSession } from "./account-session";
-import type { MiCloud } from "./micloud";
-import { LoginFlow, type LoginCandidate } from "./login-flow";
-import { context, ROOT_CONTEXT } from "@home-agent/observability";
-import type { Operation, ApiError } from "@home-agent/api/contracts";
+import {
+  AccountMaintenance,
+  type AccountSessionCandidate,
+} from "./account/maintenance";
+import { LoginFlow, type LoginCandidate } from "./account/login-flow";
+import { miotSourceId } from "./properties/source-profiles";
+import { preparePropertyRead } from "./properties/read-request";
+import type { MiotPropertyAddress } from "./protocols/micloud/properties";
+import { PropertyReader } from "./properties/reader";
+import type { MiCloud } from "./protocols/micloud";
+import type { Operation } from "@home-agent/api/contracts";
 import type { MijiaState } from "@home-agent/api/mijia";
 import type { CredentialStore } from "../credentials/store";
-import { MediaSession } from "./media-session";
-import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "./errors";
-import { RetryTimer } from "./retry-timer";
-import { DeviceDiscovery } from "./device-discovery";
+import { MediaSession } from "./media/session";
+import { MijiaError, safeMijiaError } from "./errors";
+import { DeviceDiscovery } from "./devices/discovery";
+import { DeviceQueries } from "./devices/queries";
 import { mijiaOperation } from "./operation";
 
 export type MijiaDependencies = {
   readGo2rtcUrl: () => Promise<string>;
   credentialStore: CredentialStore | undefined;
 };
-
-type RestoreTask = { controller: AbortController; promise: Promise<void> };
-type AccountTask = {
-  account: MiCloud;
-  controller: AbortController;
-  promise: Promise<void>;
-};
-const UNKNOWN_EXPIRY_RENEWAL_INTERVAL_MS = 6 * 60 * 60_000;
 
 /** Owns the durable account; only the current task may adopt credentials or media. */
 export class MijiaService {
@@ -37,18 +35,14 @@ export class MijiaService {
   private lifecycleQueue: Promise<unknown> = Promise.resolve();
   private stopped = false;
 
-  private readonly restoreRetry = new RetryTimer();
-  private readonly renewalRetry = new RetryTimer();
-  private restoreTask: RestoreTask | undefined;
-  private renewalTask: AccountTask | undefined;
-  private renewalFailedAccount: MiCloud | undefined;
-  private renewalTimer: ReturnType<typeof setTimeout> | undefined;
   private initialRestorePending = false;
   private committingCredentials = false;
   private loggingOut = false;
 
   private readonly media: MediaSession;
   private readonly discovery: DeviceDiscovery;
+  private readonly queries: DeviceQueries;
+  private readonly maintenance: AccountMaintenance;
 
   constructor({ readGo2rtcUrl, credentialStore }: MijiaDependencies) {
     this.credentialStore = credentialStore;
@@ -65,15 +59,119 @@ export class MijiaService {
       currentAccount: () => this.accountClient,
       activeAccount: (account) => this.activeAccount(account),
       stopped: () => this.stopped,
-      renewalFailed: (account) => this.renewalFailedAccount === account,
-      renew: (account) => this.startRenewal(account),
+      renewalFailed: (account) => this.maintenance.renewalFailed(account),
+      renew: (account) => this.maintenance.renew(account),
       retainedChannels: (id) => this.media.retainedChannels(id),
       onDevices: (devices, retryFailed) =>
         this.media.updateDevices(devices, retryFailed),
     });
+    this.queries = new DeviceQueries({
+      currentAccount: () => this.accountClient,
+      activeAccount: (account) => this.activeAccount(account),
+      discovery: this.discovery,
+    });
+    this.maintenance = new AccountMaintenance({
+      currentAccount: () => this.accountClient,
+      isActive: (account) => this.activeAccount(account),
+      acceptsWork: () => !this.stopped && !this.loggingOut,
+      committing: () => this.committingCredentials,
+      isLoginActive: () => this.loginFlow.active,
+      readStore: () => this.requireStore(),
+      commitRestored: (candidate, assertCurrent) =>
+        this.commitRestored(candidate, assertCurrent),
+      commitRenewed: (account, candidate, assertCurrent) =>
+        this.commitRenewed(account, candidate, assertCurrent),
+      onRestoreState: (state) => {
+        this.state.account = state;
+      },
+      onRenewalFailure: async (account, failure) => {
+        if (failure.reason === "authentication")
+          await this.expireAccount(account, failure);
+        else if (this.activeAccount(account)) this.discovery.fail(failure);
+      },
+    });
   }
 
+  private readScope = new AbortController();
+  private readGeneration = crypto.randomUUID();
+  private readonly propertyReader = new PropertyReader();
   private readonly credentialStore: CredentialStore | undefined;
+
+  private invalidatePropertyReads() {
+    this.readScope.abort();
+    this.readScope = new AbortController();
+    this.readGeneration = crypto.randomUUID();
+  }
+
+  async readProperties(
+    properties: readonly MiotPropertyAddress[],
+    signal: AbortSignal,
+  ) {
+    signal.throwIfAborted();
+    const client = this.accountClient;
+    if (!client) throw new MijiaError("not_bound");
+    if (!this.activeAccount(client)) throw new MijiaError("stale_session");
+    const uid = client.getCredentials().userId;
+    const generation = this.readGeneration;
+    if (this.discovery.stateSnapshot.status !== "ready")
+      throw new MijiaError("devices_failed");
+    const combined = AbortSignal.any([signal, this.readScope.signal]);
+    const propertiesSnapshot = properties.map((property) => ({ ...property }));
+    const devices = new Map(
+      [...new Set(propertiesSnapshot.map(({ did }) => did))].map((did) => [
+        did,
+        this.discovery.find(did),
+      ]),
+    );
+    const assertCurrent = () => {
+      combined.throwIfAborted();
+      if (!this.activeAccount(client) || this.readGeneration !== generation)
+        throw new MijiaError("stale_session");
+      if (this.discovery.stateSnapshot.status !== "ready")
+        throw new MijiaError("devices_failed");
+      for (const [did, previous] of devices) {
+        const current = this.discovery.find(did);
+        if (!previous || !current) throw new MijiaError("device_not_found");
+        if (
+          previous.home_id !== current.home_id ||
+          previous.model !== current.model ||
+          previous.spec_type !== current.spec_type
+        )
+          throw new MijiaError("stale_session");
+      }
+    };
+    assertCurrent();
+    const requested = await preparePropertyRead(
+      propertiesSnapshot,
+      {
+        getDeviceSpec: (did, readSignal) =>
+          this.queries.getDeviceSpec(did, readSignal),
+        assertCurrent,
+      },
+      combined,
+    );
+    const observations = await this.propertyReader.read(
+      requested,
+      {
+        client,
+        source_id: miotSourceId(uid),
+        collection_generation: generation,
+        assertCurrent,
+      },
+      combined,
+    );
+    assertCurrent();
+    const rejected = observations.some(
+      (item) =>
+        item.status === "unavailable" &&
+        item.reason === "request_failed" &&
+        item.error.kind === "authentication",
+    );
+    // Restore the shared account through its existing owner; never replay a read
+    // or discard successful observations from earlier batches.
+    if (rejected) void this.maintenance.renew(client);
+    return observations;
+  }
 
   private requireStore() {
     if (!this.credentialStore) throw new MijiaError("credential_storage");
@@ -144,7 +242,7 @@ export class MijiaService {
       };
   }
 
-  private connectionFailure(): ApiError | undefined {
+  private connectionFailure() {
     if (this.state.account.status !== "authenticated")
       return "error" in this.state.account
         ? this.state.account.error
@@ -168,17 +266,16 @@ export class MijiaService {
     await this.media.reconcileConfiguration();
     assertCurrent();
     if (!this.accountClient) {
-      this.restoreRetry.cancel();
-      await this.startRestore();
+      await this.maintenance.retryRestore();
       assertCurrent();
       return this.connectionFailure();
     }
-    if (this.renewalFailedAccount === this.accountClient) {
-      await this.startRenewal(this.accountClient);
+    if (this.maintenance.renewalFailed(this.accountClient)) {
+      await this.maintenance.renew(this.accountClient);
       assertCurrent();
       if (
         !this.accountClient ||
-        this.renewalFailedAccount === this.accountClient
+        this.maintenance.renewalFailed(this.accountClient)
       )
         return this.connectionFailure();
     }
@@ -193,20 +290,9 @@ export class MijiaService {
     return this.connectionFailure();
   }
 
-  private currentRestore(task: RestoreTask) {
-    return (
-      this.restoreTask === task &&
-      !task.controller.signal.aborted &&
-      !this.stopped &&
-      !this.loggingOut
-    );
-  }
-
   private cancelRestore() {
     this.initialRestorePending = false;
-    this.restoreRetry.cancel();
-    this.restoreTask?.controller.abort();
-    this.restoreTask = undefined;
+    this.maintenance.cancelRestore();
   }
 
   private activeAccount(account: MiCloud) {
@@ -214,125 +300,71 @@ export class MijiaService {
   }
 
   private stopAccountMaintenance() {
-    clearTimeout(this.renewalTimer);
     this.discovery.pause();
-    this.renewalTimer = undefined;
-    this.renewalRetry.cancel();
-    // Once the durable write starts, its candidate must also become the in-memory
-    // account before a queued logout can succeed or fail.
-    if (!this.committingCredentials) {
-      this.renewalTask?.controller.abort();
-      this.renewalTask = undefined;
-    }
+    this.maintenance.stopRenewal();
   }
 
   private startAccountMaintenance(account: MiCloud) {
-    clearTimeout(this.renewalTimer);
     this.discovery.pause();
-    this.renewalRetry.cancel();
-    this.renewalFailedAccount = undefined;
-    if (!this.activeAccount(account)) return;
-    const expiresAt = account.exportSession().expiresAt;
-    const remaining =
-      expiresAt === null ? null : Math.max(0, expiresAt - Date.now());
-    // Session cookies have no stated lifetime. Six hours is our revalidation
-    // policy, not an inferred Xiaomi expiration time.
-    const delay =
-      remaining === null
-        ? UNKNOWN_EXPIRY_RENEWAL_INTERVAL_MS
-        : Math.max(1_000, remaining - Math.min(5 * 60_000, remaining / 2));
-    this.renewalTimer = context.with(ROOT_CONTEXT, () =>
-      setTimeout(
-        () => {
-          this.renewalTimer = undefined;
-          if (this.activeAccount(account)) void this.startRenewal(account);
-        },
-        Math.min(delay, 2_147_483_647),
-      ),
-    );
-    this.renewalTimer.unref();
+    this.maintenance.scheduleRenewal(account);
     this.discovery.schedule(account);
   }
 
-  private currentRenewal(task: AccountTask) {
-    return (
-      this.renewalTask === task &&
-      !task.controller.signal.aborted &&
-      this.activeAccount(task.account)
-    );
+  private async commitRenewed(
+    account: MiCloud,
+    candidate: AccountSessionCandidate,
+    assertCurrent: () => void,
+  ) {
+    let reinstall = false;
+    await this.serial(async () => {
+      assertCurrent();
+      const previous = account.getCredentials();
+      const next = candidate.client.getCredentials();
+      if (next.userId !== previous.userId || next.region !== previous.region)
+        throw new MijiaError("authentication");
+      this.committingCredentials = true;
+      try {
+        await mijiaOperation("credentials.save", "credential_storage", () =>
+          this.requireStore().write("mijia", candidate.client.exportSession()),
+        );
+        // A queued logout must delete the same durable and in-memory candidate.
+        if (this.stopped || this.accountClient !== account) return;
+        reinstall = this.media.needsRebind(
+          next.passToken !== previous.passToken,
+        );
+        if (reinstall) this.media.prepareRebind();
+        this.invalidatePropertyReads();
+        this.accountClient = candidate.client;
+        account.dispose();
+        this.discovery.set(candidate.devices, true);
+        this.startAccountMaintenance(candidate.client);
+      } finally {
+        this.committingCredentials = false;
+      }
+    });
+    if (this.activeAccount(candidate.client) && reinstall)
+      await this.media.startBinding();
   }
 
-  private startRenewal(account: MiCloud) {
-    if (!this.activeAccount(account)) return Promise.resolve();
-    if (this.renewalTask?.account === account) return this.renewalTask.promise;
-    clearTimeout(this.renewalTimer);
-    const task: AccountTask = {
-      account,
-      controller: new AbortController(),
-      promise: Promise.resolve(),
-    };
-    this.renewalTask = task;
-    let candidate: MiCloud | undefined;
-    let reinstall = false;
-    task.promise = mijiaOperation(
-      "session.renew",
-      "authentication",
-      async () => {
-        const renewed = await renewAccountSession(
-          account,
-          task.controller.signal,
-        );
-        candidate = renewed.client;
-        const { devices } = renewed;
-        await this.serial(async () => {
-          if (!this.currentRenewal(task) || !candidate) return;
-          const previous = account.getCredentials();
-          const next = candidate.getCredentials();
-          if (next.userId !== previous.userId)
-            throw new MijiaError("authentication");
-          this.committingCredentials = true;
-          try {
-            await mijiaOperation("credentials.save", "credential_storage", () =>
-              this.requireStore().write("mijia", candidate!.exportSession()),
-            );
-            if (this.stopped || this.accountClient !== account) return;
-            // Preserve terminal failures until configuration changes or explicit retry.
-            reinstall = this.media.needsRebind(
-              next.passToken !== previous.passToken,
-            );
-            if (reinstall) this.media.prepareRebind();
-            this.accountClient = candidate;
-            account.dispose();
-            this.discovery.set(devices, true);
-            this.startAccountMaintenance(candidate);
-          } finally {
-            this.committingCredentials = false;
-          }
-        });
-        if (candidate && this.activeAccount(candidate) && reinstall)
-          await this.media.startBinding();
-      },
-    )
-      .catch(async (error: unknown) => {
-        if (!this.currentRenewal(task)) return;
-        const failure = safeMijiaError(error, "authentication");
-        if (failure.reason === "authentication") {
-          await this.expireAccount(account, failure);
-          return;
-        }
-        this.renewalFailedAccount = account;
-        this.discovery.fail(failure);
-        if (isRecoverableMijiaError(error))
-          this.renewalRetry.schedule(() => {
-            if (this.activeAccount(account)) void this.startRenewal(account);
-          });
-        else this.renewalRetry.cancel();
-      })
-      .finally(() => {
-        if (candidate !== this.accountClient) candidate?.dispose();
-        if (this.renewalTask === task) this.renewalTask = undefined;
-      });
-    return task.promise;
+  private async commitRestored(
+    candidate: AccountSessionCandidate,
+    assertCurrent: () => void,
+  ) {
+    await this.serial(async () => {
+      assertCurrent();
+      if (this.accountClient) throw new MijiaError("stale_session");
+      await mijiaOperation("credentials.save", "credential_storage", () =>
+        this.requireStore().write("mijia", candidate.client.exportSession()),
+      );
+      assertCurrent();
+      this.invalidatePropertyReads();
+      this.accountClient = candidate.client;
+      this.discovery.set(candidate.devices);
+      this.state.account = { status: "authenticated", id: crypto.randomUUID() };
+      this.startAccountMaintenance(candidate.client);
+    });
+    assertCurrent();
+    if (this.activeAccount(candidate.client)) await this.media.startBinding();
   }
 
   private expireAccount(account: MiCloud, failure: MijiaError) {
@@ -341,6 +373,7 @@ export class MijiaService {
       this.stopAccountMaintenance();
       this.media.cancelBinding();
       account.dispose();
+      this.invalidatePropertyReads();
       this.accountClient = undefined;
       this.media.resetAccount(false);
       this.discovery.reset();
@@ -352,98 +385,13 @@ export class MijiaService {
     });
   }
 
-  private startRestore() {
-    if (this.restoreTask) return this.restoreTask.promise;
-    if (
-      this.stopped ||
-      this.loggingOut ||
-      this.accountClient ||
-      this.loginFlow.active
-    )
-      return Promise.resolve();
-    const task: RestoreTask = {
-      controller: new AbortController(),
-      promise: Promise.resolve(),
-    };
-    this.restoreTask = task;
-    this.state.account = { status: "restoring" };
-    let cloud: MiCloud | undefined;
-    task.promise = mijiaOperation(
-      "session.restore",
-      "credential_storage",
-      async () => {
-        const assertActive = () => {
-          if (!this.currentRestore(task)) throw new MijiaError("cancelled");
-        };
-        await this.serial(async () => {
-          assertActive();
-          const restored = await restoreAccountSession(
-            this.requireStore(),
-            task.controller.signal,
-          );
-          cloud = restored?.client;
-          assertActive();
-          if (!restored) {
-            this.state.account = { status: "idle" };
-            this.restoreRetry.cancel();
-            return;
-          }
-          const { devices } = restored;
-          await mijiaOperation("credentials.save", "credential_storage", () =>
-            this.requireStore().write("mijia", cloud!.exportSession()),
-          );
-          assertActive();
-          this.accountClient = restored.client;
-          this.discovery.set(devices);
-          this.state.account = {
-            status: "authenticated",
-            id: crypto.randomUUID(),
-          };
-          this.restoreRetry.cancel();
-          this.startAccountMaintenance(restored.client);
-        });
-        if (this.currentRestore(task) && cloud && this.accountClient === cloud)
-          await this.media.startBinding();
-        assertActive();
-      },
-    )
-      .catch((error: unknown) => {
-        if (!this.currentRestore(task)) return;
-        const failure = safeMijiaError(error, "credential_storage");
-        this.state.account = {
-          status:
-            failure.reason === "authentication"
-              ? "reauth_required"
-              : "restore_error",
-          error: failure.toPayload(),
-        };
-        if (isRecoverableMijiaError(error)) {
-          this.restoreRetry.schedule(() => {
-            if (
-              !this.stopped &&
-              !this.loggingOut &&
-              !this.accountClient &&
-              !this.loginFlow.active
-            )
-              void this.startRestore();
-          });
-        } else {
-          this.restoreRetry.cancel();
-        }
-      })
-      .finally(() => {
-        if (cloud !== this.accountClient) cloud?.dispose();
-        if (this.restoreTask === task) this.restoreTask = undefined;
-      });
-    return task.promise;
-  }
-
   async logout() {
     if (this.stopped || this.loggingOut) throw new MijiaError("stale_session");
     const account = this.accountClient;
     const wasBinding = this.media.bindingPending;
     this.cancelConnectionOperation();
     this.loggingOut = true;
+    this.invalidatePropertyReads();
     this.stopAccountMaintenance();
     this.cancelRestore();
     this.media.cancelBinding();
@@ -458,14 +406,6 @@ export class MijiaService {
           await mijiaOperation("credentials.remove", "credential_storage", () =>
             this.requireStore().remove("mijia"),
           );
-          this.loginFlow.dispose();
-          this.accountClient?.dispose();
-          this.accountClient = undefined;
-          this.discovery.reset();
-          this.state.account = { status: "idle" };
-          this.state.connectionOperation = null;
-          this.media.resetAccount();
-          await this.media.clearAdapter().catch(() => {});
         } catch (error) {
           const failure = safeMijiaError(error, "credential_storage");
           this.state.account = this.accountClient
@@ -474,6 +414,17 @@ export class MijiaService {
           this.media.failInstalling(failure);
           throw failure;
         }
+        this.loginFlow.dispose();
+        this.invalidatePropertyReads();
+        this.accountClient?.dispose();
+        this.accountClient = undefined;
+        this.discovery.reset();
+        this.state.account = { status: "idle" };
+        this.state.connectionOperation = null;
+        this.media.resetAccount();
+        // Authorization is already revoked. A cleanup failure must remain a
+        // media error, without restoring the account or reporting logout success.
+        await this.media.clearAdapter();
       });
     } catch (error) {
       this.loggingOut = false;
@@ -501,7 +452,7 @@ export class MijiaService {
     this.state.account = { status: "restoring" };
     try {
       await this.media.initialize();
-      if (this.initialRestorePending) await this.startRestore();
+      if (this.initialRestorePending) await this.maintenance.restore();
     } finally {
       this.initialRestorePending = false;
       this.media.startConfigurationChecks();
@@ -557,6 +508,7 @@ export class MijiaService {
         );
         if (!this.loginFlow.isCurrent(attempt)) return;
         this.cancelRestore();
+        this.invalidatePropertyReads();
         this.media.resetAccount();
         this.discovery.reset();
         this.accountClient?.dispose();
@@ -579,14 +531,16 @@ export class MijiaService {
       !this.stopped &&
       !this.loggingOut
     ) {
-      await this.media.startBinding();
-      if (
-        this.accountClient === attempt.cloud &&
-        !this.stopped &&
-        !this.loggingOut
-      )
-        void this.loadDevices().catch(() => {});
+      const discovery = this.loadDevices().catch(() => {});
+      await Promise.all([discovery, this.media.startBinding()]);
     }
+  }
+
+  getHome(signal?: AbortSignal) {
+    return this.queries.getHome(signal);
+  }
+  getDeviceSpec(id: string, signal?: AbortSignal) {
+    return this.queries.getDeviceSpec(id, signal);
   }
 
   async loadDevices() {
@@ -610,13 +564,19 @@ export class MijiaService {
   async close() {
     this.cancelConnectionOperation();
     this.stopped = true;
-    this.stopAccountMaintenance();
-    this.cancelRestore();
+    const maintenanceClosing = this.maintenance.shutdown();
+    this.invalidatePropertyReads();
+    this.initialRestorePending = false;
+    this.discovery.pause();
     this.media.cancelBinding();
     this.loginFlow.dispose();
     this.accountClient?.dispose();
     this.accountClient = undefined;
     this.discovery.reset();
-    await this.media.close();
+    try {
+      await this.media.close();
+    } finally {
+      await Promise.allSettled([maintenanceClosing, this.lifecycleQueue]);
+    }
   }
 }

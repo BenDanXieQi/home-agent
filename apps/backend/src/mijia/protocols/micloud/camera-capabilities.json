@@ -1,0 +1,39 @@
+{
+  "source": {
+    "repository": "https://github.com/XiaoMi/xiaomi-miloco",
+    "revision": "cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8",
+    "path": "backend/miot/src/miot/configs/camera_extra_info.yaml",
+    "sha256": "849337895efe362e99f3530986a5b12f8df447bee686efe2751e4c2f6431e228"
+  },
+  "default_channel_count": 1,
+  "models": [
+    {
+      "model": "chuangmi.camera.068ac1",
+      "channel_count": 2
+    },
+    {
+      "model": "chuangmi.camera.111ac1",
+      "channel_count": 2
+    },
+    {
+      "model": "chuangmi.camera.72ac1",
+      "channel_count": 2
+    },
+    {
+      "model": "isa.camera.cw501d",
+      "channel_count": 2
+    },
+    {
+      "model": "isa.camera.hlmax",
+      "channel_count": 2
+    },
+    {
+      "model": "mxiang.camera.c500ch",
+      "channel_count": 2
+    },
+    {
+      "model": "xiaomi.camera.082ac1",
+      "channel_count": 2
+    }
+  ]
+}

@@ -2,6 +2,7 @@ import {
   readLimitedBytes,
   ResponseBodyError,
 } from "@home-agent/api/http/read-body";
+import { parseRetryAfter } from "@home-agent/api/http/retry-after";
 // Adapted from homebridge-miot/lib/protocol/MiCloud.js; source and MIT license in ../README.md.
 // Copyright (c) 2025 Marcin.
 import { Cookie, CookieJar } from "tough-cookie";
@@ -13,6 +14,8 @@ export type RequestOptions = Omit<RequestInit, "body"> & {
   body?: URLSearchParams;
   sameOriginRedirects?: boolean;
 };
+/** Reports the first fetch dispatch, after local request preparation has succeeded. */
+export type RequestStartObserver = (startedAt: string) => void;
 type Identity = Pick<MiCloudSavedSession, "clientId" | "userAgent">;
 type CookieOptions = {
   domain?: string;
@@ -126,6 +129,7 @@ export class MiCloudTransport {
     options: RequestOptions,
     signal?: AbortSignal,
     timeoutMs = 15_000,
+    onRequestStarted?: RequestStartObserver,
   ) {
     this.assertActive(signal);
     const timeout = AbortSignal.timeout(Math.max(1, Math.floor(timeoutMs)));
@@ -142,6 +146,8 @@ export class MiCloudTransport {
         const headers = new Headers(options.headers);
         headers.set("User-Agent", this.identity.userAgent);
         headers.set("Cookie", this.#cookieHeader(next));
+        requestSignal.throwIfAborted();
+        if (hop === 0) onRequestStarted?.(new Date().toISOString());
         const response = await fetch(next, {
           ...requestOptions,
           headers,
@@ -168,7 +174,14 @@ export class MiCloudTransport {
           next = destination;
           continue;
         }
-        if (!response.ok)
+        if (!response.ok) {
+          const now = Date.now();
+          const retryDelay = parseRetryAfter(
+            response.headers.get("retry-after"),
+            now,
+          );
+          const retryAt =
+            retryDelay === undefined ? undefined : now + retryDelay;
           throw new MiCloudError(
             response.status === 401 || response.status === 403
               ? "authentication"
@@ -177,7 +190,16 @@ export class MiCloudTransport {
                   response.status >= 500
                 ? "network"
                 : "invalid-response",
+            {
+              httpStatus: response.status,
+              ...(retryAt !== undefined &&
+              Number.isSafeInteger(retryAt) &&
+              retryAt <= 8_640_000_000_000_000
+                ? { retryAfterAt: retryAt }
+                : {}),
+            },
           );
+        }
         const body = Buffer.from(
           await readLimitedBytes(response, MAX_RESPONSE_BYTES, requestSignal),
         );

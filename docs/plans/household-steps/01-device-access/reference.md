@@ -4,35 +4,36 @@
 
 这是三个任务共用的协议、源码依据与交付契约，不是独立实施任务。按任务文件指定的章节读取；以下目标文件尚未实现时，由对应任务创建。
 
-## MiLoCo 接入基线
+## 当前接入与 MiLoCo 参考边界
 
-接入协议以 `AGENTS.local.md` 指定的 MiLoCo checkout 为参考，源码基准为 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`。下表路径均相对于该 checkout；这是已核实的实现事实，不代表本项目已完成实机接入。OAuth、HTTP 与 MQTT 的协议不重新设计。
+任务 1.1 的属性读取复用现有 MiCloud 扫码会话。协议依据是已固定的 `homebridge-miot` commit `8d27204423a569e11c468830e3df324d278954ee` 中 `MiCloud.js` 的 `miotGetProps`：通过同一用户的 MiCloud RC4 请求访问 `/miotspec/prop/get`，不需要另建 OAuth 或执行 unionId→uid 映射。
 
-| 能力           | MiLoCo 的具体实现与本步采用方式                                                                                                                                                                                                                                                                                                                               | 源码入口                                                                                                                                                                                                                        |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OAuth          | `client_id=2882303761520431603`，授权页 `https://account.xiaomi.com/oauth2/authorize`；使用已注册回调 `https://mico.api.mijia.tech/login_redirect`，提交返回的 code/state。国内 token 接口为 GET `https://mico.api.mijia.tech/app/v2/mico/oauth/get_token`，`data` 查询参数承载 JSON。授权与续期分别提交 code、refresh_token；不是普通的通用 OAuth token POST | `backend/miot/src/miot/cloud.py`：`MIoTOAuth2Client`；`const.py`；`backend/miloco/src/miloco/manager.py`：`initialize`                                                                                                          |
-| 账号映射       | GET `https://open.account.xiaomi.com/user/profile` 取得 unionId，再经 OAuth HTTP POST `/app/v2/oauth/get_uid_by_unionid` 取得数字 uid。以其字符串值与现有扫码 `userId` 比较；本项目现有区域仅 cn，OAuth 和 MQTT 同用 cn                                                                                                                                       | `backend/miot/src/miot/cloud.py`：`MIoTHttpClient.get_user_info_async`                                                                                                                                                          |
-| HTTP 编码      | `mico.api.mijia.tech`；随机 16 字节 AES key，CBC 的 IV 与 key 相同、PKCS7、Base64；用源码公钥 RSA PKCS1v15 包装 key 形成 `X-Client-Secret`。完整请求头采用 `__api_request_headers`，包括源码实际使用的 `Authorization: Bearer{access_token}`（Bearer 后没有空格）；不能套用现有 MiCloud 的 cookie／签名请求                                                   | `backend/miot/src/miot/cloud.py`：`MIoTHttpClient.__init__`、`__api_request_headers`、`aes_encrypt_with_b64`、`__mihome_api_post_async`                                                                                         |
-| 属性读取       | POST `/app/v2/miotspec/prop/get`，内容为 `{"datasource":1,"params":[{"did":"…","siid":2,"piid":1}]}`。按云端最后上报缓存处理，不宣称设备即时响应；每批 150 项是 MiLoCo 的实现批次，不是已证明的供应商硬上限                                                                                                                                                   | `backend/miot/src/miot/cloud.py`：`get_props_async`；`backend/miloco/src/miloco/miot/state_align.py`：`CHUNK_SIZE`、`_read_values`                                                                                              |
-| MQTT 连接      | MQTT v5 + TLS，`cn-ha.mqtt.io.mi.com:8883`，`client_id=miloco:{uuid}`，username 为上述 app ID，password 为 OAuth access_token，keepalive 60 秒，clean start；安装实例 UUID 独立持久化，不使用另一进程的 UUID                                                                                                                                                  | `backend/miot/src/miot/mips_cloud.py`：`MIoTMipsCloud`、`_default_client_factory`、`init_async`                                                                                                                                 |
-| 属性推送       | 每设备订阅 `device/{did}/up/properties_changed/#`，请求 QoS 2；解码校验 method、did、siid/piid 和 value 是否存在，接受 params 对象或数组；不以 notify 白名单裁掉设备子树内的合法属性                                                                                                                                                                          | 同文件：`sub_device_props_async`、`_make_device_props_decoder`                                                                                                                                                                  |
-| 在线通知       | 每设备订阅 `device/{did}/state/#`，仅识别 online/offline 叶子；不是从属性变化猜在线，也不是只订两个未经核实 ACL 的精确 topic                                                                                                                                                                                                                                  | 同文件：`sub_device_state_async`、`_make_device_state_decoder`                                                                                                                                                                  |
-| 订阅确认与恢复 | SUBACK granted QoS 0/1/2 都算成功；按 topic 对账，只有确认成功才记入上层订阅集合。重连重新订阅，失败单独上报；换 token 后重连以使用新密码。对账与 SDK 重放各使用 16 的并发限制；低层 `_on_connect` 重订本身没有这项限流                                                                                                                                       | 同文件：`_subscribe_async`、`_on_connect`、`update_access_token`；`backend/miot/src/miot/client.py`：`_replay_subscriptions`；`backend/miloco/src/miloco/miot/client.py`：`_reconcile_subscriptions`                            |
-| 初始与恢复读取 | 启动读取当前家庭在线设备的可读属性；上线补读只补缺项，防抖 20 秒。MQTT 重连先刷新目录，规则源延迟 15 秒补读其引用属性，包括已有旧值；用请求开始时间保护期间到达的新推送。不能把“重连只补缺值”误写成参考行为                                                                                                                                                   | `backend/miloco/src/miloco/miot/state_align.py`：`align_iot_state`、`read_missing_props`、`read_props`；`manager.py`：`_pull_iot_props`；`miot/mips_listeners.py`：`PropTopUpListener`；`rule/iot_source.py`：`on_mips_connect` |
-| 时间与设备标识 | 属性及在线回调的 timestamp_ms 来自本机 `_now_ms()`，不是设备时间；解码结果没有上游业务事件 ID／序号。带 `/` 的 did 被该实现排除，不据此断言供应商永久不支持                                                                                                                                                                                                   | `backend/miot/src/miot/mips_cloud.py`：两个 decoder；`backend/miloco/src/miloco/miot/client.py`：`is_subscribable_did`                                                                                                          |
-| 独立设备事件   | 当前实现没有 `event_occured` 的订阅、解码和消费链。文件头提到该名字、types 中存在 eiid，均不能当成功能已实现                                                                                                                                                                                                                                                  | `backend/miot/src/miot/mips_cloud.py`、`client.py`；`backend/miloco/src/miloco/miot/state_push.py`                                                                                                                              |
+MiLoCo checkout 由 `AGENTS.local.md` 指定，源码基准为 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`。下表的 MiLoCo 路径均相对于该 checkout；它用于属性返回值、消息及恢复行为参考。整组任务遵守[账号接入前提](README.md#账号接入前提)，不照搬参考项目的 OAuth 登录，也不新增额外授权。其 MQTT 实现只提供协议参考，不能证明本项目现有扫码会话已取得适用凭据或供应商准入；必须单独核实，无法满足时记录能力限制。
 
-本步的对齐目标是上述 OAuth、指定属性缓存读取、属性推送、在线通知与连接／订阅恢复能力。表中 MiLoCo 的家庭初始对齐、上线补缺和重连补读是 Step 3 的实现参考，不是 Step 1 的交付前置条件。独立 `siid/eiid` 设备事件仍属于后续数据契约支持的能力，但在找到真实接入实现前不启用、不伪造 topic，也不作为“MiLoCo 已有能力”验收。
+| 能力               | 本项目采用方式及参考边界                                                                                                                                                                                                        | 源码入口                                                                                                                                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 账号与 HTTP 鉴权   | 复用当前扫码 MiCloud 实例的 userId、serviceToken 与 ssecurity，以及现有 Cookie、签名和 RC4 传输；仅沿已支持的 cn 区域运行                                                                                                       | 固定 `homebridge-miot` 源码 `MiCloud.js` 的 `miotGetProps` 与请求编码；本项目 `protocols/micloud/client.ts`                                                                   |
+| 属性读取           | POST `https://api.io.mi.com/app/miotspec/prop/get`；`datasource=1` 缓存优先，缓存缺失可能触发设备 RPC，不保证最新值；规范化输出保守采用 cloud_cache/baseline。150 项／批、30 秒／请求是本项目应用预算，不是已证明的供应商硬上限 | 固定 `homebridge-miot` 的 `miotGetProps`；MiLoCo `backend/miloco/src/miloco/miot/state_align.py` 的逐项处理作为参考                                                           |
+| MQTT 鉴权          | 任务 1.2 须核实利用现有扫码会话取得适用凭据的方式。MiLoCo 的 OAuth app ID/access_token 仅为参考事实，不是本项目实施路径；不得套用其凭据、把 Cookie 充当 MQTT 密码或新增 OAuth，无法满足时记录能力限制                           | MiLoCo `backend/miot/src/miot/mips_cloud.py`：`MIoTMipsCloud`、`_default_client_factory`、`init_async`                                                                        |
+| MQTT 连接参考      | MiLoCo 使用 MQTT v5/TLS、`cn-ha.mqtt.io.mi.com:8883`、`client_id=miloco:{uuid}`、keepalive 60 秒及 clean start。实际连接参数须与任务 1.2 已核实的鉴权和准入一并验证；实例 UUID 不复用另一进程的值                               | 同文件                                                                                                                                                                        |
+| 属性推送参考       | 每设备 `device/{did}/up/properties_changed/#`，请求 QoS 2；校验 method、did、siid/piid 和 value 是否存在，接受 params 对象或数组；不以 notify 白名单裁掉设备子树内的合法属性                                                    | 同文件：`sub_device_props_async`、`_make_device_props_decoder`                                                                                                                |
+| 在线通知参考       | 每设备 `device/{did}/state/#`，仅识别 online/offline 叶子；不从属性变化猜在线，也不假定未经核实的精确 topic 可订阅                                                                                                              | 同文件：`sub_device_state_async`、`_make_device_state_decoder`                                                                                                                |
+| 订阅确认与恢复参考 | SUBACK granted QoS 0/1/2 算成功；按 topic 对账，确认成功才记入订阅集合。重连重订，失败单独上报；对账与 SDK 重放各使用 16 的并发限制。凭据更新方式由实际启用通路决定                                                             | 同文件：`_subscribe_async`、`_on_connect`；`backend/miot/src/miot/client.py`：`_replay_subscriptions`；`backend/miloco/src/miloco/miot/client.py`：`_reconcile_subscriptions` |
+| 初始与恢复读取参考 | 启动读取当前家庭在线设备的可读属性；上线补读只补缺项，防抖 20 秒。MQTT 重连先刷新目录，规则源延迟 15 秒补读引用属性，包括已有旧值；用请求开始时间保护期间到达的新推送。这些属于 Step 3                                          | `backend/miloco/src/miloco/miot/state_align.py`；`manager.py`：`_pull_iot_props`；`miot/mips_listeners.py`：`PropTopUpListener`；`rule/iot_source.py`：`on_mips_connect`      |
+| 时间与设备标识参考 | 属性及在线回调的 timestamp_ms 来自本机 `_now_ms()`，不是设备时间；解码结果没有上游业务事件 ID／序号。带 `/` 的 did 被该实现排除，不据此断言供应商永久不支持                                                                     | `backend/miot/src/miot/mips_cloud.py`：两个 decoder；`backend/miloco/src/miloco/miot/client.py`：`is_subscribable_did`                                                        |
+| 独立设备事件       | 参考实现没有 `event_occured` 的订阅、解码和消费链。文件头或类型里出现该名字和 eiid 不能当成功能已实现                                                                                                                           | `backend/miot/src/miot/mips_cloud.py`、`client.py`；`backend/miloco/src/miloco/miot/state_push.py`                                                                            |
+
+本阶段交付同账号指定属性读取，并在复用已有扫码登录流程的鉴权方式核实后推进属性推送、在线通知与连接／订阅恢复。MQTT 未验证不阻断任务 1.1；它仍是后续推送与集采启用的前置。独立 `siid/eiid` 设备事件在找到真实接入实现前不启用、不伪造 topic。
 
 ### 属性读取返回码
 
 沿用 MiLoCo 的 backend/miloco/src/miloco/miot/result_codes.py 中 is_failure 与 _MIOT_OK_CODES，以及 state_align.py 的 _read_values：只有整数负码且不在 {0, -702000000, -702010000} 中才判该项失败。不能采用“非零即失败”或“负数一律失败”；参考实现不将零、正码、非整数或缺失 code 判为设备失败。
 
-返回码未判失败不代表已有可用属性值：仍须匹配本次请求的 did/siid/piid、确实包含 value，并满足属性值结构要求；缺失 value 不补 null，不以外层 RPC code=0 代替逐项判定。此分类仅用于属性读取结果，不混用于 OAuth 响应或 MQTT SUBACK。
+返回码未判失败不代表已有可用属性值：仍须匹配本次请求的 did/siid/piid、确实包含 value，并满足属性值结构要求；缺失 value 不补 null，不以外层 RPC code=0 代替逐项判定。此分类仅用于属性读取结果，不混用于扫码认证响应或 MQTT SUBACK。
 
 ### 本项目适配边界
 
-- MiLoCo 使用 Python `paho-mqtt>=2.1.0`。本项目在 Bun／TypeScript backend 使用 [MQTT.js](https://github.com/mqttjs/MQTT.js) 的 MQTT 5、TLS 和订阅确认 API；正式实现时锁定通过 Bun 实机接入的精确版本。语言库替换不改变小米协议，不新增 Python 常驻服务或自制 MQTT 编解码器。显式设置 protocolVersion=5、clean=true、keepalive=60、connectTimeout=15000、resubscribe=false、reconnectPeriod=0；由一个适配器负责重连和 topic 对账，避免与库默认机制重复。
+- MQTT 鉴权和准入须在复用已有扫码登录流程且不增加额外 OAuth 的前提下通过任务 1.2 核实，才采用以下传输与订阅适配规则。MiLoCo 使用 Python `paho-mqtt>=2.1.0`。任务 1.2 在 Bun／TypeScript backend 使用 [MQTT.js](https://github.com/mqttjs/MQTT.js) 的 MQTT 5、TLS 和订阅确认 API；正式实现时锁定通过 Bun 实机接入的精确版本。语言库替换不改变小米协议，不新增 Python 常驻服务或自制 MQTT 编解码器。显式设置 protocolVersion=5、clean=true、keepalive=60、connectTimeout=15000、resubscribe=false、reconnectPeriod=0；由一个适配器负责重连和 topic 对账，避免与库默认机制重复。
 - MiLoCo 账号级订阅属性后在状态写入处过滤当前家庭。本项目沿已确定的单家庭采集范围，适配器只为调用方明确提供并经同账号目录校验的设备集合建立属性／在线订阅；Step 3 才由已选家庭生成该集合，Step 1 不隐含“当前家庭”；目录迁移通知的账号级范围归 Step 2。此差异不改变每设备 topic 和解码方式。
 - MiLoCo 的 `_on_message` 不等待 SUBACK 即可分发合法消息；本项目适配器沿用该行为，不新增早到包丢弃或缓冲机制。MiLoCo 的 `IotPushWriter.on_device_props` 另检查 `scope_is_aligned()`，初始对齐前仍会拒绝写入属性；传输分发不能等同于家庭状态已提交。本项目的 collection_generation、delivery_kind 与 quality 属于 Step 3 接纳规则，不是小米协议字段；消息接收与订阅确认分别处理。
 - MiLoCo 将当前连接的属性推送作为实时输入，缓存读取作为对齐输入。本项目沿用这一运行语义：正常活动连接、合法 topic 上的推送为 `live`，`observed_at=null`、时间依据为接收时间；它不承诺设备即时采样、历史永不补发或端到端恰好一次。已识别的保留包／重放包单独分类；出现反证时调整受影响通路，而不因没有设备时间戳就默认停用全部推送。
@@ -43,16 +44,16 @@
 最终目录与现有模块迁移以 [目录架构](architecture.md) 为准。
 
 - `docs/mijia-source-contract.md`：当前有效的来源契约与能力矩阵，按下表记录已验证能力、适用条件、未验证项和恢复限制；维护最终参考，不累计历次验证流水。
-- `apps/backend/src/mijia/protocols/miot/`：OAuth、HTTP 属性读取与 MQTT 适配器，分别落在 `oauth.ts`、`http-client.ts`、`mqtt.ts`；账号协调归现有 `service.ts`，不创建另一套账号管理服务。
+- `apps/backend/src/mijia/protocols/micloud/`：现有扫码、会话、目录、规格与属性读取协议；`client.ts` 的 `getProperties` 复用当前 MiCloud 实例。后续 MQTT 仅在鉴权核实后由任务 1.2 创建 `protocols/miot/mqtt.ts`；账号协调归 `service.ts`，不创建另一套账号管理服务。
 - `apps/backend/src/mijia/properties/source-profiles.ts`：与来源契约条目对应的类型化接入配置，包含稳定 contract_id、契约版本、凭据／区域／拓扑／型号／规格适用条件、读取与交付语义及能力映射。仅写入已验证结论；普通运行配置不能把未验证项改为已验证。Step 3 按该配置绑定设备策略，不解析 Markdown 决定运行行为。
-- `data/verification/household-access/<run_id>/report.json`：本次脱敏实机证据。`run_id` 使用 UUID；该目录位于已忽略的 `data/` 内，不提交账号、设备对应的本机验证记录。报告顶层包含 `run_id`、`started_at`、`finished_at`、`adapter_version`、实际锁定的客户端库版本、`cases`；每个 case 包含契约条目 ID、脱敏设备／能力标识、前置条件、操作、预期、实际结果、来源及采集代次、开始／结束时间、返回码／SUBACK 结果、接收与丢弃数量、成功／失败／未验证结论。认证绑定只记录核验方式及匹配结论，不记录凭据、完整供应商报文或私密登录材料。
+- `data/verification/household-access/<run_id>/report.json`：本次脱敏实机证据。`run_id` 使用 UUID；该目录位于已忽略的 `data/` 内，不提交账号、设备对应的本机验证记录。报告顶层包含 `run_id`、`started_at`、`finished_at`、`adapter_version`、实际锁定的客户端库版本、`cases`；每个 case 包含契约条目 ID、脱敏设备／能力标识、前置条件、操作、预期、实际结果、来源及采集代次、开始／结束时间、返回码／SUBACK 结果、接收与丢弃数量、成功／失败／未验证结论。账号核验只记录目录归属检查方式及结论，不记录凭据、完整供应商报文或私密登录材料。
 
 ## Step 1 的调用范围与验收入口
 
-- Step 1 没有“当前家庭”或 scope_epoch。任务 1.1 从现有账号完整成功同步的家庭／设备目录中，由操作者明确选一组代表设备及属性；以真实 home_id、did、siid/piid 记录在本机报告。验收范围不持久化为业务家庭选择，也不自动选择第一个家庭。
+- Step 1 没有“当前家庭”或 scope_epoch。任务 1.1 从现有账号完整成功同步的家庭／设备目录中，由操作者明确选择或明确授权代理选择一组代表设备及属性；以真实 home_id、did、siid/piid 记录在本机报告。验收范围不持久化为业务家庭选择，也不自动选择第一个家庭。
 - service 提供正式内部方法 readProperties(properties, signal) 与 observeDevices(deviceIds, onObservation, signal)，分别在 1.1、1.2 交付。账号取自唯一账号所有者；输入设备必须属于其有效目录，属性读取须有 readable 规格。调用前及异步返回前重验账号、活动请求／连接身份和设备归属；不要求调用方提供尚不存在的家庭 latest、属性版本或 availability。
 - readProperties 返回逐项观测，不提交家庭状态；observeDevices 将明确设备集合交给同一 MQTT 适配器，交付逐 topic 确认／失败、连接变化和规范化消息。传入信号结束即取消本次读取或观察。Step 3 直接调用这两个入口，不新增另一套协议客户端；家庭过滤、缺值选择和状态写入由采集 actor 负责。
-- 正式授权通过现有账号页面完成。设备读取与消息验收可在暂停常驻 backend 后，用现有 Bun 执行工具装配同一 MijiaService、复用加密凭据存储并调用上述正式方法；在 finally 中撤销观察并关闭服务，再恢复常驻 backend。避免两个账号所有者进程同时续期或使用同一 MQTT 实例 ID。操作与脱敏输出留在本机报告，不提交专用验收程序、临时 HTTP 路由或测试代码。
+- 读取复用现有扫码账号；仅在扫码会话本身失效时通过现有账号页面恢复登录，不增加属性读取专用授权。设备读取与消息验收可在暂停常驻 backend 后，用现有 Bun 执行工具装配同一 MijiaService、复用加密凭据存储并调用上述正式方法；在 finally 中撤销观察并关闭服务，再恢复常驻 backend。避免两个账号所有者进程同时续期或使用同一 MQTT 实例 ID。操作与脱敏输出留在本机报告，不提交专用验收程序、临时 HTTP 路由或测试代码。
 - 本机验收接收方只记录消息、确认结果和时间，不维护业务 latest、不推导在线状态或缺值，不参与自动化。Step 1 不把“重新读取成功”表述为“家庭状态已恢复”。Step 2 交付持久家庭选择；Step 3 再把选中家庭、属性版本和 availability 接到正式入口。
 
 ## 来源能力矩阵
@@ -91,25 +92,26 @@ Step 1 输出在线通知来源、连接／订阅失效及恢复事实；每设�
 | `replayed`    | 可确认的历史补发、离线积压或重放；按来源时间与质量进入历史候选，不作为即时设备事件或物理边沿                                                  |
 | `unknown`     | 无法确认本次交付属于实时、基线还是重放；保留来源与限制，可按策略进入历史候选，不作为即时设备事件或物理边沿                                    |
 
-MIoT 正常活动连接的合法属性／在线推送沿基线表采用 live 的运行语义，保留缺少设备时间与源排序的限制；这不构成“从不补发”的供应商保证。已识别的保留状态为 baseline、历史补发为 replayed，无法解释的异常交付为 unknown。其他尚未接入的来源不继承这项结论。历史保存不得把 received_at 写成设备事件发生时间。
+任务 1.2 鉴权与消息语义实机验证通过后，活动连接的合法属性／在线推送可按基线表采用 live 的运行语义，保留缺少设备时间与源排序的限制；这不构成“从不补发”的供应商保证。已识别的保留状态为 baseline、历史补发为 replayed，无法解释的异常交付为 unknown。其他尚未接入的来源不继承这项结论。历史保存不得把 received_at 写成设备事件发生时间。
 
 ### 接入参数与恢复行为
 
-采用参考实现已有参数；它们是 MiLoCo 的实现值，不冒充小米服务端限额。供应商明确拒绝或限流时记录并遵从。协议接入不另设每秒订阅数、额外订阅重试轮次或预确认缓冲。
+下表 HTTP 读取采用本项目应用预算；MQTT 参数作为任务 1.2 核实后实施的参考。它们不冒充小米服务端限额。供应商明确拒绝或限流时记录并遵从。协议接入不另设每秒订阅数、额外订阅重试轮次或预确认缓冲。
 
-| 项目                  | 默认值与失败分支                                                                                                                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| MQTT 连接             | v5/TLS、keepalive 60 秒、请求 QoS 2、clean start；CONNACK 等待 15 秒，参照 `mips_cloud.py`                                                                                                     |
-| 连接重建              | 1—120 秒退避，参照 paho reconnect_delay_set；TS 适配器集中管理一个重连计时器，不叠加库自动重连，不另设 ±20% 抖动或稳定 60 秒才复位条件。撤销时取消，认证拒绝交还账号所有者                     |
-| 订阅确认              | 每次 10 秒；本项目对账／重订共用 16 个在途名额，对应 `_RECONCILE_CONCURRENCY`／`_REPLAY_CONCURRENCY`。共用限制属于 TS 单一适配器的组织方式，不声称 MiLoCo 低层重订已全局限流                   |
-| 订阅失败              | 暂时失败保留期望项，下一次对账／重连／显式重试重新发起；权限拒绝交还授权所有者，授权条件未变不反复尝试。Step 3 显式恢复复用现有连接重试命令                                                    |
-| HTTP 属性读取         | 单次 30 秒、每批最多 150 项、批次串行，参照 `MIHOME_HTTP_API_TIMEOUT` 和 `state_align._read_values`。Step 3 共用此预算，命令总期限可以更早取消；失败不增加隐藏重试，等待真实恢复触发或显式读取 |
-| Step 3 上线／重连补读 | 上线防抖 20 秒、重连延迟 15 秒，参照 `PROP_TOPUP_DEBOUNCE_SEC`、`RECONNECT_PULL_DELAY_SECONDS`；在途触发合并，退出作用域取消                                                                   |
+| 项目                  | 默认值与失败分支                                                                                                                                                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MQTT 连接             | v5/TLS、keepalive 60 秒、请求 QoS 2、clean start；CONNACK 等待 15 秒，参照 `mips_cloud.py`                                                                                                                                            |
+| 连接重建              | 1—120 秒退避，参照 paho reconnect_delay_set；TS 适配器集中管理一个重连计时器，不叠加库自动重连，不另设 ±20% 抖动或稳定 60 秒才复位条件。撤销时取消，认证拒绝交还账号所有者                                                            |
+| 订阅确认              | 每次 10 秒；本项目对账／重订共用 16 个在途名额，对应 `_RECONCILE_CONCURRENCY`／`_REPLAY_CONCURRENCY`。共用限制属于 TS 单一适配器的组织方式，不声称 MiLoCo 低层重订已全局限流                                                          |
+| 订阅失败              | 暂时失败保留期望项，下一次对账／重连／显式重试重新发起；权限拒绝交还授权所有者，授权条件未变不反复尝试。Step 3 显式恢复复用现有连接重试命令                                                                                           |
+| HTTP 属性读取         | 单次 30 秒、每批最多 150 项、批次串行，作为本项目应用预算。Step 3 共用此预算，命令总期限可以更早取消；失败不增加隐藏重试，等待真实恢复触发或显式读取                                                                                  |
+| HTTP 限流等待         | 属性 reader 按稳定 source_id 保存 Retry-After；期限内后续批次及新读取不发请求，返回 read_started_at=null 的 unavailable，沿用原失败接收时刻。到期后只由下一次显式读取发起；账号自动／手动恢复续期也遵守 Retry-After，超长等待分段调度 |
+| Step 3 上线／重连补读 | 上线防抖 20 秒、重连延迟 15 秒，参照 `PROP_TOPUP_DEBOUNCE_SEC`、`RECONNECT_PULL_DELAY_SECONDS`；在途触发合并，退出作用域取消                                                                                                          |
 
 ## 验证与任务交接
 
 - 各任务按本文件的 report.json 格式保存自己的实机证据；报告增加 task_id，分别为 1.1、1.2、1.3，并记录源码／依赖版本。后续任务读取前置任务报告，不把参考源码验证当成本项目实机通过。
-- 实际环境与设备选择保存在已忽略的本机报告内；共享来源契约只保存协议结论、适用条件和限制。认证绑定仅保存匹配结论，不保存凭据、授权 code/state 或完整供应商报文。
+- 实际环境与设备选择保存在已忽略的本机报告内；共享来源契约只保存协议结论、适用条件和限制。账号与目录归属核验仅保存结论，不保存凭据、扫码材料或完整供应商报文。
 - 每项验收标明通过、未通过、未验证或不适用；实机不可覆盖的场景保留未验证，不以模拟数据补齐。内部确定性分支按总览接受实现审查。
 - 每个任务完成时运行受影响包的类型检查、lint 和构建，按仓库规则不擅自新增测试。维护当前实现文档及本任务状态；最终回复给出改动入口、验证结论和本机报告路径，方便下一上下文接续。共享文档不累计会话流水。
 - 完成当前任务后停止，不自动执行下一任务。待后续任务实现的能力如实注明，不创建占位服务、兼容层或临时实现。

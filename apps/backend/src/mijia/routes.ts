@@ -7,6 +7,8 @@ import {
   validateJson,
 } from "@home-agent/api/errors/hono";
 import {
+  mijiaDeviceSpecSchema,
+  mijiaHomeSchema,
   mijiaPlaybackInputSchema,
   mijiaPlaybackReservationInputSchema,
   mijiaVerificationInputSchema,
@@ -27,6 +29,8 @@ function stateResponse(c: Context, state: MijiaState, status: 200 | 202 = 200) {
 
 export type MijiaApi = Pick<
   MijiaService,
+  | "getHome"
+  | "getDeviceSpec"
   | "snapshot"
   | "startLogin"
   | "cancelLogin"
@@ -52,12 +56,29 @@ export function createMijiaRoutes(port: number, service: MijiaApi) {
     )
     .use(async (c, next) => {
       c.header("Referrer-Policy", "no-referrer");
+      c.header("Cache-Control", "no-store");
       await next();
     });
   const routes = app
     .get("/state", (c) => {
       return stateResponse(c, service.snapshot());
     })
+    .get("/home", async (c) =>
+      c.json({
+        code: 0,
+        message: "Home info retrieved successfully",
+        data: mijiaHomeSchema.parse(await service.getHome(c.req.raw.signal)),
+      }),
+    )
+    .get("/devices/:did/spec", async (c) =>
+      c.json({
+        code: 0,
+        message: "ok",
+        data: mijiaDeviceSpecSchema.parse(
+          await service.getDeviceSpec(c.req.param("did"), c.req.raw.signal),
+        ),
+      }),
+    )
     .post("/login", (c) => stateResponse(c, service.startLogin(), 202))
     .delete("/login/:id", (c) =>
       stateResponse(c, service.cancelLogin(c.req.param("id"))),

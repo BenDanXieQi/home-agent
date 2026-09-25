@@ -2,6 +2,7 @@
 export type CameraSourceSpec = {
   deviceId: string;
   channel: 1 | 2;
+  channelCount: number;
   model: string;
   localIp?: string;
 };

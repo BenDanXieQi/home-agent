@@ -1,6 +1,6 @@
 # MiCloud adapter
 
-本模块将 [homebridge-miot](https://github.com/merdok/homebridge-miot) 的独立 MiCloud 协议代码移植为 Bun TypeScript 模块，提供米家二维码登录、短信／邮件安全验证、授权会话导出与恢复、passToken 会话续期及加密设备列表请求。会话落盘、加密和续期调度由 backend 负责；本模块不包含 Homebridge、设备控制、密码登录或 OAuth。
+本模块将 [homebridge-miot](https://github.com/merdok/homebridge-miot) 的独立 MiCloud 协议代码移植为 Bun TypeScript 模块，提供米家二维码登录、短信／邮件安全验证、授权会话导出与恢复、passToken 会话续期、加密设备目录与属性读取请求。会话落盘、加密和续期调度由 backend 负责；本模块不包含 Homebridge、设备控制、密码登录或 OAuth。
 
 ## 固定来源与许可
 
@@ -13,15 +13,25 @@
 
 上游 MIT 许可全文保留在 [LICENSE](LICENSE)，版权为 Copyright (c) 2025 Marcin。RC4 模块原有的 edomi-roboroc 来源说明保留在代码中。
 
-passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://github.com/AlexxIT/go2rtc/blob/b5948cfb25404cc5cb37b166ecaa2dca20b11d4b/pkg/xiaomi/cloud.go#L345) 的同一米家账号协议：向 `account.xiaomi.com/pass/serviceLogin` 提交限定该主机及 `/pass` 路径的 `userId`／`passToken` Cookie，取得 `ssecurity` 和 STS 地址，再完成设备会话。该协议与 OAuth refresh token 无关；go2rtc 来源和 MIT 许可见 [构建目录](../../../../../docker/go2rtc/README.md)。
+passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://github.com/AlexxIT/go2rtc/blob/b5948cfb25404cc5cb37b166ecaa2dca20b11d4b/pkg/xiaomi/cloud.go#L345) 的同一米家账号协议：向 `account.xiaomi.com/pass/serviceLogin` 提交限定该主机及 `/pass` 路径的 `userId`／`passToken` Cookie，取得 `ssecurity` 和 STS 地址，再完成设备会话。该协议与 OAuth refresh token 无关；go2rtc 来源和 MIT 许可见 [构建目录](../../../../../../docker/go2rtc/README.md)。
 
 `node-fetch` 替换为 Bun 原生 `fetch`、`Headers.getSetCookie()` 和 `AbortSignal`；`randomstring` 替换为 `node:crypto`；`querystring` 替换为 `URLSearchParams`。[`tough-cookie` 6.0.2](https://github.com/salesforce/tough-cookie/releases/tag/v6.0.2) 的内存 `CookieJar` 负责 Cookie 解析、域名／路径匹配、过期、删除和同名 Cookie 排序。收到 `Max-Age` 时，使用库的 `expiryTime()` 计算并保存绝对过期时间，避免读取 Cookie 更新访问时间而延长寿命。Bun 版本沿用仓库 `packageManager` 和 `engines`。
 
 `client.ts` 管理扫码、安全验证、会话和设备加密协议；`session.ts` 定义可导出授权的校验结构；`transport.ts` 持有 CookieJar 和请求生命周期。传输层逐跳校验目标仅为小米可信 HTTPS 地址，并按目标 URL 匹配 Cookie；凭据读取限定当前验证／STS 响应 URL。重定向遵循 Fetch 语义：301／302 将 POST 转为 GET，303 将非 GET／HEAD 转为 GET，307／308 保留方法及可重放的表单请求体；跨源跳转移除 Authorization。验证码提交额外拒绝一切跨 origin 重定向，不能把验证码请求体重放到其他主机。各跳及最终响应体读取共享一次超时与取消信号，错误分类以组合信号的首次中止原因为准，响应体限制为 4 MiB；`extension-pragma` 中的登录材料在每次跳转前交回账号协议处理。返回业务层时响应体已读取并释放。
 
+## 摄像头通道能力
+
+`camera-capabilities.json` 保存从小米官方 MiLoCo 的 [`camera_extra_info.yaml`](https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miot/src/miot/configs/camera_extra_info.yaml) 抽取的通道数量事实，包含上游版本、路径和原文件 SHA-256。该版本声明 7 款双摄；未列入额外能力表的摄像头采用单通道，与同版本 `MIoTClient.get_cameras_async` 的规则一致。运行时不请求 GitHub，也不按型号名称包含“dual”等字样猜测镜头数。更新目录时应从固定上游重新抽取并同步来源信息，不在业务或 Go 代码中添加型号分支。
+
+这里只提取通道数量，没有照搬 MiLoCo 原生摄像头 SDK 的设备白名单和黑名单；本项目的取流协议支持范围仍由 go2rtc 决定。
+
+`camera-count` 是 MIoT `camera-control` 服务的可选属性，并非所有双摄都提供；已核对的 7 款中有 6 款公开规格未声明它。`audio-channel` 表示声道数，不能用于判断镜头数。因此当前通道清单使用官方能力目录，不宣称能自动识别目录外所有新双摄。通道能力声明也不等同于所有型号的媒体协议已实机通过。
+
+后台将通道能力作为 `channelCount` 传给媒体适配器。当前媒体实现支持 1／2 个镜头；更大的声明不会被截断成两路。双摄使用 MISS 的 `videoquality`／`videoquality2` 联合启动、`flags` 高字节分流，默认画质沿用 go2rtc 既有规则。实机回归范围仍是本地 C500 双摄与 C700 单摄，其他型号保持能力识别与实际播放证据分开记录。
+
 ## 生命周期
 
-这里的会话是米家云账号／设备请求会话；go2rtc 的 `sessionId` 和心跳租约属于独立的媒体运行时资源，见[资源定义](../../../../../docs/mijia.md#组件与资源)。
+这里的会话是米家云账号／设备请求会话；go2rtc 的 `sessionId` 和心跳租约属于独立的媒体运行时资源，见[资源定义](../../../../../../docs/mijia.md#组件与资源)。
 
 每次扫码创建独立的 `new MiCloud({ region: "cn" })`。`createLogin()` 返回二维码图片数据、毫秒过期时间及轮询间隔，长轮询地址仅保留在实例内部。`pollLogin()` 持有该次登录的 cookie、设备标识与加密材料；登录完成时必须获得 `ssecurity`、`userId`、`serviceToken`、`passToken`。缺少任意材料均报告 `missing-credentials`。
 
@@ -29,7 +39,9 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 
 `getDevices()` 使用这个实例完成的设备会话，并通过 `getHomes()` 查询 `/v2/homeroom/gethome` 与归属分页 `/v2/homeroom/get_dev_room_page`，合并家庭和房间。设备与目录请求使用同一 RC4 签名传输，未找到归属时返回空值，不推测安装位置。`homes.ts` 负责目录响应校验、分页和归属映射。
 
-`getDeviceSpec()` 通过独立的 `spec.ts` 客户端读取 `miot-spec.org` 的公开型号 URN、规格实例和中文翻译，按 MiLoCo 精简规格结构解析属性访问能力与动作输入，使用 `writeable`、`value_range`、`in_params` 等字段；不对外输出事件或动作输出。该客户端不接收 Cookie、token 或设备控制凭据。规格不是实时属性值，不执行设备读取、订阅或控制。接口结构与缓存规则见[米家与摄像头](../../../../../docs/mijia.md#家庭房间与设备能力)。
+`getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/mijia-source-contract.md)。
+
+`getDeviceSpec()` 通过独立的 `spec.ts` 客户端读取 `miot-spec.org` 的公开型号 URN、规格实例和中文翻译，按 MiLoCo 精简规格结构解析属性访问能力与动作输入，使用 `writeable`、`value_range`、`in_params` 等字段；不对外输出事件或动作输出。能力定义与展示翻译独立缓存；翻译服务失败、超时或响应无效时保留已取得的原文描述和可读能力，后续查询可重新获取翻译。一次查询的网络请求共用 30 秒预算；翻译仅消耗剩余时间，预算耗尽不丢弃已取得的能力，也不留下后台请求。调用取消、账号撤销或调用方自身期限到达仍会终止读取，能力尚未取得时的预算超时仍报错。该客户端不接收 Cookie、token 或设备控制凭据。规格不是实时属性值，不执行设备读取、订阅或控制。接口结构与缓存规则见[米家与摄像头](../../../../../../docs/mijia.md#家庭房间与设备能力)。
 
 `getCredentials()` 明确包含上游会话导出遗漏的 `passToken`，供 backend 比较续期前后的凭据，并通过 `Go2RtcAdapter` 将凭据安装到 go2rtc 运行时会话。设备与摄像头统一使用中国大陆区域 `cn`；其他区域被拒绝。
 

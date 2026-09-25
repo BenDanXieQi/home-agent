@@ -9,7 +9,13 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
  	"time"
  
  	"github.com/AlexxIT/go2rtc/pkg/core"
-@@ -31,9 +32,10 @@
+@@ -26,14 +27,16 @@
+ 
+ 	url      string
+ 	template string
++	factory  func() (core.Producer, error)
+ 
+ 	conn      core.Producer
  	receivers []*core.Receiver
  	senders   []*core.Receiver
  
@@ -23,7 +29,16 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
  }
  
  const SourceTemplate = "{input}"
-@@ -149,7 +151,7 @@
+@@ -59,7 +62,7 @@
+ 	defer p.mu.Unlock()
+ 
+ 	if p.state == stateNone {
+-		conn, err := GetProducer(p.url)
++		conn, err := p.dial()
+ 		if err != nil {
+ 			return err
+ 		}
+@@ -149,7 +152,7 @@
  		return
  	}
  
@@ -32,7 +47,7 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
  
  	p.state = stateStart
  	p.workerID++
-@@ -158,16 +160,16 @@
+@@ -158,16 +161,16 @@
  }
  
  func (p *Producer) worker(conn core.Producer, workerID int) {
@@ -58,7 +73,7 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
  	}
  
  	p.reconnect(workerID, 0)
-@@ -178,15 +180,15 @@
+@@ -178,15 +181,15 @@
  	defer p.mu.Unlock()
  
  	if p.workerID != workerID {
@@ -67,20 +82,22 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
 -	}
 -
 -	log.Debug().Msgf("[streams] retry=%d to url=%s", retry, p.url)
+-
+-	conn, err := GetProducer(p.url)
 +		log.Trace().Msgf("[streams] stop reconnect url=%s", p.logSource())
 +		return
 +	}
 +
 +	log.Debug().Msgf("[streams] retry=%d to url=%s", retry, p.logSource())
- 
- 	conn, err := GetProducer(p.url)
++
++	conn, err := p.dial()
  	if err != nil {
 -		log.Debug().Msgf("[streams] producer=%s", err)
 +		log.Debug().Msgf("[streams] producer=%s", p.logError(err))
  
  		timeout := time.Minute
  		if retry < 5 {
-@@ -238,6 +240,7 @@
+@@ -238,6 +241,7 @@
  	_ = p.conn.Stop()
  	// swap connections
  	p.conn = conn
@@ -88,7 +105,7 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
  
  	go p.worker(conn, workerID)
  }
-@@ -257,7 +260,7 @@
+@@ -257,7 +261,7 @@
  		p.workerID++
  	}
  
@@ -97,7 +114,7 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
  
  	if p.conn != nil {
  		_ = p.conn.Stop()
-@@ -265,6 +268,20 @@
+@@ -265,6 +269,27 @@
  	}
  
  	p.state = stateNone
@@ -111,6 +128,13 @@ diff --git a/internal/streams/producer.go b/internal/streams/producer.go
 +		return "xiaomi:[redacted]"
 +	}
 +	return p.url
++}
++
++func (p *Producer) dial() (core.Producer, error) {
++	if p.factory != nil {
++		return p.factory()
++	}
++	return GetProducer(p.url)
 +}
 +func (p *Producer) logError(err error) error {
 +	if err != nil && strings.HasPrefix(p.url, "xiaomi:") {
@@ -438,10 +462,9 @@ index 92375fa..018bbc4 100644
  	return medias, nil
  }
 diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
-index 6eaa06c..d8a0e19 100644
 --- a/pkg/xiaomi/miss/client.go
 +++ b/pkg/xiaomi/miss/client.go
-@@ -6,6 +6,7 @@ import (
+@@ -6,6 +6,7 @@
  	"encoding/hex"
  	"errors"
  	"fmt"
@@ -449,7 +472,7 @@ index 6eaa06c..d8a0e19 100644
  	"net"
  	"net/url"
  	"time"
-@@ -46,6 +47,7 @@ func NewClient(rawURL string) (*Client, error) {
+@@ -46,6 +47,7 @@
  	query := u.Query()
  	key, err := crypto.CalcSharedKey(query.Get("device_public"), query.Get("client_private"))
  	if err != nil {
@@ -457,19 +480,25 @@ index 6eaa06c..d8a0e19 100644
  		return nil, err
  	}
  
-@@ -59,20 +61,36 @@ func NewClient(rawURL string) (*Client, error) {
+@@ -59,20 +61,36 @@
  	case "tutk":
  		conn, err = tutk.Dial(u.Host, query.Get("uid"), "Miss", "client")
  	default:
 -		err = fmt.Errorf("miss: unsupported vendor %s", s)
+-	}
+-
+-	if err != nil {
+-		return nil, err
+-	}
+-
 +		err = errors.New("miss: unsupported vendor")
 +		diagnostic.Report("camera_vendor", err)
- 	}
- 
- 	if err != nil {
- 		return nil, err
- 	}
- 
++	}
++
++	if err != nil {
++		return nil, err
++	}
++
 +	// Bound authentication and StartMedia reads; probe installs its own deadline.
 +	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
  	err = login(conn, query.Get("client_public"), query.Get("sign"))
@@ -496,7 +525,7 @@ index 6eaa06c..d8a0e19 100644
  }
  
  type Client struct {
-@@ -116,7 +134,7 @@ func login(conn Conn, clientPublic, sign string) error {
+@@ -116,7 +134,7 @@
  	}
  
  	if !bytes.Contains(data, []byte(`"result":"success"`)) {
@@ -505,6 +534,48 @@ index 6eaa06c..d8a0e19 100644
  	}
  
  	return nil
+@@ -158,6 +176,22 @@
+ 		)
+ 	}
+ 
++	quality = c.videoQuality(quality)
++
++	if audio == "" {
++		audio = "1"
++	}
++
++	data := binary.BigEndian.AppendUint32(nil, cmdVideoStart)
++	if channel == "" {
++		data = fmt.Appendf(data, `{"videoquality":%s,"enableaudio":%s}`, quality, audio)
++	} else {
++		data = fmt.Appendf(data, `{"videoquality":-1,"videoquality2":%s,"enableaudio":%s}`, quality, audio)
++	}
++	return c.WriteCommand(data)
++}
++
++func (c *Client) videoQuality(quality string) string {
+ 	// 0 - auto, 1 - sd, 2 - hd, default - hd
+ 	switch quality {
+ 	case "", "hd":
+@@ -176,17 +210,7 @@
+ 		quality = "0"
+ 	}
+ 
+-	if audio == "" {
+-		audio = "1"
+-	}
+-
+-	data := binary.BigEndian.AppendUint32(nil, cmdVideoStart)
+-	if channel == "" {
+-		data = fmt.Appendf(data, `{"videoquality":%s,"enableaudio":%s}`, quality, audio)
+-	} else {
+-		data = fmt.Appendf(data, `{"videoquality":-1,"videoquality2":%s,"enableaudio":%s}`, quality, audio)
+-	}
+-	return c.WriteCommand(data)
++	return quality
+ }
+ 
+ func (c *Client) StopMedia() error {
 diff --git a/pkg/xiaomi/miss/cs2/conn.go b/pkg/xiaomi/miss/cs2/conn.go
 index 1bea07c..a37c889 100644
 --- a/pkg/xiaomi/miss/cs2/conn.go

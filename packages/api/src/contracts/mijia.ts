@@ -1,3 +1,10 @@
+export {
+  mijiaDeviceSpecSchema,
+  mijiaHomeSchema,
+  type MijiaDeviceSpec,
+  type MijiaHome,
+  type MijiaCapability,
+} from "./mijia-spec";
 import { z } from "zod";
 import { operationSchema } from "./operations";
 import { apiErrorSchema } from "./errors";
@@ -34,6 +41,10 @@ export const mijiaDeviceSchema = z.object({
   id: z.string(),
   name: z.string(),
   model: z.string(),
+  home_id: z.string().nullable(),
+  home_name: z.string().nullable(),
+  room_id: z.string().nullable(),
+  room_name: z.string().nullable(),
   online: z.boolean(),
   camera: z.boolean(),
   channels: z.array(z.union([z.literal(1), z.literal(2)])),
@@ -76,15 +87,13 @@ export type MijiaLoginAttempt = z.infer<typeof mijiaLoginAttemptSchema>;
 
 export function isMijiaLoginAttemptActive(
   attempt: MijiaLoginAttempt | undefined,
-): attempt is Extract<
-  MijiaLoginAttempt,
-  { status: "creating" | "pending" | "security_required" | "completing" }
-> {
+) {
   return (
     attempt !== undefined &&
-    ["creating", "pending", "security_required", "completing"].includes(
-      attempt.status,
-    )
+    (attempt.status === "creating" ||
+      attempt.status === "pending" ||
+      attempt.status === "security_required" ||
+      attempt.status === "completing")
   );
 }
 
