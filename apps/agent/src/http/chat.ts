@@ -1,10 +1,6 @@
 import type { RunFailedEvent } from "@home-agent/api/contracts";
-import {
-  AppError,
-  errorPayload,
-  validationIssues,
-} from "@home-agent/api/errors";
-import { errorResponse, readJsonBody } from "@home-agent/api/errors/hono";
+import { AppError, errorPayload } from "@home-agent/api/errors";
+import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
 import {
   context,
   withSpan,
@@ -15,21 +11,11 @@ import { HumanMessage } from "@langchain/core/messages";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
-import { z } from "zod";
+import { chatInputSchema } from "@home-agent/api/contracts";
 import type { createHomeAgent } from "../graph/home-agent";
 import type { AgentDatabase } from "../db";
 
-const chatInput = z
-  .object({
-    message: z.string().trim().min(1).max(16_000),
-    threadId: z
-      .uuid()
-      .transform((id) => id.toLowerCase())
-      .optional(),
-  })
-  .strict();
-
-function textContent(content: unknown): string {
+function textContent(content: unknown) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content
@@ -59,15 +45,12 @@ export function createChatRoutes(
           new AppError("request_too_large", { params: { maxBytes: 32768 } }),
         ),
     }),
+    validateJson(chatInputSchema),
     async (c) => {
-      const input = chatInput.safeParse(await readJsonBody(c));
-      if (!input.success)
-        throw new AppError("invalid_request", {
-          issues: validationIssues(input.error),
-        });
+      const input = c.req.valid("json");
       if (!agent) throw new AppError("model_not_configured");
       if (!database) throw new AppError("database_not_configured");
-      const threadId = input.data.threadId ?? crypto.randomUUID();
+      const threadId = input.threadId ?? crypto.randomUUID();
       if (activeThreads.has(threadId))
         throw new AppError("thread_busy", { params: { threadId } });
       activeThreads.add(threadId);
@@ -167,7 +150,7 @@ export function createChatRoutes(
                     persistent: true,
                   });
                   for await (const event of agent.graph.streamEvents(
-                    { messages: [new HumanMessage(input.data.message)] },
+                    { messages: [new HumanMessage(input.message)] },
                     {
                       version: "v2",
                       runId,

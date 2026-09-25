@@ -1,6 +1,8 @@
 import type { ErrorCode } from "../contracts";
+import { mijiaErrorDefinitions } from "../contracts/mijia-errors";
 
 export const errorDefinitions = {
+  ...mijiaErrorDefinitions,
   invalid_request: { status: 400, message: "The request is invalid." },
   invalid_json: { status: 400, message: "Provide a valid JSON body." },
   content_type_required: { status: 415, message: "Use application/json." },

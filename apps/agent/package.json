@@ -10,8 +10,8 @@
     "dev": "bun --env-file=../../.env --watch src/main.ts",
     "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
     "start": "bun --env-file=../../.env dist/main.js",
-    "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
-    "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "lint": "oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
     "db:setup": "bun --env-file=../../.env scripts/db-setup.ts",
     "db:check": "bun --env-file=../../.env scripts/db-check.ts"
@@ -33,6 +33,7 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
-    "@types/pg": "catalog:"
+    "@types/pg": "catalog:",
+    "@home-agent/oxlint-config": "workspace:*"
   }
 }

@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { mijiaErrorCodes } from "./mijia-errors";
 
 export const errorCodeSchema = z.enum([
+  ...mijiaErrorCodes,
   "invalid_request",
   "invalid_json",
   "content_type_required",

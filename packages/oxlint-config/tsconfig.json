@@ -1,0 +1,4 @@
+{
+  "extends": "@home-agent/typescript-config/bun.json",
+  "include": ["*.ts"]
+}

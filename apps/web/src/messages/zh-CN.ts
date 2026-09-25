@@ -6,8 +6,13 @@ import type {
   ServiceStatus,
   ValidationIssue,
 } from "@home-agent/api/contracts";
+import {
+  isMijiaErrorCode,
+  mijiaFailureMessage,
+  type MijiaErrorCode,
+} from "@home-agent/api/mijia";
 
-type ClientErrorCode = "network_error" | "request_timeout" | "invalid_response";
+import type { ClientErrorCode } from "../lib/api";
 export type DisplayError = {
   code: ErrorCode | ClientErrorCode;
   params?: MessageParams | undefined;
@@ -44,7 +49,12 @@ const errorMessages = {
   network_error: "无法连接后端，请确认后端已启动。",
   request_timeout: "请求超时，请确认后端仍在运行。",
   invalid_response: "后端返回了无效响应，请检查服务状态。",
-} satisfies Record<ErrorCode | ClientErrorCode, string>;
+  ice_gathering_timeout: "浏览器网络候选地址收集超时，请检查本机网络。",
+  missing_local_sdp: "浏览器未生成有效的播放协商信息。",
+} satisfies Record<
+  Exclude<ErrorCode, MijiaErrorCode> | ClientErrorCode,
+  string
+>;
 
 const issueMessages = {
   invalid_type: "字段缺失或类型不正确。",
@@ -72,7 +82,8 @@ const connectionMessages = {
   timeout: "连接检查超时。",
 } satisfies Record<ConnectionReasonCode, string>;
 
-export function errorMessage(error: DisplayError | ApiError): string {
+export function errorMessage(error: DisplayError | ApiError) {
+  if (isMijiaErrorCode(error.code)) return mijiaFailureMessage(error.code);
   if (
     error.code === "request_too_large" &&
     typeof error.params?.maxBytes === "number"
@@ -82,11 +93,11 @@ export function errorMessage(error: DisplayError | ApiError): string {
   return errorMessages[error.code];
 }
 
-export function issueMessage(issue: ValidationIssue): string {
+export function issueMessage(issue: ValidationIssue) {
   return issueMessages[issue.code];
 }
 
-export function connectionMessage(service: ServiceStatus): string {
+export function connectionMessage(service: ServiceStatus) {
   if (
     service.reasonCode === "http_error" &&
     typeof service.params?.status === "number"

@@ -1,0 +1,56 @@
+@layer components {
+  .button {
+    @apply inline-flex min-h-8 shrink-0 items-center justify-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium;
+    transition:
+      background-color 120ms,
+      color 120ms;
+  }
+  .button-primary {
+    @apply border-ink bg-ink text-white hover:bg-ink/85;
+  }
+  .button-secondary {
+    @apply border-line bg-white text-ink hover:bg-sidebar;
+  }
+  .button-ghost {
+    @apply border-transparent bg-transparent text-muted hover:bg-sidebar hover:text-ink;
+  }
+  .status-badge {
+    @apply inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 text-[11px];
+  }
+  .status-dot {
+    @apply size-1.5 rounded-full bg-current;
+  }
+  .status-connected {
+    @apply text-sage;
+  }
+  .status-unavailable {
+    @apply text-danger;
+  }
+  .status-unknown {
+    @apply text-muted;
+  }
+  .notice {
+    @apply mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md bg-sidebar px-3 py-2.5 text-xs leading-6;
+  }
+  .notice-error {
+    @apply bg-danger/5 text-danger;
+  }
+  .notice-warning {
+    @apply bg-amber-50 text-amber-800;
+  }
+  .notice-success {
+    @apply bg-sage/10 text-sage;
+  }
+  .notice strong {
+    @apply block w-full font-medium;
+  }
+  .notice ul {
+    @apply w-full;
+  }
+  .field-error {
+    @apply mt-1 text-xs text-danger;
+  }
+  .dialog-overlay {
+    @apply fixed inset-0 z-40 bg-black/25;
+  }
+}

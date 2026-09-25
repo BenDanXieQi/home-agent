@@ -41,10 +41,7 @@ export function httpTracing() {
 }
 
 /** CLIENT span covers headers AND body consumption, including SSE and cancellation. */
-export function tracedFetch(
-  input: string | URL,
-  init: RequestInit = {},
-): Promise<Response> {
+export function tracedFetch(input: string | URL, init: RequestInit = {}) {
   const url = new URL(input);
   const method = init.method ?? "GET";
   return trace.getTracer("home-agent.http").startActiveSpan(
@@ -67,9 +64,14 @@ export function tracedFetch(
         span.end();
         finishOperation();
       };
+      const recordCancellation = (reason: unknown) => {
+        if (ended) return;
+        if (reason instanceof Error && reason.name === "TimeoutError")
+          recordFailure(span, reason, "timeout");
+        else span.setAttribute("operation.cancelled", true);
+      };
       const onAbort = () => {
-        span.setAttribute("operation.cancelled", true);
-        recordFailure(span, init.signal?.reason);
+        recordCancellation(init.signal?.reason);
         finish();
       };
       if (init.signal?.aborted) onAbort();
@@ -81,9 +83,13 @@ export function tracedFetch(
         for (const [key, value] of Object.entries(carrier))
           headers.set(key, value);
         const response = await fetch(url, { ...init, headers });
-        span.setAttribute("http.response.status_code", response.status);
-        if (response.status >= 400)
-          span.setStatus({ code: SpanStatusCode.ERROR });
+        if (!ended) {
+          span.setAttribute("http.response.status_code", response.status);
+          if (response.status >= 400) {
+            span.setAttribute("error.type", String(response.status));
+            span.setStatus({ code: SpanStatusCode.ERROR });
+          }
+        }
         if (!response.body) {
           finish();
           return response;
@@ -98,13 +104,13 @@ export function tracedFetch(
                 controller.close();
               } else controller.enqueue(value);
             } catch (error) {
-              recordFailure(span, error);
+              if (!ended) recordFailure(span, error);
               finish();
               controller.error(error);
             }
           },
           async cancel(reason) {
-            span.setAttribute("operation.cancelled", true);
+            recordCancellation(reason);
             try {
               await reader.cancel(reason);
             } finally {
@@ -118,7 +124,7 @@ export function tracedFetch(
           headers: response.headers,
         });
       } catch (error) {
-        recordFailure(span, error);
+        if (!ended) recordFailure(span, error);
         finish();
         throw error;
       }

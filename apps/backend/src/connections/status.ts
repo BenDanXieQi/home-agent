@@ -7,9 +7,11 @@ import type {
 import { tracedFetch } from "@home-agent/observability";
 import { Hono } from "hono";
 import { z } from "zod";
-import type { Environment } from "../environment";
-import type { AppContext } from "../app-context";
-import { requireLocalManagementAccess } from "../middleware/local-management";
+import { requireLocalAccess } from "@home-agent/api/local-access";
+import {
+  readLimitedJson,
+  ResponseBodyError,
+} from "@home-agent/api/http/read-body";
 import type { ConnectionStore } from "./store";
 
 const MAX_RESPONSE_BYTES = 16_384;
@@ -33,7 +35,7 @@ async function checkServiceConnection(
   serviceName: keyof typeof healthResponseSchemas,
   url: string,
   requestSignal: AbortSignal,
-): Promise<ServiceStatus> {
+) {
   const timeoutSignal = AbortSignal.timeout(CHECK_TIMEOUT_MS);
   const completionController = new AbortController();
   const signal = AbortSignal.any([
@@ -41,12 +43,6 @@ async function checkServiceConnection(
     timeoutSignal,
     completionController.signal,
   ]);
-  let reader:
-    | Pick<
-        ReadableStreamDefaultReader<Uint8Array>,
-        "read" | "cancel" | "releaseLock"
-      >
-    | undefined;
   let status: ServiceStatus["status"] = "unavailable";
   let reasonCode: ConnectionReasonCode = "unreachable";
   let params: MessageParams | undefined;
@@ -55,7 +51,6 @@ async function checkServiceConnection(
       new URL(serviceName === "agent" ? "/health" : "/api", url),
       { signal, redirect: "error", headers: { Accept: "application/json" } },
     );
-    reader = response.body?.getReader();
     if (!response.ok) {
       reasonCode = "http_error";
       params = { status: response.status };
@@ -65,58 +60,27 @@ async function checkServiceConnection(
       )
     ) {
       reasonCode = "invalid_json";
-    } else if (!reader) {
-      reasonCode = "empty_response";
     } else {
       reasonCode = "invalid_json";
-      let responseBytes = 0;
-      let responseText = "";
-      const decoder = new TextDecoder("utf-8", { fatal: true });
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        responseBytes += chunk.value.byteLength;
-        if (responseBytes > MAX_RESPONSE_BYTES) {
-          reasonCode = "response_too_large";
-          params = { maxBytes: MAX_RESPONSE_BYTES };
-          break;
-        }
-        responseText += decoder.decode(chunk.value, { stream: true });
-      }
-      if (reasonCode === "response_too_large") {
-        return {
-          url,
-          status,
-          checkedAt: new Date().toISOString(),
-          reasonCode,
-          ...(params ? { params } : {}),
-        };
-      }
-      responseText += decoder.decode();
-      const responseData: unknown = JSON.parse(responseText);
+      const responseData = await readLimitedJson(response, MAX_RESPONSE_BYTES);
       reasonCode = "unexpected_response";
       if (healthResponseSchemas[serviceName].safeParse(responseData).success) {
         status = "connected";
         reasonCode = "reachable";
       }
     }
-  } catch {
+  } catch (error) {
     if (requestSignal.aborted) reasonCode = "cancelled";
     else if (timeoutSignal.aborted) {
       reasonCode = "timeout";
       params = { timeoutMs: CHECK_TIMEOUT_MS };
+    } else if (error instanceof ResponseBodyError) {
+      reasonCode = error.code;
+      if (error.code === "response_too_large")
+        params = { maxBytes: MAX_RESPONSE_BYTES };
     }
   } finally {
     completionController.abort();
-    if (reader) {
-      try {
-        await reader.cancel();
-      } catch {
-        // The combined abort signal may have already closed the body.
-      } finally {
-        reader.releaseLock();
-      }
-    }
   }
   return {
     url,
@@ -124,15 +88,15 @@ async function checkServiceConnection(
     checkedAt: new Date().toISOString(),
     reasonCode,
     ...(params ? { params } : {}),
-  };
+  } satisfies ServiceStatus;
 }
 
 export function createConnectionStatusRoutes(
-  environment: Environment,
-  connectionStore: ConnectionStore,
+  port: number,
+  connectionStore: Pick<ConnectionStore, "read">,
 ) {
-  return new Hono<AppContext>()
-    .use(requireLocalManagementAccess(environment))
+  return new Hono()
+    .use(requireLocalAccess([port, 5173]))
     .get("/status", async (c) => {
       const { services } = await connectionStore.read();
       const [agent, go2rtc] = await Promise.all([

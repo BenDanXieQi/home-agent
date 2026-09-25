@@ -1,0 +1,162 @@
+@layer components {
+  .workspace {
+    @apply flex min-h-dvh;
+  }
+  .workspace-sidebar {
+    @apply fixed inset-y-0 left-0 z-20 flex w-[196px] flex-col border-r border-line bg-sidebar;
+  }
+  .workspace-brand {
+    @apply flex h-16 shrink-0 items-center gap-2.5 px-5 text-sm font-semibold tracking-tight;
+  }
+  .workspace-nav {
+    @apply flex flex-1 flex-col gap-1 px-3 pt-5;
+  }
+  .workspace-nav-item {
+    @apply flex h-10 items-center gap-3 rounded-md px-3 text-[13px] text-muted hover:bg-black/4 hover:text-ink;
+  }
+  .workspace-nav-item.is-active {
+    @apply bg-[#e9ecf0] font-medium text-ink;
+  }
+  .workspace-nav-item.nav-settings {
+    @apply mt-auto mb-4;
+  }
+  .sidebar-account {
+    @apply border-t border-line p-3;
+  }
+  .account-button {
+    @apply flex w-full items-center gap-2.5 rounded-md p-2 text-left hover:bg-black/4;
+  }
+  .account-avatar {
+    @apply grid size-8 shrink-0 place-items-center rounded-full border border-line bg-white text-muted;
+  }
+  .account-copy {
+    @apply min-w-0 flex-1;
+  }
+  .account-copy strong {
+    @apply block text-xs font-medium;
+  }
+  .account-copy span {
+    @apply mt-0.5 block text-[11px] text-muted;
+  }
+  .workspace-main {
+    @apply min-w-0 flex-1 pl-[196px];
+  }
+  .workspace-topbar {
+    @apply sticky top-0 z-10 flex h-16 items-center justify-between gap-4 border-b border-line bg-white px-7;
+  }
+  .workspace-topbar h1 {
+    @apply text-[16px] font-semibold;
+  }
+  .workspace-content {
+    @apply px-7 pb-6;
+  }
+  .workspace-page {
+    @apply min-h-[calc(100dvh-90px)];
+  }
+  .mobile-navigation {
+    @apply hidden;
+  }
+  .skip-link {
+    @apply sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-white focus:p-3;
+  }
+  .page-toolbar {
+    @apply flex h-[72px] items-center justify-between gap-4;
+  }
+  .count-badge {
+    @apply rounded bg-sidebar px-1.5 py-0.5 text-[11px] text-muted;
+  }
+  .workspace-empty {
+    @apply flex min-h-[420px] flex-col items-center justify-center gap-3 pb-12 text-muted;
+  }
+  .workspace-empty h2 {
+    @apply mt-1 text-sm font-medium text-ink;
+  }
+  .workspace-empty p {
+    @apply mb-2 text-xs;
+  }
+  .workspace-empty.compact {
+    @apply min-h-64;
+  }
+  .empty-device-icon {
+    @apply mb-2 grid size-14 place-items-center rounded-xl bg-sidebar text-[#8a929e];
+  }
+}
+
+@media (max-width: 767px) {
+  .workspace-sidebar {
+    width: 64px;
+  }
+  .workspace-brand {
+    padding: 0;
+    justify-content: center;
+  }
+  .workspace-brand span,
+  .workspace-nav-item span,
+  .account-copy,
+  .account-button > svg {
+    display: none;
+  }
+  .workspace-nav {
+    padding-inline: 8px;
+  }
+  .workspace-nav-item {
+    padding: 0;
+    justify-content: center;
+  }
+  .sidebar-account {
+    padding: 12px 8px;
+  }
+  .account-button {
+    padding: 0;
+    justify-content: center;
+  }
+  .workspace-main {
+    padding-left: 64px;
+  }
+  .workspace-topbar {
+    height: 56px;
+    padding-inline: 16px;
+  }
+  .workspace-content {
+    padding-inline: 16px;
+  }
+  .workspace-topbar output {
+    font-size: 10px;
+  }
+  .workspace-topbar h1 {
+    font-size: 14px;
+  }
+  .mobile-navigation {
+    display: block;
+  }
+  .navigation-expanded .workspace-sidebar {
+    width: 196px;
+    box-shadow: 8px 0 30px #0001;
+  }
+  .navigation-expanded .workspace-brand {
+    padding: 0 20px;
+    justify-content: flex-start;
+  }
+  .navigation-expanded .workspace-brand span,
+  .navigation-expanded .workspace-nav-item span,
+  .navigation-expanded .account-copy {
+    display: block;
+  }
+  .navigation-expanded .workspace-nav-item {
+    justify-content: flex-start;
+    padding-inline: 12px;
+  }
+  .navigation-expanded .account-button {
+    padding: 8px;
+  }
+  .page-toolbar {
+    height: 64px;
+  }
+  .workspace-empty {
+    min-height: 360px;
+    text-align: center;
+  }
+  .workspace-empty p {
+    line-height: 1.8;
+  }
+}

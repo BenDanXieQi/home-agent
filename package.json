@@ -14,18 +14,16 @@
   },
   "scripts": {
     "setup": "bun scripts/setup-local.ts",
-    "infra:up": "bun run setup && bun scripts/compose.ts up",
-    "infra:down": "bun scripts/compose.ts down",
-    "dev": "bun run infra:up && bun run db:check && turbo run dev --filter=@home-agent/web --filter=@home-agent/backend --filter=@home-agent/agent",
+    "dev": "bun scripts/services.ts dev",
     "dev:backend": "turbo run dev --filter=@home-agent/backend",
     "dev:web": "turbo run dev --filter=@home-agent/web",
     "build": "turbo run build",
     "start": "turbo run start --filter=@home-agent/backend --filter=@home-agent/agent",
-    "lint": "turbo run lint",
-    "lint:fix": "turbo run lint:fix",
+    "lint": "turbo run lint lint:root",
+    "lint:fix": "turbo run lint:fix lint:root:fix",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check .",
-    "check-types": "turbo run check-types",
+    "check-types": "turbo run check-types check-types:root",
     "check": "bun run format:check && bun run lint && bun run check-types",
     "test": "turbo run test",
     "dev:agent": "turbo run dev --filter=@home-agent/agent",
@@ -34,14 +32,25 @@
     "db:migrate": "bun run --cwd apps/backend db:migrate && bun run --cwd apps/agent db:setup",
     "db:check": "bun run --cwd apps/backend db:check && bun run --cwd apps/agent db:check",
     "db:studio": "bun run --cwd apps/backend db:studio",
-    "db:up": "bun scripts/compose.ts up db",
-    "db:down": "bun scripts/compose.ts down db"
+    "db:up": "docker compose up -d --wait db",
+    "db:down": "docker compose stop db",
+    "stop": "bun scripts/services.ts stop",
+    "status": "bun scripts/services.ts status",
+    "lint:root": "oxlint --type-aware --max-warnings 0 scripts oxlint.config.ts",
+    "lint:root:fix": "oxlint --type-aware --max-warnings 0 --fix scripts oxlint.config.ts",
+    "check-types:root": "tsc --project scripts/tsconfig.json"
   },
   "devDependencies": {
     "@hono/cli": "^0.2.0-next.9",
-    "eslint-plugin-turbo": "catalog:",
     "oxfmt": "catalog:",
-    "turbo": "catalog:"
+    "turbo": "catalog:",
+    "yaml": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "@home-agent/oxlint-config": "workspace:*",
+    "@home-agent/typescript-config": "workspace:*",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:"
   },
   "workspaces": {
     "packages": [

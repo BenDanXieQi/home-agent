@@ -1,4 +1,5 @@
 node_modules/
+/AGENTS.local.md
 # Local runtime configuration; defaults are versioned and initialized by bun run setup.
 /config/
 .pnpm-store/

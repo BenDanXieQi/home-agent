@@ -10,20 +10,23 @@
     "dev": "bun --env-file=../../.env --watch src/main.ts",
     "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external && bun scripts/copy-web.ts",
     "start": "bun --env-file=../../.env dist/main.js",
-    "lint": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 .",
-    "lint:fix": "oxlint --config ../../.oxlintrc.json --type-aware --max-warnings 0 --fix .",
+    "lint": "oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
     "test": "bun test ./tests --pass-with-no-tests",
-    "db:generate": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs generate",
-    "db:migrate": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs migrate",
-    "db:studio": "bun --env-file=../../.env ./node_modules/drizzle-kit/bin.cjs studio",
-    "db:check": "bun --env-file=../../.env scripts/db-check.ts"
+    "db:generate": "bun --env-file=../../.env --bun run drizzle-kit generate",
+    "db:migrate": "bun --env-file=../../.env --bun run drizzle-kit migrate",
+    "db:studio": "bun --env-file=../../.env --bun run drizzle-kit studio",
+    "db:check": "bun --env-file=../../.env scripts/db-check.ts",
+    "build:rpc": "tsc --project tsconfig.rpc.json",
+    "dev:rpc": "tsc --project tsconfig.rpc.json --watch --preserveWatchOutput"
   },
   "dependencies": {
     "@home-agent/observability": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "postgres": "catalog:",
+    "tough-cookie": "6.0.2",
     "write-file-atomic": "catalog:",
     "yaml": "catalog:",
     "zod": "catalog:",
@@ -36,6 +39,13 @@
     "drizzle-kit": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "@home-agent/oxlint-config": "workspace:*"
+  },
+  "exports": {
+    "./client": {
+      "types": "./dist/rpc/client.d.ts",
+      "default": "./src/client.ts"
+    }
   }
 }

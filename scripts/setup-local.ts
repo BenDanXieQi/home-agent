@@ -1,5 +1,6 @@
+import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -30,4 +31,21 @@ for (const [source, destination] of [
       throw error;
     }
   }
+}
+
+// Never replace an existing key: encrypted database records depend on it.
+try {
+  await writeFile(
+    resolve(root, "config/credentials.key"),
+    randomBytes(32).toString("base64") + "\n",
+    { flag: "wx", mode: 0o600 },
+  );
+  console.info("Created local credential encryption key");
+} catch (error) {
+  if (
+    !(error instanceof Error) ||
+    !("code" in error) ||
+    error.code !== "EEXIST"
+  )
+    throw error;
 }

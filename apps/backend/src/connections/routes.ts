@@ -1,19 +1,20 @@
 import { AppError } from "@home-agent/api/errors";
-import { errorResponse, readJsonBody } from "@home-agent/api/errors/hono";
-import type { ConfigResponse } from "@home-agent/api/contracts";
+import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
+import {
+  serviceConfigurationSchema,
+  type ConfigResponse,
+} from "@home-agent/api/contracts";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import type { Environment } from "../environment";
-import type { AppContext } from "../app-context";
-import { requireLocalManagementAccess } from "../middleware/local-management";
+import { requireLocalAccess } from "@home-agent/api/local-access";
 import type { ConnectionStore } from "./store";
 
 export function createConnectionRoutes(
-  environment: Environment,
+  port: number,
   connectionStore: ConnectionStore,
 ) {
-  return new Hono<AppContext>()
-    .use(requireLocalManagementAccess(environment))
+  return new Hono()
+    .use(requireLocalAccess([port, 5173]))
     .get("/", async (c) => {
       const configuration = await connectionStore.read();
       return c.json({
@@ -32,8 +33,12 @@ export function createConnectionRoutes(
             new AppError("request_too_large", { params: { maxBytes: 16384 } }),
           ),
       }),
+      validateJson(
+        serviceConfigurationSchema,
+        "connection_config_input_invalid",
+      ),
       async (c) => {
-        const input = await readJsonBody(c);
+        const input = c.req.valid("json");
         const configuration = await connectionStore.save(input);
         return c.json({
           config: configuration,

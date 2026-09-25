@@ -4,7 +4,7 @@ Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连�
 
 ## 初始化
 
-首次配置和日常启动统一见[项目启动说明](../../README.md#启动)。单独开发 Agent 使用根目录 `bun run dev:agent`，需先准备依赖和数据库。
+首次配置和日常启动统一见[项目启动说明](../../README.md#快速开始)。单独开发 Agent 使用根目录 `bun run dev:agent`，需先准备依赖和数据库。
 
 根目录 `db:migrate` 先执行 backend 迁移，再调用 Agent 的官方 `setup()`，可重复执行；部署和升级适配器时先运行。仅初始化 Agent 可执行 `bun run --cwd apps/agent db:setup`。服务启动不自动改表。初始化账号需要 schema/表创建权限，运行账号需相应读写权限。连接池上限 5，连接等待超时 10 秒，SQL 执行超时 30 秒。SIGINT/SIGTERM 最多等待 HTTP 请求 30 秒，再强制断开；随后 drain telemetry 中的活动执行并关闭连接池。
 
@@ -31,6 +31,8 @@ Agent 将其映射为 LangGraph 的 `configurable.thread_id`，只追加本次�
 运行超时会取消模型执行，并向仍连接的客户端发送 `run_failed`，最多等待 1 秒发送与关闭，随后强制断开。客户端主动断开时直接取消，不再发送事件。客户端必须将未收到 `run_completed` 或 `run_failed` 的流结束视为异常，不能把 EOF 当成成功；失败后也不应自动重发消息。同会话锁在后台执行结束后释放，而非在 SSE 关闭时释放。
 
 HTTP 错误使用共享 `{ code, message, params?, issues?, traceId? }` 结构；`run_failed` 返回 `{ runId, threadId, error }`，其中 `error` 使用同一结构，超时码为 `run_timeout`，执行失败码为 `agent_execution_failed`。详见[错误处理](../../docs/errors.md)。
+
+聊天接口只接受 TCP loopback 对端，Host 和浏览器 Origin 必须为本机地址及 Agent 配置端口，不信任转发头；通过 `@home-agent/api/local-access` 与 backend 复用检查。`/health` 独立用于服务探测。
 
 仅限可信本机使用，尚无身份认证和会话归属校验，UUID 不是权限控制。存储含完整消息内容，与 OTel 是否采集内容无关。不提供长期记忆 Store、自动历史清理、会话列表、恢复任务调度或 SSE 断线续传。
 

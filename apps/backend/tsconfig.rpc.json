@@ -1,0 +1,11 @@
+{
+  "extends": "@home-agent/typescript-config/bun.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "rootDir": "src",
+    "outDir": "dist/rpc"
+  },
+  "include": ["src/client.ts"]
+}

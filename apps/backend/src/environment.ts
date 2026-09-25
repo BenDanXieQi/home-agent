@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const environmentSchema = z.object({
+  CREDENTIAL_KEY_FILE: z.string().trim().min(1).optional(),
   DATABASE_URL: z
     .url()
     .refine(
@@ -28,7 +29,7 @@ export type Environment = z.infer<typeof environmentSchema>;
 
 export function loadEnvironment(
   env: Record<string, string | undefined> = Bun.env,
-): Environment {
+) {
   const result = environmentSchema.safeParse(env);
   if (!result.success) {
     const fields = result.error.issues

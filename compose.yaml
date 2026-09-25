@@ -1,8 +1,17 @@
 name: home-agent
 services:
   go2rtc:
-    image: alexxit/go2rtc:1.9.14
+    image: home-agent/go2rtc:1.9.14
+    build:
+      context: ./docker/go2rtc
     restart: unless-stopped
+    network_mode: host
+    command:
+      - go2rtc
+      - -config
+      - /config/go2rtc.yaml
+      - -config
+      - '{"api":{"listen":"127.0.0.1:1984"},"rtsp":{"listen":"127.0.0.1:8554"},"webrtc":{"listen":"127.0.0.1:8555","candidates":["127.0.0.1:8555"],"filters":{"loopback":true}}}'
     healthcheck:
       test:
         ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1984/api"]
@@ -10,11 +19,6 @@ services:
       timeout: 3s
       retries: 12
       start_period: 5s
-    ports:
-      - "127.0.0.1:1984:1984"
-      - "127.0.0.1:8554:8554"
-      - "127.0.0.1:8555:8555/tcp"
-      - "127.0.0.1:8555:8555/udp"
     volumes:
       - type: bind
         source: ./config/go2rtc

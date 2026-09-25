@@ -14,7 +14,6 @@ import {
   serviceConfigurationSchema,
   serviceConfigurationWithDefaults as configurationWithDefaults,
   type ValidationIssue,
-  type ServiceConfiguration,
 } from "@home-agent/api/contracts";
 import writeFileAtomic from "write-file-atomic";
 import { Document, parseDocument } from "yaml";
@@ -28,7 +27,7 @@ export function resolveConnectionConfigPath(
   repositoryRoot: string,
   args: readonly string[] = process.argv.slice(2),
   startupCwd = process.cwd(),
-): string {
+) {
   let configuredPath: string | undefined;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index]!;
@@ -45,14 +44,14 @@ export function resolveConnectionConfigPath(
     : resolve(startupCwd, configuredPath);
 }
 
-function hasCode(error: unknown, code: string): boolean {
+function hasCode(error: unknown, code: string) {
   return error instanceof Error && "code" in error && error.code === code;
 }
 
 function invalidFile(
   issues: ValidationIssue[] = [{ path: "config", code: "invalid_yaml" }],
   cause?: unknown,
-): AppError {
+) {
   return new AppError("connection_config_invalid", {
     issues,
     cause,
@@ -60,10 +59,7 @@ function invalidFile(
   });
 }
 
-function validateConfiguration(
-  input: unknown,
-  fromFile: boolean,
-): ServiceConfiguration {
+function validateConfiguration(input: unknown, fromFile: boolean) {
   const result = serviceConfigurationSchema.safeParse(input);
   if (result.success) return result.data;
   throw new AppError(
@@ -80,7 +76,7 @@ function validateConfiguration(
   );
 }
 
-async function readDocument(path: string) {
+async function readSource(path: string) {
   let source: string;
   try {
     // Nonblocking open rejects FIFOs without hanging a request. Check the opened
@@ -133,6 +129,10 @@ async function readDocument(path: string) {
     });
   }
 
+  return source;
+}
+
+function parseConfigurationDocument(source: string) {
   try {
     const document = parseDocument(source, {
       strict: true,
@@ -157,8 +157,14 @@ async function readDocument(path: string) {
 export function createConnectionStore(configPath: string) {
   const path = resolve(configPath);
   const schemaPath = resolve(dirname(path), "config.schema.json");
+  let parsed:
+    | {
+        source: string;
+        configuration: ReturnType<typeof validateConfiguration>;
+      }
+    | undefined;
 
-  async function initialize(): Promise<void> {
+  async function initialize() {
     try {
       await lstat(path);
     } catch (error) {
@@ -211,11 +217,20 @@ export function createConnectionStore(configPath: string) {
     }
   }
 
-  async function read(): Promise<ServiceConfiguration> {
-    return (await readDocument(path)).configuration;
+  async function read() {
+    // Read on every request so manual edits and permission failures are observed.
+    // Only YAML parsing is cached, by exact content rather than timestamps.
+    const source = await readSource(path);
+    if (parsed?.source !== source) {
+      parsed = {
+        source,
+        configuration: parseConfigurationDocument(source).configuration,
+      };
+    }
+    return structuredClone(parsed.configuration);
   }
 
-  async function isWritable(): Promise<boolean> {
+  async function isWritable() {
     try {
       // write-file-atomic follows symlinks, so check the actual replacement
       // directory as well as the file's permissions, including explicit modes.
@@ -242,9 +257,9 @@ export function createConnectionStore(configPath: string) {
     }
   }
 
-  async function save(input: unknown): Promise<ServiceConfiguration> {
+  async function save(input: unknown) {
     const configuration = validateConfiguration(input, false);
-    const { document } = await readDocument(path);
+    const { document } = parseConfigurationDocument(await readSource(path));
     if (!(await isWritable())) {
       throw new AppError("connection_config_read_only");
     }

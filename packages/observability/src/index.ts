@@ -4,6 +4,7 @@ export {
   withSpan,
   recordFailure,
   context,
+  ROOT_CONTEXT,
   trace,
   SpanKind,
   SpanStatusCode,
