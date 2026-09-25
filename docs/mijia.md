@@ -40,6 +40,27 @@ backend 每 15 秒发送心跳，go2rtc 每次成功续租后保留 60 秒租约
 
 云端首次报告设备离线时，backend 为已注册且没有注册错误的通道设置 60 秒离线确认窗口，以等待后续设备发现确认；这不保证摄像头实际仍在出流。go2rtc 独立监测视频包并处理取流恢复，浏览器独立检测可见画面的首帧和停滞。
 
+## 家庭、房间与设备能力
+
+设备发现同时读取设备列表与米家家庭／房间目录，按设备 ID 合并归属。`GET /api/mijia/state` 的设备项包含 `home_id`、`home_name`、`room_id`、`room_name`；无归属信息的字段为 `null`。家庭中未分配房间的设备保留家庭信息，不把家庭名称当成房间。目录读取失败会报告设备读取失败，不发布不完整的新设备快照。归属分页会校验游标和响应，不写入数据库。
+
+`GET /api/mijia/home` 与 `GET /api/mijia/devices/:did/spec` 的成功响应采用 MiLoCo 的 `{ code: 0, message, data }` 结构；错误继续使用本项目公共错误协议。
+
+`/home` 聚合已发现设备及其规格，返回 `home_name`、`devices`、`areas`、`scenes`、`persons`。`areas` 为设备房间名称去重后的 `{ name }` 数组；设备项包含 `did`、`name`、`home`、`room`、`model`、`online`、`category`、`spec`、`sub_devices`。当前未接入家庭选择，返回当前账号已发现的设备；仅设备归属唯一家庭时返回 `home_name`，否则为 `null`。场景和人员尚未接入，对应数组为空；子设备名称尚未接入，`sub_devices` 为 `null`。这些是功能范围限制，不表示已实现 MiLoCo 的家庭作用域或完整聚合数据。目录仍由后台发现及 `POST /devices/refresh` 更新，读取 `/home` 不刷新云端设备目录。
+
+`/devices/:did/spec` 的 `data` 返回 `did`、`name`、`home`、`model`、`room`、`online`、`category`、`spec`。`home`、`room` 为名称，未知时为空字符串。无可用规格时保留设备资料并返回 `category: null`、`spec: {}`；网络失败或规格格式无效仍报告错误。
+
+`spec` 对齐 MiLoCo 的精简规格，以 `prop.<siid>.<piid>`、`action.<siid>.<aiid>` 为键：
+
+- 所有条目包含 `description`、`format`、`writeable`、`readable`、`notify`，以及适用的 `type_name`、`service_type_name`、`service_description`、`prop_description`。
+- 属性按规格提供 `unit`、`value_range`、`value_list`，缺失的可选字段省略。枚举项包含 `name`、`value`、`description`。
+- 动作的 `format` 为输入参数说明数组的 JSON 字符串；有输入时提供 `in_params: [{ name, format }]`；无输入时省略。动作 `writeable: true`、`readable: false`、`notify: false`。
+- `description` 组合服务和属性／动作的中文说明，`prop_description` 保留原始说明。不输出事件、动作输出、类型 URN 或另行设计的 `kind`、实例 ID 字段。与 MiLoCo lite 解析一致，忽略 device-information 服务和非 MIoT 标准命名空间的私有条目。
+
+规格优先使用设备的 `spec_type`，未提供时按型号查询公开 MIoT URN；读取规格实例与中文翻译。成功结果缓存 24 小时，型号映射与规格缓存各最多 128 项，归属当前 MiCloud 实例。账号替换或续期创建新实例后重新获取。未知设备返回 `mijia_device_not_found`，规格网络和解析失败使用独立错误码。公开规格请求不携带账号凭据；账号退出、请求取消或设备变化会使在途结果失效。
+
+能力定义不含当前属性值。`notify`、`writeable` 表示规格声明，不表示已接入属性订阅或设备控制。当前未实现 MiLoCo 的本地标准库翻译补充和子设备服务名称覆盖。
+
 ## 支持范围
 
 - 目前支持中国大陆区及局域网 IPv4 摄像头，不支持远程中继或云端部署。
@@ -76,6 +97,8 @@ go2rtc 地址通过 `config/config.yaml` 的 `services.go2rtc.url` 配置。保�
 | 接口                                    | 用途                                                   |
 | --------------------------------------- | ------------------------------------------------------ |
 | `GET /api/mijia/state`                  | 当前流程、绑定、设备状态                               |
+| `GET /api/mijia/home`                   | 家庭设备、房间名称与规格聚合                           |
+| `GET /api/mijia/devices/:did/spec`      | 设备属性与动作的 MIoT 精简规格                         |
 | `POST /api/mijia/login`                 | 开始独立扫码流程                                       |
 | `DELETE /api/mijia/login/:id`           | 取消对应流程                                           |
 | `POST /api/mijia/login/:id/verify`      | 提交本次短信或邮件验证码                               |

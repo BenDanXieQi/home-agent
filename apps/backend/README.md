@@ -2,6 +2,8 @@
 
 基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、受控摄像头播放和聊天转发。模型执行与对话会话持久化由独立 [Agent](../agent/README.md) 负责。
 
+当前目录与规格接入尚未形成家庭语义模型，也未实现属性集采、人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础的交付顺序见[六步实施计划](../../docs/plans/backend-household-perception.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+
 ## 运行
 
 先按[项目 README](../../README.md)安装依赖并配置根目录 `.env`。以下命令均在仓库根目录执行：
@@ -27,6 +29,8 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 连接地址来自根目录 `config/config.yaml`，每次请求重新读取文件，内容未变时复用解析结果。生成规则、`--config`、接口结构与错误处理见[服务连接配置](../../docs/service-connections.md)。
 
 `/api/mijia` 提供扫码、验证码提交、授权恢复与退出、设备读取、按镜头预留观看连接及 SDP 信令；沿用本机管理限制。统一重试连接返回 HTTP 202，由 `/api/mijia/state` 展示后台进展。`src/credentials/` 负责通用 AES-256-GCM 凭据存储，`src/mijia/service.ts` 拥有当前账号和串行提交边界，`login-flow.ts` 管理独立扫码尝试，`account-session.ts` 准备恢复或续期候选账号；只有候选授权持久化成功才接管当前账号。
+
+设备快照包含米家家庭和房间归属；`GET /api/mijia/home` 聚合设备、房间及规格，`GET /api/mijia/devices/:did/spec` 按需查询设备可读、可写、可通知属性及动作定义；成功响应和业务字段采用 MiLoCo 的结构。规格解析使用不带账号凭据的独立公开请求，尚不采集属性值或执行设备动作。详见[家庭、房间与设备能力](../../docs/mijia.md#家庭房间与设备能力)。
 
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。backend 不接收或中转视频包。
 

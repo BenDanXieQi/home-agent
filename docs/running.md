@@ -28,6 +28,8 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 ## 服务连接
 
+backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
+
 backend 首次启动生成 `config/config.yaml`，修改后下次请求生效。默认 Agent 地址为 `http://127.0.0.1:1811`，go2rtc 地址为 `http://127.0.0.1:1984`。详细配置见[服务连接配置](service-connections.md)。
 
 ## 单独启动与检查
