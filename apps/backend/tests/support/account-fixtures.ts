@@ -1,3 +1,4 @@
+import { MijiaError } from "../../src/mijia/errors";
 import { mock } from "bun:test";
 import type { CredentialStore } from "../../src/credentials/store";
 import type { HomeSelectionStore } from "../../src/mijia/homes/store";
@@ -39,11 +40,22 @@ export function homeSelectionStore(
   initial?: Awaited<ReturnType<HomeSelectionStore["read"]>>,
 ) {
   let selection = initial;
+  let accountKey = initial ? '["cn","100001"]' : null;
   return {
-    read: mock<HomeSelectionStore["read"]>(async () => selection),
+    read: mock<HomeSelectionStore["read"]>(async (account) => {
+      if (accountKey !== null && account !== accountKey)
+        throw new MijiaError("binding_conflict");
+      return selection;
+    }),
     write: mock<HomeSelectionStore["write"]>(
-      async (_account, homeId, assert) => {
+      async (account, homeId, assert) => {
         assert();
+        if (
+          selection &&
+          (accountKey !== account || selection.homeId !== homeId)
+        )
+          throw new MijiaError("binding_conflict");
+        accountKey = account;
         selection = { homeId };
       },
     ),

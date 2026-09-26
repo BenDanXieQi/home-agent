@@ -22,12 +22,9 @@ type MediaDependencies = {
   canBind: () => boolean;
   stopped: () => boolean;
   canReconfigure: () => boolean;
-  serial: <T>(run: () => Promise<T>) => Promise<T>;
 };
 
-/** Owns media binding, configuration polling, sources and viewer resources.
- * Account adoption and media cleanup share the coordinator's commit queue.
- */
+/** Owns media binding, cleanup order, configuration polling, sources and viewers. */
 export class MediaSession {
   private currentState: MijiaState["binding"] = { status: "unbound" };
   get state() {
@@ -47,6 +44,7 @@ export class MediaSession {
   );
   private readonly bindingRetry = new RetryTimer();
   private readonly cleanupRetry = new RetryTimer();
+  private readonly cleanupTasks = new WeakMap<Go2RtcAdapter, Promise<void>>();
   private cleanupFailureState: MijiaState["binding"] | undefined;
   private bindingTask: BindingTask | undefined;
   private bindingRecoveryError: MijiaError | undefined;
@@ -54,8 +52,16 @@ export class MediaSession {
   private desiredMediaUrl: string | undefined;
   private configurationUnavailable = false;
   private configurationTask: Promise<void> | undefined;
+  private queue: Promise<unknown> = Promise.resolve();
+  private closing: Promise<void> | undefined;
 
   constructor(private readonly dependencies: MediaDependencies) {}
+
+  private serial<T>(run: () => Promise<T>) {
+    const result = this.queue.then(run);
+    this.queue = result.catch(() => {});
+    return result;
+  }
 
   get binding() {
     return this.state;
@@ -119,16 +125,21 @@ export class MediaSession {
     this.devices = devices;
     void this.cameraSources?.update(devices, retryFailed);
   }
+
+  revokeDevices(ids: readonly string[]) {
+    this.playback.releaseForDevices(ids);
+  }
   retryBinding() {
     this.bindingRetry.cancel();
     return this.startBinding();
   }
 
   async initialize() {
-    await this.dependencies.serial(async () => {
-      if (!this.dependencies.acceptsWork()) return;
+    await this.serial(async () => {
+      if (this.closing || !this.dependencies.acceptsWork()) return;
       try {
         const url = await this.serviceUrl();
+        if (this.closing || !this.dependencies.acceptsWork()) return;
         this.desiredMediaUrl = url;
         this.mediaAdapter = this.newAdapter(url);
         await mijiaOperation("reset", "internal_error", () =>
@@ -147,18 +158,20 @@ export class MediaSession {
     this.scheduleConfigurationCheck();
   }
 
-  async close() {
+  close() {
+    if (this.closing) return this.closing;
     clearTimeout(this.configurationTimer);
     this.cleanupRetry.cancel();
     this.cancelBinding();
     this.devices = [];
     this.invalidateMedia();
     this.mediaAdapter?.revoke();
-    await this.dependencies.serial(() => this.clearAdapter());
+    this.closing = this.serial(() => this.releaseAdapter());
+    return this.closing;
   }
 
   private scheduleConfigurationCheck() {
-    if (this.dependencies.stopped()) return;
+    if (this.closing || this.dependencies.stopped()) return;
     clearTimeout(this.configurationTimer);
     this.configurationTimer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
@@ -200,20 +213,34 @@ export class MediaSession {
   }
 
   private queueCleanup(adapter: Go2RtcAdapter) {
-    // This can be requested from inside the account commit queue. Enqueue without
-    // awaiting that queue, and never let an old cleanup close a replacement.
-    void this.dependencies
-      .serial(async () => {
-        if (this.dependencies.stopped() || this.mediaAdapter !== adapter)
-          return;
-        await this.clearAdapter();
+    // Cleanup stays ordered with media installation without holding account writes.
+    if (
+      this.closing ||
+      this.dependencies.stopped() ||
+      this.mediaAdapter !== adapter
+    )
+      return;
+    void this.clearAdapter()
+      .then(() => {
         if (this.state.status === "unbound" && !this.configurationUnavailable)
           void this.startBinding();
       })
       .catch(() => {});
   }
 
-  async clearAdapter() {
+  clearAdapter() {
+    const adapter = this.mediaAdapter;
+    if (!adapter) return this.serial(() => this.releaseAdapter());
+    const pending = this.cleanupTasks.get(adapter);
+    if (pending) return pending;
+    const task = this.serial(async () => {
+      if (this.mediaAdapter === adapter) await this.releaseAdapter();
+    }).finally(() => this.cleanupTasks.delete(adapter));
+    this.cleanupTasks.set(adapter, task);
+    return task;
+  }
+
+  private async releaseAdapter() {
     const adapter = this.mediaAdapter;
     if (!adapter) return;
     // Retain the previous instance until cleanup succeeds, even if YAML changed.
@@ -226,7 +253,11 @@ export class MediaSession {
         error: failure.toPayload(),
       };
       this.state = this.cleanupFailureState;
-      if (!this.dependencies.stopped() && this.mediaAdapter === adapter)
+      if (
+        !this.closing &&
+        !this.dependencies.stopped() &&
+        this.mediaAdapter === adapter
+      )
         this.cleanupRetry.schedule(() => this.queueCleanup(adapter));
       throw failure;
     }
@@ -254,12 +285,12 @@ export class MediaSession {
   }
 
   private async applyConfiguration() {
-    if (!this.dependencies.canReconfigure()) return;
+    if (this.closing || !this.dependencies.canReconfigure()) return;
     let url: string;
     try {
       url = await this.serviceUrl();
     } catch {
-      if (!this.dependencies.canReconfigure()) return;
+      if (this.closing || !this.dependencies.canReconfigure()) return;
       if (!this.configurationUnavailable) {
         this.configurationUnavailable = true;
         this.cancelBinding();
@@ -268,14 +299,14 @@ export class MediaSession {
           status: "error",
           error: new MijiaError("go2rtc_unavailable").toPayload(),
         };
-        await this.dependencies.serial(async () => {
+        await this.serial(async () => {
           if (this.configurationUnavailable)
-            await this.clearAdapter().catch(() => {});
+            await this.releaseAdapter().catch(() => {});
         });
       }
       return;
     }
-    if (!this.dependencies.canReconfigure()) return;
+    if (this.closing || !this.dependencies.canReconfigure()) return;
     if (url === this.desiredMediaUrl && !this.configurationUnavailable) return;
     this.desiredMediaUrl = url;
     this.configurationUnavailable = false;
@@ -288,6 +319,7 @@ export class MediaSession {
   private currentBinding(task: BindingTask) {
     return (
       this.bindingTask === task &&
+      !this.closing &&
       this.dependencies.currentAccount() === task.account &&
       this.dependencies.acceptsWork()
     );
@@ -335,6 +367,7 @@ export class MediaSession {
   startBinding() {
     const account = this.dependencies.currentAccount();
     if (
+      this.closing ||
       !account ||
       !this.dependencies.acceptsWork() ||
       !this.dependencies.canBind()
@@ -350,19 +383,17 @@ export class MediaSession {
     this.bindingRecoveryError = undefined;
     this.invalidateMedia();
     this.state = { status: "installing" };
-    task.promise = this.dependencies
-      .serial(async () => {
-        if (this.currentBinding(task)) await this.installAccount(task);
-      })
-      .finally(() => {
-        if (this.bindingTask === task) this.bindingTask = undefined;
-      });
+    task.promise = this.serial(async () => {
+      if (this.currentBinding(task)) await this.installAccount(task);
+    }).finally(() => {
+      if (this.bindingTask === task) this.bindingTask = undefined;
+    });
     return task.promise;
   }
 
   private async installAccount(task: BindingTask) {
     try {
-      await this.clearAdapter();
+      await this.releaseAdapter();
       if (!this.currentBinding(task)) return;
       const url = await this.serviceUrl();
       if (!this.currentBinding(task)) return;

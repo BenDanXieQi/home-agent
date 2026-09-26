@@ -1,6 +1,7 @@
 import {
   deviceSchema,
   entityKey,
+  initialSpecification,
   snapshotSchema,
 } from "@home-agent/api/household";
 
@@ -29,6 +30,7 @@ export function householdSnapshot() {
       },
       household: {
         household: {
+          provider: "mijia",
           account_id: accountId,
           home_id: "home-1",
           status: "running",
@@ -36,7 +38,6 @@ export function householdSnapshot() {
           homes: {
             selectedHomeId: "home-1",
             status: "selected",
-            items: [{ id: "home-1", name: "家", shared: false }],
           },
           sync_status: "synced",
           cloud_synced_at: timestamp,
@@ -53,10 +54,6 @@ export function householdSnapshot() {
       home: {},
       room: {},
       device: {},
-      spec: {},
-      latest: {},
-      source_health: {},
-      rule_status: {},
     },
   });
 }
@@ -78,7 +75,7 @@ export function device(
     online: true,
     camera: false,
     channels: [],
-    spec_id: null,
+    ...initialSpecification,
     last_seen_at: timestamp,
     archived: false,
     category: null,

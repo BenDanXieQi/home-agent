@@ -46,7 +46,7 @@ test("property observations follow the selected home while directory notificatio
     "device/device-a/state/#",
     "device/device-a/up/properties_changed/#",
   ]);
-  // Keep these SUBACKs pending so the later home switch must also reject late confirmations.
+  // Keep these SUBACKs pending so the later logout must also reject late confirmations.
   old.publish(11, "device-a");
   old.publish(22, "device-b");
   old.publish(33, "stable");
@@ -67,55 +67,20 @@ test("property observations follow the selected home while directory notificatio
   });
   expect(h.service.directoryPushStatus().received).toBe(received + 1);
 
-  h.runtime.selectHome(h.runtime.epoch, "home-b");
-  await eventually(
-    () =>
-      h.runtime.ready &&
-      h.runtime.snapshot().projection.household.household.home_id ===
-        "home-b" &&
-      h.mqtt.transports.length === 2,
-  );
-  const current = h.mqtt.transports[1]!;
-  current.connected();
-  for (let index = 0; index < current.subscriptions.length; index++)
-    current.ack(index);
-  expect(current.subscriptions.map(({ topic }) => topic).toSorted()).toEqual(
-    directoryTopics,
-  );
-  expect(old.end).toHaveBeenCalledTimes(1);
-
-  const currentEvents: MiotObservation[] = [];
-  const watch = await h.service.observeDevices(
-    ["device-b"],
-    (event) => currentEvents.push(event),
-    new AbortController().signal,
-  );
-  expect(
-    current.subscriptions
-      .slice(directoryTopics.length)
-      .map(({ topic }) => topic)
-      .toSorted(),
-  ).toEqual([
-    "device/device-b/state/#",
-    "device/device-b/up/properties_changed/#",
-  ]);
+  await expect(
+    h.runtime.selectHome(h.runtime.epoch, "home-b"),
+  ).rejects.toMatchObject({ reason: "binding_conflict" });
+  expect(h.mqtt.transports).toHaveLength(1);
+  await h.runtime.logout();
   for (
     let index = directoryTopics.length;
     index < old.subscriptions.length;
     index++
   )
     old.ack(index);
-  for (
-    let index = directoryTopics.length;
-    index < current.subscriptions.length;
-    index++
-  )
-    current.ack(index);
   old.publish(44, "device-a");
-  old.publish(55, "device-b");
-  current.publish(66, "device-a");
-  current.publish(77, "device-b");
   await nextTurn();
+  expect(old.end).toHaveBeenCalledTimes(1);
   expect(oldEvents.filter((event) => event.kind === "property")).toEqual([
     expect.objectContaining({ did: "device-a", value: 11 }),
   ]);
@@ -124,18 +89,7 @@ test("property observations follow the selected home while directory notificatio
       (event) => event.kind === "subscription" && event.status === "confirmed",
     ),
   ).toEqual([]);
-  expect(currentEvents.filter((event) => event.kind === "property")).toEqual([
-    expect.objectContaining({
-      did: "device-b",
-      value: 77,
-      collection_generation: watch.snapshot().generation,
-    }),
-  ]);
-  await expect(
-    h.service.observeDevices(
-      ["device-a"],
-      () => {},
-      new AbortController().signal,
-    ),
-  ).rejects.toMatchObject({ reason: "device_not_found" });
+  expect(h.runtime.snapshot().projection.household.household.home_id).toBe(
+    "home-a",
+  );
 });

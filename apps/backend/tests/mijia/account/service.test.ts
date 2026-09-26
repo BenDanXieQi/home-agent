@@ -65,6 +65,7 @@ function harness(
   service.attachHousehold({
     restore: async () => {},
     commit,
+    revoke: (_candidate, assert) => assert(),
     ready: () => false,
     specification: () => {
       throw new Error("No property capability in account fixture");
@@ -99,7 +100,7 @@ describe("account persistence and access ownership", () => {
 
   test.each([
     ["no selection and one home", undefined, 1, "home-1", 1],
-    ["explicitly disconnected home", { homeId: null }, 1, null, 0],
+    ["saved binding", { homeId: "home-1" }, 1, "home-1", 0],
     ["multiple homes", undefined, 2, null, 0],
   ] as const)(
     "default selection respects %s",

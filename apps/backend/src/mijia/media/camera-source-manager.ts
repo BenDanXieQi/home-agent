@@ -13,6 +13,7 @@ type CameraSourceEntry = {
   pending: Promise<void>;
   prepared: boolean;
   retiring: boolean;
+  controller: AbortController;
   retry: RetryTimer;
   error?: MijiaError;
 };
@@ -55,6 +56,7 @@ export class CameraSourceManager {
   dispose() {
     this.closed = true;
     this.pause();
+    for (const stream of this.streams.values()) stream.controller.abort();
     this.streams.clear();
     this.devices.clear();
   }
@@ -103,6 +105,7 @@ export class CameraSourceManager {
         pending: Promise.resolve(),
         prepared: false,
         retiring: false,
+        controller: new AbortController(),
         retry: new RetryTimer(),
       };
       this.streams.set(key, next);
@@ -126,6 +129,7 @@ export class CameraSourceManager {
     if (this.paused || !this.current(key, stream)) return;
     // DELETE retires the previous ID even when the failed PUT response was lost.
     stream.id = crypto.randomUUID();
+    stream.controller = new AbortController();
     stream.prepared = false;
     delete stream.error;
     stream.pending = this.prepareStream(key, stream);
@@ -140,9 +144,13 @@ export class CameraSourceManager {
       await removed;
       if (!this.current(key, stream)) return;
       try {
-        await this.adapter.prepareCamera(stream.id, stream.device);
+        await this.adapter.prepareCamera(
+          stream.id,
+          stream.device,
+          stream.controller.signal,
+        );
       } catch (error) {
-        await this.remove(stream.id);
+        if (!stream.controller.signal.aborted) await this.remove(stream.id);
         throw error;
       }
       if (this.current(key, stream)) {
@@ -178,6 +186,7 @@ export class CameraSourceManager {
   private retire(key: string, stream: CameraSourceEntry) {
     if (stream.retiring) return stream.pending;
     stream.retiring = true;
+    stream.controller.abort();
     stream.retry.cancel();
     this.playback.releaseForSource(this.adapter, stream.id);
     const prepared = stream.pending;

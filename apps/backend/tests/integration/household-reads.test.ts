@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { MijiaError } from "../../src/mijia/errors";
 import { MiCloudError } from "../../src/mijia/protocols/micloud";
 import { deferred, eventually } from "../support/async";
@@ -51,6 +51,68 @@ async function holdRead(h: Awaited<ReturnType<typeof runningHousehold>>) {
 }
 
 describe("running household read authorization", () => {
+  test("source notifications use a detached public view without materializing the device list", async () => {
+    const h = await household();
+    const full = h.service.snapshot();
+    expect(full.devices.items).toHaveLength(2);
+    const snapshot = spyOn(h.service, "snapshot");
+    releases.push(() => snapshot.mockRestore());
+    const version = h.runtime.version();
+
+    h.service.flushChanges();
+    const source = h.service.sourceSnapshot();
+    expect(snapshot).not.toHaveBeenCalled();
+    expect(h.runtime.version()).toEqual(version);
+    expect(source).toMatchObject({
+      accountId: h.service.identity(),
+      account: full.account,
+      homes: full.homes,
+      revision: full.revision,
+      binding: full.binding,
+      login: h.service.loginPublic(),
+      directory: { status: "ready" },
+    });
+    expect(source).not.toHaveProperty("devices");
+    expect(source).not.toHaveProperty("loginAttempt");
+    expect(source.directory).not.toHaveProperty("items");
+
+    source.homes.items[0]!.name = "Changed by reader";
+    if (source.account.status === "authenticated" && source.account.profile)
+      source.account.profile.name = "Changed by reader";
+    expect(h.service.sourceSnapshot().homes).toEqual(full.homes);
+    expect(h.service.sourceSnapshot().account).toEqual(full.account);
+  });
+
+  test("missing room-member details cannot revoke an in-flight read", async () => {
+    const h = await household();
+    const pending = await holdRead(h);
+    const original = householdCatalog();
+    const next = {
+      ...original,
+      homes: original.homes.map((home) =>
+        home.id === "home-a"
+          ? {
+              ...home,
+              deviceIds: ["stable"],
+              rooms: [
+                { id: "room-a", name: "Room A", deviceIds: ["device-a"] },
+              ],
+            }
+          : home,
+      ),
+      devices: original.devices.filter((device) => device.did !== "device-a"),
+    };
+    h.catalog.mockResolvedValue(next);
+    await h.service.loadDevices();
+    expect(pending.signal?.aborted).toBe(false);
+    expect(h.runtime.ready).toBe(true);
+    pending.release();
+    expect(await pending.outcome).toMatchObject({
+      accepted: true,
+      observations: [{ status: "success", value: 99 }],
+    });
+  });
+
   test("a complete directory revokes in-flight and new device access before a failed save", async () => {
     const h = await household();
     expect(await read(h)).toMatchObject([{ status: "success", value: 21 }]);
@@ -71,74 +133,36 @@ describe("running household read authorization", () => {
         .storage_degraded,
     ).toBe(true);
     await expect(read(h)).rejects.toMatchObject({ reason: "device_not_found" });
-    await expect(read(h, "new-device")).rejects.toMatchObject({
-      reason: "device_not_found",
-    });
     pending.release();
+    await eventually(() =>
+      Object.values(h.runtime.snapshot().projection.device).some(
+        (device) =>
+          device.id === "new-device" && device.spec_status === "ready",
+      ),
+    );
+    expect(await read(h, "new-device")).toMatchObject([{ status: "success" }]);
     expect(await read(h, "stable")).toMatchObject([
       { status: "success", value: 21 },
     ]);
   });
 
-  test("a failed home-selection save leaves the target visible but neither household can authorize reads", async () => {
+  test("a rejected home change leaves current reads authorized", async () => {
     const h = await household();
     const pending = await holdRead(h);
     const epoch = h.runtime.epoch;
-    h.homes.write.mockRejectedValueOnce(new MijiaError("home_storage"));
-    h.runtime.selectHome(epoch, "home-b");
-    await eventually(
-      () =>
-        h.runtime.snapshot().projection.household.household.sync_status ===
-        "error",
-    );
-
-    expect(h.runtime.epoch).not.toBe(epoch);
-    expect(h.runtime.ready).toBe(false);
-    expect(h.runtime.snapshot().projection.household.household).toMatchObject({
-      status: "initializing",
-      stage: "selection",
-      home_id: "home-b",
+    await expect(h.runtime.selectHome(epoch, "home-b")).rejects.toMatchObject({
+      reason: "binding_conflict",
     });
-    expect(pending.signal?.aborted).toBe(true);
-    expect(await pending.outcome).toMatchObject({ accepted: false });
-    await expect(read(h)).rejects.toMatchObject({ reason: "devices_failed" });
-    await expect(read(h, "device-b")).rejects.toMatchObject({
-      reason: "devices_failed",
-    });
-    await expect(
-      h.service.observeDevices(
-        ["device-a"],
-        () => {},
-        new AbortController().signal,
-      ),
-    ).rejects.toMatchObject({ reason: "devices_failed" });
-    expect(() =>
-      h.service.reservePlayback(h.service.snapshot().revision, "device-a", 1),
-    ).toThrow(new MijiaError("devices_failed"));
-    expect(h.service.homes().selectedHomeId).toBe("home-a");
+    expect(h.runtime.epoch).toBe(epoch);
+    expect(h.runtime.ready).toBe(true);
+    expect(pending.signal?.aborted).toBe(false);
     pending.release();
-
-    expect(() => h.runtime.requestRefresh(h.runtime.epoch, "specs")).toThrow(
-      new MijiaError("invalid_state"),
-    );
-    h.runtime.requestRefresh(h.runtime.epoch, "directory");
-    await eventually(
-      () =>
-        h.runtime.ready &&
-        h.runtime.snapshot().projection.household.household.home_id ===
-          "home-b" &&
-        Object.values(h.runtime.snapshot().projection.spec).some(
-          (spec) => spec.status === "ready",
-        ),
-    );
-    expect(h.homes.write.mock.calls.map(([, homeId]) => homeId)).toEqual([
-      "home-b",
-      "home-b",
-    ]);
-    expect(await read(h, "device-b")).toMatchObject([
-      { status: "success", value: 21 },
-    ]);
-    await expect(read(h)).rejects.toMatchObject({ reason: "device_not_found" });
+    expect(await pending.outcome).toMatchObject({ accepted: true });
+    expect(await read(h)).toMatchObject([{ status: "success" }]);
+    await expect(read(h, "device-b")).rejects.toMatchObject({
+      reason: "device_not_found",
+    });
+    expect(h.homes.write).not.toHaveBeenCalled();
   });
 
   test("an ordinary directory refresh error keeps a confirmed household readable", async () => {

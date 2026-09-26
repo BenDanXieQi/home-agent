@@ -65,7 +65,7 @@ bun --env-file=.env apps/backend/dist/main.js --config ./local-config/config.yam
 
 ### 连接状态与访问范围
 
-服务设置页约每 10 秒检查 Agent `/health` 与 go2rtc `/api`，每项限时 3 秒。**已连接只表示服务接口可用，不代表模型、米家授权或摄像头出流已就绪。** go2rtc `/api` 的 `revision` 是构建版本信息，与米家的媒体代次无关。米家绑定、共享流和浏览器出帧的区别见[组件与资源](mijia.md#组件与资源)。
+服务设置页约每 10 秒检查 Agent `/health` 与 go2rtc `/api`，每项限时 3 秒。**已连接只表示服务接口可用，不代表模型、米家授权或摄像头出流已就绪。** go2rtc `/api` 的 `revision` 是构建版本信息，与米家的媒体运行标识无关。米家绑定、共享流和浏览器出帧的区别见[组件与资源](mijia.md#组件与资源)。
 
 设置页管理已运行服务的地址，并提供摄像头接入重试；扫码、重新扫码与退出登录见[米家与摄像头](mijia.md)。接口结构和探测协议见 [Backend](../apps/backend/README.md#连接配置与探测)。
 

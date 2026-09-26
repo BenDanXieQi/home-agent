@@ -27,6 +27,13 @@ export function createDeviceLogRoutes(logs: DevicePushLogs) {
       });
     })
     .get("/events", async (c) => {
+      // HEAD must not create a stream whose discarded body has no reader.
+      if (c.req.method === "HEAD")
+        return c.body(null, 200, {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-store",
+          "X-Accel-Buffering": "no",
+        });
       await logs.ready;
       if (connections >= 8) return c.body(null, 503);
       connections++;

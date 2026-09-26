@@ -35,18 +35,5 @@ export const mijiaDeviceSpecSchema = z.object({
   category: z.string().nullable(),
   spec: z.record(z.string(), mijiaCapabilitySchema),
 });
-export const mijiaHomeSchema = z.object({
-  home_name: z.string().nullable(),
-  devices: z.array(
-    mijiaDeviceSpecSchema.extend({
-      sub_devices: z.record(z.string(), z.string()).nullable(),
-    }),
-  ),
-  areas: z.array(z.object({ name: z.string() })),
-  // These domains are not connected yet; no records are fabricated.
-  scenes: z.array(z.never()),
-  persons: z.array(z.never()),
-});
 export type MijiaCapability = z.infer<typeof mijiaCapabilitySchema>;
 export type MijiaDeviceSpec = z.infer<typeof mijiaDeviceSpecSchema>;
-export type MijiaHome = z.infer<typeof mijiaHomeSchema>;

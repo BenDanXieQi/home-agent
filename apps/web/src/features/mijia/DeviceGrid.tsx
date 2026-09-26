@@ -7,9 +7,19 @@ import { m, AnimatePresence } from "motion/react";
 import {
   deviceSearchAtom,
   deviceFilterAtom,
+  deviceFiltersAtom,
+  deviceFilterOptionsAtom,
   filteredDevicesAtom,
 } from "./state";
 import type { MijiaState } from "@home-agent/api/mijia";
+
+const capabilityOptions = [
+  { value: "readable", label: "可读取" },
+  { value: "writeable", label: "可写入" },
+  { value: "notify", label: "属性通知" },
+  { value: "action", label: "设备动作" },
+  { value: "event", label: "设备事件" },
+];
 export const DeviceGrid = memo(function DeviceGrid({
   status,
   reliable,
@@ -19,7 +29,15 @@ export const DeviceGrid = memo(function DeviceGrid({
 }) {
   const [search, setSearch] = useAtom(deviceSearchAtom);
   const [filter, setFilter] = useAtom(deviceFilterAtom);
+  const [filters, setFilters] = useAtom(deviceFiltersAtom);
+  const options = useAtomValue(deviceFilterOptionsAtom);
   const devices = useAtomValue(filteredDevicesAtom);
+  const hasFilters =
+    search ||
+    filter !== "all" ||
+    filters.room ||
+    filters.category ||
+    filters.capability;
   return (
     <Tabs.Root value={filter} onValueChange={setFilter}>
       <div className="device-filters">
@@ -27,6 +45,7 @@ export const DeviceGrid = memo(function DeviceGrid({
           {[
             { value: "all", label: "全部" },
             { value: "online", label: "在线" },
+            { value: "offline", label: "离线" },
             { value: "unknown", label: "未知" },
             { value: "camera", label: "摄像头" },
           ].map((item) => (
@@ -39,10 +58,76 @@ export const DeviceGrid = memo(function DeviceGrid({
           <Search size={14} />
           <input
             aria-label="搜索设备"
-            placeholder="搜索名称或型号"
+            placeholder="搜索名称、别名或型号"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+        </label>
+      </div>
+      <div className="device-refinements">
+        <label>
+          房间
+          <select
+            value={filters.room}
+            onChange={(event) =>
+              setFilters({ ...filters, room: event.target.value })
+            }
+          >
+            <option value="">全部房间</option>
+            {filters.room &&
+            !options.rooms.some(([value]) => value === filters.room) ? (
+              <option value={filters.room}>原房间已移除</option>
+            ) : null}
+            {options.rooms.map(([value, name]) => (
+              <option key={value} value={value}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          分类
+          <select
+            value={filters.category}
+            onChange={(event) =>
+              setFilters({ ...filters, category: event.target.value })
+            }
+          >
+            <option value="">全部分类</option>
+            {filters.category &&
+            !options.categories.some(
+              ([value]) => value === filters.category,
+            ) ? (
+              <option value={filters.category}>原分类已移除</option>
+            ) : null}
+            {options.categories.map(([value, name]) => (
+              <option key={value} value={value}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          能力
+          <select
+            value={filters.capability}
+            onChange={(event) =>
+              setFilters({ ...filters, capability: event.target.value })
+            }
+          >
+            <option value="">全部能力</option>
+            {capabilityOptions
+              .filter(
+                ({ value }) =>
+                  options.capabilities.has(value) ||
+                  value === filters.capability,
+              )
+              .map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+          </select>
         </label>
       </div>
       <Tabs.Content value={filter}>
@@ -110,12 +195,12 @@ export const DeviceGrid = memo(function DeviceGrid({
             <h2>
               {status === "loading"
                 ? "正在读取设备…"
-                : search || filter !== "all"
+                : hasFilters
                   ? "没有匹配的设备"
                   : "所选家庭没有设备"}
             </h2>
             <p>
-              {search || filter !== "all"
+              {hasFilters
                 ? "试试其他名称或筛选条件。"
                 : "请确认家庭选择，或刷新设备列表。"}
             </p>

@@ -12,6 +12,7 @@ import type { ConnectionStore } from "./connections/store";
 import { createConnectionStatusRoutes } from "./connections/status";
 import { createMijiaRoutes } from "./mijia/routes";
 import type { HouseholdRuntime } from "./household/runtime";
+import type { MijiaService } from "./mijia/service";
 import type { DevicePushLogs } from "./household/device-logs";
 
 type AppDependencies = {
@@ -19,6 +20,7 @@ type AppDependencies = {
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
   connectionStore: ConnectionStore;
   household: HouseholdRuntime;
+  mijiaService: MijiaService;
   deviceLogs: DevicePushLogs;
   readAgentUrl: () => Promise<string>;
 };
@@ -28,6 +30,7 @@ export function createApp({
   environment,
   connectionStore,
   household,
+  mijiaService,
   deviceLogs,
   readAgentUrl,
 }: AppDependencies) {
@@ -77,7 +80,12 @@ export function createApp({
     )
     .route(
       "/api/mijia",
-      createMijiaRoutes(environment.BACKEND_PORT, household, deviceLogs),
+      createMijiaRoutes(
+        environment.BACKEND_PORT,
+        household,
+        deviceLogs,
+        mijiaService,
+      ),
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));

@@ -15,6 +15,7 @@ import {
   householdSyncedAtom,
   householdUpdatedAtom,
   householdReconnectAtom,
+  householdSnapshotReceivedAtom,
 } from "./household-state";
 
 /** One subscription per app/ tab. Commands never write public state. */
@@ -25,9 +26,24 @@ export function subscribeHousehold() {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let delay = 1_000;
   let lastMessage = 0;
-  let retryAfter = 0;
+  let nextAllowedAt = 0;
+  function scheduleReconnect() {
+    nextAllowedAt = Math.max(
+      nextAllowedAt,
+      Date.now() + delay + Math.random() * 250,
+    );
+    delay = Math.min(delay * 2, 30_000);
+    void connect();
+  }
   async function connect() {
     if (stopped) return;
+    clearTimeout(timer);
+    const wait = nextAllowedAt - Date.now();
+    if (wait > 0) {
+      // Longer server deadlines need multiple waits within the browser timer limit.
+      timer = setTimeout(() => void connect(), Math.min(wait, 2_147_483_647));
+      return;
+    }
     const current = new AbortController();
     controller = current;
     let timeout = setTimeout(() => current.abort(), 10_000);
@@ -57,6 +73,7 @@ export function subscribeHousehold() {
             case "snapshot": {
               const snapshot = snapshotSchema.parse(data);
               appStore.set(householdSnapshotAtom, snapshot);
+              appStore.set(householdSnapshotReceivedAtom, (count) => count + 1);
               hasSnapshot = true;
               clearTimeout(stable);
               stable = setTimeout(() => {
@@ -96,7 +113,10 @@ export function subscribeHousehold() {
             }
             case "resync_required": {
               const hint = resyncSchema.parse(data);
-              retryAfter = Math.max(retryAfter, hint.retry_after_ms ?? 0);
+              nextAllowedAt = Math.max(
+                nextAllowedAt,
+                Date.now() + (hint.retry_after_ms ?? 0),
+              );
               if (hint.reason === "scope_changed" || hint.reason === "stopping")
                 appStore.set(householdSnapshotAtom, undefined);
               throw new Error("Resync");
@@ -118,10 +138,15 @@ export function subscribeHousehold() {
         {},
         { init: { signal: current.signal, cache: "no-store" } },
       );
+      if (!active()) {
+        await response.body?.cancel();
+        return;
+      }
       if (response.status === 503) {
-        retryAfter = Math.max(
-          retryAfter,
-          parseRetryAfter(response.headers.get("Retry-After")) ?? 30_000,
+        nextAllowedAt = Math.max(
+          nextAllowedAt,
+          Date.now() +
+            (parseRetryAfter(response.headers.get("Retry-After")) ?? 30_000),
         );
       }
       if (
@@ -149,15 +174,9 @@ export function subscribeHousehold() {
       reader?.releaseLock();
       parser.reset();
       if (controller === current) {
+        controller = undefined;
         appStore.set(householdSyncedAtom, false);
-        if (!stopped) {
-          timer = setTimeout(
-            () => void connect(),
-            Math.max(retryAfter, delay + Math.random() * 250),
-          );
-          retryAfter = 0;
-          delay = Math.min(delay * 2, 30_000);
-        }
+        if (!stopped) scheduleReconnect();
       }
     }
   }
@@ -168,7 +187,8 @@ export function subscribeHousehold() {
     controller = undefined;
     previous?.abort();
     appStore.set(householdSyncedAtom, false);
-    void connect();
+    if (previous) scheduleReconnect();
+    else void connect();
   };
   const visibility = () => {
     if (

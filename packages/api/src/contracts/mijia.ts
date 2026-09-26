@@ -1,8 +1,6 @@
 export {
   mijiaDeviceSpecSchema,
-  mijiaHomeSchema,
   type MijiaDeviceSpec,
-  type MijiaHome,
   type MijiaCapability,
 } from "./mijia-spec";
 import { z } from "zod";

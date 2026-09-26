@@ -23,6 +23,7 @@ type Playback = {
   phase: "negotiating" | "active";
   id: string;
   revision: string;
+  deviceId: string;
   offerFingerprint: string;
   result: Promise<MijiaPlaybackResponse>;
   answer?: MijiaPlaybackResponse;
@@ -107,6 +108,13 @@ export class PlaybackManager {
     }
   }
 
+  releaseForDevices(ids: readonly string[]) {
+    const revoked = new Set(ids);
+    for (const entry of this.entries.values())
+      if (revoked.has(entry.deviceId))
+        void this.release(entry.id).catch(() => {});
+  }
+
   releaseForSource(adapter: Go2RtcAdapter, sourceId: string) {
     for (const entry of this.entries.values()) {
       if (
@@ -144,6 +152,7 @@ export class PlaybackManager {
       phase: "negotiating",
       id,
       revision,
+      deviceId: entry.deviceId,
       offerFingerprint,
       controller: new AbortController(),
       result: Promise.resolve().then(() =>

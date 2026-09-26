@@ -19,7 +19,6 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
     reliable,
     canPlay,
     confirming,
-    fetching,
     fetchError,
     actionError,
     action,
@@ -28,9 +27,11 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
   } = useMijia();
   const snapshot = useAtomValue(householdSnapshotAtom);
   const household = snapshot?.projection.household.household;
-  const homeName = state?.homes.items.find(
-    (home) => home.id === state.homes.selectedHomeId,
-  )?.name;
+  const homeName =
+    snapshot &&
+    Object.values(snapshot.projection.home).find(
+      (home) => home.home_id === household?.home_id,
+    )?.name;
   const count =
     state?.devices.status === "ready"
       ? view === "devices"
@@ -48,7 +49,7 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
           {count !== null ? <span className="count-badge">{count}</span> : null}
         </div>
         <Button
-          disabled={fetching || !!action}
+          disabled={!snapshot || !!action}
           onClick={() => void perform({ type: "refreshDevices" })}
         >
           <RefreshCw size={13} />
@@ -73,9 +74,13 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
           {state.homes.status === "unavailable"
             ? "所选家庭已不可访问。"
             : "尚未选择要接入的家庭。"}
-          <Link to="/settings" className="underline">
-            前往设置选择家庭
-          </Link>
+          {household?.home_id === null ? (
+            <Link to="/settings" className="underline">
+              前往设置选择家庭
+            </Link>
+          ) : (
+            "请恢复原账号的家庭访问权限后重试。"
+          )}
         </p>
       ) : null}
       <RequestFeedback
@@ -110,14 +115,15 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
               {state.binding.status === "error" ? (
                 <div className="notice notice-error" role="alert">
                   <span>{state.binding.error.message}</span>
-                  <RetryConnectionButton disabled={!reliable} />
+                  <RetryConnectionButton />
                 </div>
               ) : state.binding.status === "installing" ? (
                 <output className="notice">正在连接摄像头服务…</output>
               ) : null}
               <CameraWall
                 key={snapshot?.scope_epoch}
-                state={state}
+                devices={state.devices}
+                revision={state.revision}
                 ready={canPlay}
                 confirming={confirming}
               />

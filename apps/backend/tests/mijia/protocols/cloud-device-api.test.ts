@@ -203,4 +203,19 @@ describe("MiCloud device API boundary", () => {
     });
     expect(pages).toBe(2);
   });
+
+  test("preserves missing membership references for household-scoped completeness validation", async () => {
+    const { client } = cloudDeviceApi((path) => {
+      if (path === "/app/v2/homeroom/gethome")
+        return {
+          homelist: [
+            { id: "home", name: "Home", dids: ["a", "b"], roomlist: [] },
+          ],
+        };
+      return { list: [{ did: "a" }], has_more: false };
+    });
+    const catalog = await client.getCatalog();
+    expect(catalog.homes[0]?.deviceIds).toEqual(["a", "b"]);
+    expect(catalog.devices.map((device) => device.did)).toEqual(["a"]);
+  });
 });

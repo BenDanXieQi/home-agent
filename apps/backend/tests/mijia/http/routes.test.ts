@@ -1,10 +1,12 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { HouseholdRuntime } from "../../../src/household/runtime";
+import { createMijiaHousehold } from "../../../src/mijia/household";
+import type { HouseholdRuntime } from "../../../src/household/runtime";
+import { householdLimits } from "../../../src/household/config";
 import { DevicePushLogs } from "../../../src/household/device-logs";
 import { MijiaService } from "../../../src/mijia/service";
 import { createMijiaRoutes } from "../../../src/mijia/routes";
@@ -28,6 +30,7 @@ afterEach(async () => {
   for (const directory of logDirectories.splice(0))
     await rm(directory, { recursive: true, force: true });
   mock.restore();
+  jest.useRealTimers();
 });
 
 function harness() {
@@ -38,16 +41,16 @@ function harness() {
       throw new Error("No media configuration in HTTP fixture");
     },
   });
-  const runtime = new HouseholdRuntime(service, undefined);
+  const runtime = createMijiaHousehold(service, undefined);
   runtimes.push(runtime);
   runtime.start();
   const directory = mkdtempSync(join(tmpdir(), "home-agent-routes-"));
   logDirectories.push(directory);
-  const logs = new DevicePushLogs(runtime, directory);
+  const logs = new DevicePushLogs(runtime, directory, service);
   logStores.push(logs);
   const app = new Hono().route(
     "/api/mijia",
-    createMijiaRoutes(4000, runtime, logs),
+    createMijiaRoutes(4000, runtime, logs, service),
   );
   async function request(
     path: string,
@@ -66,7 +69,7 @@ function harness() {
       { requestIP: () => ({ address, port: 50000, family: "IPv4" }) },
     );
   }
-  return { app, service, runtime, request };
+  return { app, service, runtime, logs, request };
 }
 
 function json(method: string, body: unknown) {
@@ -86,6 +89,115 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
     expect(catalog).not.toHaveBeenCalled();
+  });
+
+  test.each(["/events", "/logs/events"])(
+    "HEAD %s leaves the stream capacity available for GET",
+    async (path) => {
+      const h = harness();
+      await h.logs.ready;
+      const snapshot = spyOn(h.runtime, "snapshot");
+      const subscribe = spyOn(h.runtime, "subscribe");
+      const logs = spyOn(h.logs, "snapshot");
+      const heads = await Promise.all(
+        Array.from({ length: 32 }, () => h.request(path, { method: "HEAD" })),
+      );
+      for (const response of heads) {
+        expect(response.status).toBe(200);
+        expect(response.body).toBeNull();
+        expect(response.headers.get("content-type")).toBe("text/event-stream");
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("x-accel-buffering")).toBe("no");
+      }
+      expect(snapshot).not.toHaveBeenCalled();
+      expect(subscribe).not.toHaveBeenCalled();
+      expect(logs).not.toHaveBeenCalled();
+
+      const response = await h.request(path);
+      const reader = response.body?.getReader();
+      try {
+        expect(response.status).toBe(200);
+        const first = await reader?.read();
+        expect(new TextDecoder().decode(first?.value)).toStartWith(
+          "event: snapshot\n",
+        );
+      } finally {
+        await reader?.cancel();
+        reader?.releaseLock();
+      }
+    },
+  );
+
+  test("GET events enforces 16 connections and cancellation immediately returns one slot", async () => {
+    const h = harness();
+    const responses = await Promise.all(
+      Array.from({ length: 16 }, () => h.request("/events")),
+    );
+    try {
+      expect(responses.every((response) => response.status === 200)).toBe(true);
+      const full = await h.request("/events");
+      expect(full.status).toBe(503);
+      expect(full.headers.get("retry-after")).toBe("30");
+      await responses[0]!.body!.cancel();
+      const replacement = await h.request("/events");
+      responses.push(replacement);
+      expect(replacement.status).toBe(200);
+      await responses[0]!.body!.cancel();
+      expect((await h.request("/events")).status).toBe(503);
+    } finally {
+      await Promise.all(responses.map((response) => response.body?.cancel()));
+    }
+  });
+
+  test("blocked event writers detach at their deadline while a reading client keeps receiving", async () => {
+    jest.useFakeTimers();
+    const h = harness();
+    const detach = mock(() => {});
+    const subscribe = h.runtime.subscribe.bind(h.runtime);
+    spyOn(h.runtime, "subscribe").mockImplementation((listener) => {
+      const remove = subscribe(listener);
+      return () => {
+        remove();
+        detach();
+      };
+    });
+    const slow = await Promise.all(
+      Array.from({ length: 15 }, () => h.request("/events")),
+    );
+    const healthy = await h.request("/events");
+    const reader = healthy.body!.getReader();
+    const decoder = new TextDecoder();
+    try {
+      expect(decoder.decode((await reader.read()).value)).toStartWith(
+        "event: snapshot\n",
+      );
+      await nextTurn();
+      expect((await h.request("/events")).status).toBe(503);
+      const heartbeat = reader.read();
+      // Hono buffers the initial snapshot; the next write blocks only slow readers.
+      jest.advanceTimersByTime(householdLimits.heartbeatMs);
+      expect(decoder.decode((await heartbeat).value)).toStartWith(
+        "event: heartbeat\n",
+      );
+      await nextTurn();
+      jest.advanceTimersByTime(householdLimits.writeTimeoutMs - 1);
+      await nextTurn();
+      expect(detach).not.toHaveBeenCalled();
+      const nextHeartbeat = reader.read();
+      jest.advanceTimersByTime(1);
+      expect(decoder.decode((await nextHeartbeat).value)).toStartWith(
+        "event: heartbeat\n",
+      );
+      await nextTurn();
+      expect(detach).toHaveBeenCalledTimes(15);
+      const replacement = await h.request("/events");
+      slow.push(replacement);
+      expect(replacement.status).toBe(200);
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+      await Promise.all(slow.map((response) => response.body?.cancel()));
+    }
   });
 
   test.each([
@@ -155,7 +267,7 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     for (const [path, init] of [
       [
         "/scope/homes",
-        json("PUT", { scope_epoch: crypto.randomUUID(), home_id: null }),
+        json("PUT", { scope_epoch: crypto.randomUUID(), home_id: "home-a" }),
       ],
       [
         "/devices/refresh",

@@ -219,6 +219,50 @@ describe("one MQTT generation", () => {
 });
 
 describe("account watch recovery", () => {
+  test("revoking one device preserves peer topics and reconnect cannot restore its old watches", async () => {
+    const account = observeAccount();
+    const events: MiotObservation[] = [];
+    account.owner.observe(
+      ["123", "456"],
+      (event) => events.push(event),
+      new AbortController().signal,
+    );
+    await flushMicrotasks();
+    const wire = transport.transports[0]!;
+    wire.connected();
+    for (let index = 0; index < wire.subscriptions.length; index++)
+      wire.ack(index);
+    account.owner.revokeDevices(["123"]);
+    expect(wire.end).not.toHaveBeenCalled();
+    expect(wire.unsubscriptions.map(({ topic }) => topic).toSorted()).toEqual([
+      "device/123/state/#",
+      "device/123/up/properties_changed/#",
+    ]);
+    wire.publish(1, "123");
+    wire.publish(2, "456");
+    expect(events.filter((event) => event.kind === "property")).toMatchObject([
+      { did: "456", value: 2 },
+    ]);
+    wire.client.emit("close");
+    jest.advanceTimersByTime(1_000);
+    await flushMicrotasks();
+    const next = transport.transports[1]!;
+    next.connected();
+    expect(next.subscriptions.map(({ topic }) => topic).toSorted()).toEqual([
+      "device/456/state/#",
+      "device/456/up/properties_changed/#",
+    ]);
+    next.publish(3, "123");
+    next.publish(4, "456");
+    expect(account.events.filter((event) => event.kind === "property")).toEqual(
+      [],
+    );
+    expect(events.filter((event) => event.kind === "property")).toMatchObject([
+      { did: "456", value: 2 },
+      { did: "456", value: 4 },
+    ]);
+  });
+
   test("late SUBACK after cancellation cannot restore the old watcher or strand a replacement behind UNSUBACK", async () => {
     // MiLoCo tests subscribe/unsubscribe supersession; shared watchers also allow rejoining mid-unsubscribe.
     const account = observeAccount();

@@ -1,6 +1,6 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import { MiotMqtt, isMqttAuthenticationFailure } from "../protocols/miot/mqtt";
-import type { MiotObservation } from "../protocols/miot/messages";
+import { deviceTopics, type MiotObservation } from "../protocols/miot/messages";
 import { safeMijiaError } from "../errors";
 import { mijiaOperation } from "../operation";
 
@@ -174,6 +174,32 @@ export class AccountObservations {
       signal,
     );
   }
+  revokeDevices(ids: readonly string[]) {
+    const revoked = new Set(ids);
+    for (const watch of this.watches) {
+      if (watch.selection.kind !== "devices") continue;
+      const removed = watch.selection.ids.filter((id) => revoked.has(id));
+      if (!removed.length) continue;
+      watch.selection = {
+        kind: "devices",
+        ids: watch.selection.ids.filter((id) => !revoked.has(id)),
+      };
+      watch.binding?.removeTopics(removed.flatMap(deviceTopics));
+      if (!watch.selection.ids.length) this.removeWatch(watch);
+    }
+  }
+
+  private removeWatch(watch: Watch) {
+    watch.detach();
+    this.watches.delete(watch);
+    watch.binding?.cancel();
+    if (!this.watches.size) {
+      clearTimeout(this.timer);
+      this.timer = undefined;
+      void this.connection?.close("cancelled");
+    }
+  }
+
   private watch(
     selection: Watch["selection"],
     listener: Watch["listener"],
@@ -187,16 +213,7 @@ export class AccountObservations {
       signal,
       detach: () => signal.removeEventListener("abort", cancel),
     };
-    const cancel = () => {
-      watch.detach();
-      this.watches.delete(watch);
-      watch.binding?.cancel();
-      if (!this.watches.size) {
-        clearTimeout(this.timer);
-        this.timer = undefined;
-        void this.connection?.close("cancelled");
-      }
-    };
+    const cancel = () => this.removeWatch(watch);
     this.watches.add(watch);
     signal.addEventListener("abort", cancel, { once: true });
     if (this.connection && !this.connection.closed)
