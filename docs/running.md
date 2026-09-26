@@ -8,6 +8,8 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
+`bun run dev` 逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；数据库和所选模式的 go2rtc 已运行时跳过启动。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目记录的所有开发进程及依赖，不终止单独手动启动的应用。
+
 两种模式都需要 Docker，分别用于数据库和 go2rtc 构建／运行，无需本机安装 Go。首次构建需联网。模式切换由启动命令管理，会中断现有播放；不要同时手工启动另一套 go2rtc。
 
 go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `config/runtime/`，均不提交 Git。修改配置后用 `bun run stop`、`bun run dev` 重启。开发终端按 Ctrl+C 后依赖进程仍保持运行，但 backend 正常关闭会请求释放其 go2rtc 运行时会话和媒体资源；go2rtc 进程仍在不等于摄像头仍在取流。完整停止请用 `bun run stop`，异常退出的资源清理见[米家资源释放](mijia.md#资源释放)。

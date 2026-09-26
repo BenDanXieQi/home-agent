@@ -5,8 +5,8 @@ import { delimiter, dirname, resolve } from "node:path";
 import { parse } from "yaml";
 import {
   applicationStatus,
-  requireFreeApplicationPorts,
-  devOwner,
+  pendingApplications,
+  devOwners,
   startDev,
   stopDev,
 } from "./dev-runtime";
@@ -49,13 +49,13 @@ async function runDocker(arguments_: string[]) {
   });
   if (await child.exited) throw new Error("Docker 命令失败，未完成模式切换。");
 }
-async function dockerRunning() {
+async function dockerRunning(service: "go2rtc" | "db") {
   const child = Bun.spawn(
-    [docker!, "compose", "ps", "--status", "running", "-q", "go2rtc"],
+    [docker!, "compose", "ps", "--status", "running", "-q", service],
     { cwd: root, env, stdout: "pipe", stderr: "inherit" },
   );
   const output = await new Response(child.stdout).text();
-  if (await child.exited) throw new Error("无法检查 go2rtc 容器状态。");
+  if (await child.exited) throw new Error(`无法检查 ${service} 容器状态。`);
   return output.trim().length > 0;
 }
 async function requireDockerNetwork() {
@@ -108,7 +108,7 @@ async function runBun(commandArgs: string[]) {
 if (action === "status") {
   console.info(`已选 go2rtc 模式：${modeLabel(await selectedMode())}`);
   console.info(
-    `开发应用：${(await devOwner()) ? "运行中" : "无受管理运行记录"}`,
+    `开发应用：${(await devOwners()).length > 0 ? "运行中" : "无受管理运行记录"}`,
   );
   await applicationStatus();
   console.info(`原生 go2rtc：${(await nativeRunning()) ? "运行中" : "未运行"}`);
@@ -134,12 +134,6 @@ try {
     await runDocker(["compose", "stop"]);
     console.info("本项目管理的开发应用、go2rtc 和数据库已停止，数据保留。");
   } else {
-    const running = await devOwner();
-    if (running && !requestedMode)
-      throw new Error(
-        "dev 已在运行；使用 dev --mode native|docker 切换模式，或先执行 bun run stop。",
-      );
-    if (!running) await requireFreeApplicationPorts();
     const modeFile = resolve(runtime, "go2rtc-mode");
     const mode = requestedMode ?? (await selectedMode());
     if (mode === "docker") await requireDockerNetwork();
@@ -156,11 +150,12 @@ try {
     }
     // Stop only this project's other mode. Unknown port owners are never killed.
     if (mode === "native") {
-      if (await dockerRunning()) await runDocker(["compose", "stop", "go2rtc"]);
+      if (await dockerRunning("go2rtc"))
+        await runDocker(["compose", "stop", "go2rtc"]);
       if (!(await nativeRunning())) {
         await requireFreePorts();
         await startNative(runDocker);
-      }
+      } else console.info("原生 go2rtc 已运行，跳过启动。");
       const health = await fetch("http://127.0.0.1:1984/api", {
         signal: AbortSignal.timeout(3000),
       });
@@ -171,8 +166,12 @@ try {
         );
     } else {
       await stopNative();
-      if (!(await dockerRunning())) await requireFreePorts();
-      await runDocker([...up, "--build", "--no-deps", "go2rtc"]);
+      if (await dockerRunning("go2rtc"))
+        console.info("go2rtc 容器已运行，跳过启动。");
+      else {
+        await requireFreePorts();
+        await runDocker([...up, "--build", "--no-deps", "go2rtc"]);
+      }
       // Container health alone cannot prove Desktop host networking is enabled.
       let reachable = false;
       for (let attempt = 0; attempt < 10; attempt++) {
@@ -195,16 +194,17 @@ try {
           "go2rtc 容器已启动，但本机无法访问 1984。Docker Desktop 请在 Settings → Resources → Network 开启 Enable host networking 并 Apply & restart；Linux 请检查 host 网络与端口占用。详见 README.md。",
         );
     }
-    await runDocker([...up, "db"]);
+    if (await dockerRunning("db")) console.info("数据库容器已运行，跳过启动。");
+    else await runDocker([...up, "db"]);
     await writeFile(modeFile, mode + "\n", { mode: 0o600 });
     console.info(
       `go2rtc: ${mode} · http://127.0.0.1:1984（接口就绪不代表摄像头出帧）`,
     );
-    if (running) console.info("go2rtc 模式已更新，现有开发应用继续运行。");
-    else {
+    const pending = await pendingApplications();
+    if (pending.length > 0) {
       await runBun(["run", "db:check"]);
-      waitForDev = await startDev();
-    }
+      waitForDev = await startDev(pending);
+    } else console.info("所有开发应用均已启动，无需启动新进程。");
   }
 } finally {
   await rm(lock, { recursive: true });
