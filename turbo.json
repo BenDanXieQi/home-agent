@@ -25,7 +25,6 @@
       "cache": false
     },
     "test": {
-      "dependsOn": ["^build"],
       "cache": false
     },
     "@home-agent/backend#build": {

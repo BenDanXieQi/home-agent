@@ -13,7 +13,7 @@
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
-    "test": "bun test ./tests --pass-with-no-tests",
+    "test": "bun test ./tests",
     "db:generate": "bun --env-file=../../.env --bun run drizzle-kit generate",
     "db:migrate": "bun --env-file=../../.env --bun run drizzle-kit migrate",
     "db:studio": "bun --env-file=../../.env --bun run drizzle-kit studio",

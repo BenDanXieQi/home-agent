@@ -254,7 +254,7 @@ export const mijiaCanStartLoginAutomaticallyAtom = atom((get) => {
     !(command.type === "startLogin" && command.error) &&
     (state.account.status === "idle" ||
       state.account.status === "reauth_required") &&
-    !(state.account.status === "idle" && state.binding.status === "error") &&
+    state.binding.status !== "error" &&
     (state.loginAttempt.status === "idle" ||
       state.loginAttempt.status === "expired")
   );
