@@ -32,12 +32,7 @@ export function createHomeSelectionStore(db: Database) {
         throw new MijiaError("home_storage");
       }
     },
-    async write(
-      accountKey: string,
-      homeId: string | null,
-      assertCurrent: () => void,
-    ) {
-      if (homeId === null) throw new MijiaError("invalid_input");
+    async write(accountKey: string, homeId: string, assertCurrent: () => void) {
       try {
         await write(
           bindingLockKey,

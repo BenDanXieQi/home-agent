@@ -1,9 +1,12 @@
 import { mock, spyOn } from "bun:test";
 import { HouseholdRuntime } from "../../src/household/runtime";
-import { createMijiaHousehold } from "../../src/mijia/household";
+import {
+  createMijiaHousehold,
+  createMijiaSpecificationLoader,
+} from "../../src/mijia/household";
 import { MijiaService } from "../../src/mijia/service";
 import { MiCloud } from "../../src/mijia/protocols/micloud";
-import { MiotSpecClient } from "../../src/mijia/protocols/spec/client";
+import type { MiotSpecClient } from "../../src/mijia/protocols/spec/client";
 import { interceptMqtt } from "../mijia/observations/support";
 import { mediaPeer } from "../mijia/media/support";
 import { credentialStore, homeSelectionStore } from "./account-fixtures";
@@ -90,16 +93,18 @@ export async function runningHousehold(
     onStarted?.(new Date().toISOString());
     return Promise.resolve(batch.map((address) => ({ ...address, value: 21 })));
   });
-  const resolve = spyOn(MiotSpecClient.prototype, "resolve").mockImplementation(
-    (_device, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+  const resolve = mock<MiotSpecClient["resolve"]>((_device, signal) =>
+    Promise.resolve({ urn: specUrn, requestSignal: signal }),
   );
   const { category, spec } = preparedSpec();
-  const read = spyOn(MiotSpecClient.prototype, "read").mockResolvedValue({
-    urn: specUrn,
-    category,
-    spec,
-  });
+  const read = mock<MiotSpecClient["read"]>(() =>
+    Promise.resolve({
+      urn: specUrn,
+      category,
+      spec,
+    }),
+  );
+  const specClient = { resolve, read };
   const store = credentialStore();
   const homes = homeSelectionStore(
     binding.homeId ? { homeId: binding.homeId } : undefined,
@@ -121,7 +126,11 @@ export async function runningHousehold(
     homeSelectionStore: homes,
     readGo2rtcUrl: () => Promise.resolve(peer.adapter.url),
   });
-  const runtime = createMijiaHousehold(service, repository);
+  const runtime = createMijiaHousehold(
+    service,
+    repository,
+    createMijiaSpecificationLoader(specClient),
+  );
   const close = async () => {
     try {
       await runtime.close();
@@ -130,14 +139,7 @@ export async function runningHousehold(
         await peer.close();
       } finally {
         mqtt.restore();
-        for (const boundary of [
-          renewal,
-          catalog,
-          profile,
-          properties,
-          resolve,
-          read,
-        ])
+        for (const boundary of [renewal, catalog, profile, properties])
           boundary.mockRestore();
       }
     }
@@ -164,6 +166,7 @@ export async function runningHousehold(
       homes,
       catalog,
       properties,
+      specClient,
       renewal,
       acceptedAccount: candidate,
       mqtt,

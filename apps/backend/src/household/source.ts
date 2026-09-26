@@ -1,4 +1,4 @@
-import type { Projection } from "@home-agent/api/household";
+import type { Projection, selectHomeSchema } from "@home-agent/api/household";
 import type {
   mijiaPlaybackReservationResponseSchema,
   mijiaHomeSelectionSchema,
@@ -26,10 +26,9 @@ export type HouseholdSourceState = {
 export type HouseholdSource = {
   snapshot: () => HouseholdSourceState;
   subscribe: (listener: () => void) => () => void;
-  validateHome: (homeId: string | null) => void;
-  /** Resolve after the choice is persisted and installed, before directory or media work. */
-  selectHome: (
-    homeId: string | null,
+  /** Validate, save and install the fixed binding before acquiring devices or media. */
+  bindHome: (
+    homeId: z.infer<typeof selectHomeSchema>["home_id"],
     assertCurrent: () => void,
   ) => Promise<unknown>;
   refreshDirectory: () => Promise<unknown>;

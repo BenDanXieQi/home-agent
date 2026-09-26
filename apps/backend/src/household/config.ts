@@ -7,6 +7,7 @@ export const householdLimits = {
   directoryBytes: 4 * 1024 * 1024,
   snapshotBytes: householdStreamPolicy.snapshotBytes,
   specificationBytes: 4 * 1024 * 1024,
+  specificationResponseBytes: 4 * 1024 * 1024,
   devices: 1024,
   changesBytes: 2 * 1024 * 1024,
   queuedChanges: 256,

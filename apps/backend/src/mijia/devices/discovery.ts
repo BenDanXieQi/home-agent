@@ -97,8 +97,7 @@ export class DeviceDiscovery {
     if (!this.selectedHome) throw new MijiaError("home_unavailable");
     return this.selectedHome;
   }
-  validateSelection(homeId: string | null) {
-    if (homeId === null) return;
+  validateSelection(homeId: string) {
     if (!this.catalog.homes.some((home) => home.id === homeId))
       throw new MijiaError("home_unavailable");
   }

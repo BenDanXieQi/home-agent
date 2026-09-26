@@ -14,7 +14,7 @@ import { householdMachine } from "./machine";
 import { householdLimits, jsonBytes } from "./config";
 import { publicDirectory } from "./directory";
 import type { DirectoryCandidate } from "./directory";
-import { HouseholdSpecifications } from "./specifications";
+import { HouseholdSpecifications, specificationBytes } from "./specifications";
 import type { HouseholdRepository } from "./repository";
 import type { HouseholdSource } from "./source";
 import { HouseholdError } from "./errors";
@@ -28,7 +28,7 @@ export class HouseholdRuntime {
   private handled = 0;
   private started = false;
   private closing: Promise<void> | undefined;
-  private selecting = false;
+  private bindingHome = false;
   private logoutTask: Promise<void> | undefined;
   private readonly refreshTasks = new Map<
     DirectoryRefreshTarget,
@@ -53,9 +53,12 @@ export class HouseholdRuntime {
   ) {
     this.specs = new HouseholdSpecifications(
       loader,
-      () => this.publishSpecifications(),
+      (deviceIds) => this.publishSpecifications(deviceIds),
       (candidate) => {
-        if (jsonBytes(candidate.specs) <= householdLimits.specificationBytes)
+        if (
+          specificationBytes(candidate.specs) <=
+          householdLimits.specificationBytes
+        )
           return true;
         this.reportCapacity();
         return false;
@@ -132,7 +135,7 @@ export class HouseholdRuntime {
       state_version: this.version(),
       bytes: {
         ...projectionBytes(this.projection),
-        specifications: jsonBytes(this.specs.snapshot().specs),
+        specifications: specificationBytes(this.specs.snapshot().specs),
       },
       memory: {
         ...this.memory,
@@ -210,23 +213,25 @@ export class HouseholdRuntime {
       throw new HouseholdError("capacity_exceeded");
     return { items };
   }
-  async selectHome(epoch: string, home_id: string | null) {
+  async bindHome(
+    epoch: string,
+    homeId: ReturnType<typeof selectHomeSchema.parse>["home_id"],
+  ) {
     this.assertEpoch(epoch);
-    const home = selectHomeSchema.shape.home_id.parse(home_id);
-    if (this.selecting || this.context.operation)
+    const home = selectHomeSchema.shape.home_id.parse(homeId);
+    if (this.bindingHome || this.context.operation)
       throw new HouseholdError("invalid_state");
     const bound = this.projection.household.household.home_id;
     if (bound !== null) throw new HouseholdError("binding_conflict");
-    this.source.validateHome(home);
-    this.selecting = true;
+    this.bindingHome = true;
     try {
-      await this.source.selectHome(home, () => this.assertEpoch(epoch));
+      await this.source.bindHome(home, () => this.assertEpoch(epoch));
       this.assertEpoch(epoch);
       this.actor.send({ type: "bound", scope_epoch: epoch, home_id: home });
       this.refresh("directory", epoch);
       return { state_version: this.version() };
     } finally {
-      this.selecting = false;
+      this.bindingHome = false;
     }
   }
   requestRefresh(epoch: string, target: DirectoryRefreshTarget) {
@@ -234,7 +239,7 @@ export class HouseholdRuntime {
     if (
       this.projection.account.account.status !== "authenticated" ||
       this.context.operation ||
-      this.selecting
+      this.bindingHome
     )
       throw new HouseholdError("stale_session");
     return this.command({
@@ -418,11 +423,17 @@ export class HouseholdRuntime {
   }
   private withSpecifications(
     devices: Projection["device"],
-    snapshot = this.specs.snapshot(),
+    deviceIds?: ReadonlySet<string>,
   ) {
-    const { specs, references } = snapshot;
-    const device = Object.fromEntries(
-      Object.entries(devices).map(([key, value]) => {
+    const { specs, references } = this.specs.snapshot(deviceIds);
+    const account = this.projection.household.household.account_id ?? "";
+    const keys = deviceIds
+      ? [...deviceIds].map((id) => entityKey(account, id))
+      : Object.keys(devices);
+    const device = produce(devices, (draft) => {
+      for (const key of keys) {
+        const value = devices[key];
+        if (!value) continue;
         const { spec_id, spec_status, spec_error } =
           references.get(value.id) ?? initialSpecification;
         const spec = spec_id ? specs[spec_id] : undefined;
@@ -442,8 +453,7 @@ export class HouseholdRuntime {
         }
         const category = summary?.category ?? null;
         const capability_tags = summary?.capability_tags ?? [];
-        return [
-          key,
+        if (
           value.spec_id === spec_id &&
           value.spec_status === spec_status &&
           value.spec_error === spec_error &&
@@ -452,25 +462,24 @@ export class HouseholdRuntime {
           value.capability_tags.every(
             (tag, index) => tag === capability_tags[index],
           )
-            ? value
-            : {
-                ...value,
-                spec_id,
-                spec_status,
-                spec_error,
-                category,
-                capability_tags,
-              },
-        ];
-      }),
-    );
+        )
+          continue;
+        Object.assign(draft[key]!, {
+          spec_id,
+          spec_status,
+          spec_error,
+          category,
+          capability_tags,
+        });
+      }
+    });
     return { device };
   }
-  private publishSpecifications() {
+  private publishSpecifications(deviceIds?: ReadonlySet<string>) {
     if (this.stopped) return;
     this.publish({
       ...this.projection,
-      ...this.withSpecifications(this.projection.device),
+      ...this.withSpecifications(this.projection.device, deviceIds),
     });
   }
   private syncSource() {
@@ -495,7 +504,7 @@ export class HouseholdRuntime {
     if (!this.specs.isApplicable(id, device.model))
       throw new HouseholdError("spec_unavailable");
     const spec = device.spec_id
-      ? this.specs.snapshot().specs[device.spec_id]
+      ? this.specs.snapshot(new Set([id])).specs[device.spec_id]
       : undefined;
     if (!spec) throw new HouseholdError("spec_unavailable");
     return {

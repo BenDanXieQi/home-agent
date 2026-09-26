@@ -1,12 +1,12 @@
 import { HouseholdRuntime } from "../household/runtime";
 import type { HouseholdRepository } from "../household/repository";
-import { MiotSpecClient } from "./protocols/spec/client";
-import { householdLimits } from "../household/config";
+import type { MiotSpecClient } from "./protocols/spec/client";
 import { isRecoverableMijiaError, safeMijiaError } from "./errors";
 import type { MijiaService } from "./service";
 
-export function createMijiaSpecificationLoader() {
-  const client = new MiotSpecClient(householdLimits.directoryBytes);
+export function createMijiaSpecificationLoader(
+  client: Pick<MiotSpecClient, "resolve" | "read">,
+) {
   return {
     async resolve(
       device: { model: string; spec_type: string | null },
@@ -37,6 +37,7 @@ export function createMijiaSpecificationLoader() {
 export function createMijiaHousehold(
   service: MijiaService,
   repository: HouseholdRepository | undefined,
+  loader: ConstructorParameters<typeof HouseholdRuntime>[2],
 ) {
   const runtime = new HouseholdRuntime(
     {
@@ -71,8 +72,7 @@ export function createMijiaHousehold(
         };
       },
       subscribe: (listener) => service.subscribe(listener),
-      validateHome: (id) => service.validateHome(id),
-      selectHome: (id, assert) => service.selectHome(id, assert),
+      bindHome: (id, assert) => service.bindHome(id, assert),
       refreshDirectory: () => service.loadDevices(),
       logout: () => service.logout(),
       close: () => service.close(),
@@ -85,7 +85,7 @@ export function createMijiaHousehold(
         ).toPayload(),
     },
     repository,
-    createMijiaSpecificationLoader(),
+    loader,
   );
   service.attachHousehold({
     restore: (account, home) => runtime.restore(account, home),

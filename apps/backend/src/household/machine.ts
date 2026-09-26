@@ -5,12 +5,12 @@ import type {
   Projection,
 } from "@home-agent/api/household";
 import { householdLimits, jsonBytes } from "./config";
-import { initialProjection } from "./projection";
 import {
+  initialProjection,
   initialProjectionState,
   prepareProjection,
-  directoryFits,
-} from "./capacity";
+} from "./projection";
+import { directoryFits } from "./capacity";
 import type { HouseholdSourceState } from "./source";
 
 type Effect =

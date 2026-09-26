@@ -270,19 +270,17 @@ export class MijiaService {
       throw new MijiaError("stale_session");
     return this.discovery.homeSnapshot();
   }
-  validateHome(homeId: string | null) {
-    this.discovery.validateSelection(homeId);
-  }
-  async selectHome(homeId: string | null, assertCurrent: () => void) {
+  async bindHome(homeId: string, assertCurrent: () => void) {
     const account = this.accountClient;
     if (!account || !this.activeAccount(account))
       throw new MijiaError("not_bound");
-    if (this.discovery.homeSnapshot().selectedHomeId !== null)
-      throw new MijiaError("binding_conflict");
-    this.chooseDefaultHome = false;
     await this.serial(async () => {
       if (!this.activeAccount(account)) throw new MijiaError("stale_session");
       assertCurrent();
+      if (this.discovery.homeSnapshot().selectedHomeId !== null)
+        throw new MijiaError("binding_conflict");
+      this.discovery.validateSelection(homeId);
+      this.chooseDefaultHome = false;
       await this.requireHomeStore().write(
         this.accountKey(account),
         homeId,
@@ -868,9 +866,11 @@ export class MijiaService {
       this.loggingOut = false;
       if (this.accountClient) {
         const accountChanged = this.accountClient !== account;
-        if (this.media.resumeAfterLogout(wasBinding, accountChanged))
-          void this.loadDevices().catch(() => {});
+        this.media.resumeAfterLogout(wasBinding, accountChanged);
         this.startAccountMaintenance(this.accountClient);
+        // The household revoked its public scope before durable logout. Rebuild
+        // it through fresh, validated discovery when authorization remains valid.
+        void this.loadDevices().catch(() => {});
       }
       throw error;
     } finally {

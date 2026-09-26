@@ -150,7 +150,7 @@ describe("running household read authorization", () => {
     const h = await household();
     const pending = await holdRead(h);
     const epoch = h.runtime.epoch;
-    await expect(h.runtime.selectHome(epoch, "home-b")).rejects.toMatchObject({
+    await expect(h.runtime.bindHome(epoch, "home-b")).rejects.toMatchObject({
       reason: "binding_conflict",
     });
     expect(h.runtime.epoch).toBe(epoch);

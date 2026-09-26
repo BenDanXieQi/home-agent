@@ -1,9 +1,8 @@
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { MijiaError } from "../../src/mijia/errors";
 import { HouseholdError } from "../../src/household/errors";
 import type { MiotObservation } from "../../src/mijia/protocols/miot/messages";
 import { MiCloudError } from "../../src/mijia/protocols/micloud";
-import { MiotSpecClient } from "../../src/mijia/protocols/spec/client";
 import { specUrn } from "../support/protocol-fixtures";
 import { deferred, eventually, nextTurn } from "../support/async";
 import {
@@ -195,11 +194,10 @@ test("a changed device definition retains display capabilities but cannot author
   )!;
   const previousSpec = h.runtime.specification("stable").spec;
   const nextUrn = specUrn.replace(/:1$/, ":2");
-  spyOn(MiotSpecClient.prototype, "resolve").mockImplementation(
-    (_device, signal) =>
-      Promise.resolve({ urn: nextUrn, requestSignal: signal }),
+  h.specClient.resolve.mockImplementation((_device, signal) =>
+    Promise.resolve({ urn: nextUrn, requestSignal: signal }),
   );
-  spyOn(MiotSpecClient.prototype, "read").mockRejectedValue(
+  h.specClient.read.mockRejectedValue(
     new MiCloudError("spec-invalid-response"),
   );
   const entered = deferred<AbortSignal | undefined>();
