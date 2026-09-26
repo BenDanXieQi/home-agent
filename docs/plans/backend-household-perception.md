@@ -1,10 +1,10 @@
 # 家庭感知与 Agent：按实际场景实施
 
-**状态：实施计划。** 当前已有米家统一账号、指定属性读取、MQTT 接入、家庭运行时、设备清单持久化和页面状态订阅。持续集采、历史记录及自动触发 Agent 尚待接入；当前行为以[米家接入](../mijia.md)、[家庭运行时](../household.md)和[来源契约](../reference/mijia-source-contract.md)为准。本计划不表示固定家庭维护流程或后续能力已经实现。
+**状态：实施计划。** 当前已有米家统一账号、指定属性读取、MQTT 接入、家庭运行时、设备清单数据库缓存和页面状态订阅。持续集采、历史记录及自动触发 Agent 尚待接入；当前行为以[米家接入](../mijia.md)、[家庭运行时](../household.md)和[来源契约](../reference/mijia-source-contract.md)为准。本计划不表示固定家庭维护流程或后续能力已经实现。
 
 ## 产品边界
 
-一个本地部署固定服务一个家庭。首次设置保存唯一绑定，正常运行不切换。选错家庭时停止服务、修改持久绑定后重启，不建立在线维护改绑流程。
+一个本地部署固定服务一个家庭。首次设置保存唯一绑定，正常运行不切换。选错家庭时停止服务、修改数据库中的绑定后重启，不建立在线维护改绑流程。
 
 后台在无人打开页面、Agent 未启动时仍维护设备状态。房间、设备类别和搜索仅是页面筛选。账号退出、设备访问撤销、连接恢复以及后台重启仍须正确清理资源和拒绝迟到结果；单家庭并不取消这些要求。
 
@@ -35,7 +35,7 @@ Step 编号表示工作领域，不是必须全部完成后才能使用 Agent �
 - 账号、家庭、设备保留稳定来源身份。名称不当作身份，数据预算按原始响应、发现资料及绑定家庭各自范围定义，不能把其他家庭的业务数据预算套到当前家庭。
 - `scope_epoch` 标识本轮运行，启动、退出或明确访问失效使旧运行资格失效；停机修改绑定后重启使用新标识。它用于拒绝旧任务，不代表多家庭运行能力。
 - `source_id/collection_generation` 标识来源与当前采集实例，防止同一运行中旧连接回写；协议重连由现有米家模块负责。
-- `input_sequence` 是进程内提交顺序；`state_version={scope_epoch,sequence}` 标识公共状态；`event_sequence` 是场景事件流顺序。三者用途分开，不建立逐输入持久回执账本。
+- `input_sequence` 是进程内提交顺序；`state_version={scope_epoch,sequence}` 标识公共状态；`event_sequence` 是场景事件流顺序。三者用途分开，不为每次输入另建数据库回执记录。
 - 观测的 `quality` 随证据保存；`latest.observation_quality` 保留它，`latest.quality` 表示当前适用性。来源观测时间、接收 UTC 与处理顺序分别表达；超时和持续计时使用单调时钟。
 - 读取不能无依据覆盖较新推送；快照、未知时间缓存和断线补读不能补造物理事件。未知不替换成零、false 或模型猜测。
 - 停止、退出和明确访问撤销立即失效相应任务；临时采集故障只影响对应来源的当前条件、连续计时和旧采集任务，已接纳且证据充分的纯证据分析可继续。业务到期检查等待此前观测处理边界。每次公共状态更新原子生效，之后才发布通知和执行外部操作。
@@ -94,4 +94,4 @@ MiLoCo 只读 checkout 由 `AGENTS.local.md` 指定。属性订阅、`state_push
 - [TanStack Query 游标分页](https://tanstack.com/query/latest/docs/framework/react/guides/infinite-queries)
 - [Home Assistant 数据获取](https://developers.home-assistant.io/docs/integration_fetching_data/)
 - [Home Assistant 自动化触发](https://www.home-assistant.io/docs/automation/trigger/)
-- [LangGraph 持久化](https://docs.langchain.com/oss/javascript/langgraph/persistence)
+- [LangGraph 状态保存](https://docs.langchain.com/oss/javascript/langgraph/persistence)
