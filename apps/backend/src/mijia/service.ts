@@ -76,7 +76,7 @@ export class MijiaService {
       renew: (account) => this.maintenance.renew(account),
       retainedChannels: (id) => this.media.retainedChannels(id),
       onScopeChanged: () => {
-        this.invalidatePropertyReads();
+        this.invalidateDeviceAccess();
         this.media.prepareRebind();
         void this.media.startBinding().catch(() => {});
       },
@@ -151,18 +151,20 @@ export class MijiaService {
     return this.snapshot();
   }
 
-  private invalidatePropertyReads(preserveObservations = false) {
-    if (!preserveObservations) {
-      const mqtt = this.mqtt;
-      this.mqtt = undefined;
-      if (mqtt)
-        this.mqttClosing = Promise.all([
-          this.mqttClosing,
-          mqtt.close("scope_invalidated"),
-        ]).then(() => {});
-      this.observationScope.abort();
-      this.observationScope = new AbortController();
-    }
+  private invalidateDeviceAccess() {
+    const mqtt = this.mqtt;
+    this.mqtt = undefined;
+    if (mqtt)
+      this.mqttClosing = Promise.all([
+        this.mqttClosing,
+        mqtt.close("scope_invalidated"),
+      ]).then(() => {});
+    this.observationScope.abort();
+    this.observationScope = new AbortController();
+    this.invalidatePropertyReads();
+  }
+
+  private invalidatePropertyReads() {
     this.readScope.abort();
     this.readScope = new AbortController();
     this.readGeneration = crypto.randomUUID();
@@ -232,6 +234,18 @@ export class MijiaService {
         () => {
           if (this.accountClient)
             void this.maintenance.rejectOAuth(this.accountClient);
+        },
+        () => {
+          const current = this.accountClient;
+          if (
+            current &&
+            this.activeAccount(current) &&
+            this.accountKey(current) === accountKey &&
+            this.observationScope.signal === scope
+          ) {
+            // A topic ACL refusal can revoke device access without invalidating the token.
+            void this.discovery.load(true).catch(() => {});
+          }
         },
       ));
       const observation = mqtt.observe(
@@ -516,7 +530,7 @@ export class MijiaService {
         if (reinstall) this.media.prepareRebind();
         const oauthChanged =
           this.accountOAuth?.accessToken !== candidate.oauth.accessToken;
-        this.invalidatePropertyReads(true);
+        this.invalidatePropertyReads();
         this.accountClient = candidate.client;
         this.accountOAuth = candidate.oauth;
         account.dispose();
@@ -549,7 +563,7 @@ export class MijiaService {
         }),
       );
       assertCurrent();
-      this.invalidatePropertyReads();
+      this.invalidateDeviceAccess();
       this.accountClient = candidate.client;
       this.accountOAuth = candidate.oauth;
       this.discovery.set(candidate.catalog);
@@ -571,7 +585,7 @@ export class MijiaService {
       this.stopAccountMaintenance();
       this.media.cancelBinding();
       account.dispose();
-      this.invalidatePropertyReads();
+      this.invalidateDeviceAccess();
       this.accountClient = undefined;
       this.accountOAuth = undefined;
       this.media.resetAccount(false);
@@ -590,7 +604,7 @@ export class MijiaService {
     const wasBinding = this.media.bindingPending;
     this.cancelConnectionOperation();
     this.loggingOut = true;
-    this.invalidatePropertyReads();
+    this.invalidateDeviceAccess();
     this.stopAccountMaintenance();
     this.cancelRestore();
     this.media.cancelBinding();
@@ -614,7 +628,7 @@ export class MijiaService {
           throw failure;
         }
         this.loginFlow.dispose();
-        this.invalidatePropertyReads();
+        this.invalidateDeviceAccess();
         this.accountClient?.dispose();
         this.accountClient = undefined;
         this.accountOAuth = undefined;
@@ -725,7 +739,7 @@ export class MijiaService {
         );
         if (!this.loginFlow.isCurrent(attempt)) return;
         this.cancelRestore();
-        this.invalidatePropertyReads();
+        this.invalidateDeviceAccess();
         this.media.resetAccount();
         this.discovery.reset();
         this.accountClient?.dispose();
@@ -788,7 +802,7 @@ export class MijiaService {
     this.cancelConnectionOperation();
     this.stopped = true;
     const maintenanceClosing = this.maintenance.shutdown();
-    this.invalidatePropertyReads();
+    this.invalidateDeviceAccess();
     this.initialRestorePending = false;
     this.discovery.pause();
     this.media.cancelBinding();

@@ -58,6 +58,10 @@ function typeName(type: string) {
 
 /** Public metadata only. This client never receives account cookies or tokens. */
 export class MiotSpecClient {
+  private readonly requests = new Map<
+    string,
+    ReturnType<MiotSpecClient["startRequest"]>
+  >();
   private readonly models = new Map<
     string,
     { urn: string; expiresAt: number }
@@ -212,6 +216,48 @@ export class MiotSpecClient {
   ) {
     const url = new URL(path, "https://miot-spec.org");
     url.search = new URLSearchParams(params).toString();
+    this.assertActive(signal);
+    const key = url.toString();
+    const request = this.requests.get(key) ?? this.startRequest(url);
+    this.requests.set(key, request);
+    request.waiters++;
+    let abort: (() => void) | undefined;
+    try {
+      const result = await new Promise<Awaited<typeof request.promise>>(
+        (resolve, reject) => {
+          abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+          request.promise.then(resolve, reject);
+          if (signal.aborted) abort();
+        },
+      );
+      this.assertActive(signal);
+      return result;
+    } catch (error) {
+      this.assertActive(signal);
+      throw error;
+    } finally {
+      if (abort) signal.removeEventListener("abort", abort);
+      request.waiters--;
+      // A caller owns its deadline, not another caller's metadata request.
+      // Stop the shared transport only when nobody still needs its result.
+      if (request.waiters === 0) {
+        if (this.requests.get(key) === request) this.requests.delete(key);
+        request.controller.abort();
+      }
+    }
+  }
+
+  private startRequest(url: URL) {
+    const controller = new AbortController();
+    return {
+      controller,
+      promise: this.fetchMetadata(url, controller.signal),
+      waiters: 0,
+    };
+  }
+
+  private async fetchMetadata(url: URL, signal: AbortSignal) {
     let response: Response | undefined;
     try {
       response = await fetch(url, {

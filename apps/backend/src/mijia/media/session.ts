@@ -168,7 +168,10 @@ export class MediaSession {
         this.bindingFailed(error);
       },
       activePlaybackIds: () => this.playback.activeIds(adapter),
-      onPlaybackEnded: (ids) => this.playback.forgetEnded(adapter, ids),
+      onPlaybackEnded: (ids) => {
+        this.playback.forgetEnded(adapter, ids);
+        this.playback.retryReleases(adapter);
+      },
     });
     return adapter;
   }
@@ -181,17 +184,17 @@ export class MediaSession {
   }
 
   async clearAdapter() {
-    if (!this.mediaAdapter) return;
+    const adapter = this.mediaAdapter;
+    if (!adapter) return;
     // Retain the previous instance until cleanup succeeds, even if YAML changed.
     try {
-      await mijiaOperation("cleanup", "go2rtc_cleanup", () =>
-        this.mediaAdapter!.close(),
-      );
+      await mijiaOperation("cleanup", "go2rtc_cleanup", () => adapter.close());
     } catch (error) {
       const failure = safeMijiaError(error, "go2rtc_cleanup");
       this.state = { status: "error", error: failure.toPayload() };
       throw failure;
     }
+    this.playback.forgetAdapter(adapter);
     this.mediaAdapter = undefined;
   }
 
