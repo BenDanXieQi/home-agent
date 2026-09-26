@@ -4,7 +4,6 @@ import { createHash, randomInt, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { MiCloudError } from "./errors";
 import { readHomes, deviceLocations, type DeviceLocation } from "./homes";
-import { MiotSpecClient } from "./spec";
 import { cryptRc4 } from "./rc4";
 import { savedSessionSchema, type MiCloudSavedSession } from "./session";
 import {
@@ -98,7 +97,6 @@ function seconds(
 
 /** Owns one cloud identity; renewal returns an isolated candidate for durable adoption. */
 export class MiCloud {
-  readonly #spec = new MiotSpecClient();
   readonly region: MiCloudRegion;
   #identity = {
     clientId: randomCharacters(
@@ -429,14 +427,6 @@ export class MiCloud {
         AbortSignal.timeout(30_000),
         ...(signal ? [signal] : []),
       ]),
-    );
-  }
-
-  getDeviceSpec(device: MiCloudDevice, signal?: AbortSignal) {
-    this.#transport.assertActive(signal);
-    return this.#spec.get(
-      device,
-      AbortSignal.any([this.#transport.signal, ...(signal ? [signal] : [])]),
     );
   }
 

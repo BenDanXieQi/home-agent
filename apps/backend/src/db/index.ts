@@ -7,7 +7,11 @@ export function createDatabase(url: string) {
     max: 10,
     idle_timeout: 20,
     connect_timeout: 10,
-    connection: { application_name: "home-agent-backend" },
+    connection: {
+      application_name: "home-agent-backend",
+      statement_timeout: 5000,
+      lock_timeout: 5000,
+    },
   });
   const db = drizzle(client, { schema });
   return { db, close: () => client.end({ timeout: 5 }) };

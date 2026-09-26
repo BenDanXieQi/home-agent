@@ -8,7 +8,7 @@
 
 ## 账号与授权
 
-`MijiaService` 是唯一账号所有者，`DeviceDiscovery` 是唯一业务设备目录。[`DeviceQueries`](../apps/backend/src/mijia/devices/queries.ts) 从当前账号和同一目录查询家庭、房间及设备规格，不另存目录。扫码会话同时支持目录和属性请求；媒体从同一账号取得 userId/passToken/region。凭据以 `mijia` 保存在 AES-256-GCM 凭据仓库，不进入普通配置、状态快照、日志或追踪。
+`MijiaService` 是唯一账号所有者，`DeviceDiscovery` 负责供应商目录请求与原始媒体接入信息；`household/` 状态机持有已保存、提交的家庭业务目录和规格，页面与内部属性预检读取这份资料。扫码会话同时支持目录和属性请求；媒体从同一账号取得 userId/passToken/region。凭据以 `mijia` 保存在 AES-256-GCM 凭据仓库，不进入普通配置、状态快照、日志或追踪。
 
 复用已有米家扫码登录流程是接入前提。现有账号所有者统一管理会话保存、恢复、续期和退出；属性读取使用当前 MiCloud 实例的 userId、serviceToken、ssecurity 与 Cookie，不创建独立 OAuth、unionId→uid 映射、额外授权页面或第二套 token 仓库。需要重新登录时仍使用现有扫码入口，某项属性或媒体失败不构成新增授权流程的理由。
 
@@ -41,6 +41,12 @@ OAuth 与 MQTT 必须使用同一个实例 UUID：OAuth 的 `device_id=mico.<uui
 观测包含稳定 `source_id`、实例 `collection_generation`、真实 `received_at`、`observed_at=null`、`source_event_id=null` 和 `source_sequence=null`。正常消息按 live 交付，MQTT retained 消息按 baseline；不承诺设备采样时间、跨消息顺序、无断线重放或端到端恰好一次。独立 `siid/eiid` 事件未启用。
 
 账号退出、账号身份替换、家庭切换和目录归属／型号／规格变化使当前实例失效；取消移除对应回调，最后一个观察者退出某 topic 时退订。连接或订阅局部失败不会直接关闭媒体。断连只结束当前 MQTT 连接代次，`properties/observation.ts` 保留仍然活动的观察集合，用单一计时器按 1、2、4…120 秒退避重连，连接成功重置为 1 秒，重建后重新取得逐 topic SUBACK。每次连接从账号所有者读取最新 OAuth 凭据；明确认证拒绝停止普通重试并交回账号维护。最后一个观察取消或账号退出时关闭连接并清除定时器。同账号会话续期不撤销观察；OAuth token 改变时重建连接，其他账号／家庭范围撤销仍会终止观察。没有自动补读或家庭状态恢复。应用持有一份业务目录，MQTT 只保存派生的订阅集合。
+
+## 目录变化通知
+
+账号后台目录维护与属性观察复用同一 MQTT 连接。新增精确主题 `user/{uid}/g_op/bind`、`unbind` 和 `device/{did}/g_op/rename`、`hr_change`；目录设备主题覆盖账号可见设备，以发现跨家庭移入。它们不进入属性观测，也不绕过业务家庭限制。通知仅触发 5 秒防抖后的完整目录读取，实际归属以本次云目录校验和提交为准，不依赖未文档化载荷。
+
+主题仍须收到成功 SUBACK。重连后重新订阅并同步目录，既有 5 分钟目录发现继续补漏。只读 `/api/mijia/directory/push` 提供脱敏的连接、订阅与通知统计；收到主题通知不等于已经保存成功，保存结果通过家庭公共状态报告。
 
 ## 正式读取入口
 
@@ -99,7 +105,7 @@ reader 按稳定 `source_id` 保存供应商 `Retry-After` 期限；同账号会
 | 拓扑／网关／固件条件                   | 依据实际接入条件限定                                | 正式目录／规格没有提供实际网关和固件       | BLE 类型可由设备标识与型号作为推定依据；实际网关、链路及固件未知                                  | 不从 online、型号或数字 did 推断实际直连路径 |
 | 属性推送 `siid/piid`                   | 同账号统一保存的 OAuth 凭据及所选家庭目录           | notify 仅是规格声明                        | 4 种代表型号的 topic 获准 QoS 2；灯、空气检测仪、人在传感器收到属性                               | 已接入；温湿度计实际推送仍待观察             |
 | 在线通知                               | 同一设备集的独立 state topic                        | 不适用                                     | 4 种代表型号获准 QoS 2；床头灯 `yeelink.light.bslamp2` 实收 offline 和 online，其余型号未验证通知 | 不从属性或目录布尔值派生 availability        |
-| 独立设备事件 `siid/eiid`               | 当前无正式接入通路                                  | 当前精简规格不输出事件                     | 未接入                                                                                            | 不构造事件 topic 或支持结论                  |
+| 独立设备事件 `siid/eiid`               | 当前无正式接入通路                                  | 规格保留事件标识，尚无事件采集通路         | 未接入                                                                                            | 不构造事件 topic 或支持结论                  |
 
 ### 已验证的代表读取范围
 

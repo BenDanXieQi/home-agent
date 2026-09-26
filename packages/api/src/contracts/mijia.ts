@@ -48,7 +48,6 @@ export const mijiaDeviceSchema = z.object({
   online: z.boolean(),
   camera: z.boolean(),
   channels: z.array(z.union([z.literal(1), z.literal(2)])),
-  retainedChannels: z.array(z.union([z.literal(1), z.literal(2)])),
 });
 export const mijiaAccountSchema = z.discriminatedUnion("status", [
   z.object({ status: z.enum(["idle", "restoring"]) }),
@@ -95,7 +94,7 @@ export const mijiaLoginAttemptSchema = z.discriminatedUnion("status", [
 export type MijiaLoginAttempt = z.infer<typeof mijiaLoginAttemptSchema>;
 
 export function isMijiaLoginAttemptActive(
-  attempt: MijiaLoginAttempt | undefined,
+  attempt: Pick<MijiaLoginAttempt, "status"> | undefined,
 ) {
   return (
     attempt !== undefined &&
@@ -106,10 +105,6 @@ export function isMijiaLoginAttemptActive(
   );
 }
 
-export const mijiaHomeSelectionInputSchema = z.strictObject({
-  accountId: z.uuid(),
-  homeId: z.string().min(1).max(128).nullable(),
-});
 export const mijiaHomeSelectionSchema = z.object({
   selectedHomeId: z.string().nullable(),
   status: z.enum(["unselected", "selected", "unavailable"]),
@@ -147,6 +142,7 @@ export const mijiaPlaybackInputSchema = z.strictObject({
   sdp: z.string().min(16).max(65_536),
 });
 export const mijiaPlaybackReservationInputSchema = z.strictObject({
+  scope_epoch: z.uuid(),
   revision: z.string().uuid(),
   deviceId: z.string().min(1).max(128),
   channel: z.union([z.literal(1), z.literal(2)]),
@@ -167,22 +163,6 @@ export const mijiaPlaybackStateSchema = z.discriminatedUnion("phase", [
     answer: mijiaPlaybackResponseSchema,
   }),
 ]);
-
-/** Poll cadence is advertised by the server through Retry-After on every snapshot. */
-export function mijiaPollIntervalMs(state: MijiaState) {
-  if (
-    state.connectionOperation?.status === "running" ||
-    isMijiaLoginAttemptActive(state.loginAttempt) ||
-    state.account.status === "restoring" ||
-    state.binding.status === "installing" ||
-    state.devices.status === "loading"
-  )
-    return 2_000;
-  return state.account.status === "idle" &&
-    ["idle", "cancelled"].includes(state.loginAttempt.status)
-    ? 30_000
-    : 10_000;
-}
 
 export const mijiaVerificationInputSchema = z.strictObject({
   ticket: z.string().min(1).max(2048),

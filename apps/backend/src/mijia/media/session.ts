@@ -15,6 +15,7 @@ type BindingTask = {
 };
 
 type MediaDependencies = {
+  onChange: () => void;
   readUrl: () => Promise<string>;
   currentAccount: () => MiCloud | undefined;
   acceptsWork: () => boolean;
@@ -27,7 +28,14 @@ type MediaDependencies = {
  * Account adoption and media cleanup share the coordinator's commit queue.
  */
 export class MediaSession {
-  private state: MijiaState["binding"] = { status: "unbound" };
+  private currentState: MijiaState["binding"] = { status: "unbound" };
+  get state() {
+    return this.currentState;
+  }
+  private set state(value: MijiaState["binding"]) {
+    this.currentState = value;
+    this.dependencies.onChange();
+  }
   private revision = crypto.randomUUID();
   private mediaAdapter: Go2RtcAdapter | undefined;
   private cameraSources: CameraSourceManager | undefined;
@@ -99,9 +107,6 @@ export class MediaSession {
     return refreshDevices;
   }
 
-  retainedChannels(id: string) {
-    return this.cameraSources?.retainedChannels(id) ?? [];
-  }
   updateDevices(devices: MiCloudDevice[], retryFailed = false) {
     this.devices = devices;
     void this.cameraSources?.update(devices, retryFailed);
@@ -175,6 +180,7 @@ export class MediaSession {
 
   private invalidateMedia() {
     this.revision = crypto.randomUUID();
+    this.dependencies.onChange();
     this.cameraSources?.dispose();
     this.cameraSources = undefined;
     this.playback.invalidate();

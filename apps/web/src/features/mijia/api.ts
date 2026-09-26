@@ -1,130 +1,133 @@
 import {
-  mijiaStateSchema,
-  type MijiaState,
   mijiaTimeouts,
   mijiaPlaybackResponseSchema,
   mijiaPlaybackReservationResponseSchema,
 } from "@home-agent/api/mijia";
 import {
+  commandResultSchema,
+  loginMaterialSchema,
+} from "@home-agent/api/household";
+import {
   requestJson,
-  requestJsonResponse,
   requestEmpty,
-  RequestError,
   retryOnceOnTransportFailure,
-  type RpcJsonRequest,
-  type RequestOptions,
 } from "../../lib/api";
+import { appStore } from "../../lib/store";
+import { householdSnapshotAtom } from "./household-state";
 import type { InferRequestType } from "hono/client";
-
 type MijiaApi =
   import("@home-agent/backend/client").BackendClient["api"]["mijia"];
-
 export type MijiaCommand =
-  | ({ type: "selectHome" } & InferRequestType<
-      MijiaApi["home-selection"]["$put"]
-    >["json"])
+  | { type: "selectHome"; homeId: string | null }
   | { type: "startLogin" }
   | { type: "cancelLogin"; loginId: string }
   | { type: "verifyLogin"; loginId: string; ticket: string }
   | { type: "retryConnection" }
   | { type: "logout" }
-  | { type: "refreshDevices" };
-
-async function requestSnapshot(
-  send: RpcJsonRequest<MijiaState>,
-  options: RequestOptions = {},
-) {
-  const response = await requestJsonResponse(send, mijiaStateSchema, {
-    timeoutMs: mijiaTimeouts.control,
-    ...options,
-  });
-  if (response.retryAfterMs === undefined)
-    throw new RequestError({ code: "invalid_response" });
-  return { ...response.data, pollAfterMs: response.retryAfterMs };
-}
-
-export function getMijiaState(signal?: AbortSignal) {
-  return requestSnapshot(
-    (client, options) => client.api.mijia.state.$get({}, options),
-    {
-      signal,
-    },
+  | { type: "refreshDevices"; target?: "directory" | "specs" | "all" };
+export function getLoginMaterial(id: string, signal: AbortSignal) {
+  return requestJson(
+    (client, options) =>
+      client.api.mijia.login[":id"].material.$get({ param: { id } }, options),
+    loginMaterialSchema,
+    { signal },
   );
 }
-
 export function executeMijiaCommand(
   command: MijiaCommand,
+  scope_epoch: string,
   signal: AbortSignal,
 ) {
+  const options = {
+    signal,
+    timeoutMs:
+      command.type === "verifyLogin"
+        ? mijiaTimeouts.verification
+        : mijiaTimeouts.control,
+  };
   switch (command.type) {
     case "selectHome":
-      return requestSnapshot(
-        (client, options) =>
-          client.api.mijia["home-selection"].$put(
-            { json: { accountId: command.accountId, homeId: command.homeId } },
-            options,
+      return requestJson(
+        (client, opts) =>
+          client.api.mijia.scope.homes.$put(
+            { json: { scope_epoch, home_id: command.homeId } },
+            opts,
           ),
-        { signal },
+        commandResultSchema,
+        options,
       );
     case "startLogin":
-      return requestSnapshot(
-        (client, options) => client.api.mijia.login.$post({}, options),
-        {
-          signal,
-        },
+      return requestJson(
+        (client, opts) => client.api.mijia.login.$post({}, opts),
+        commandResultSchema,
+        options,
       );
     case "cancelLogin":
-      return requestSnapshot(
-        (client, options) =>
+      return requestJson(
+        (client, opts) =>
           client.api.mijia.login[":id"].$delete(
             { param: { id: command.loginId } },
-            options,
+            opts,
           ),
-        { signal },
+        commandResultSchema,
+        options,
       );
     case "verifyLogin":
-      return requestSnapshot(
-        (client, options) =>
+      return requestJson(
+        (client, opts) =>
           client.api.mijia.login[":id"].verify.$post(
             {
               param: { id: command.loginId },
               json: { ticket: command.ticket },
             },
-            options,
+            opts,
           ),
-        { signal, timeoutMs: mijiaTimeouts.verification },
+        commandResultSchema,
+        options,
       );
     case "retryConnection":
-      return requestSnapshot(
-        (client, options) =>
-          client.api.mijia.connection.retry.$post({}, options),
-        { signal },
+      return requestJson(
+        (client, opts) => client.api.mijia.connection.retry.$post({}, opts),
+        commandResultSchema,
+        options,
       );
     case "logout":
-      return requestSnapshot(
-        (client, options) => client.api.mijia.session.$delete({}, options),
-        {
-          signal,
-        },
+      return requestJson(
+        (client, opts) => client.api.mijia.session.$delete({}, opts),
+        commandResultSchema,
+        options,
       );
     case "refreshDevices":
-      return requestSnapshot(
-        (client, options) =>
-          client.api.mijia.devices.refresh.$post({}, options),
-        { signal, timeoutMs: mijiaTimeouts.devices },
+      return requestJson(
+        (client, opts) =>
+          client.api.mijia.devices.refresh.$post(
+            { json: { scope_epoch, target: command.target ?? "directory" } },
+            opts,
+          ),
+        commandResultSchema,
+        options,
       );
   }
-  throw new Error("Unknown Xiaomi command");
+  throw new Error("Unknown command");
 }
 
 export function reserveMijiaPlayback(
-  target: InferRequestType<
-    MijiaApi["playback"]["reservations"]["$post"]
-  >["json"],
+  target: Omit<
+    InferRequestType<MijiaApi["playback"]["reservations"]["$post"]>["json"],
+    "scope_epoch"
+  >,
 ) {
   return requestJson(
     (client, options) =>
-      client.api.mijia.playback.reservations.$post({ json: target }, options),
+      client.api.mijia.playback.reservations.$post(
+        {
+          json: {
+            ...target,
+            scope_epoch: appStore.get(householdSnapshotAtom)?.scope_epoch ?? "",
+          },
+        },
+        options,
+      ),
     mijiaPlaybackReservationResponseSchema,
     { timeoutMs: mijiaTimeouts.control },
   );

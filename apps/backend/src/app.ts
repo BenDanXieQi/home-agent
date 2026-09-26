@@ -11,13 +11,13 @@ import { createConnectionRoutes } from "./connections/routes";
 import type { ConnectionStore } from "./connections/store";
 import { createConnectionStatusRoutes } from "./connections/status";
 import { createMijiaRoutes } from "./mijia/routes";
-import type { MijiaApi } from "./mijia/routes";
+import type { HouseholdRuntime } from "./household/runtime";
 
 type AppDependencies = {
   staticRoot?: string;
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
   connectionStore: ConnectionStore;
-  mijia: MijiaApi;
+  mijia: HouseholdRuntime;
   readAgentUrl: () => Promise<string>;
 };
 

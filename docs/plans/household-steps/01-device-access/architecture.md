@@ -19,7 +19,6 @@ apps/backend/src/mijia/
 │   └── session.ts                  # MiCloud 会话恢复／续期候选准备，提交归 service
 ├── devices/
 │   ├── discovery.ts                # 唯一设备目录及刷新
-│   ├── queries.ts                  # 家庭／房间聚合、设备规格读取与目录归属校验
 │   └── mapping.ts                  # 设备展示与摄像头通道映射
 ├── properties/
 │   ├── read-request.ts             # 请求复制、按设备分组与 readable 规格预检
@@ -59,7 +58,7 @@ apps/backend/src/mijia/
 | playback-manager.ts | media/playback-manager.ts                        |
 | micloud/            | protocols/micloud/，保留其内部文件命名及许可材料 |
 
-devices/queries.ts 从 discovery 的当前目录查询家庭、房间和规格，不保存另一份业务目录。properties/read-request.ts 按设备分组预检 readable 规格，reader.ts 负责指定属性读取的批次、预算及取消，source-profiles.ts 负责来源能力配置；不命名为含义不明的 access.ts，也不把 reader 做成通用调度器。属性请求由 micloud/client.ts 复用扫码实例发出；地址类型和应用预算位于 micloud/properties.ts。MQTT 由 miot/mqtt.ts 承担；参考源码中的 mips_cloud.py 名称保持原样。
+household/ 持有已提交家庭目录与规格，供应商 discovery 保留请求和原始媒体接入资料。properties/read-request.ts 按设备分组预检 readable 规格，reader.ts 负责指定属性读取的批次、预算及取消，source-profiles.ts 负责来源能力配置；不命名为含义不明的 access.ts，也不把 reader 做成通用调度器。属性请求由 micloud/client.ts 复用扫码实例发出；地址类型和应用预算位于 micloud/properties.ts。MQTT 由 miot/mqtt.ts 承担；参考源码中的 mips_cloud.py 名称保持原样。
 
 account 表达账号及授权生命周期；properties 表达设备属性；media 包括共享摄像头源与浏览器播放；protocols 区分外部协议与业务职责。它们无需再改名。routes.ts、service.ts、errors.ts、operation.ts、retry-timer.ts 沿用现有具体职责；不增加 manager、utils、common 等无明确用途的目录。
 
@@ -74,7 +73,7 @@ account 表达账号及授权生命周期；properties 表达设备属性；medi
 | media      | go2rtc 绑定、摄像头源及播放资源                            | 使用同一账号与目录，通过 service 接受凭据更新和撤销，不直接启动另一套米家登录                            |
 | protocols  | 小米具体请求编码、响应解码及连接协议                       | 不依赖 routes、service、家庭 actor；不保存另一份业务目录或公开家庭状态                                   |
 
-service 负责装配与跨模块通知，子模块通过具体参数／回调接收所需依赖，避免互相导入 service 实例。account 的流程模块只持有操作状态、任务、计时器和候选工作；MiCloud 恢复续期归 maintenance。当前账号、已接纳 MiCloud 会话及读取采集代次归 service，持久化与接纳通过同一提交队列完成。DeviceQueries 通过当前账号回调和 discovery 实例读取目录；属性规格预检通过查询与有效性断言回调读取规格，账号、采集实例和设备归属的有效性仍由 service 核验。协议错误在业务边界映射；HTTP 路由只做请求校验和调用，不直接创建小米客户端或拥有后台任务。
+service 负责装配与跨模块通知，子模块通过具体参数／回调接收所需依赖，避免互相导入 service 实例。account 的流程模块只持有操作状态、任务、计时器和候选工作；MiCloud 恢复续期归 maintenance。当前账号、已接纳 MiCloud 会话及读取采集代次归 service，持久化与接纳通过同一提交队列完成。属性规格预检通过家庭运行时的已准备规格和有效性断言回调读取资料，账号、采集实例和设备归属的有效性仍由 service 核验。协议错误在业务边界映射；HTTP 路由只做请求校验和调用，不直接创建小米客户端或拥有后台任务。
 
 目录唯一指业务目录只有一个所有者；媒体持有的活动摄像头资源、MQTT 的订阅集合是各自派生状态，不能反过来成为独立设备目录。Step 2 接管目录到家庭 actor 时，同批替换其业务状态来源，不保留两份可独立更新的目录。
 

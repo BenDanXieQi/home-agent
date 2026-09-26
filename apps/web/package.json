@@ -16,10 +16,13 @@
   },
   "dependencies": {
     "@home-agent/api": "workspace:*",
+    "@home-agent/backend": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/query-core": "^5.103.2",
     "@tanstack/react-query": "^5.103.2",
     "@tanstack/react-router": "^1.170.39",
+    "eventsource-parser": "4.1.1",
+    "hono": "catalog:",
     "jotai": "^3.0.0",
     "jotai-tanstack-query": "^0.11.0",
     "lucide-react": "^1.48.0",
@@ -28,9 +31,7 @@
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-hook-form": "^7.88.0",
-    "tailwindcss": "^4.3.3",
-    "@home-agent/backend": "workspace:*",
-    "hono": "catalog:"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",

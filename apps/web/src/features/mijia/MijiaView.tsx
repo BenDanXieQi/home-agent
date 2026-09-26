@@ -1,3 +1,5 @@
+import { useAtomValue } from "jotai";
+import { householdSnapshotAtom } from "./household-state";
 import { RequestFeedback } from "../../components/RequestFeedback";
 import { RetryConnectionButton } from "./RetryConnectionButton";
 import { Link } from "@tanstack/react-router";
@@ -24,6 +26,8 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
     perform,
     refresh,
   } = useMijia();
+  const snapshot = useAtomValue(householdSnapshotAtom);
+  const household = snapshot?.projection.household.household;
   const homeName = state?.homes.items.find(
     (home) => home.id === state.homes.selectedHomeId,
   )?.name;
@@ -55,6 +59,15 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
               : "刷新摄像头"}
         </Button>
       </div>
+      {household?.status === "initializing" ? (
+        <p className="notice">
+          {household.sync_status === "error"
+            ? "家庭初始化失败，请重试。"
+            : household.stage === "account"
+              ? "正在恢复账号，目录尚未同步。"
+              : "正在初始化家庭…"}
+        </p>
+      ) : null}
       {state && state.homes.status !== "selected" ? (
         <p className="notice notice-warning">
           {state.homes.status === "unavailable"
@@ -68,14 +81,14 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
       <RequestFeedback
         fetchError={fetchError}
         error={actionError}
-        refresh={() => void refresh()}
+        refresh={() => refresh()}
       />
       {state?.devices.status === "error" ? (
         <p className="notice notice-error" role="alert">
           {state.devices.items.length
             ? "设备刷新失败，保留上次读取的列表。"
             : "设备读取失败。"}
-          {state.devices.error.message}
+          {state.devices.error?.message}
         </p>
       ) : null}
       {!state ? (
@@ -103,11 +116,7 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
                 <output className="notice">正在连接摄像头服务…</output>
               ) : null}
               <CameraWall
-                key={
-                  state.account.status === "authenticated"
-                    ? state.account.id
-                    : state.account.status
-                }
+                key={snapshot?.scope_epoch}
                 state={state}
                 ready={canPlay}
                 confirming={confirming}

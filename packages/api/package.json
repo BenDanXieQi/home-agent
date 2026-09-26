@@ -10,7 +10,8 @@
     "./errors": "./src/errors/index.ts",
     "./errors/hono": "./src/errors/hono.ts",
     "./http/retry-after": "./src/http/retry-after.ts",
-    "./http/read-body": "./src/http/read-body.ts"
+    "./http/read-body": "./src/http/read-body.ts",
+    "./household": "./src/contracts/household.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

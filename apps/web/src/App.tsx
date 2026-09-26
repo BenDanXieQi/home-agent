@@ -12,7 +12,10 @@ import {
 import { m } from "motion/react";
 import { Dialog } from "radix-ui";
 import { AccountAvatar } from "./features/mijia/AccountAvatar";
-import { mijiaAccountAtom, mijiaFetchErrorAtom } from "./features/mijia/state";
+import {
+  mijiaAccountAtom,
+  mijiaAccountLabelAtom,
+} from "./features/mijia/state";
 import { accountDialogOpenAtom, navigationOpenAtom } from "./state/ui";
 import { BackendStatus } from "./features/connections/BackendStatus";
 const ConnectionNotice = lazy(() =>
@@ -31,7 +34,7 @@ export default function App() {
   const [loginOpen, openLogin] = useAtom(accountDialogOpenAtom);
   const path = useRouterState({ select: (state) => state.location.pathname });
   const current = navigation.find((item) => item.to === path);
-  const fetchError = useAtomValue(mijiaFetchErrorAtom);
+  const accountLabel = useAtomValue(mijiaAccountLabelAtom);
   const account = useAtomValue(mijiaAccountAtom);
   const accountName =
     (account?.status === "authenticated" && account.profile?.name) ||
@@ -81,12 +84,12 @@ export default function App() {
               <button
                 type="button"
                 className="account-button"
-                aria-label={`${accountName}，${fetchError ? "状态不可用" : "已登录"}`}
+                aria-label={`${accountName}，${accountLabel}`}
               >
                 <AccountAvatar />
                 <span className="account-copy">
                   <strong title={accountName}>{accountName}</strong>
-                  <span>{fetchError ? "状态不可用" : "已登录"}</span>
+                  <span>{accountLabel}</span>
                 </span>
                 <ChevronRight size={13} />
               </button>

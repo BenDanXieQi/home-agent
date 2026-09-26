@@ -13,13 +13,54 @@ export type LoginCandidate = {
 
 /** Owns only an interactive attempt. Account adoption belongs to the coordinator. */
 export class LoginFlow {
-  state: MijiaLoginAttempt = { status: "idle" };
+  private currentState: MijiaLoginAttempt = { status: "idle" };
+  get state() {
+    return this.currentState;
+  }
+  private set state(value: MijiaLoginAttempt) {
+    this.currentState = value;
+    this.onChange();
+  }
   private attempt: LoginCandidate | undefined;
 
   constructor(
     private readonly commit: (candidate: LoginCandidate) => Promise<void>,
+    private readonly onChange: () => void,
   ) {}
 
+  private materialVersion = 0;
+  private materialFingerprint = "";
+  publicSnapshot() {
+    const state = this.state;
+    const fingerprint = JSON.stringify([
+      "id" in state ? state.id : null,
+      "qrImageUrl" in state ? state.qrImageUrl : null,
+      "verificationUrl" in state ? state.verificationUrl : null,
+    ]);
+    if (fingerprint !== this.materialFingerprint) {
+      this.materialFingerprint = fingerprint;
+      this.materialVersion++;
+    }
+    return {
+      id: "id" in state ? state.id : null,
+      status: state.status,
+      error: "error" in state ? (state.error ?? null) : null,
+      material_version: this.materialVersion,
+    };
+  }
+  material(id: string) {
+    const state = this.state;
+    if (!("id" in state) || state.id !== id || !this.active)
+      throw new MijiaError("stale_session");
+    return {
+      id,
+      material_version: this.publicSnapshot().material_version,
+      qr_image_url: "qrImageUrl" in state ? state.qrImageUrl : null,
+      verification_url:
+        "verificationUrl" in state ? state.verificationUrl : null,
+      expires_at: "expiresAt" in state ? state.expiresAt : null,
+    };
+  }
   get active() {
     return this.attempt !== undefined;
   }

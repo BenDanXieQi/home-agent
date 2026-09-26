@@ -18,6 +18,19 @@ const change = z.object({
 export function deviceTopics(did: string) {
   return [`device/${did}/up/properties_changed/#`, `device/${did}/state/#`];
 }
+export function directoryTopics(uid: string, deviceIds: readonly string[]) {
+  return [
+    ...(subscribableDevice(uid)
+      ? [`user/${uid}/g_op/bind`, `user/${uid}/g_op/unbind`]
+      : []),
+    ...[...new Set(deviceIds)]
+      .filter(subscribableDevice)
+      .flatMap((did) => [
+        `device/${did}/g_op/rename`,
+        `device/${did}/g_op/hr_change`,
+      ]),
+  ];
+}
 export function subscribableDevice(did: string) {
   return (
     did.length > 0 &&
@@ -26,6 +39,14 @@ export function subscribableDevice(did: string) {
   );
 }
 export function decodePush(topic: string, payload: Buffer) {
+  // Directory notifications are invalidations, not authoritative field updates.
+  // Their undocumented payload is neither retained nor used to mutate the catalog.
+  const directory =
+    /^(?:user\/([^/]+)\/g_op\/(bind|unbind)|device\/([^/]+)\/g_op\/(rename|hr_change))$/.exec(
+      topic,
+    );
+  if (directory)
+    return [{ kind: "directory" as const, did: directory[3] ?? "", topic }];
   const online = /^device\/([^/]+)\/state\/(online|offline)$/.exec(topic);
   if (online)
     return [

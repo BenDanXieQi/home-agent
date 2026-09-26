@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
+import { householdSnapshotAtom } from "./household-state";
 import App from "../../App";
 import { accountDialogOpenAtom } from "../../state/ui";
 import {
@@ -25,6 +26,11 @@ export function AccountGate() {
   const path = useRouterState({ select: (state) => state.location.pathname });
   const account = useAtomValue(mijiaAccountAtom);
   const signedIn = useAtomValue(mijiaAuthenticatedAtom);
+  const household = useAtomValue(householdSnapshotAtom)?.projection.household
+    .household;
+  const showCache =
+    household?.account_id &&
+    (account?.status === "restoring" || account?.status === "restore_error");
   const login = useAtomValue(mijiaLoginAttemptAtom);
   const fetchError = useAtomValue(mijiaFetchErrorAtom);
   const closeLogin = useSetAtom(accountDialogOpenAtom);
@@ -46,7 +52,7 @@ export function AccountGate() {
     }
   }, [login, signedIn, path, navigate, closeLogin]);
   if (!account && !fetchError) return <AccountLoading />;
-  if (!signedIn)
+  if (!signedIn && !showCache)
     return (
       <Suspense fallback={<AccountLoading />}>
         <LoginPage />
