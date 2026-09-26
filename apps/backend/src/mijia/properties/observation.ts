@@ -1,6 +1,8 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
-import { MiotMqtt } from "../protocols/miot/mqtt";
+import { MiotMqtt, isMqttAuthenticationFailure } from "../protocols/miot/mqtt";
 import type { MiotObservation } from "../protocols/miot/messages";
+import { safeMijiaError } from "../errors";
+import { mijiaOperation } from "../operation";
 
 type Watch = {
   selection:
@@ -12,15 +14,17 @@ type Watch = {
   binding?: ReturnType<MiotMqtt["observe"]>;
 };
 
-/** Keeps active observations across disposable connections; owns the only retry timer. */
+/** Owns observations, topic authorization failures and connection recovery. */
 export class DeviceObservations {
   private connection: MiotMqtt | undefined;
   private readonly watches = new Set<Watch>();
+  private readonly rejectedTopics = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private delay = 1_000;
   private stopped = false;
   private connecting = false;
   private authenticationFailed = false;
+  private failure: ReturnType<typeof safeMijiaError>["reason"] | null = null;
 
   constructor(
     private readonly sourceId: string,
@@ -28,6 +32,9 @@ export class DeviceObservations {
       typeof MiotMqtt
     >[1],
     private readonly onAuthenticationFailure: () => void,
+    private readonly onPermissionRejected: (
+      event: Extract<MiotObservation, { kind: "subscription" }>,
+    ) => void,
   ) {}
 
   get closed() {
@@ -57,34 +64,68 @@ export class DeviceObservations {
     if (this.connecting || this.stopped || !this.watches.size) return;
     this.connecting = true;
     try {
-      await this.connection?.close();
-      if (this.stopped || !this.watches.size || this.authenticationFailed)
-        return;
-      const connection = new MiotMqtt(this.sourceId, this.credentials());
-      this.connection = connection;
-      for (const watch of this.watches) this.bind(watch, connection);
-    } catch {
-      this.authenticationFailed = true;
-      this.onAuthenticationFailure();
+      await mijiaOperation("mqtt.connect", "internal_error", async () => {
+        await this.connection?.close();
+        if (this.stopped || !this.watches.size || this.authenticationFailed)
+          return;
+        // This attempt uses current credentials, including updates during close.
+        clearTimeout(this.timer);
+        this.timer = undefined;
+        const connection = new MiotMqtt(
+          this.sourceId,
+          this.credentials(),
+          this.rejectedTopics,
+        );
+        this.connection = connection;
+        for (const watch of this.watches) {
+          if (this.stopped || connection.closed) break;
+          this.bind(watch, connection);
+        }
+      });
+    } catch (error) {
+      if (this.stopped || !this.watches.size) return;
+      const failure = safeMijiaError(error);
+      this.failure = failure.reason;
+      if (
+        failure.reason === "cancelled" ||
+        failure.reason === "stale_session"
+      ) {
+        await this.close(failure.reason);
+      } else if (failure.reason === "authentication") {
+        this.authenticationFailed = true;
+        this.onAuthenticationFailure();
+      } else {
+        await this.connection?.close(failure.reason);
+        this.schedule();
+      }
     } finally {
       this.connecting = false;
+      // A synchronous callback can replace the last watch while this attempt closes.
+      if (this.connection?.closed) this.schedule();
     }
   }
 
   private bind(watch: Watch, connection: MiotMqtt) {
     const listener: Watch["listener"] = (event) => {
       if (this.connection !== connection || !this.watches.has(watch)) return;
+      if (
+        event.kind === "subscription" &&
+        event.status === "failed" &&
+        event.reason === "subscription_rejected" &&
+        event.code !== null &&
+        !this.rejectedTopics.has(event.topic)
+      ) {
+        this.rejectedTopics.set(event.topic, event.code);
+        // Topic ACL rejection is not evidence that the account token is invalid.
+        if (event.code === 0x87) this.onPermissionRejected(event);
+      }
       if (event.kind === "connection") {
-        if (event.status === "connected") this.delay = 1_000;
+        if (event.status === "connected") {
+          this.delay = 1_000;
+          this.failure = null;
+        }
         if (event.status === "closed") {
-          if (
-            [
-              "connack_134",
-              "connack_135",
-              "connack_138",
-              "server_disconnect_135",
-            ].includes(event.reason ?? "")
-          ) {
+          if (isMqttAuthenticationFailure(event.reason)) {
             if (!this.authenticationFailed) {
               this.authenticationFailed = true;
               this.onAuthenticationFailure();
@@ -92,9 +133,10 @@ export class DeviceObservations {
           } else this.schedule();
         }
       }
-      watch.listener(event);
+      if (this.connection === connection && this.watches.has(watch))
+        watch.listener(event);
     };
-    watch.binding =
+    const binding =
       watch.selection.kind === "devices"
         ? connection.observe(watch.selection.ids, listener, watch.signal)
         : connection.observeTopics(
@@ -102,6 +144,16 @@ export class DeviceObservations {
             listener,
             watch.signal,
           );
+    // observe delivers events synchronously; callbacks may cancel this watch.
+    if (
+      this.stopped ||
+      !this.watches.has(watch) ||
+      watch.signal.aborted ||
+      this.connection !== connection ||
+      connection.closed
+    )
+      binding.cancel();
+    else watch.binding = binding;
   }
 
   observe(
@@ -139,7 +191,11 @@ export class DeviceObservations {
       watch.detach();
       this.watches.delete(watch);
       watch.binding?.cancel();
-      if (!this.watches.size) void this.close("cancelled");
+      if (!this.watches.size) {
+        clearTimeout(this.timer);
+        this.timer = undefined;
+        void this.connection?.close("cancelled");
+      }
     };
     this.watches.add(watch);
     signal.addEventListener("abort", cancel, { once: true });
@@ -152,6 +208,7 @@ export class DeviceObservations {
         ...this.connection?.snapshot(),
         reconnect_scheduled: this.timer !== undefined,
         authentication_failed: this.authenticationFailed,
+        failure: this.failure,
         observers: this.watches.size,
       }),
       retry: () => {
@@ -162,8 +219,11 @@ export class DeviceObservations {
   }
 
   credentialsUpdated() {
-    if (this.stopped || !this.watches.size) return;
+    if (this.stopped) return;
     this.authenticationFailed = false;
+    this.failure = null;
+    this.rejectedTopics.clear();
+    if (!this.watches.size) return;
     void this.connection?.close("credentials_updated");
     this.schedule();
   }
@@ -175,5 +235,6 @@ export class DeviceObservations {
     await this.connection?.close(reason);
     for (const watch of this.watches) watch.detach();
     this.watches.clear();
+    this.rejectedTopics.clear();
   }
 }
