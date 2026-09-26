@@ -1,4 +1,4 @@
-import { MiotMqtt } from "./protocols/miot/mqtt";
+import { DeviceObservations } from "./properties/observation";
 import type { MiotObservation } from "./protocols/miot/messages";
 import { miotPushSourceId } from "./properties/source-profiles";
 import { authorizeOAuth } from "./protocols/oauth/client";
@@ -111,7 +111,8 @@ export class MijiaService {
     });
   }
 
-  private mqtt: MiotMqtt | undefined;
+  private mqtt: DeviceObservations | undefined;
+  private observationScope = new AbortController();
   private mqttClosing: Promise<void> = Promise.resolve();
   private readScope = new AbortController();
   private readGeneration = crypto.randomUUID();
@@ -150,14 +151,18 @@ export class MijiaService {
     return this.snapshot();
   }
 
-  private invalidatePropertyReads() {
-    const mqtt = this.mqtt;
-    this.mqtt = undefined;
-    if (mqtt)
-      this.mqttClosing = Promise.all([
-        this.mqttClosing,
-        mqtt.close("scope_invalidated"),
-      ]).then(() => {});
+  private invalidatePropertyReads(preserveObservations = false) {
+    if (!preserveObservations) {
+      const mqtt = this.mqtt;
+      this.mqtt = undefined;
+      if (mqtt)
+        this.mqttClosing = Promise.all([
+          this.mqttClosing,
+          mqtt.close("scope_invalidated"),
+        ]).then(() => {});
+      this.observationScope.abort();
+      this.observationScope = new AbortController();
+    }
     this.readScope.abort();
     this.readScope = new AbortController();
     this.readGeneration = crypto.randomUUID();
@@ -174,11 +179,16 @@ export class MijiaService {
     if (!account || !oauth) throw new MijiaError("not_bound");
     const ids = [...new Set(deviceIds)];
     if (!ids.length) throw new MijiaError("invalid_input");
-    const scope = this.readScope.signal;
+    const accountKey = this.accountKey(account);
+    const scope = this.observationScope.signal;
     const combined = AbortSignal.any([signal, scope]);
     const assertCurrent = () => {
       combined.throwIfAborted();
-      if (!this.activeAccount(account) || this.accountOAuth !== oauth)
+      if (
+        !this.accountClient ||
+        !this.activeAccount(this.accountClient) ||
+        this.accountKey(this.accountClient) !== accountKey
+      )
         throw new MijiaError("stale_session");
       this.discovery.requireHome();
       if (this.discovery.stateSnapshot.status !== "ready")
@@ -196,9 +206,24 @@ export class MijiaService {
         this.mqtt = undefined;
       }
       assertCurrent();
-      const mqtt = (this.mqtt ??= new MiotMqtt(
+      const mqtt = (this.mqtt ??= new DeviceObservations(
         miotPushSourceId(account.getCredentials().userId),
-        oauth,
+        () => {
+          scope.throwIfAborted();
+          if (
+            !this.accountClient ||
+            !this.activeAccount(this.accountClient) ||
+            this.accountKey(this.accountClient) !== accountKey
+          )
+            throw new MijiaError("stale_session");
+          if (!this.accountOAuth || this.accountOAuth.expiresAt <= Date.now())
+            throw new MijiaError("authentication");
+          return this.accountOAuth;
+        },
+        () => {
+          if (this.accountClient)
+            void this.maintenance.renew(this.accountClient);
+        },
       ));
       const observation = mqtt.observe(
         ids,
@@ -480,12 +505,15 @@ export class MijiaService {
           next.passToken !== previous.passToken,
         );
         if (reinstall) this.media.prepareRebind();
-        this.invalidatePropertyReads();
+        const oauthChanged =
+          this.accountOAuth?.accessToken !== candidate.oauth.accessToken;
+        this.invalidatePropertyReads(true);
         this.accountClient = candidate.client;
         this.accountOAuth = candidate.oauth;
         account.dispose();
         this.discovery.set(candidate.catalog, true);
         this.startAccountMaintenance(candidate.client);
+        if (oauthChanged) this.mqtt?.credentialsUpdated();
       } finally {
         this.committingCredentials = false;
       }

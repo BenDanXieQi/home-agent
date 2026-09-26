@@ -25,7 +25,7 @@ function entry(topic: string) {
   };
 }
 
-/** One disposable MQTT generation. Reconnection orchestration belongs to task 1.3. */
+/** One disposable MQTT generation. DeviceObservations owns reconnection orchestration. */
 export class MiotMqtt {
   readonly generation = crypto.randomUUID();
   private readonly client;

@@ -82,7 +82,7 @@ backend 提供 `MijiaService.readProperties(properties, signal)`，由调用方�
 
 属性读取按稳定来源遵守 `Retry-After`：期限内后续批次和新读取均不发请求，返回 `unavailable` 且 `read_started_at=null`，接收时间沿用原失败观测。到期后等待下一次显式读取，不自动重试。账号自动及手动恢复续期同样遵守该期限，超长等待分段调度。
 
-请求复用 MiCloud RC4 传输，`datasource=1` 为缓存优先，缓存缺失可能触发设备 RPC，不保证最新值；统一按 `cloud_cache/baseline` 保守处理。该入口不写家庭状态，不提供属性读取 HTTP 路由或周期属性轮询。`observeDevices(deviceIds, onObservation, signal)` 提供正式内部 MQTT 属性与在线观察，使用同一账号保存的 OAuth 凭据，按所选家庭的明确设备集合订阅，返回取消、状态快照和临时失败重试入口；消息与逐 topic 的订阅确认分别交付。观察不写家庭状态，也未接前端实时展示。自动重连恢复与独立设备事件尚未接入；缓存读取成功不能直接推导属性边沿。字段、失败原因及来源能力矩阵见[读取契约](mijia-source-contract.md#正式读取入口)。
+请求复用 MiCloud RC4 传输，`datasource=1` 为缓存优先，缓存缺失可能触发设备 RPC，不保证最新值；统一按 `cloud_cache/baseline` 保守处理。该入口不写家庭状态，不提供属性读取 HTTP 路由或周期属性轮询。`observeDevices(deviceIds, onObservation, signal)` 提供正式内部 MQTT 属性与在线观察，使用同一账号保存的 OAuth 凭据，按所选家庭的明确设备集合订阅，返回取消、状态快照和临时失败重试入口；消息与逐 topic 的订阅确认分别交付。观察不写家庭状态，也未接前端实时展示。MQTT 断线后保留活动观察并按 1～120 秒退避重连、重新订阅；最后一个观察取消即停止重试。独立设备事件和自动补读尚未接入；缓存读取成功不能直接推导属性边沿。字段、失败原因及来源能力矩阵见[读取契约](mijia-source-contract.md#正式读取入口)。
 
 ## 支持范围
 
