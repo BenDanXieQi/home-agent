@@ -6,6 +6,7 @@ import {
 import {
   commandResultSchema,
   loginMaterialSchema,
+  type DirectoryRefreshTarget,
 } from "@home-agent/api/household";
 import {
   requestJson,
@@ -24,7 +25,7 @@ export type MijiaCommand =
   | { type: "verifyLogin"; loginId: string; ticket: string }
   | { type: "retryConnection" }
   | { type: "logout" }
-  | { type: "refreshDevices"; target?: "directory" | "specs" | "all" };
+  | { type: "refreshDevices"; target?: DirectoryRefreshTarget };
 export function getLoginMaterial(id: string, signal: AbortSignal) {
   return requestJson(
     (client, options) =>

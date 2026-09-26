@@ -14,8 +14,8 @@ type Watch = {
   binding?: ReturnType<MiotMqtt["observe"]>;
 };
 
-/** Owns observations, topic authorization failures and connection recovery. */
-export class DeviceObservations {
+/** Owns shared account observations, topic authorization failures and connection recovery. */
+export class AccountObservations {
   private connection: MiotMqtt | undefined;
   private readonly watches = new Set<Watch>();
   private readonly rejectedTopics = new Map<string, number>();
@@ -180,7 +180,7 @@ export class DeviceObservations {
     signal: AbortSignal,
   ) {
     signal.throwIfAborted();
-    if (this.stopped) throw new Error("Device observations are closed");
+    if (this.stopped) throw new Error("Account observations are closed");
     const watch: Watch = {
       selection,
       listener,

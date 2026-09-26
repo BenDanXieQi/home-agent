@@ -290,10 +290,15 @@ export class Go2RtcAdapter {
     );
   }
 
-  /** Stop media, delete the private stream and invalidate its account cache. */
-  async close() {
+  /** Stop using this authorization immediately, before its queued remote cleanup. */
+  revoke() {
     this.stopHeartbeat();
     this.ready = false;
+  }
+
+  /** Stop media, delete the private stream and invalidate its account cache. */
+  async close() {
+    this.revoke();
     const sessionId = this.sessionId;
     if (!sessionId) return;
     try {

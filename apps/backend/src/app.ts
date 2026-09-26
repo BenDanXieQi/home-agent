@@ -17,7 +17,7 @@ type AppDependencies = {
   staticRoot?: string;
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
   connectionStore: ConnectionStore;
-  mijia: HouseholdRuntime;
+  household: HouseholdRuntime;
   readAgentUrl: () => Promise<string>;
 };
 
@@ -25,7 +25,7 @@ export function createApp({
   staticRoot,
   environment,
   connectionStore,
-  mijia,
+  household,
   readAgentUrl,
 }: AppDependencies) {
   const app = new Hono();
@@ -72,7 +72,10 @@ export function createApp({
         readAgentUrl,
       }),
     )
-    .route("/api/mijia", createMijiaRoutes(environment.BACKEND_PORT, mijia));
+    .route(
+      "/api/mijia",
+      createMijiaRoutes(environment.BACKEND_PORT, household),
+    );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));
   if (staticRoot) {

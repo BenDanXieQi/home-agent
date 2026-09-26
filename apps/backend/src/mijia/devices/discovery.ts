@@ -3,7 +3,7 @@ import { householdLimits, jsonBytes } from "../../household/config";
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { MijiaState } from "@home-agent/api/mijia";
 import type { MiCloud, MiCloudDevice } from "../protocols/micloud";
-import { describeMijiaDevices } from "./mapping";
+import { describeMijiaDevice } from "./mapping";
 import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "../errors";
 import { mijiaOperation } from "../operation";
 
@@ -25,7 +25,7 @@ type DeviceDependencies = {
   onDevices: (devices: MiCloudDevice[], retryFailed: boolean) => void;
 };
 
-/** Owns the account catalog, selected household scope and discovery work. */
+/** Maintains vendor discovery and the access index for the accepted household. */
 export class DeviceDiscovery {
   private currentState: MijiaState["devices"] = { status: "idle", items: [] };
   get state() {
@@ -39,7 +39,7 @@ export class DeviceDiscovery {
     homes: [],
     devices: [],
   };
-  private selectedHomeId: string | null = null;
+  private accessHomeId: string | null = null;
   private selectedDevices = new Map<string, MiCloudDevice>();
   private scopeRevision = crypto.randomUUID();
   private confirmed = false;
@@ -47,7 +47,7 @@ export class DeviceDiscovery {
   private pendingCatalog:
     | { account: MiCloud; catalog: Awaited<ReturnType<MiCloud["getCatalog"]>> }
     | undefined;
-  get ready() {
+  get catalogConfirmed() {
     return this.confirmed;
   }
 
@@ -61,19 +61,19 @@ export class DeviceDiscovery {
     this.selectedDevices = new Map(
       this.selectedHome
         ? this.catalog.devices
-            .filter((device) => device.home_id === this.selectedHomeId)
+            .filter((device) => device.home_id === this.accessHomeId)
             .map((device) => [device.did, device])
         : [],
     );
   }
   get selectedHome() {
-    return this.catalog.homes.find((home) => home.id === this.selectedHomeId);
+    return this.catalog.homes.find((home) => home.id === this.accessHomeId);
   }
   homeSnapshot() {
     return {
-      selectedHomeId: this.selectedHomeId,
+      selectedHomeId: this.accessHomeId,
       status:
-        this.selectedHomeId === null
+        this.accessHomeId === null
           ? ("unselected" as const)
           : this.selectedHome
             ? ("selected" as const)
@@ -86,7 +86,7 @@ export class DeviceDiscovery {
     };
   }
   requireHome() {
-    if (this.selectedHomeId === null) throw new MijiaError("home_required");
+    if (this.accessHomeId === null) throw new MijiaError("home_required");
     if (!this.selectedHome) throw new MijiaError("home_unavailable");
     return this.selectedHome;
   }
@@ -95,13 +95,16 @@ export class DeviceDiscovery {
     if (!this.catalog.homes.some((home) => home.id === homeId))
       throw new MijiaError("home_unavailable");
   }
-  select(homeId: string | null) {
-    if (homeId === this.selectedHomeId) return;
-    this.selectedHomeId = homeId;
+  acceptHome(homeId: string | null) {
+    if (homeId === this.accessHomeId) return;
+    this.accessHomeId = homeId;
     this.indexSelectedDevices();
     this.scopeRevision = crypto.randomUUID();
     this.dependencies.onScopeChanged();
-    this.state = { ...this.state, items: describeMijiaDevices(this.devices) };
+    this.state = {
+      ...this.state,
+      items: this.devices.map(describeMijiaDevice),
+    };
     this.dependencies.onDevices(this.devices, false);
   }
   catalogSnapshot() {
@@ -128,7 +131,7 @@ export class DeviceDiscovery {
     const accepted = new Map(
       next.devices.map((device) => [device.did, device]),
     );
-    const home = this.selectedHomeId;
+    const home = this.accessHomeId;
     const remaining = this.catalog.devices.filter((device) => {
       const replacement = accepted.get(device.did);
       return (
@@ -174,7 +177,7 @@ export class DeviceDiscovery {
   snapshot() {
     return {
       ...this.state,
-      items: describeMijiaDevices(this.devices),
+      items: this.devices.map(describeMijiaDevice),
     };
   }
   pause() {
@@ -188,7 +191,7 @@ export class DeviceDiscovery {
     this.confirmed = false;
     this.pendingCatalog = undefined;
     this.catalog = { homes: [], devices: [] };
-    this.selectedHomeId = null;
+    this.accessHomeId = null;
     this.selectedDevices.clear();
     this.scopeRevision = crypto.randomUUID();
     this.state = { status: "idle", items: [] };
@@ -266,7 +269,7 @@ export class DeviceDiscovery {
     const devices = this.devices;
     this.state = {
       status: "ready",
-      items: describeMijiaDevices(devices),
+      items: devices.map(describeMijiaDevice),
     };
     this.dependencies.onDevices(devices, retryFailed);
     const account = this.dependencies.currentAccount();

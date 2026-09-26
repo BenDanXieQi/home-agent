@@ -46,11 +46,11 @@ const mijiaService = new MijiaService({
 });
 const { HouseholdRuntime } = await import("./household/runtime");
 const { createHouseholdRepository } = await import("./household/repository");
-const mijia = new HouseholdRuntime(
+const household = new HouseholdRuntime(
   mijiaService,
   database ? createHouseholdRepository(database.db) : undefined,
 );
-mijia.start();
+household.start();
 void mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
@@ -58,7 +58,7 @@ const app = createApp({
   staticRoot: join(import.meta.dir, "public"),
   environment,
   connectionStore,
-  mijia,
+  household,
   readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
 });
 const server = Bun.serve({
@@ -79,7 +79,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         const drained = await Promise.race([
           Promise.all([
             server.stop(),
-            mijia.close().catch(() => {
+            household.close().catch(() => {
               console.warn(
                 "摄像头会话清理未完成；go2rtc 将在租约到期后自动清理。",
               );

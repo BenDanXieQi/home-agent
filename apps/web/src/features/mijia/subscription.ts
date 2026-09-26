@@ -6,7 +6,9 @@ import {
   resyncSchema,
   stateVersionSchema,
   applyChanges,
+  householdStreamPolicy,
 } from "@home-agent/api/household";
+import { parseRetryAfter } from "@home-agent/api/http/retry-after";
 import { appStore } from "../../lib/store";
 import {
   householdSnapshotAtom,
@@ -39,12 +41,15 @@ export function subscribeHousehold() {
       timeout = setTimeout(() => current.abort(), ms);
     };
     const parser = createParser({
-      maxBufferSize: 9 * 1024 * 1024,
+      maxBufferSize: householdStreamPolicy.snapshotBytes + 1024 * 1024,
       onError: () => current.abort(),
       onEvent: (event) => {
         if (!active()) return;
         try {
-          if (new TextEncoder().encode(event.data).byteLength > 8 * 1024 * 1024)
+          if (
+            new TextEncoder().encode(event.data).byteLength >
+            householdStreamPolicy.snapshotBytes
+          )
             throw new Error("Oversized state");
           const data: unknown = JSON.parse(event.data);
           const previous = appStore.get(householdSnapshotAtom);
@@ -102,7 +107,7 @@ export function subscribeHousehold() {
           lastMessage = Date.now();
           appStore.set(householdUpdatedAtom, lastMessage);
           appStore.set(householdSyncedAtom, true);
-          resetDeadline(45_000);
+          resetDeadline(householdStreamPolicy.silenceMs);
         } catch {
           current.abort();
         }
@@ -114,13 +119,9 @@ export function subscribeHousehold() {
         { init: { signal: current.signal, cache: "no-store" } },
       );
       if (response.status === 503) {
-        const header = response.headers.get("Retry-After");
-        const seconds = Number(header);
         retryAfter = Math.max(
           retryAfter,
-          Number.isFinite(seconds)
-            ? seconds * 1000
-            : Math.max(0, Date.parse(header ?? "") - Date.now()) || 30_000,
+          parseRetryAfter(response.headers.get("Retry-After")) ?? 30_000,
         );
       }
       if (
@@ -172,7 +173,8 @@ export function subscribeHousehold() {
   const visibility = () => {
     if (
       document.visibilityState === "visible" &&
-      (!appStore.get(householdSyncedAtom) || Date.now() - lastMessage > 45_000)
+      (!appStore.get(householdSyncedAtom) ||
+        Date.now() - lastMessage > householdStreamPolicy.silenceMs)
     )
       reconnect();
   };

@@ -1,40 +1,90 @@
 import { streamSSE } from "hono/streaming";
 import type { Context } from "hono";
 import {
-  snapshotSchema,
   stateChangeSchema,
   resyncSchema,
   stateVersionSchema,
 } from "@home-agent/api/household";
-import { projectionChanges } from "./projection";
-import { householdLimits, jsonBytes } from "./config";
+import { householdLimits } from "./config";
 import type { HouseholdRuntime } from "./runtime";
 
 /** All writes, including heartbeats, share a bounded per-client FIFO. */
 const noop = () => {};
+const encoder = new TextEncoder();
+function serialize(
+  event: "snapshot" | "state_change" | "heartbeat" | "resync_required",
+  payload: unknown,
+  end = false,
+) {
+  const data = encoder.encode(
+    `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`,
+  );
+  return { data, bytes: data.byteLength, snapshot: event === "snapshot", end };
+}
 export function createHouseholdStream(runtime: HouseholdRuntime) {
   let connections = 0;
+  let cached: ReturnType<typeof prepare> | undefined;
+  function prepare(snapshot: ReturnType<HouseholdRuntime["snapshot"]>) {
+    const { scope_epoch, sequence } = snapshot;
+    const version = { scope_epoch, sequence };
+    const changes = runtime.changes();
+    const stopping =
+      snapshot.projection.household.household.status === "stopping";
+    let snapshotFrame: ReturnType<typeof serialize> | undefined;
+    let changeFrame: ReturnType<typeof serialize> | undefined;
+    let heartbeatFrame: ReturnType<typeof serialize> | undefined;
+    let resyncFrame: ReturnType<typeof serialize> | undefined;
+    return {
+      version,
+      stopping,
+      snapshot: () => (snapshotFrame ??= serialize("snapshot", snapshot)),
+      change: () => {
+        if (!changes.length) return undefined;
+        return (changeFrame ??= serialize(
+          "state_change",
+          stateChangeSchema.parse({ ...version, changes }),
+        ));
+      },
+      heartbeat: () =>
+        (heartbeatFrame ??= serialize(
+          "heartbeat",
+          stateVersionSchema.parse(version),
+        )),
+      resync: () =>
+        (resyncFrame ??= serialize(
+          "resync_required",
+          resyncSchema.parse({
+            ...version,
+            reason: stopping ? "stopping" : "scope_changed",
+          }),
+          true,
+        )),
+    };
+  }
+  function current() {
+    const snapshot = runtime.snapshot();
+    if (
+      !cached ||
+      cached.version.scope_epoch !== snapshot.scope_epoch ||
+      cached.version.sequence !== snapshot.sequence
+    )
+      cached = prepare(snapshot);
+    return cached;
+  }
   return (c: Context) => {
     if (connections >= householdLimits.connections) {
       c.header("Retry-After", "30");
       return c.body(null, 503);
     }
     connections++;
-    c.header("Cache-Control", "no-store");
     c.header("X-Accel-Buffering", "no");
-    return streamSSE(c, async (stream) => {
+    const response = streamSSE(c, async (stream) => {
       let closed = false;
       let sending = false;
       let queuedBytes = 0;
       let queuedChanges = 0;
-      let last: ReturnType<HouseholdRuntime["snapshot"]> | undefined;
-      const queue: {
-        event: string;
-        data: string;
-        bytes: number;
-        snapshot: boolean;
-        end: boolean;
-      }[] = [];
+      let last: ReturnType<typeof current>["version"] | undefined;
+      const queue: ReturnType<typeof serialize>[] = [];
       let detach = noop;
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       let deadline: ReturnType<typeof setTimeout> | undefined;
@@ -62,7 +112,7 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
           while (queue.length && !closed) {
             const item = queue[0]!;
             deadline = setTimeout(close, householdLimits.writeTimeoutMs);
-            await stream.writeSSE({ event: item.event, data: item.data });
+            await stream.write(item.data);
             clearTimeout(deadline);
             if (closed) return;
             queue.shift();
@@ -81,11 +131,9 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
           sending = false;
         }
       }
-      function enqueue(event: string, payload: unknown, end = false) {
+      function enqueue(item: ReturnType<typeof serialize>) {
         if (closed) return;
-        const data = JSON.stringify(payload);
-        const bytes = Buffer.byteLength(data) + Buffer.byteLength(event) + 16;
-        const snapshot = event === "snapshot";
+        const { bytes, snapshot } = item;
         if (
           bytes > householdLimits.snapshotBytes ||
           (!snapshot &&
@@ -99,50 +147,37 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
           queuedBytes += bytes;
           queuedChanges++;
         }
-        queue.push({ event, data, bytes, snapshot, end });
+        queue.push(item);
         void pump();
       }
       try {
         stream.onAbort(close);
         // No await between registration and the single committed snapshot.
         detach = runtime.subscribe(() => {
-          const next = runtime.snapshot();
+          const next = current();
+          if (
+            last?.scope_epoch === next.version.scope_epoch &&
+            last.sequence === next.version.sequence
+          )
+            return;
           if (
             !last ||
-            next.scope_epoch !== last.scope_epoch ||
-            next.projection.household.household.status === "stopping"
+            next.version.scope_epoch !== last.scope_epoch ||
+            next.stopping
           ) {
-            enqueue(
-              "resync_required",
-              resyncSchema.parse({
-                ...runtime.version(),
-                reason:
-                  next.projection.household.household.status === "stopping"
-                    ? "stopping"
-                    : "scope_changed",
-              }),
-              true,
-            );
-          } else if (next.sequence > last.sequence) {
-            enqueue(
-              "state_change",
-              stateChangeSchema.parse({
-                ...runtime.version(),
-                changes: projectionChanges(last.projection, next.projection),
-              }),
-            );
+            enqueue(next.resync());
+          } else if (next.version.sequence > last.sequence) {
+            const change = next.change();
+            if (change) enqueue(change);
           }
-          last = next;
+          last = next.version;
         });
-        last = runtime.snapshot();
-        if (jsonBytes(last) > householdLimits.snapshotBytes) {
-          close();
-          return;
-        }
-        enqueue("snapshot", snapshotSchema.parse(last));
+        const initial = current();
+        last = initial.version;
+        enqueue(initial.snapshot());
+        if (closed) return;
         heartbeat = setInterval(
-          () =>
-            enqueue("heartbeat", stateVersionSchema.parse(runtime.version())),
+          () => enqueue(current().heartbeat()),
           householdLimits.heartbeatMs,
         );
         await done;
@@ -150,5 +185,7 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
         close();
       }
     });
+    response.headers.set("Cache-Control", "no-store");
+    return response;
   };
 }

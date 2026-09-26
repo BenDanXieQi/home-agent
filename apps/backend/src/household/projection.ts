@@ -5,7 +5,7 @@ import {
   changeSchema,
 } from "@home-agent/api/household";
 import type { Projection } from "@home-agent/api/household";
-import type { MijiaService } from "../mijia/service";
+import type { deviceDirectory } from "../mijia/devices/directory";
 
 export function initialProjection() {
   return projectionSchema.parse({
@@ -43,7 +43,7 @@ export function initialProjection() {
   });
 }
 export function publicDirectory(
-  candidate: ReturnType<MijiaService["directoryCandidate"]>,
+  candidate: ReturnType<typeof deviceDirectory>,
   now: string,
 ) {
   const home = candidate.homes.find((item) => item.id === candidate.homeId);
@@ -103,7 +103,10 @@ export function projectionChanges(previous: Projection, next: Projection) {
       if (!(key in after))
         changes.push(changeSchema.parse({ op: "remove", entity, key }));
     for (const [key, value] of Object.entries(after))
-      if (JSON.stringify(before[key]) !== JSON.stringify(value))
+      if (
+        before[key] !== value &&
+        JSON.stringify(before[key]) !== JSON.stringify(value)
+      )
         changes.push(changeSchema.parse({ op: "upsert", entity, key, value }));
   }
   return changes;
