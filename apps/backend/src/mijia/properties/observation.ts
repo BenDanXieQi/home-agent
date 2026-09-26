@@ -1,6 +1,8 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
-import { MiotMqtt } from "../protocols/miot/mqtt";
+import { MiotMqtt, isMqttAuthenticationFailure } from "../protocols/miot/mqtt";
 import type { MiotObservation } from "../protocols/miot/messages";
+import { safeMijiaError } from "../errors";
+import { mijiaOperation } from "../operation";
 
 type Watch = {
   ids: readonly string[];
@@ -19,6 +21,7 @@ export class DeviceObservations {
   private stopped = false;
   private connecting = false;
   private authenticationFailed = false;
+  private failure: ReturnType<typeof safeMijiaError>["reason"] | null = null;
 
   constructor(
     private readonly sourceId: string,
@@ -55,36 +58,50 @@ export class DeviceObservations {
     if (this.connecting || this.stopped || !this.watches.size) return;
     this.connecting = true;
     try {
-      await this.connection?.close();
-      if (this.stopped || !this.watches.size || this.authenticationFailed)
-        return;
-      const connection = new MiotMqtt(this.sourceId, this.credentials());
-      this.connection = connection;
-      for (const watch of this.watches) this.bind(watch, connection);
-    } catch {
-      this.authenticationFailed = true;
-      this.onAuthenticationFailure();
+      await mijiaOperation("mqtt.connect", "internal_error", async () => {
+        await this.connection?.close();
+        if (this.stopped || !this.watches.size || this.authenticationFailed)
+          return;
+        const connection = new MiotMqtt(this.sourceId, this.credentials());
+        this.connection = connection;
+        for (const watch of this.watches) {
+          if (this.stopped || connection.closed) break;
+          this.bind(watch, connection);
+        }
+      });
+    } catch (error) {
+      if (this.stopped || !this.watches.size) return;
+      const failure = safeMijiaError(error);
+      this.failure = failure.reason;
+      if (
+        failure.reason === "cancelled" ||
+        failure.reason === "stale_session"
+      ) {
+        await this.close(failure.reason);
+      } else if (failure.reason === "authentication") {
+        this.authenticationFailed = true;
+        this.onAuthenticationFailure();
+      } else {
+        await this.connection?.close(failure.reason);
+        this.schedule();
+      }
     } finally {
       this.connecting = false;
     }
   }
 
   private bind(watch: Watch, connection: MiotMqtt) {
-    watch.binding = connection.observe(
+    const binding = connection.observe(
       watch.ids,
       (event) => {
         if (this.connection !== connection || !this.watches.has(watch)) return;
         if (event.kind === "connection") {
-          if (event.status === "connected") this.delay = 1_000;
+          if (event.status === "connected") {
+            this.delay = 1_000;
+            this.failure = null;
+          }
           if (event.status === "closed") {
-            if (
-              [
-                "connack_134",
-                "connack_135",
-                "connack_138",
-                "server_disconnect_135",
-              ].includes(event.reason ?? "")
-            ) {
+            if (isMqttAuthenticationFailure(event.reason)) {
               if (!this.authenticationFailed) {
                 this.authenticationFailed = true;
                 this.onAuthenticationFailure();
@@ -96,6 +113,16 @@ export class DeviceObservations {
       },
       watch.signal,
     );
+    // observe delivers events synchronously; callbacks may cancel this watch.
+    if (
+      this.stopped ||
+      !this.watches.has(watch) ||
+      watch.signal.aborted ||
+      this.connection !== connection ||
+      connection.closed
+    )
+      binding.cancel();
+    else watch.binding = binding;
   }
 
   observe(
@@ -128,6 +155,7 @@ export class DeviceObservations {
         ...this.connection?.snapshot(),
         reconnect_scheduled: this.timer !== undefined,
         authentication_failed: this.authenticationFailed,
+        failure: this.failure,
         observers: this.watches.size,
       }),
       retry: () => {

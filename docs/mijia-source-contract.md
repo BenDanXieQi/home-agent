@@ -34,13 +34,15 @@ OAuth 与 MQTT 必须使用同一个实例 UUID：OAuth 的 `device_id=mico.<uui
 
 `MijiaService.observeDevices(deviceIds, onObservation, signal)` 校验当前账号、所选家庭和目录中的明确设备集合，按需创建一个 MQTT 采集实例。多个观察者共用连接与 topic，通过引用计数对账；返回 `cancel()`、`snapshot()` 和 `retry()`。`snapshot()` 提供逐 topic 的期望、确认、在途、获准 QoS、失败原因及接收／丢弃计数；`retry()` 只重试临时失败，不反复尝试已被拒绝的订阅。该入口没有 HTTP 路由，不自动选择全家庭，不提交家庭 latest 或 availability。
 
+设备目录由 `DeviceDiscovery` 维护所选家庭的派生索引，目录更新、家庭选择和清除时同步更新。新观察在接纳前校验完整设备集合；消息交付检查账号仍活动、取消信号及作用域代次，不逐条扫描目录。目录刷新中的 `loading` 或临时错误不撤销已接纳观察；成功目录更新确认设备移除、归属／型号／规格变化时才撤销对应作用域。同账号续期期间排队的观察使用稳定来源身份和出队后的当前 OAuth 凭据。
+
 `protocols/miot/mqtt.ts` 负责 MQTT 5/TLS 连接、订阅与取消，`messages.ts` 校验和规范化属性及在线消息。每设备请求 QoS 2 的 `device/{did}/up/properties_changed/#` 和 `device/{did}/state/#`；两类 topic 独立接受 QoS 0/1/2 的 SUBACK，连接成功不代替订阅确认。在途操作共用 16 个名额、确认期限 10 秒。订阅超时只令对应 topic 失败，迟到确认不能恢复其确认状态；取消时对已确认或状态不确定的订阅退订。退订失败或超时关闭连接，防止遗留订阅继续交付。
 
 消息回调先于订阅注册。只交付当前实例内仍被观察的设备消息，不等待 SUBACK，也不把消息到达视为订阅成功。属性校验 method、did、siid/piid 和显式存在的 JSON 标量 value；params 支持对象或数组，单项属性与 topic 中地址交叉校验，不按 notify 白名单裁剪。同值上报保留。在线消息仅识别 online/offline 叶子。带 `/`、MQTT 通配符或空标识的设备报告 `unsupported_device_id`，不猜测转义规则。
 
 观测包含稳定 `source_id`、实例 `collection_generation`、真实 `received_at`、`observed_at=null`、`source_event_id=null` 和 `source_sequence=null`。正常消息按 live 交付，MQTT retained 消息按 baseline；不承诺设备采样时间、跨消息顺序、无断线重放或端到端恰好一次。独立 `siid/eiid` 事件未启用。
 
-账号退出、账号身份替换、家庭切换和目录归属／型号／规格变化使当前实例失效；取消移除对应回调，最后一个观察者退出某 topic 时退订。连接或订阅局部失败不会直接关闭媒体。断连只结束当前 MQTT 连接代次，`properties/observation.ts` 保留仍然活动的观察集合，用单一计时器按 1、2、4…120 秒退避重连，连接成功重置为 1 秒，重建后重新取得逐 topic SUBACK。每次连接从账号所有者读取最新 OAuth 凭据；明确认证拒绝停止普通重试并交回账号维护。最后一个观察取消或账号退出时关闭连接并清除定时器。同账号会话续期不撤销观察；OAuth token 改变时重建连接，其他账号／家庭范围撤销仍会终止观察。没有自动补读或家庭状态恢复。应用持有一份业务目录，MQTT 只保存派生的订阅集合。
+账号退出、账号身份替换、家庭切换和目录归属／型号／规格变化使当前实例失效；取消移除对应回调，最后一个观察者退出某 topic 时退订。连接或订阅局部失败不会直接关闭媒体。断连只结束当前 MQTT 连接代次，`properties/observation.ts` 保留仍然活动的观察集合，用单一计时器按 1、2、4…120 秒退避重连，连接成功重置为 1 秒，重建后重新取得逐 topic SUBACK。每次连接从账号所有者读取最新 OAuth 凭据；明确认证拒绝停止普通重试并交回账号维护，强制刷新被拒绝的 OAuth token，不因其本地有效期尚未到期而复用；在途续期和 Retry-After 等待保留该拒绝状态，刷新仍返回被拒绝 token 时进入重新认证。连接初始化异常按取消、认证和其他故障区分，脱敏原因保留在观察快照与 tracing 中。最后一个观察取消或账号退出时关闭连接并清除定时器。同账号会话续期不撤销观察；OAuth token 改变时重建连接，其他账号／家庭范围撤销仍会终止观察。没有自动补读或家庭状态恢复。应用持有一份业务目录，MQTT 只保存派生的订阅集合。
 
 ## 正式读取入口
 
