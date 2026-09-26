@@ -16,8 +16,14 @@ import { loginMaterialSchema } from "@home-agent/api/household";
 import type { HouseholdRuntime } from "../household/runtime";
 import { createHouseholdRoutes } from "../household/routes";
 import { requireLocalAccess } from "@home-agent/api/local-access";
+import type { DevicePushLogs } from "../household/device-logs";
+import { createDeviceLogRoutes } from "../household/device-log-routes";
 
-export function createMijiaRoutes(port: number, runtime: HouseholdRuntime) {
+export function createMijiaRoutes(
+  port: number,
+  runtime: HouseholdRuntime,
+  logs: DevicePushLogs,
+) {
   const service = runtime.service;
   const commandResult = () => {
     service.flushChanges();
@@ -39,6 +45,7 @@ export function createMijiaRoutes(port: number, runtime: HouseholdRuntime) {
     });
   const routes = app
     .route("/", createHouseholdRoutes(runtime))
+    .route("/logs", createDeviceLogRoutes(logs))
     .get("/directory/push", (c) => c.json(service.directoryPushStatus()))
     .get("/login/:id/material", (c) =>
       c.json(

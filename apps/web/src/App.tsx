@@ -4,6 +4,7 @@ import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import {
   LayoutGrid,
   Video,
+  ScrollText,
   Settings2,
   House,
   ChevronRight,
@@ -28,6 +29,7 @@ const AccountDialog = lazy(() => import("./features/mijia/AccountDialog"));
 const navigation = [
   { to: "/devices", label: "设备", icon: LayoutGrid },
   { to: "/cameras", label: "摄像头", icon: Video },
+  { to: "/device-logs", label: "设备日志", icon: ScrollText },
   { to: "/settings", label: "设置", icon: Settings2 },
 ] as const;
 export default function App() {
@@ -64,14 +66,14 @@ export default function App() {
             className="workspace-nav"
             aria-label="工作台导航"
           >
-            {navigation.map(({ to, label, icon: Icon }, index) => (
+            {navigation.map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}
                 to={to}
                 aria-label={label}
                 activeOptions={{ exact: true }}
                 onClick={() => setExpanded(false)}
-                className={`workspace-nav-item ${index === 2 ? "nav-settings" : ""}`}
+                className={`workspace-nav-item ${to === "/settings" ? "nav-settings" : ""}`}
                 activeProps={{ className: "is-active" }}
               >
                 <Icon size={18} strokeWidth={1.65} />

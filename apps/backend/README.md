@@ -94,7 +94,7 @@ src/
 │       │   └── properties.ts # 属性地址类型及应用读取预算
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
-├── household/             # 家庭状态机、目录持久化、规格与 SSE
+├── household/             # 家庭状态机、目录持久化、规格、SSE 与限时设备推送日志
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验

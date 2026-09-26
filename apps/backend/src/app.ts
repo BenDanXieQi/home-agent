@@ -12,12 +12,14 @@ import type { ConnectionStore } from "./connections/store";
 import { createConnectionStatusRoutes } from "./connections/status";
 import { createMijiaRoutes } from "./mijia/routes";
 import type { HouseholdRuntime } from "./household/runtime";
+import type { DevicePushLogs } from "./household/device-logs";
 
 type AppDependencies = {
   staticRoot?: string;
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
   connectionStore: ConnectionStore;
   household: HouseholdRuntime;
+  deviceLogs: DevicePushLogs;
   readAgentUrl: () => Promise<string>;
 };
 
@@ -26,6 +28,7 @@ export function createApp({
   environment,
   connectionStore,
   household,
+  deviceLogs,
   readAgentUrl,
 }: AppDependencies) {
   const app = new Hono();
@@ -74,7 +77,7 @@ export function createApp({
     )
     .route(
       "/api/mijia",
-      createMijiaRoutes(environment.BACKEND_PORT, household),
+      createMijiaRoutes(environment.BACKEND_PORT, household, deviceLogs),
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));
@@ -82,7 +85,7 @@ export function createApp({
     app.get("/*", serveStatic({ root: staticRoot }));
     app.on(
       "GET",
-      ["/", "/devices", "/cameras", "/settings"],
+      ["/", "/devices", "/cameras", "/settings", "/device-logs"],
       serveStatic({ path: `${staticRoot}/index.html` }),
     );
   }

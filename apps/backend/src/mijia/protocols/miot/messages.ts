@@ -105,6 +105,7 @@ export function pushObservations(
   collection_generation: string,
 ) {
   const received_at = new Date().toISOString();
+  const packet_id = crypto.randomUUID();
   return decodePush(topic, payload).map((item) => ({
     ...item,
     topic,
@@ -113,6 +114,8 @@ export function pushObservations(
     delivery_kind: retain ? ("baseline" as const) : ("live" as const),
     observed_at: null,
     received_at,
+    packet_id,
+    packet_bytes: payload.length,
     source_event_id: null,
     source_sequence: null,
   }));

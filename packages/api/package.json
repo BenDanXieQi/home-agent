@@ -11,7 +11,8 @@
     "./errors/hono": "./src/errors/hono.ts",
     "./http/retry-after": "./src/http/retry-after.ts",
     "./http/read-body": "./src/http/read-body.ts",
-    "./household": "./src/contracts/household.ts"
+    "./household": "./src/contracts/household.ts",
+    "./device-logs": "./src/contracts/device-logs.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",
