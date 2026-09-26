@@ -118,7 +118,6 @@ export class MediaSession {
       this.bindingFailed(this.bindingRecoveryError);
     else if (!accountChanged && cancelledBinding) void this.startBinding();
     this.cameraSources?.resume();
-    return refreshDevices;
   }
 
   updateDevices(devices: MiCloudDevice[], retryFailed = false) {

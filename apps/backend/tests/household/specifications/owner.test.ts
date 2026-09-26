@@ -1,5 +1,18 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { HouseholdSpecifications } from "../../../src/household/specifications";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  mock,
+  spyOn,
+  test,
+} from "bun:test";
+import { specSchema } from "@home-agent/api/household";
+import { parseImmutable } from "@home-agent/api/immutable";
+import {
+  HouseholdSpecifications,
+  specificationBytes,
+} from "../../../src/household/specifications";
 import { MiCloudError } from "../../../src/mijia/protocols/micloud";
 import { MiotSpecClient } from "../../../src/mijia/protocols/spec/client";
 import { createMijiaSpecificationLoader } from "../../../src/mijia/household";
@@ -9,6 +22,11 @@ import {
   specInstance,
   specUrn,
 } from "../../support/protocol-fixtures";
+
+let specClient: MiotSpecClient;
+beforeEach(() => {
+  specClient = new MiotSpecClient(4 * 1024 * 1024);
+});
 
 const restores: (() => void)[] = [];
 afterEach(() => {
@@ -29,7 +47,7 @@ function specifications(
 ) {
   const changed = mock(() => {});
   const owner = new HouseholdSpecifications(
-    createMijiaSpecificationLoader(),
+    createMijiaSpecificationLoader(specClient),
     changed,
     capacity,
   );
@@ -45,16 +63,79 @@ function metadata(urn = specUrn) {
 }
 
 describe("active household specifications", () => {
+  test("specification limits count escaped UTF-8 values exactly across replacement and removal", () => {
+    const first = parseImmutable(specSchema, {
+      ...metadata(),
+      id: specUrn,
+      version: "1",
+      category: '温度"\\\n',
+    });
+    const secondUrn = specUrn.replace(/:1$/, ":2");
+    const second = parseImmutable(specSchema, {
+      ...metadata(secondUrn),
+      id: secondUrn,
+      version: "2",
+      category: "湿度🌧️",
+    });
+    for (const specs of [
+      {},
+      { [first.id]: first },
+      { [first.id]: first, [second.id]: second },
+      { [second.id]: second },
+    ])
+      expect(specificationBytes(specs)).toBe(
+        Buffer.byteLength(JSON.stringify(specs)),
+      );
+
+    const mutable = specSchema.parse(first);
+    const specs = { [mutable.id]: mutable };
+    const before = specificationBytes(specs);
+    mutable.spec["prop.2.1"]!.description += "更多资料";
+    expect(specificationBytes(specs)).toBeGreaterThan(before);
+    expect(specificationBytes(specs)).toBe(
+      Buffer.byteLength(JSON.stringify(specs)),
+    );
+  });
+
+  test("independently injected clients keep same-URN metadata isolated", async () => {
+    const firstClient = new MiotSpecClient(4 * 1024 * 1024);
+    const secondClient = new MiotSpecClient(4 * 1024 * 1024);
+    const owners = [firstClient, secondClient].map((client, index) => {
+      const resolve = spyOn(client, "resolve").mockImplementation(
+        (_device, signal) =>
+          Promise.resolve({ urn: specUrn, requestSignal: signal }),
+      );
+      const read = spyOn(client, "read").mockResolvedValue({
+        ...metadata(),
+        category: `sensor-${index}`,
+      });
+      const owner = new HouseholdSpecifications(
+        createMijiaSpecificationLoader(client),
+        () => {},
+        () => true,
+      );
+      restores.push(
+        () => resolve.mockRestore(),
+        () => read.mockRestore(),
+        () => owner.clear(),
+      );
+      owner.update([device("a")]);
+      return owner;
+    });
+    await Promise.all(owners.map((owner) => owner.refresh()));
+    expect(
+      owners.map((owner) => owner.snapshot().specs[specUrn]?.category),
+    ).toEqual(["sensor-0", "sensor-1"]);
+    owners[0]!.clear();
+    expect(owners[1]!.isApplicable("a", device("a").model)).toBe(true);
+  });
+
   test("different models resolving to one URN share accepted capabilities and disappear with their last reference", async () => {
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_device, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_device, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockResolvedValue(
-      metadata(),
-    );
+    const read = spyOn(specClient, "read").mockResolvedValue(metadata());
     restores.push(
       () => resolve.mockRestore(),
       () => read.mockRestore(),
@@ -94,14 +175,14 @@ describe("active household specifications", () => {
 
   test("failed refresh after a changed model-to-URN mapping retains display metadata without authorizing old abilities", async () => {
     const nextUrn = specUrn.replace(/:1$/, ":2");
-    const resolve = spyOn(MiotSpecClient.prototype, "resolve")
+    const resolve = spyOn(specClient, "resolve")
       .mockImplementationOnce((_device, signal) =>
         Promise.resolve({ urn: specUrn, requestSignal: signal }),
       )
       .mockImplementation((_device, signal) =>
         Promise.resolve({ urn: nextUrn, requestSignal: signal }),
       );
-    const read = spyOn(MiotSpecClient.prototype, "read")
+    const read = spyOn(specClient, "read")
       .mockResolvedValueOnce(metadata())
       .mockRejectedValue(new MiCloudError("spec-invalid-response"));
     restores.push(
@@ -204,13 +285,11 @@ describe("active household specifications", () => {
 
   test("a removed source's late response cannot restore its reference or evict active specifications", async () => {
     const late = deferred<Awaited<ReturnType<MiotSpecClient["read"]>>>();
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_device, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_device, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
+    const read = spyOn(specClient, "read").mockImplementation(
       () => late.promise,
     );
     restores.push(
@@ -239,17 +318,15 @@ describe("active household specifications", () => {
       ...updated.spec["prop.2.1"]!,
       description: "Expanded device capability ".repeat(256),
     };
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((item, signal) =>
-      Promise.resolve({
-        urn: item.model === "stable-model" ? stableUrn : currentUrn,
-        requestSignal: signal,
-      }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (item, signal) =>
+        Promise.resolve({
+          urn: item.model === "stable-model" ? stableUrn : currentUrn,
+          requestSignal: signal,
+        }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
-      ({ urn }) => Promise.resolve(urn === nextUrn ? updated : metadata(urn)),
+    const read = spyOn(specClient, "read").mockImplementation(({ urn }) =>
+      Promise.resolve(urn === nextUrn ? updated : metadata(urn)),
     );
     restores.push(
       () => resolve.mockRestore(),
@@ -320,15 +397,11 @@ describe("active household specifications", () => {
 
 describe("specification refresh ownership", () => {
   test("refresh still fetches and finishes truthfully when new metadata cannot be admitted", async () => {
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_item, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_item, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockResolvedValue(
-      metadata(),
-    );
+    const read = spyOn(specClient, "read").mockResolvedValue(metadata());
     restores.push(
       () => resolve.mockRestore(),
       () => read.mockRestore(),
@@ -367,15 +440,13 @@ describe("specification refresh ownership", () => {
 
   test("a new definition is installed and its failed task completes even when metadata admission is unavailable", async () => {
     let lookupAllowed = true;
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_item, signal) =>
-      lookupAllowed
-        ? Promise.resolve({ urn: specUrn, requestSignal: signal })
-        : Promise.reject(new MiCloudError("spec-unavailable")),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_item, signal) =>
+        lookupAllowed
+          ? Promise.resolve({ urn: specUrn, requestSignal: signal })
+          : Promise.reject(new MiCloudError("spec-unavailable")),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read")
+    const read = spyOn(specClient, "read")
       .mockResolvedValueOnce(metadata())
       .mockRejectedValue(new MiCloudError("spec-invalid-response"));
     restores.push(
@@ -416,14 +487,12 @@ describe("specification refresh ownership", () => {
   test("projection capacity checks proposed device references before replacing accepted metadata", async () => {
     const nextUrn = specUrn.replace(/:1$/, ":2");
     let currentUrn = specUrn;
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_item, signal) =>
-      Promise.resolve({ urn: currentUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_item, signal) =>
+        Promise.resolve({ urn: currentUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
-      ({ urn }) => Promise.resolve(metadata(urn)),
+    const read = spyOn(specClient, "read").mockImplementation(({ urn }) =>
+      Promise.resolve(metadata(urn)),
     );
     restores.push(
       () => resolve.mockRestore(),
@@ -455,13 +524,11 @@ describe("specification refresh ownership", () => {
   });
 
   test("directory repeats and duplicate refreshes share the original retry budget", async () => {
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_item, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_item, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockRejectedValue(
+    const read = spyOn(specClient, "read").mockRejectedValue(
       new MiCloudError("network"),
     );
     restores.push(
@@ -491,21 +558,17 @@ describe("specification refresh ownership", () => {
     const pending = Array.from({ length: 4 }, () =>
       deferred<Awaited<ReturnType<MiotSpecClient["read"]>>>(),
     );
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((item, signal) =>
-      Promise.resolve({
-        urn: specUrn.replace("test-contract", item.model),
-        requestSignal: signal,
-      }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (item, signal) =>
+        Promise.resolve({
+          urn: specUrn.replace("test-contract", item.model),
+          requestSignal: signal,
+        }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
-      ({ urn }) => {
-        const index = Number(urn.split(":").at(-2));
-        return pending[index]!.promise;
-      },
-    );
+    const read = spyOn(specClient, "read").mockImplementation(({ urn }) => {
+      const index = Number(urn.split(":").at(-2));
+      return pending[index]!.promise;
+    });
     restores.push(
       () => resolve.mockRestore(),
       () => read.mockRestore(),
@@ -544,17 +607,14 @@ describe("specification refresh ownership", () => {
     const large = metadata();
     large.spec["prop.2.1"]!.description = "x".repeat(1_400_000);
     let failed = false;
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_device, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_device, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
-      () =>
-        failed
-          ? Promise.reject(new MiCloudError("spec-invalid-response"))
-          : Promise.resolve(large),
+    const read = spyOn(specClient, "read").mockImplementation(() =>
+      failed
+        ? Promise.reject(new MiCloudError("spec-invalid-response"))
+        : Promise.resolve(large),
     );
     restores.push(
       () => resolve.mockRestore(),
@@ -602,21 +662,19 @@ describe("specification refresh ownership", () => {
     async (field) => {
       const nextUrn = specUrn.replace(/:1$/, ":2");
       let failing = false;
-      const resolve = spyOn(
-        MiotSpecClient.prototype,
-        "resolve",
-      ).mockImplementation((item, signal) =>
-        Promise.resolve({
-          urn:
-            item.spec_type ?? (item.model === "new-model" ? nextUrn : specUrn),
-          requestSignal: signal,
-        }),
+      const resolve = spyOn(specClient, "resolve").mockImplementation(
+        (item, signal) =>
+          Promise.resolve({
+            urn:
+              item.spec_type ??
+              (item.model === "new-model" ? nextUrn : specUrn),
+            requestSignal: signal,
+          }),
       );
-      const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
-        ({ urn }) =>
-          failing
-            ? Promise.reject(new MiCloudError("spec-invalid-response"))
-            : Promise.resolve(metadata(urn)),
+      const read = spyOn(specClient, "read").mockImplementation(({ urn }) =>
+        failing
+          ? Promise.reject(new MiCloudError("spec-invalid-response"))
+          : Promise.resolve(metadata(urn)),
       );
       restores.push(
         () => resolve.mockRestore(),
@@ -660,20 +718,17 @@ describe("specification refresh ownership", () => {
     const slowUrn = specUrn.replace("test-contract", "slow-contract");
     const slow = deferred<Awaited<ReturnType<MiotSpecClient["read"]>>>();
     let refreshing = false;
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((item, signal) =>
-      Promise.resolve({
-        urn: item.model === "slow" ? slowUrn : specUrn,
-        requestSignal: signal,
-      }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (item, signal) =>
+        Promise.resolve({
+          urn: item.model === "slow" ? slowUrn : specUrn,
+          requestSignal: signal,
+        }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockImplementation(
-      ({ urn }) =>
-        refreshing && urn === slowUrn
-          ? slow.promise
-          : Promise.resolve(metadata(urn)),
+    const read = spyOn(specClient, "read").mockImplementation(({ urn }) =>
+      refreshing && urn === slowUrn
+        ? slow.promise
+        : Promise.resolve(metadata(urn)),
     );
     restores.push(
       () => resolve.mockRestore(),
@@ -706,13 +761,11 @@ describe("specification refresh ownership", () => {
 
   test("clearing a refresh cancels its source and settles all joined callers", async () => {
     const pending = deferred<Awaited<ReturnType<MiotSpecClient["read"]>>>();
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_item, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_item, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read")
+    const read = spyOn(specClient, "read")
       .mockResolvedValueOnce(metadata())
       .mockImplementation(() => pending.promise);
     restores.push(
@@ -738,15 +791,11 @@ describe("specification refresh ownership", () => {
   });
 
   test("revocation releases the last reference even when new capacity is unavailable", async () => {
-    const resolve = spyOn(
-      MiotSpecClient.prototype,
-      "resolve",
-    ).mockImplementation((_item, signal) =>
-      Promise.resolve({ urn: specUrn, requestSignal: signal }),
+    const resolve = spyOn(specClient, "resolve").mockImplementation(
+      (_item, signal) =>
+        Promise.resolve({ urn: specUrn, requestSignal: signal }),
     );
-    const read = spyOn(MiotSpecClient.prototype, "read").mockResolvedValue(
-      metadata(),
-    );
+    const read = spyOn(specClient, "read").mockResolvedValue(metadata());
     restores.push(
       () => resolve.mockRestore(),
       () => read.mockRestore(),

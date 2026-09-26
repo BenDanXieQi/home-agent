@@ -5,13 +5,12 @@ import {
   parseImmutable,
   produce,
 } from "@home-agent/api/immutable";
+import { directoryFits, projectionBytes } from "../../src/household/capacity";
 import {
-  directoryFits,
+  initialProjection,
   initialProjectionState,
   prepareProjection,
-  projectionBytes,
-} from "../../src/household/capacity";
-import { initialProjection } from "../../src/household/projection";
+} from "../../src/household/projection";
 import { householdLimits, jsonBytes } from "../../src/household/config";
 import { machineDirectory, runningMachine } from "../support/household-machine";
 

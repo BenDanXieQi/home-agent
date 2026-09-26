@@ -44,12 +44,18 @@ const mijiaService = new MijiaService({
     ? createHomeSelectionStore(database.db)
     : undefined,
 });
-const { createMijiaHousehold } = await import("./mijia/household");
+const { createMijiaHousehold, createMijiaSpecificationLoader } =
+  await import("./mijia/household");
+const { MiotSpecClient } = await import("./mijia/protocols/spec/client");
+const { householdLimits } = await import("./household/config");
 const { DevicePushLogs } = await import("./household/device-logs");
 const { createHouseholdRepository } = await import("./household/repository");
 const household = createMijiaHousehold(
   mijiaService,
   database ? createHouseholdRepository(database.db) : undefined,
+  createMijiaSpecificationLoader(
+    new MiotSpecClient(householdLimits.specificationResponseBytes),
+  ),
 );
 household.start();
 const deviceLogs = new DevicePushLogs(
@@ -60,6 +66,7 @@ const deviceLogs = new DevicePushLogs(
 void mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
+const shutdown = new AbortController();
 const app = createApp({
   staticRoot: join(import.meta.dir, "public"),
   environment,
@@ -67,6 +74,7 @@ const app = createApp({
   household,
   mijiaService,
   deviceLogs,
+  shutdownSignal: shutdown.signal,
   readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
 });
 const server = Bun.serve({
@@ -76,11 +84,10 @@ const server = Bun.serve({
   idleTimeout: 0,
 });
 console.info(`Home backend listening on ${server.url.toString()}`);
-let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    if (stopping) return;
-    stopping = true;
+    if (shutdown.signal.aborted) return;
+    shutdown.abort();
     void (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {

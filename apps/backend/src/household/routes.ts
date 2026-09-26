@@ -16,7 +16,7 @@ export function createHouseholdRoutes(runtime: HouseholdRuntime) {
     .put("/scope/homes", validateJson(selectHomeSchema), async (c) => {
       const input = c.req.valid("json");
       return c.json(
-        await runtime.selectHome(input.scope_epoch, input.home_id),
+        await runtime.bindHome(input.scope_epoch, input.home_id),
         202,
       );
     })

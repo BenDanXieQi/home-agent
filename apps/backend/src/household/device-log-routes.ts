@@ -1,10 +1,14 @@
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
+import { setTimeout as sleep } from "node:timers/promises";
 import { validateJson } from "@home-agent/api/errors/hono";
 import { startDeviceLogSchema } from "@home-agent/api/device-logs";
 import type { DevicePushLogs } from "./device-logs";
 
-export function createDeviceLogRoutes(logs: DevicePushLogs) {
+export function createDeviceLogRoutes(
+  logs: DevicePushLogs,
+  shutdownSignal: AbortSignal,
+) {
   let connections = 0;
   return new Hono()
     .get("/", async (c) => {
@@ -35,12 +39,16 @@ export function createDeviceLogRoutes(logs: DevicePushLogs) {
           "X-Accel-Buffering": "no",
         });
       await logs.ready;
-      if (connections >= 8) return c.body(null, 503);
+      if (shutdownSignal.aborted || connections >= 8) return c.body(null, 503);
       connections++;
       c.header("X-Accel-Buffering", "no");
       return streamSSE(c, async (stream) => {
         let runId: string | null | undefined;
         let cursor = 0;
+        const disconnected = new AbortController();
+        const close = () => stream.abort();
+        stream.onAbort(() => disconnected.abort());
+        shutdownSignal.addEventListener("abort", close, { once: true });
         try {
           while (!stream.aborted && !stream.closed) {
             const snapshot = logs.snapshot();
@@ -60,9 +68,12 @@ export function createDeviceLogRoutes(logs: DevicePushLogs) {
             }
             runId = id;
             cursor = snapshot.run?.total_rows ?? 0;
-            await stream.sleep(1000);
+            await sleep(1000, undefined, { signal: disconnected.signal });
           }
+        } catch (error) {
+          if (!disconnected.signal.aborted) throw error;
         } finally {
+          shutdownSignal.removeEventListener("abort", close);
           connections--;
         }
       });

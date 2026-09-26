@@ -1,7 +1,7 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import { specSchema, type Projection } from "@home-agent/api/household";
-import { parseImmutable } from "@home-agent/api/immutable";
-import { householdLimits } from "./config";
+import { isImmutable, parseImmutable } from "@home-agent/api/immutable";
+import { householdLimits, jsonBytes } from "./config";
 import type { DirectoryCandidate } from "./directory";
 import { HouseholdError } from "./errors";
 
@@ -15,6 +15,24 @@ type Device = Pick<
   "id" | "model" | "spec_type"
 >;
 type Metadata = Pick<Spec, "urn" | "category" | "spec">;
+
+const encodedSizes = new WeakMap<Spec, number>();
+
+/** Count the JSON object without serializing unchanged, owned specifications again. */
+export function specificationBytes(specs: Record<string, Spec>) {
+  let bytes = 2;
+  let count = 0;
+  for (const [id, spec] of Object.entries(specs)) {
+    let size = isImmutable(spec) ? encodedSizes.get(spec) : undefined;
+    if (size === undefined) {
+      size = jsonBytes(spec);
+      if (isImmutable(spec)) encodedSizes.set(spec, size);
+    }
+    bytes += jsonBytes(id) + 1 + size;
+    count++;
+  }
+  return bytes + Math.max(0, count - 1);
+}
 
 type Loader = {
   resolve: (
@@ -56,7 +74,7 @@ export class HouseholdSpecifications {
 
   constructor(
     private readonly loader: Loader,
-    private readonly changed: () => void,
+    private readonly changed: (deviceIds: ReadonlySet<string>) => void,
     private readonly capacity: (
       snapshot: ReturnType<HouseholdSpecifications["snapshot"]>,
     ) => boolean,
@@ -117,14 +135,19 @@ export class HouseholdSpecifications {
       source.error = null;
       source.round = round;
     }
-    this.changed();
+    this.changed(new Set(this.bindings.keys()));
     this.pump();
     this.finishBatch();
     return batch.promise;
   }
 
-  snapshot() {
-    return this.snapshotFrom(this.sources, this.bindings, this.accepted);
+  snapshot(deviceIds?: ReadonlySet<string>) {
+    return this.snapshotFrom(
+      this.sources,
+      this.bindings,
+      this.accepted,
+      deviceIds,
+    );
   }
 
   /** Display metadata can outlive the definition for which it was verified. */
@@ -160,10 +183,13 @@ export class HouseholdSpecifications {
     sources: typeof this.sources,
     bindings: typeof this.bindings,
     accepted: typeof this.accepted,
+    deviceIds?: ReadonlySet<string>,
   ) {
     const specs: Record<string, Spec> = {};
     const references = new Map<string, Preparation>();
-    for (const [deviceId, binding] of bindings) {
+    for (const deviceId of deviceIds ?? bindings.keys()) {
+      const binding = bindings.get(deviceId);
+      if (!binding) continue;
       const source = sources.get(binding.source)!;
       const metadata = binding.urn
         ? accepted.get(binding.urn)?.result
@@ -184,6 +210,14 @@ export class HouseholdSpecifications {
   ) {
     const urns = new Set([...bindings.values()].map((binding) => binding.urn));
     return new Map([...accepted].filter(([urn]) => urns.has(urn)));
+  }
+
+  private notifySource(key: string, urn?: string) {
+    const devices = new Set<string>();
+    for (const [id, binding] of this.bindings)
+      if (binding.source === key || (urn !== undefined && binding.urn === urn))
+        devices.add(id);
+    this.changed(devices);
   }
 
   clear() {
@@ -262,7 +296,7 @@ export class HouseholdSpecifications {
         source.status = "error";
         source.error = failure.error;
         source.done = true;
-        this.changed();
+        this.notifySource(key);
         return;
       }
     }
@@ -295,6 +329,6 @@ export class HouseholdSpecifications {
     this.accepted = retained;
     this.bindings = bindings;
     source.done = true;
-    this.changed();
+    this.notifySource(key, result.urn);
   }
 }

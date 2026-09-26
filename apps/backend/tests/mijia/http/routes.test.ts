@@ -4,7 +4,15 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
-import { createMijiaHousehold } from "../../../src/mijia/household";
+import {
+  applyChanges,
+  snapshotSchema,
+  stateChangeSchema,
+} from "@home-agent/api/household";
+import {
+  createMijiaHousehold,
+  createMijiaSpecificationLoader,
+} from "../../../src/mijia/household";
 import type { HouseholdRuntime } from "../../../src/household/runtime";
 import { householdLimits } from "../../../src/household/config";
 import { DevicePushLogs } from "../../../src/household/device-logs";
@@ -12,6 +20,7 @@ import { MijiaService } from "../../../src/mijia/service";
 import { createMijiaRoutes } from "../../../src/mijia/routes";
 import { MijiaError } from "../../../src/mijia/errors";
 import { MiCloud } from "../../../src/mijia/protocols/micloud";
+import { MiotSpecClient } from "../../../src/mijia/protocols/spec/client";
 import {
   credentialStore,
   homeSelectionStore,
@@ -21,7 +30,9 @@ import { deferred, eventually, nextTurn } from "../../support/async";
 const runtimes: HouseholdRuntime[] = [];
 const logStores: DevicePushLogs[] = [];
 const logDirectories: string[] = [];
+const shutdownControllers: AbortController[] = [];
 afterEach(async () => {
+  for (const controller of shutdownControllers.splice(0)) controller.abort();
   for (const logs of logStores.splice(0)) {
     await logs.ready;
     await logs.stop();
@@ -41,16 +52,24 @@ function harness() {
       throw new Error("No media configuration in HTTP fixture");
     },
   });
-  const runtime = createMijiaHousehold(service, undefined);
+  const runtime = createMijiaHousehold(
+    service,
+    undefined,
+    createMijiaSpecificationLoader(
+      new MiotSpecClient(householdLimits.specificationResponseBytes),
+    ),
+  );
   runtimes.push(runtime);
   runtime.start();
   const directory = mkdtempSync(join(tmpdir(), "home-agent-routes-"));
   logDirectories.push(directory);
   const logs = new DevicePushLogs(runtime, directory, service);
   logStores.push(logs);
+  const shutdown = new AbortController();
+  shutdownControllers.push(shutdown);
   const app = new Hono().route(
     "/api/mijia",
-    createMijiaRoutes(4000, runtime, logs, service),
+    createMijiaRoutes(4000, runtime, logs, service, shutdown.signal),
   );
   async function request(
     path: string,
@@ -69,7 +88,7 @@ function harness() {
       { requestIP: () => ({ address, port: 50000, family: "IPv4" }) },
     );
   }
-  return { app, service, runtime, logs, request };
+  return { app, service, runtime, logs, shutdown, request };
 }
 
 function json(method: string, body: unknown) {
@@ -146,6 +165,109 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
       expect((await h.request("/events")).status).toBe(503);
     } finally {
       await Promise.all(responses.map((response) => response.body?.cancel()));
+    }
+  });
+
+  test("the shared state change frame replays a committed version for every subscriber", async () => {
+    const h = harness();
+    const qr = deferred<Awaited<ReturnType<MiCloud["createLogin"]>>>();
+    spyOn(MiCloud.prototype, "createLogin").mockImplementation(
+      () => qr.promise,
+    );
+    const responses = await Promise.all([
+      h.request("/events"),
+      h.request("/events"),
+    ]);
+    const readers = responses.map((response) => response.body!.getReader());
+    const decoder = new TextDecoder();
+    try {
+      const initial = await Promise.all(
+        readers.map(async (reader) =>
+          decoder.decode((await reader.read()).value),
+        ),
+      );
+      expect(initial[0]).toBe(initial[1]);
+      const snapshot = snapshotSchema.parse(
+        JSON.parse(initial[0]!.split("\ndata: ")[1]!),
+      );
+
+      const receipt = await h.request("/login", { method: "POST" });
+      const frames = await Promise.all(
+        readers.map(async (reader) =>
+          decoder.decode((await reader.read()).value),
+        ),
+      );
+      expect(frames[0]).toBe(frames[1]);
+      expect(frames[0]).toStartWith("event: state_change\n");
+      const change = stateChangeSchema.parse(
+        JSON.parse(frames[0]!.split("\ndata: ")[1]!),
+      );
+      expect(await receipt.json()).toEqual({
+        state_version: {
+          scope_epoch: change.scope_epoch,
+          sequence: change.sequence,
+        },
+      });
+      expect(applyChanges(snapshot.projection, change)).toEqual(
+        h.runtime.snapshot().projection,
+      );
+    } finally {
+      await Promise.all(readers.map((reader) => reader.cancel()));
+      for (const reader of readers) reader.releaseLock();
+      h.service.cancelLogin(h.service.loginPublic().id!);
+      qr.resolve({
+        qrImage: "data:image/png;base64,dGVzdA==",
+        expiresAt: Date.now() + 60_000,
+        pollIntervalMs: 2_000,
+      });
+      await nextTurn();
+    }
+  });
+
+  test("service shutdown drains an open log stream without waiting for client cancellation", async () => {
+    const h = harness();
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch: h.app.fetch,
+    });
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const response = await fetch(
+        new URL("/api/mijia/logs/events", server.url),
+        {
+          headers: { host: "localhost:4000" },
+        },
+      );
+      expect(response.status).toBe(200);
+      const reader = response.body!.getReader();
+      try {
+        expect(
+          new TextDecoder().decode((await reader.read()).value),
+        ).toStartWith("event: snapshot\n");
+        const draining = server.stop();
+        h.shutdown.abort();
+        await Promise.all([
+          h.runtime.close(),
+          h.logs.stop("后端停止", "interrupted"),
+        ]);
+        const drained = await Promise.race([
+          draining.then(() => true),
+          new Promise<false>((resolve) => {
+            deadline = setTimeout(() => resolve(false), 2_000);
+          }),
+        ]);
+        expect(drained).toBe(true);
+        expect((await reader.read()).done).toBe(true);
+        expect((await h.request("/logs/events")).status).toBe(503);
+      } finally {
+        await reader.cancel();
+        reader.releaseLock();
+      }
+    } finally {
+      clearTimeout(deadline);
+      await server.stop(true);
     }
   });
 
@@ -260,9 +382,20 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     await nextTurn();
   });
 
+  test("first binding rejects a null home before reaching the service", async () => {
+    const h = harness();
+    const bind = spyOn(h.service, "bindHome");
+    const response = await h.request(
+      "/scope/homes",
+      json("PUT", { scope_epoch: h.runtime.epoch, home_id: null }),
+    );
+    expect(response.status).toBe(400);
+    expect(bind).not.toHaveBeenCalled();
+  });
+
   test("an obsolete epoch is rejected before household selection or refresh work", async () => {
     const h = harness();
-    const select = spyOn(h.service, "selectHome");
+    const select = spyOn(h.service, "bindHome");
     const refresh = spyOn(h.service, "loadDevices");
     for (const [path, init] of [
       [

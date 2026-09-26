@@ -68,7 +68,7 @@ test("property observations follow the selected home while directory notificatio
   expect(h.service.directoryPushStatus().received).toBe(received + 1);
 
   await expect(
-    h.runtime.selectHome(h.runtime.epoch, "home-b"),
+    h.runtime.bindHome(h.runtime.epoch, "home-b"),
   ).rejects.toMatchObject({ reason: "binding_conflict" });
   expect(h.mqtt.transports).toHaveLength(1);
   await h.runtime.logout();

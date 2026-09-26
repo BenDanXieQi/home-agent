@@ -22,6 +22,7 @@ type AppDependencies = {
   household: HouseholdRuntime;
   mijiaService: MijiaService;
   deviceLogs: DevicePushLogs;
+  shutdownSignal: AbortSignal;
   readAgentUrl: () => Promise<string>;
 };
 
@@ -32,6 +33,7 @@ export function createApp({
   household,
   mijiaService,
   deviceLogs,
+  shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
   const app = new Hono();
@@ -85,6 +87,7 @@ export function createApp({
         household,
         deviceLogs,
         mijiaService,
+        shutdownSignal,
       ),
     );
   // Unknown API routes must not fall through to the web application's HTML.

@@ -27,6 +27,7 @@ export function createMijiaRoutes(
   runtime: HouseholdRuntime,
   logs: DevicePushLogs,
   service: MijiaService,
+  shutdownSignal: AbortSignal,
 ) {
   const commandResult = () => {
     service.flushChanges();
@@ -48,7 +49,7 @@ export function createMijiaRoutes(
     });
   const routes = app
     .route("/", createHouseholdRoutes(runtime))
-    .route("/logs", createDeviceLogRoutes(logs))
+    .route("/logs", createDeviceLogRoutes(logs, shutdownSignal))
     .get("/directory/push", (c) => c.json(service.directoryPushStatus()))
     .get("/login/:id/material", (c) =>
       c.json(

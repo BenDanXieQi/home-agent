@@ -1,10 +1,6 @@
 import { streamSSE } from "hono/streaming";
 import type { Context } from "hono";
-import {
-  stateChangeSchema,
-  resyncSchema,
-  stateVersionSchema,
-} from "@home-agent/api/household";
+import { resyncSchema, stateVersionSchema } from "@home-agent/api/household";
 import { householdLimits } from "./config";
 import type { HouseholdRuntime } from "./runtime";
 
@@ -40,10 +36,11 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
       snapshot: () => (snapshotFrame ??= serialize("snapshot", snapshot)),
       change: () => {
         if (!changes.length) return undefined;
-        return (changeFrame ??= serialize(
-          "state_change",
-          stateChangeSchema.parse({ ...version, changes }),
-        ));
+        // Runtime commits already validate and freeze every change record.
+        return (changeFrame ??= serialize("state_change", {
+          ...version,
+          changes,
+        }));
       },
       heartbeat: () =>
         (heartbeatFrame ??= serialize(
