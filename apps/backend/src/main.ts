@@ -45,12 +45,17 @@ const mijiaService = new MijiaService({
     : undefined,
 });
 const { HouseholdRuntime } = await import("./household/runtime");
+const { DevicePushLogs } = await import("./household/device-logs");
 const { createHouseholdRepository } = await import("./household/repository");
 const household = new HouseholdRuntime(
   mijiaService,
   database ? createHouseholdRepository(database.db) : undefined,
 );
 household.start();
+const deviceLogs = new DevicePushLogs(
+  household,
+  resolvePath(import.meta.dir, "../../..", "data/mqtt-logs"),
+);
 void mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
@@ -59,6 +64,7 @@ const app = createApp({
   environment,
   connectionStore,
   household,
+  deviceLogs,
   readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
 });
 const server = Bun.serve({
@@ -79,6 +85,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         const drained = await Promise.race([
           Promise.all([
             server.stop(),
+            deviceLogs.stop("后端停止", "interrupted"),
             household.close().catch(() => {
               console.warn(
                 "摄像头会话清理未完成；go2rtc 将在租约到期后自动清理。",

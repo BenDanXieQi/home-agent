@@ -48,12 +48,18 @@ const settingsRoute = createRoute({
   path: "/settings",
   component: lazyRouteComponent(() => import("./pages/SettingsPage")),
 });
+const deviceLogsRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/device-logs",
+  component: lazyRouteComponent(() => import("./pages/DeviceLogsPage")),
+});
 export const router = createRouter({
   routeTree: rootRoute.addChildren([
     accountRoute.addChildren([
       indexRoute,
       devicesRoute,
       camerasRoute,
+      deviceLogsRoute,
       settingsRoute,
     ]),
   ]),
