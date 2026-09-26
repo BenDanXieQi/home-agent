@@ -1,6 +1,6 @@
 # Step 3：接收设备变化，维护当前状态
 
-**状态：待执行。** 前置条件是 Step 1 的设备通路已验证，Step 2 已能选择并运行一个家庭。
+**状态：待执行。** 前置条件是所需设备通路已按[米家来源契约](../../reference/mijia-source-contract.md)验证，Step 2 已能选择并运行一个家庭。
 
 [返回总览](../backend-household-perception.md)
 

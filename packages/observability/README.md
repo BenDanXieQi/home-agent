@@ -1,22 +1,12 @@
-# Backend 与 Agent 全链路追踪
+# Observability
 
 当前实现采用标准 OpenTelemetry JS SDK、`@hono/otel` 和 OTLP/HTTP protobuf exporter。backend 与 Agent 各自有一个 Provider，使用 AsyncLocalStorage 上下文管理和 W3C `traceparent` / `tracestate` 传播。默认不导出数据；开启后默认记录全部 trace。
 
-全链路追踪由 `packages/observability` 提供共享能力，在 backend 和 Agent 中接入，通过 LangSmith 查看和分析。聊天链路的人工验收步骤见[聊天人工验收](chat-verification.md)。
+`@home-agent/observability` 提供 SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、关闭与导出能力，由 backend 和 Agent 接入。
 
-## 运行
+## 配置
 
-按[运行说明](../README.md)配置根目录 `.env`，设置模型并完成数据库初始化。`bun run dev` 同时启动 web、backend、Agent；`bun run start` 构建后启动 backend 和 Agent。服务设置页提供连接配置与状态，工作台顶部显示 backend 健康状态，聊天通过 HTTP 使用：
-
-```sh
-curl -N http://127.0.0.1:3000/api/chat \
-  -H 'Content-Type: application/json' \
-  -d '{"message":"你好"}'
-```
-
-请求经过 backend 转发到 Agent。响应头 `x-trace-id`、SSE `run_started.traceId` 和 backend 请求日志中的 `trace_id` 可关联同一次请求。
-
-backend HTTP 日志记录方法、路径、响应状态、处理耗时和 trace ID，不记录 URL query、请求头或请求正文。日志耗时与 SERVER span 一样截止于响应创建，不代表 SSE 或媒体连接的完整持续时间。
+在根目录 `.env` 中配置追踪，应用启动见[本地运行](../../docs/running.md)。
 
 本地查看 spans：
 
@@ -40,6 +30,8 @@ LANGSMITH_PROJECT=home-agent
 
 ## 追踪链路
 
+响应头 `x-trace-id`、SSE `run_started.traceId` 和 backend 请求日志中的 `trace_id` 可关联同一次请求。backend HTTP 日志记录方法、路径、响应状态、处理耗时和 trace ID，不记录 URL query、请求头或请求正文；耗时截止于响应创建，不代表 SSE 或媒体连接的完整持续时间。
+
 ```text
 backend POST /api/chat                   SERVER
 └─ backend → Agent POST /api/chat        CLIENT（直到响应体读完或取消）
@@ -58,7 +50,6 @@ backend POST /api/chat                   SERVER
 
 ## 代码边界
 
-- `packages/observability`：SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、关闭与导出。
 - `apps/backend/src/chat/routes.ts`：受限 JSON 请求和 SSE 透明转发，不解析模型内容。
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
 - `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。

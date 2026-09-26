@@ -24,7 +24,7 @@ Home Agent 是一个通过家庭情景推断驱动全屋自动化的 Agent 项�
 
 已实现米家登录与授权恢复、家庭选择与目录持久化、后台规格准备、SSE 状态订阅、多摄像头预览，以及流式对话 API、会话持久化和调用追踪。
 
-上述设计目标尚未实现。当前未接入实时设备属性、视觉理解或设备控制，Agent 也未接入家庭数据、语音和长期记忆；Web 暂无聊天界面。仅供可信本机使用。
+上述设计目标尚未实现。backend 已提供指定属性读取、MQTT 属性／在线观察和限时上报日志，尚未将其接入持续采集与家庭状态仲裁。视觉理解、设备控制，以及 Agent 的家庭数据、语音和长期记忆尚未接入；Web 暂无聊天界面。仅供可信本机使用。
 
 ## 当前服务分工
 
@@ -64,10 +64,11 @@ bun run dev
 
 - [家庭语义目标与领域模型（规划）](docs/plans/household-model.md)：项目目标、backend 与 Agent 边界、语义模型及场景验收
 - [设备感知实施计划（规划）](docs/plans/backend-household-perception.md)：设备接入、状态、历史、Web 同步与 Agent 基础接入六步
-- [本地运行](docs/running.md)：运行模式、Docker 网络、生产启动与开发命令
+- [本地运行](docs/running.md)：运行模式、Docker 网络、服务连接配置与开发命令
 - [米家与摄像头](docs/mijia.md)：登录、预览、授权保存与支持范围
-- [服务连接配置](docs/service-connections.md)
+- [家庭运行时](docs/household.md)：目录、规格、作用域与公共状态订阅
+- [米家来源契约](docs/reference/mijia-source-contract.md) · [设备接入代码参考](docs/reference/device-access-code-reference.md)
 - [Agent 与对话 API](apps/agent/README.md)
 - [后端与数据库](apps/backend/README.md) · [前端](apps/web/README.md)
 - [go2rtc 构建](docker/go2rtc/README.md)
-- [调用追踪](docs/observability.md) · [错误处理](docs/errors.md)
+- [调用追踪](packages/observability/README.md) · [共享契约与错误处理](packages/api/README.md)

@@ -10,7 +10,7 @@ bun test ./apps/backend/tests/device-access/account
 bun run --cwd apps/web test
 ```
 
-范围依据 [设备接入代码职责参考](../../../docs/device-access-code-reference.md) 和 [Step 1](../../../docs/plans/household-steps/01-device-access/README.md)。先从“错误的状态、身份、时间或部分成功会导致什么结果”选择场景，再通过生产入口验证，不设覆盖率门槛。
+范围依据 [设备接入代码职责参考](../../../docs/reference/device-access-code-reference.md) 和[米家来源契约](../../../docs/reference/mijia-source-contract.md)。先从“错误的状态、身份、时间或部分成功会导致什么结果”选择场景，再通过生产入口验证，不设覆盖率门槛。
 
 每个保留用例应对应一个独立业务故障。第三方 schema 的同类数值枚举、仅让 mock 抛错再断言原样返回，以及已被真实所有者集成用例覆盖的手工状态门禁，不另立测试。并发测试先等待外部 I/O 门闩确认目标阶段已开始，再触发取消、替换或认证拒绝；结果同时检查持久凭据、活动身份和资源资格。
 

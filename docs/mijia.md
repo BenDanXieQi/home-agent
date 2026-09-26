@@ -4,7 +4,7 @@
 
 米家接入以扫码为唯一用户登录入口。backend 复用扫码身份静默完成 Xiaomi Miloco OAuth 授权，不需要再次扫码或打开额外授权页面；登录页说明授予昵称、头像和智能家庭服务权限。MiCloud 与 OAuth 共同构成一个完整接入会话，凭据合并存入同一个 AES-256-GCM 加密的 `mijia` 记录，由同一所有者保存、恢复、续期和退出。完整授权和保存成功后才接纳新账号；候选账号的 OAuth 授权失败只使本次登录失败，不覆盖当前账号。
 
-属性读取直接复用当前 MiCloud 会话，MQTT 推送使用同一账号保存的 OAuth 凭据。backend 提供正式内部读取与观察入口；适用范围、实机证据和限制见[米家来源契约](mijia-source-contract.md)。
+属性读取直接复用当前 MiCloud 会话，MQTT 推送使用同一账号保存的 OAuth 凭据。backend 提供正式内部读取与观察入口；适用范围、实机证据和限制见[米家来源契约](reference/mijia-source-contract.md)。
 
 账号登录、恢复和续期后，backend 异步读取当前账号昵称与头像，通过 `projection.account.account.profile` 返回。侧栏账号入口和账号弹窗共用这些资料；读取失败不影响授权或设备接入，资料缺失或头像加载失败时显示默认名称或图标。资料只保存在当前账号内存状态中，退出或切换账号后清除。
 
@@ -80,7 +80,7 @@ backend 提供 `MijiaService.readProperties(properties, signal)`，由调用方�
 
 属性读取按稳定来源遵守 `Retry-After`：期限内后续批次和新读取均不发请求，返回 `unavailable` 且 `read_started_at=null`，接收时间沿用原失败观测。到期后等待下一次显式读取，不自动重试。账号自动及手动恢复续期同样遵守该期限，超长等待分段调度。
 
-请求复用 MiCloud RC4 传输，`datasource=1` 为缓存优先，缓存缺失可能触发设备 RPC，不保证最新值；统一按 `cloud_cache/baseline` 保守处理。该入口不写家庭状态，不提供属性读取 HTTP 路由或周期属性轮询。`observeDevices(deviceIds, onObservation, signal)` 提供正式内部 MQTT 属性与在线观察，使用同一账号保存的 OAuth 凭据，按所选家庭的明确设备集合订阅，返回取消、状态快照和临时失败重试入口；消息与逐 topic 的订阅确认分别交付。观察不写家庭状态，也未接前端实时展示。MQTT 断线后保留活动观察并按 1～120 秒退避重连、重新订阅；最后一个观察（包含后台目录通知）取消即停止重试。独立设备事件和自动补读尚未接入；缓存读取成功不能直接推导属性边沿。字段、失败原因及来源能力矩阵见[读取契约](mijia-source-contract.md#正式读取入口)。
+请求复用 MiCloud RC4 传输，`datasource=1` 为缓存优先，缓存缺失可能触发设备 RPC，不保证最新值；统一按 `cloud_cache/baseline` 保守处理。该入口不写家庭状态，不提供属性读取 HTTP 路由或周期属性轮询。`observeDevices(deviceIds, onObservation, signal)` 提供正式内部 MQTT 属性与在线观察，使用同一账号保存的 OAuth 凭据，按所选家庭的明确设备集合订阅，返回取消、状态快照和临时失败重试入口；消息与逐 topic 的订阅确认分别交付。观察已用于[限时上报日志](household.md#设备上报日志)，尚未接入家庭 `latest`、`availability` 或持续采集。MQTT 断线后保留活动观察并按 1～120 秒退避重连、重新订阅；最后一个观察（包含后台目录通知）取消即停止重试。独立设备事件和自动补读尚未接入；缓存读取成功不能直接推导属性边沿。字段、失败原因及来源能力矩阵见[读取契约](reference/mijia-source-contract.md#正式读取入口)。
 
 ## 支持范围
 
@@ -145,7 +145,7 @@ go2rtc 地址通过 `config/config.yaml` 的 `services.go2rtc.url` 配置。保�
 
 HTTP 输入复用共享 JSON 读取与 Zod 校验，登录、设备与连接状态使用判别联合，使各状态所需字段明确。错误沿用公共 `AppError` 响应结构，包含静态错误码／文案、安全字段问题及可用的 `traceId`。米家错误使用 `mijia_` 前缀；前端米家、健康状态和连接设置通过同一个 Hono RPC 请求模块调用；路径和输入由后端路由推导，运行时仍使用共享 schema 校验响应。
 
-复用[共享追踪](observability.md)，记录 `mijia.*` 阶段、区域和静态 `error.type`，授权恢复和凭据保存的失败在转换成页面状态前记录。下游调用记录 CLIENT 类型和 HTTP 响应状态；后台心跳与退避使用独立上下文，主动取消不计为故障。无论是否开启内容追踪，米家 Cookie、验证码、token、二维码、原始云响应、源地址及 SDP 都不进入日志或 span；go2rtc 补丁也移除了 Xiaomi 路径的原始 debug/trace 内容。
+复用[共享追踪](../packages/observability/README.md)，记录 `mijia.*` 阶段、区域和静态 `error.type`，授权恢复和凭据保存的失败在转换成页面状态前记录。下游调用记录 CLIENT 类型和 HTTP 响应状态；后台心跳与退避使用独立上下文，主动取消不计为故障。无论是否开启内容追踪，米家 Cookie、验证码、token、二维码、原始云响应、源地址及 SDP 都不进入日志或 span；go2rtc 补丁也移除了 Xiaomi 路径的原始 debug/trace 内容。
 
 观看连接采用服务端预留 ID 后提交 SDP 的两阶段创建。预留响应为 201，`Location` 指向可 GET、PUT 和 DELETE 的观看资源。预留不启动媒体，30 秒自动过期，并计入 32 个连接上限；浏览器并行收集 ICE，取得 ID 后即使协商响应丢失也可释放。未知或已释放 ID 的激活被拒绝，因此取消后的迟到激活不能重新创建连接。释放观看连接不停止 go2rtc 中的摄像头共享流和常驻消费者。
 

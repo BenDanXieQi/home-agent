@@ -39,9 +39,13 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 
 `getCatalog()` 通过 `getHomes()` 查询 `/v2/homeroom/gethome` 与归属分页 `/v2/homeroom/get_dev_room_page`，汇总自有及共享家庭、房间中的设备 ID，再分批调用 `/v2/home/device_list_page` 获取设备详情。每批最多 150 个 ID，并检查详情分页游标，按设备 ID 去重，只接纳本批请求的设备；空目录不发送设备详情请求。协议参数参考[小米官方集成](https://github.com/XiaoMi/ha_xiaomi_home/blob/main/custom_components/xiaomi_home/miot/miot_cloud.py)的设备详情读取，沿用现有 RC4 会话。详情接口返回的 `localip` 原样保留，供摄像头局域网连接使用。设备与目录请求使用同一 RC4 签名传输，未找到归属时返回空值，不推测安装位置。`homes.ts` 负责目录响应校验、分页和归属映射。
 
-`getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/mijia-source-contract.md)。
+`getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/reference/mijia-source-contract.md)。
 
-`getDeviceSpec()` 通过独立的 `spec.ts` 客户端读取 `miot-spec.org` 的公开型号 URN、规格实例和中文翻译，按 MiLoCo 精简规格结构解析属性访问能力与动作输入，使用 `writeable`、`value_range`、`in_params` 等字段；不对外输出事件或动作输出。能力定义与展示翻译独立缓存；翻译服务失败、超时或响应无效时保留已取得的原文描述和可读能力，后续查询可重新获取翻译。一次查询的网络请求共用 30 秒预算；翻译仅消耗剩余时间，预算耗尽不丢弃已取得的能力，也不留下后台请求。调用取消、账号撤销或调用方自身期限到达仍会终止读取，能力尚未取得时的预算超时仍报错。该客户端不接收 Cookie、token 或设备控制凭据。规格不是实时属性值，不执行设备读取、订阅或控制。接口结构与缓存规则见[米家与摄像头](../../../../../../docs/mijia.md#家庭房间与设备能力)。
+`spec.ts` 的 `MiotSpecClient` 读取 `miot-spec.org` 的公开元数据。`resolve()` 优先采用设备 `spec_type`，缺失时按型号解析 URN；`read()` 获取实例及可选中文翻译，输出属性、动作输入和事件元数据。事件保留 `event.<siid>.<eiid>` 标识与参数描述，不代表已接入事件推送；不输出动作输出。该客户端不接收账号 Cookie、token 或设备控制凭据，也不执行属性读取、订阅或控制。
+
+规格结果由 `household/specifications.ts` 按活动设备引用管理，成功后按最终 URN 共享，不按时间自动过期。普通目录同步复用已准备规格，显式刷新重新获取；设备移除或家庭撤销释放不再引用的组。刷新失败保留原能力和版本并显示错误。`MijiaService.getDeviceSpec()` 只同步读取家庭模块已准备的能力，属性预检不触发公开规格网络请求。
+
+协议客户端按 URL 合并在途请求，每个调用者保留独立取消信号；最后一个等待者退出才终止共享传输。实例请求在可选翻译期间仍保留，以便解析到相同 URN 的调用共享。一次 `resolve()`／`read()` 的网络工作共用 30 秒预算，响应大小由家庭模块传入上限。翻译失败或耗尽自身网络预算不丢弃已取得的能力，调用方取消仍终止读取。接口与所有权见[家庭运行时](../../../../../../docs/household.md)和[代码职责参考](../../../../../../docs/reference/device-access-code-reference.md)。
 
 `getCredentials()` 明确包含上游会话导出遗漏的 `passToken`，供 backend 比较续期前后的凭据，并通过 `Go2RtcAdapter` 将凭据安装到 go2rtc 运行时会话。设备与摄像头统一使用中国大陆区域 `cn`；其他区域被拒绝。
 
