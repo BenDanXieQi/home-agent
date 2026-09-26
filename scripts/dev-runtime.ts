@@ -159,7 +159,7 @@ const launcher = resolvePath(root, "node_modules/.bin/turbo");
 
 async function identity(pid: number) {
   const child = Bun.spawn(
-    ["ps", "-p", String(pid), "-o", "lstart=", "-o", "args="],
+    ["ps", "-ww", "-p", String(pid), "-o", "lstart=", "-o", "args="],
     {
       stdout: "pipe",
       stderr: "pipe",
@@ -253,9 +253,23 @@ export async function startDev(
       child.once("spawn", resolve);
       child.once("error", reject);
     });
-    const owner = { pid: child.pid!, identity: await identity(child.pid!) };
-    if (!owner.identity.includes(launcher))
-      throw new Error("开发进程启动失败。");
+    const owner = { pid: child.pid!, identity: "" };
+    const deadline = performance.now() + 2000;
+    // Process creation can precede the shebang launcher's final command line.
+    // Record only the verified identity, never an intermediate process image.
+    for (;;) {
+      owner.identity = await identity(owner.pid);
+      if (child.exitCode !== null || child.signalCode !== null)
+        throw new Error(
+          `开发进程启动后已退出（PID ${owner.pid}，${child.signalCode ?? `退出码 ${child.exitCode}`}）。`,
+        );
+      if (owner.identity.includes(launcher)) break;
+      if (performance.now() >= deadline)
+        throw new Error(
+          `开发进程身份确认超时（PID ${owner.pid}）：${owner.identity || "未取得进程信息"}`,
+        );
+      await Bun.sleep(25);
+    }
     await writeFile(
       resolvePath(ownersDirectory, `${owner.pid}.json`),
       JSON.stringify(owner),
