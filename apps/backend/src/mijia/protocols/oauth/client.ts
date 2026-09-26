@@ -120,8 +120,9 @@ async function exchange(
 export async function refreshOAuth(
   session: z.infer<typeof oauthSessionSchema>,
   signal: AbortSignal,
+  force = false,
 ) {
-  if (session.expiresAt > Date.now() + 5 * 60_000) return session;
+  if (!force && session.expiresAt > Date.now() + 5 * 60_000) return session;
   return exchange(
     session.uuid,
     { refresh_token: session.refreshToken },

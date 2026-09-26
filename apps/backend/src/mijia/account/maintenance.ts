@@ -11,6 +11,7 @@ import {
 import { mijiaOperation } from "../operation";
 import { RetryTimer } from "../retry-timer";
 import { renewAccountSession, restoreAccountSession } from "./session";
+import { refreshOAuth } from "../protocols/oauth/client";
 
 export type AccountSessionCandidate = Awaited<
   ReturnType<typeof renewAccountSession>
@@ -54,6 +55,7 @@ export class AccountMaintenance {
   private stopped = false;
   private restoreRetryAfterAt = 0;
   private renewalRetryAfterAt = 0;
+  private rejectedOAuth: AccountSessionCandidate["oauth"] | undefined;
 
   constructor(private readonly deps: MaintenanceDependencies) {}
 
@@ -228,6 +230,12 @@ export class AccountMaintenance {
     );
   }
 
+  rejectOAuth(account: MiCloud) {
+    if (!this.activeAccount(account)) return Promise.resolve();
+    this.rejectedOAuth = this.deps.currentOAuth();
+    return this.renew(account);
+  }
+
   renew(account: MiCloud) {
     if (!this.activeAccount(account)) return Promise.resolve();
     if (this.failedAccount === account && Date.now() < this.renewalRetryAfterAt)
@@ -256,6 +264,18 @@ export class AccountMaintenance {
           if (!this.currentRenewal(task)) throw new MijiaError("cancelled");
         };
         assertCurrent();
+        // A rejection may arrive while an ordinary renewal is already in flight.
+        // Keep it across transient failures and the existing Retry-After budget.
+        if (candidate.oauth.accessToken === this.rejectedOAuth?.accessToken) {
+          candidate.oauth = await refreshOAuth(
+            candidate.oauth,
+            task.controller.signal,
+            true,
+          );
+          assertCurrent();
+          if (candidate.oauth.accessToken === this.rejectedOAuth?.accessToken)
+            throw new MijiaError("authentication");
+        }
         await this.deps.commitRenewed(account, candidate, assertCurrent);
       })
         .catch(async (error: unknown) => {
@@ -279,6 +299,15 @@ export class AccountMaintenance {
           if (candidate?.client !== this.deps.currentAccount())
             candidate?.client.dispose();
           if (this.renewalTask === task) this.renewalTask = undefined;
+          // A rejection during the durable commit must reach the new owner too.
+          if (candidate && this.activeAccount(candidate.client)) {
+            if (
+              this.deps.currentOAuth()?.accessToken ===
+              this.rejectedOAuth?.accessToken
+            )
+              void this.renew(candidate.client);
+            else this.rejectedOAuth = undefined;
+          }
         }),
     );
     return task.promise;

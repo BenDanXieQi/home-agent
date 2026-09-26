@@ -12,6 +12,15 @@ import {
 
 const CONCURRENCY = 16;
 const ACK_TIMEOUT = 10_000;
+export function isMqttAuthenticationFailure(reason: string | null) {
+  return [
+    "connack_134",
+    "connack_135",
+    "connack_138",
+    "server_disconnect_135",
+  ].includes(reason ?? "");
+}
+
 type Listener = (observation: MiotObservation) => void;
 function entry(topic: string) {
   return {

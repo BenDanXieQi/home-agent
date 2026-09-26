@@ -175,39 +175,48 @@ export class MijiaService {
   ) {
     signal.throwIfAborted();
     const account = this.accountClient;
-    const oauth = this.accountOAuth;
-    if (!account || !oauth) throw new MijiaError("not_bound");
+    if (!account || !this.accountOAuth) throw new MijiaError("not_bound");
     const ids = [...new Set(deviceIds)];
     if (!ids.length) throw new MijiaError("invalid_input");
     const accountKey = this.accountKey(account);
+    const sourceId = miotPushSourceId(account.getCredentials().userId);
     const scope = this.observationScope.signal;
+    const revision = this.discovery.revision;
     const combined = AbortSignal.any([signal, scope]);
     const assertCurrent = () => {
       combined.throwIfAborted();
       if (
         !this.accountClient ||
         !this.activeAccount(this.accountClient) ||
-        this.accountKey(this.accountClient) !== accountKey
+        this.observationScope.signal !== scope ||
+        this.discovery.revision !== revision
       )
         throw new MijiaError("stale_session");
+    };
+    // Membership is checked on admission. Revoking membership/model/spec changes
+    // the scope revision and aborts its observers, so delivery needs no catalog scan.
+    const assertDevices = () => {
+      assertCurrent();
       this.discovery.requireHome();
       if (this.discovery.stateSnapshot.status !== "ready")
         throw new MijiaError("devices_failed");
       if (ids.some((id) => !this.discovery.find(id)))
         throw new MijiaError("device_not_found");
     };
-    assertCurrent();
+    assertDevices();
     return this.serial(async () => {
       await this.mqttClosing;
-      assertCurrent();
-      if (oauth.expiresAt <= Date.now()) throw new MijiaError("authentication");
+      assertDevices();
       if (this.mqtt?.closed) {
         await this.mqtt.close();
         this.mqtt = undefined;
       }
-      assertCurrent();
+      assertDevices();
+      // A renewal can replace the account while this operation is queued.
+      if (!this.accountOAuth || this.accountOAuth.expiresAt <= Date.now())
+        throw new MijiaError("authentication");
       const mqtt = (this.mqtt ??= new DeviceObservations(
-        miotPushSourceId(account.getCredentials().userId),
+        sourceId,
         () => {
           scope.throwIfAborted();
           if (
@@ -222,7 +231,7 @@ export class MijiaService {
         },
         () => {
           if (this.accountClient)
-            void this.maintenance.renew(this.accountClient);
+            void this.maintenance.rejectOAuth(this.accountClient);
         },
       ));
       const observation = mqtt.observe(
