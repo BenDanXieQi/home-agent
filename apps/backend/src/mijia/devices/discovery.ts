@@ -168,7 +168,15 @@ export class DeviceDiscovery {
     const remaining = new Set(this.devices.map((device) => device.did));
     if (
       previousHome !== this.selectedHome?.id ||
-      previousDevices.some((device) => !remaining.has(device.did))
+      previousDevices.some((device) => {
+        const next = this.devices.find((item) => item.did === device.did);
+        return (
+          !remaining.has(device.did) ||
+          next?.model !== device.model ||
+          next?.spec_type !== device.spec_type ||
+          next?.home_id !== device.home_id
+        );
+      })
     ) {
       this.scopeRevision = crypto.randomUUID();
       this.dependencies.onScopeChanged();

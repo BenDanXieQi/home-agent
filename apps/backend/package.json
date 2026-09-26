@@ -22,15 +22,16 @@
     "dev:rpc": "tsc --project tsconfig.rpc.json --watch --preserveWatchOutput"
   },
   "dependencies": {
+    "@home-agent/api": "workspace:*",
     "@home-agent/observability": "workspace:*",
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
+    "mqtt": "5.16.0",
     "postgres": "catalog:",
     "tough-cookie": "6.0.2",
     "write-file-atomic": "catalog:",
     "yaml": "catalog:",
-    "zod": "catalog:",
-    "@home-agent/api": "workspace:*"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",

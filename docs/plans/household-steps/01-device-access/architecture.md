@@ -2,7 +2,7 @@
 
 [阶段入口](README.md) · [协议与源码参考](reference.md)
 
-整个接入层遵守[账号接入前提](README.md#账号接入前提)：现有米家扫码流程是唯一用户登录入口，账号保存、恢复、续期和退出由同一所有者管理，不新增独立 OAuth、额外授权页面或第二套 token 仓库。任务 1.1 通过同一 MiCloud 会话读取目录、规格和指定属性，service 统一协调媒体。实机结论以来源契约和任务报告为准。下图中的 MQTT 由任务 1.2 核实鉴权后实施，当前没有实现或占位接口。
+整个接入层遵守[账号接入前提](README.md#账号接入前提)：现有米家扫码流程是唯一用户登录入口，账号保存、恢复、续期和退出由同一所有者管理，不新增独立 OAuth、额外授权页面或第二套 token 仓库。任务 1.1 通过同一 MiCloud 会话读取目录、规格和指定属性，service 统一协调媒体。实机结论以来源契约和任务报告为准。MQTT 由 `protocols/miot/mqtt.ts` 实现，service 提供 `observeDevices`，恢复编排归任务 1.3。
 
 ## 目标目录
 
@@ -35,7 +35,8 @@ apps/backend/src/mijia/
     ├── micloud/                    # 扫码、Cookie、目录、规格和 RC4 属性请求
     │   └── properties.ts           # MIoT 属性地址类型及应用读取预算
     └── miot/
-        └── mqtt.ts                 # 任务 1.2：鉴权核实后实现连接、订阅对账与解码
+        ├── mqtt.ts                 # MQTT 连接、订阅对账与取消
+        └── messages.ts             # topic 校验与消息规范化
 ```
 
 按下表迁移并统一命名；`micloud/` 连同其 LICENSE、README 及内部依赖整体迁入。新增文件在对应能力实施时创建，不提前铺空目录、空类或统一 provider 框架。`properties/reader.ts` 承担实际批量读取与取消职责，不只是转发 HTTP 的包装层。
@@ -57,7 +58,7 @@ apps/backend/src/mijia/
 | playback-manager.ts | media/playback-manager.ts                        |
 | micloud/            | protocols/micloud/，保留其内部文件命名及许可材料 |
 
-devices/queries.ts 从 discovery 的当前目录查询家庭、房间和规格，不保存另一份业务目录。properties/read-request.ts 按设备分组预检 readable 规格，reader.ts 负责指定属性读取的批次、预算及取消，source-profiles.ts 负责来源能力配置；不命名为含义不明的 access.ts，也不把 reader 做成通用调度器。属性请求由 micloud/client.ts 复用扫码实例发出；地址类型和应用预算位于 micloud/properties.ts。后续 MQTT 由 miot/mqtt.ts 承担；参考源码中的 mips_cloud.py 名称保持原样。
+devices/queries.ts 从 discovery 的当前目录查询家庭、房间和规格，不保存另一份业务目录。properties/read-request.ts 按设备分组预检 readable 规格，reader.ts 负责指定属性读取的批次、预算及取消，source-profiles.ts 负责来源能力配置；不命名为含义不明的 access.ts，也不把 reader 做成通用调度器。属性请求由 micloud/client.ts 复用扫码实例发出；地址类型和应用预算位于 micloud/properties.ts。MQTT 由 miot/mqtt.ts 承担；参考源码中的 mips_cloud.py 名称保持原样。
 
 account 表达账号及授权生命周期；properties 表达设备属性；media 包括共享摄像头源与浏览器播放；protocols 区分外部协议与业务职责。它们无需再改名。routes.ts、service.ts、errors.ts、operation.ts、retry-timer.ts 沿用现有具体职责；不增加 manager、utils、common 等无明确用途的目录。
 
@@ -68,7 +69,7 @@ account 表达账号及授权生命周期；properties 表达设备属性；medi
 | service    | 稳定账号身份、凭据接纳、保存、换账号、退出、启动与停止顺序 | 沿用现有协调能力，调用 account、devices、properties、media；不新增第二个账号管理器                       |
 | account    | 扫码授权流程、MiCloud 会话恢复和续期操作                   | 准备同一 MiCloud 账号的候选会话；结果交 service 提交，协议客户端不自行持久化或切账号                     |
 | devices    | 设备、家庭／房间、规格的统一读取入口                       | 当前沿用 MiCloud 目录与规格实现；向属性和媒体提供同一设备身份与合法设备集，不另建属性读取／MQTT 设备目录 |
-| properties | 指定属性读取与观测输出；不选择缺值或待确认项               | 使用同一账号与目录；通过当前 MiCloud 实例读取，后续接入已核实的 MQTT，不拥有家庭 latest 或规则状态       |
+| properties | 指定属性读取与观测输出；不选择缺值或待确认项               | 使用同一账号与目录；通过当前 MiCloud 实例读取，通过已接入的 MQTT 交付观察，不拥有家庭 latest 或规则状态  |
 | media      | go2rtc 绑定、摄像头源及播放资源                            | 使用同一账号与目录，通过 service 接受凭据更新和撤销，不直接启动另一套米家登录                            |
 | protocols  | 小米具体请求编码、响应解码及连接协议                       | 不依赖 routes、service、家庭 actor；不保存另一份业务目录或公开家庭状态                                   |
 
@@ -79,7 +80,7 @@ service 负责装配与跨模块通知，子模块通过具体参数／回调接
 ## 接口、授权与失败范围
 
 - 前端通过同一组米家业务接口完成登录、设备查询与播放；属性读取由同一 service 的正式内部入口提供；共享业务类型仍在 `packages/api/src/contracts/`，页面仍在 `apps/web/src/features/mijia/`。不新增属性读取专用授权页或另一套设备 API 命名空间。
-- 账号身份和读取会话统一；扫码／目录、属性读取、后续属性订阅和媒体各有实际结果。“扫码成功”“MQTT 已连接”“视频能播放”不能互相代替。
+- 账号身份和读取会话统一；扫码／目录、属性读取、属性订阅和媒体各有实际结果。“扫码成功”“MQTT 已连接”“视频能播放”不能互相代替。
 - 当前 go2rtc 使用扫码账号的 userId/passToken/region；目录与属性 HTTP 复用该 MiCloud 实例的 Cookie、serviceToken、ssecurity 及 RC4 编码。MQTT 须在复用已有登录流程的前提下核实鉴权；HTTP 读取成功不证明推送可用。无法在此前提下接入时记录该能力限制，不增加 OAuth 或备用登录通路。
 - 属性传输故障只报告对应读取失败，go2rtc 故障只影响媒体；不自动转用另一协议。账号整体退出或身份更换时，统一撤销会话、目录、读取、订阅与播放。MiCloud 会话续期替换实例时，旧读取取消；同账号续期不改变稳定来源身份。
 - 移动模块或调整业务契约时，同批更新所有实际调用方、共享类型及当前文档；删除原路径，不保留转发导出、兼容别名、双写或备用实现。仅目录迁移不要求无故改变 HTTP URL。

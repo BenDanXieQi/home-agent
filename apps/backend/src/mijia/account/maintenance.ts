@@ -21,6 +21,7 @@ type RenewalTask = RestoreTask & { account: MiCloud };
 
 type MaintenanceDependencies = {
   currentAccount: () => MiCloud | undefined;
+  currentOAuth: () => AccountSessionCandidate["oauth"] | undefined;
   isActive: (account: MiCloud) => boolean;
   acceptsWork: () => boolean;
   committing: () => boolean;
@@ -197,14 +198,16 @@ export class AccountMaintenance {
     }
     this.failedAccount = undefined;
     this.renewalRetryAfterAt = 0;
-    const expiresAt = account.exportSession().expiresAt;
-    const remaining =
-      expiresAt === null ? null : Math.max(0, expiresAt - Date.now());
-    // Unspecified cookie lifetime uses our six-hour revalidation policy.
-    const delay =
-      remaining === null
-        ? UNKNOWN_EXPIRY_RENEWAL_INTERVAL_MS
-        : Math.max(1_000, remaining - Math.min(5 * 60_000, remaining / 2));
+    const expiresAt = Math.min(
+      account.exportSession().expiresAt ??
+        Date.now() + UNKNOWN_EXPIRY_RENEWAL_INTERVAL_MS,
+      this.deps.currentOAuth()?.expiresAt ?? Date.now(),
+    );
+    const remaining = Math.max(0, expiresAt - Date.now());
+    const delay = Math.max(
+      1_000,
+      remaining - Math.min(5 * 60_000, remaining / 2),
+    );
     this.renewalTimer = context.with(ROOT_CONTEXT, () =>
       setTimeout(
         () => {
@@ -242,7 +245,13 @@ export class AccountMaintenance {
     let candidate: AccountSessionCandidate | undefined;
     task.promise = this.track(
       mijiaOperation("session.renew", "authentication", async () => {
-        candidate = await renewAccountSession(account, task.controller.signal);
+        const oauth = this.deps.currentOAuth();
+        if (!oauth) throw new MijiaError("authentication");
+        candidate = await renewAccountSession(
+          account,
+          oauth,
+          task.controller.signal,
+        );
         const assertCurrent = () => {
           if (!this.currentRenewal(task)) throw new MijiaError("cancelled");
         };

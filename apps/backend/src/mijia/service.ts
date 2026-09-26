@@ -1,3 +1,7 @@
+import { MiotMqtt } from "./protocols/miot/mqtt";
+import type { MiotObservation } from "./protocols/miot/messages";
+import { miotPushSourceId } from "./properties/source-profiles";
+import { authorizeOAuth } from "./protocols/oauth/client";
 import {
   AccountMaintenance,
   type AccountSessionCandidate,
@@ -32,6 +36,7 @@ export class MijiaService {
     account: { status: "idle" },
   };
   private accountClient: MiCloud | undefined;
+  private accountOAuth: AccountSessionCandidate["oauth"] | undefined;
   private readonly loginFlow = new LoginFlow((candidate) =>
     this.commitLogin(candidate),
   );
@@ -85,6 +90,7 @@ export class MijiaService {
     });
     this.maintenance = new AccountMaintenance({
       currentAccount: () => this.accountClient,
+      currentOAuth: () => this.accountOAuth,
       isActive: (account) => this.activeAccount(account),
       acceptsWork: () => !this.stopped && !this.loggingOut,
       committing: () => this.committingCredentials,
@@ -105,6 +111,8 @@ export class MijiaService {
     });
   }
 
+  private mqtt: MiotMqtt | undefined;
+  private mqttClosing: Promise<void> = Promise.resolve();
   private readScope = new AbortController();
   private readGeneration = crypto.randomUUID();
   private readonly propertyReader = new PropertyReader();
@@ -143,9 +151,84 @@ export class MijiaService {
   }
 
   private invalidatePropertyReads() {
+    const mqtt = this.mqtt;
+    this.mqtt = undefined;
+    if (mqtt)
+      this.mqttClosing = Promise.all([
+        this.mqttClosing,
+        mqtt.close("scope_invalidated"),
+      ]).then(() => {});
     this.readScope.abort();
     this.readScope = new AbortController();
     this.readGeneration = crypto.randomUUID();
+  }
+
+  async observeDevices(
+    deviceIds: readonly string[],
+    onObservation: (observation: MiotObservation) => void,
+    signal: AbortSignal,
+  ) {
+    signal.throwIfAborted();
+    const account = this.accountClient;
+    const oauth = this.accountOAuth;
+    if (!account || !oauth) throw new MijiaError("not_bound");
+    const ids = [...new Set(deviceIds)];
+    if (!ids.length) throw new MijiaError("invalid_input");
+    const scope = this.readScope.signal;
+    const combined = AbortSignal.any([signal, scope]);
+    const assertCurrent = () => {
+      combined.throwIfAborted();
+      if (!this.activeAccount(account) || this.accountOAuth !== oauth)
+        throw new MijiaError("stale_session");
+      this.discovery.requireHome();
+      if (this.discovery.stateSnapshot.status !== "ready")
+        throw new MijiaError("devices_failed");
+      if (ids.some((id) => !this.discovery.find(id)))
+        throw new MijiaError("device_not_found");
+    };
+    assertCurrent();
+    return this.serial(async () => {
+      await this.mqttClosing;
+      assertCurrent();
+      if (oauth.expiresAt <= Date.now()) throw new MijiaError("authentication");
+      if (this.mqtt?.closed) {
+        await this.mqtt.close();
+        this.mqtt = undefined;
+      }
+      assertCurrent();
+      const mqtt = (this.mqtt ??= new MiotMqtt(
+        miotPushSourceId(account.getCredentials().userId),
+        oauth,
+      ));
+      const observation = mqtt.observe(
+        ids,
+        (event) => {
+          // Scope-invalidated control events are allowed to explain lost coverage;
+          // data and confirmations must still belong to the active account/scope.
+          if (
+            (event.kind === "connection" && event.status === "closed") ||
+            (event.kind === "subscription" && event.status === "cancelled")
+          ) {
+            if (!signal.aborted) onObservation(event);
+            return;
+          }
+          try {
+            assertCurrent();
+          } catch {
+            return;
+          }
+          onObservation(event);
+        },
+        combined,
+      );
+      return {
+        ...observation,
+        retry: () => {
+          assertCurrent();
+          observation.retry();
+        },
+      };
+    });
   }
 
   async readProperties(
@@ -386,7 +469,10 @@ export class MijiaService {
       this.committingCredentials = true;
       try {
         await mijiaOperation("credentials.save", "credential_storage", () =>
-          this.requireStore().write("mijia", candidate.client.exportSession()),
+          this.requireStore().write("mijia", {
+            micloud: candidate.client.exportSession(),
+            oauth: candidate.oauth,
+          }),
         );
         // A queued logout must delete the same durable and in-memory candidate.
         if (this.stopped || this.accountClient !== account) return;
@@ -396,6 +482,7 @@ export class MijiaService {
         if (reinstall) this.media.prepareRebind();
         this.invalidatePropertyReads();
         this.accountClient = candidate.client;
+        this.accountOAuth = candidate.oauth;
         account.dispose();
         this.discovery.set(candidate.catalog, true);
         this.startAccountMaintenance(candidate.client);
@@ -419,11 +506,15 @@ export class MijiaService {
       );
       assertCurrent();
       await mijiaOperation("credentials.save", "credential_storage", () =>
-        this.requireStore().write("mijia", candidate.client.exportSession()),
+        this.requireStore().write("mijia", {
+          micloud: candidate.client.exportSession(),
+          oauth: candidate.oauth,
+        }),
       );
       assertCurrent();
       this.invalidatePropertyReads();
       this.accountClient = candidate.client;
+      this.accountOAuth = candidate.oauth;
       this.discovery.set(candidate.catalog);
       this.state.account = {
         status: "authenticated",
@@ -445,6 +536,7 @@ export class MijiaService {
       account.dispose();
       this.invalidatePropertyReads();
       this.accountClient = undefined;
+      this.accountOAuth = undefined;
       this.media.resetAccount(false);
       this.discovery.reset();
       this.state.account = {
@@ -488,6 +580,7 @@ export class MijiaService {
         this.invalidatePropertyReads();
         this.accountClient?.dispose();
         this.accountClient = undefined;
+        this.accountOAuth = undefined;
         this.discovery.reset();
         this.state.account = { status: "idle" };
         this.state.connectionOperation = null;
@@ -568,6 +661,15 @@ export class MijiaService {
     if (!this.loginFlow.isCurrent(attempt)) return;
     attempt.cloud.getCredentials();
     this.loginFlow.prepareCommit(attempt);
+    const oauth = await mijiaOperation(
+      "oauth.authorize",
+      "authentication",
+      () =>
+        authorizeOAuth(
+          attempt.cloud.exportSession(),
+          attempt.controller.signal,
+        ),
+    );
     await this.serial(async () => {
       if (!this.loginFlow.isCurrent(attempt)) return;
       const homeId = await this.requireHomeStore().read(
@@ -579,7 +681,10 @@ export class MijiaService {
       this.committingCredentials = true;
       try {
         await mijiaOperation("credentials.save", "credential_storage", () =>
-          this.requireStore().write("mijia", attempt.cloud.exportSession()),
+          this.requireStore().write("mijia", {
+            micloud: attempt.cloud.exportSession(),
+            oauth,
+          }),
         );
         if (!this.loginFlow.isCurrent(attempt)) return;
         this.cancelRestore();
@@ -588,6 +693,7 @@ export class MijiaService {
         this.discovery.reset();
         this.accountClient?.dispose();
         this.accountClient = attempt.cloud;
+        this.accountOAuth = oauth;
         this.state.account = {
           id: crypto.randomUUID(),
           status: "authenticated",
@@ -652,11 +758,16 @@ export class MijiaService {
     this.loginFlow.dispose();
     this.accountClient?.dispose();
     this.accountClient = undefined;
+    this.accountOAuth = undefined;
     this.discovery.reset();
     try {
       await this.media.close();
     } finally {
-      await Promise.allSettled([maintenanceClosing, this.lifecycleQueue]);
+      await Promise.allSettled([
+        maintenanceClosing,
+        this.lifecycleQueue,
+        this.mqttClosing,
+      ]);
     }
   }
 }
