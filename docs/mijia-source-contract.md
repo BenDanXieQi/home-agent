@@ -18,6 +18,30 @@
 
 service 为当前会话维护读取取消范围及 `collection_generation`。会话替换、账号失效、退出或关闭撤销旧范围；旧请求及迟到结果不能进入新实例。同账号正常续期保留稳定 `source_id`，更换采集代次。go2rtc 故障只影响媒体，属性请求失败不自动切换其他协议。
 
+## MQTT 授权边界
+
+固定 MiLoCo 参考版本的 `mips_cloud.py` 使用 OAuth 应用 ID 作为 MQTT username、OAuth access token 作为 password，client ID 为 `miloco:<uuid>`；`cloud.py` 的 `MIoTOAuth2Client` 通过授权码或 refresh token 获取该 token。扫码登录在后端完成 OAuth 授权，两类凭据由同一个账号所有者和加密记录管理；正式 MQTT 接入使用 MQTT.js 5.16.0。
+
+现有扫码会话的 userId/passToken 已实机验证可经小米 `/pass/serviceLogin`、`/sts/oauth` 建立 OAuth 登录会话。当前账号在 MiLoCo 参考应用参数下，读取 `/oauth2/authorize?_json=true` 时，`skip_confirm=false` 和 `true` 均返回授权确认数据；该响应本身不代表已完成授权。经用户明确同意，后端提交 `/oauth2/userAuthorization` 授予公开信息（昵称、头像等）和智能家庭服务权限，取得授权码，并通过 MiLoCo 的 `/app/v2/mico/oauth/get_token` 成功换得 access token 和 refresh token，返回有效期为 259200 秒。此链路不需要再次扫码或打开授权页面，但包含实际授予权限的操作，不是免授权的 passToken 直接交换。签发的 `oauth2.0_serviceToken` 仅是登录会话 Cookie，不是 MQTT 密码。
+
+授权参数中的 `client_id` 可能以超过 JavaScript 安全整数范围的 JSON 数字返回，必须保留原始精度；普通 JSON 数字解析后再提交会导致签名不一致。正式账号记录同时保存 MiCloud 与 OAuth 凭据；refresh token 续期由账号维护流程负责。
+
+OAuth 与 MQTT 必须使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，MQTT 的 `client_id=miloco:<uuid>`。UUID 按 MiLoCo `manager.py` 的 `uuid.uuid4().hex` 生成，为不带连字符的 32 位十六进制字符串。实机对照中，两组均成功取得 OAuth token，并使用 MQTT 5、TLS、60 秒心跳及 clean start 连接 `cn-ha.mqtt.io.mi.com:8883`；32 位 UUID 在 Paho 2.1.0 与手写 CONNECT 两种客户端中均收到成功 CONNACK，带连字符的 36 位 UUID 在两种客户端中均返回 `135 / 0x87`（Not authorized）。该对照将本次连接失败定位到实例 UUID 格式，不能据此认定应用未获 MQTT 准入；服务端具体字段校验实现未知。
+
+已验证当前账号及 MiLoCo 参考应用参数下的后端授权、token 交换与 MQTT 连接。正式内部观察入口已验证代表设备的订阅确认、属性变化与同值上报。重连恢复及 Home Agent 自有应用准入未验证；设备在线通知的实机范围见下文。
+
+## 正式推送入口
+
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 校验当前账号、所选家庭和目录中的明确设备集合，按需创建一个 MQTT 采集实例。多个观察者共用连接与 topic，通过引用计数对账；返回 `cancel()`、`snapshot()` 和 `retry()`。`snapshot()` 提供逐 topic 的期望、确认、在途、获准 QoS、失败原因及接收／丢弃计数；`retry()` 只重试临时失败，不反复尝试已被拒绝的订阅。该入口没有 HTTP 路由，不自动选择全家庭，不提交家庭 latest 或 availability。
+
+`protocols/miot/mqtt.ts` 负责 MQTT 5/TLS 连接、订阅与取消，`messages.ts` 校验和规范化属性及在线消息。每设备请求 QoS 2 的 `device/{did}/up/properties_changed/#` 和 `device/{did}/state/#`；两类 topic 独立接受 QoS 0/1/2 的 SUBACK，连接成功不代替订阅确认。在途操作共用 16 个名额、确认期限 10 秒。订阅超时只令对应 topic 失败，迟到确认不能恢复其确认状态；取消时对已确认或状态不确定的订阅退订。退订失败或超时关闭连接，防止遗留订阅继续交付。
+
+消息回调先于订阅注册。只交付当前实例内仍被观察的设备消息，不等待 SUBACK，也不把消息到达视为订阅成功。属性校验 method、did、siid/piid 和显式存在的 JSON 标量 value；params 支持对象或数组，单项属性与 topic 中地址交叉校验，不按 notify 白名单裁剪。同值上报保留。在线消息仅识别 online/offline 叶子。带 `/`、MQTT 通配符或空标识的设备报告 `unsupported_device_id`，不猜测转义规则。
+
+观测包含稳定 `source_id`、实例 `collection_generation`、真实 `received_at`、`observed_at=null`、`source_event_id=null` 和 `source_sequence=null`。正常消息按 live 交付，MQTT retained 消息按 baseline；不承诺设备采样时间、跨消息顺序、无断线重放或端到端恰好一次。独立 `siid/eiid` 事件未启用。
+
+账号退出、账号／凭据替换、家庭切换和目录归属／型号／规格变化使当前实例失效；取消移除对应回调，最后一个观察者退出某 topic 时退订。连接或订阅局部失败不会直接关闭媒体。断连后当前实例终止，后续显式观察可新建连接；本任务没有自动重连、重订和恢复补读，这些由任务 1.3 编排。应用持有一份业务目录，MQTT 只保存派生的订阅集合。
+
 ## 正式读取入口
 
 [`MijiaService.readProperties(properties, signal)`](../apps/backend/src/mijia/service.ts) 接收 `readonly { did, siid, piid }[]` 与 `AbortSignal`，返回逐项 `PropertyReadObservation[]`。账号由 service 取得，调用方不提供凭据。设备必须属于当前账号完整成功同步的目录，属性必须属于该设备的 readable 规格。目录的 `online` 布尔值不作为读取禁令。规格的能力定义独立于展示翻译：翻译失败或耗尽元数据网络预算时沿用已取得的规格原文，不把已确认可读的属性判为不可读；能力请求自身超时、调用方取消、账号撤销或调用方自身期限到达仍会终止查询。
@@ -68,14 +92,14 @@ reader 按稳定 `source_id` 保存供应商 `Retry-After` 期限；同账号会
 
 规格声明、读取成功、订阅确认、实际收包和具体型号适用性分别记录；临时网络失败不能转成永久不支持。
 
-| 契约／能力                             | 身份与适用条件                                      | 规格声明                                   | 本项目证据                                                       | 结论与限制                                   |
-| -------------------------------------- | --------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------- | -------------------------------------------- |
-| `miot-cloud-cache-read` v1：同账号读取 | 当前已接纳 MiCloud 扫码实例、`cn`、同一目录中的设备 | 实际属性必须 readable                      | 同一已保存扫码会话恢复后，正式入口 4 台／13 项全部成功           | 不需要独立 OAuth；目录可读不代替属性可读     |
-| 代表设备类型                           | 灯、空气检测仪、温湿度计、人在传感器                | 已从实际规格选取布尔、枚举、整数及浮点属性 | 下表列出的型号与属性已实读成功；其余保持未验证                   | 范围及真实标识只记录于本机材料               |
-| 拓扑／网关／固件条件                   | 依据实际接入条件限定                                | 正式目录／规格没有提供实际网关和固件       | BLE 类型可由设备标识与型号作为推定依据；实际网关、链路及固件未知 | 不从 online、型号或数字 did 推断实际直连路径 |
-| 属性推送 `siid/piid`                   | 待核实现有扫码流程下的 MQTT 鉴权与准入              | notify 仅是规格声明                        | 尚无订阅确认或实际收包                                           | 未接入；HTTP 读取成功不能代替推送可用        |
-| 在线通知                               | 需要独立在线通路                                    | 不适用                                     | 尚未接入                                                         | 不从读取响应或目录布尔值派生 availability    |
-| 独立设备事件 `siid/eiid`               | 当前无正式接入通路                                  | 当前精简规格不输出事件                     | 未接入                                                           | 不构造事件 topic 或支持结论                  |
+| 契约／能力                             | 身份与适用条件                                      | 规格声明                                   | 本项目证据                                                                                        | 结论与限制                                   |
+| -------------------------------------- | --------------------------------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `miot-cloud-cache-read` v1：同账号读取 | 当前已接纳 MiCloud 扫码实例、`cn`、同一目录中的设备 | 实际属性必须 readable                      | 同一已保存扫码会话恢复后，正式入口 4 台／13 项全部成功                                            | 不需要独立 OAuth；目录可读不代替属性可读     |
+| 代表设备类型                           | 灯、空气检测仪、温湿度计、人在传感器                | 已从实际规格选取布尔、枚举、整数及浮点属性 | 下表列出的型号与属性已实读成功；其余保持未验证                                                    | 范围及真实标识只记录于本机材料               |
+| 拓扑／网关／固件条件                   | 依据实际接入条件限定                                | 正式目录／规格没有提供实际网关和固件       | BLE 类型可由设备标识与型号作为推定依据；实际网关、链路及固件未知                                  | 不从 online、型号或数字 did 推断实际直连路径 |
+| 属性推送 `siid/piid`                   | 同账号统一保存的 OAuth 凭据及所选家庭目录           | notify 仅是规格声明                        | 4 种代表型号的 topic 获准 QoS 2；灯、空气检测仪、人在传感器收到属性                               | 已接入；温湿度计实际推送仍待观察             |
+| 在线通知                               | 同一设备集的独立 state topic                        | 不适用                                     | 4 种代表型号获准 QoS 2；床头灯 `yeelink.light.bslamp2` 实收 offline 和 online，其余型号未验证通知 | 不从属性或目录布尔值派生 availability        |
+| 独立设备事件 `siid/eiid`               | 当前无正式接入通路                                  | 当前精简规格不输出事件                     | 未接入                                                                                            | 不构造事件 topic 或支持结论                  |
 
 ### 已验证的代表读取范围
 

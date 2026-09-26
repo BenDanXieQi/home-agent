@@ -87,7 +87,7 @@ export function LoginFlow() {
                   : busy
                     ? login?.status === "creating"
                       ? "正在获取二维码…"
-                      : "正在登录…"
+                      : "正在完成登录与授权…"
                     : login?.status === "expired"
                       ? "二维码已过期，正在自动刷新…"
                       : login?.status === "pending"
@@ -95,6 +95,9 @@ export function LoginFlow() {
                         : login?.status === "idle"
                           ? "正在获取二维码…"
                           : "扫码登录，无需输入账号密码。"}
+              </p>
+              <p className="login-help">
+                扫码登录将授权访问米家昵称、头像和智能家庭服务。
               </p>
             </>
           )}

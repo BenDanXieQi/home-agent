@@ -102,8 +102,8 @@ export const miotCloudCacheProfile = {
       ],
       gateway_and_firmware: "unverified",
     },
-    property_push: "pending_verification",
-    online_notifications: "pending_verification",
+    property_push: "see_miot_cloud_push_profile",
+    online_notifications: "see_miot_cloud_push_profile",
     independent_device_events: "not_integrated",
   },
 } as const;
@@ -113,3 +113,73 @@ export function miotSourceId(userId: string, region: "cn" = "cn") {
   const identity = JSON.stringify(["xiaomi", userId, region, "micloud_rc4"]);
   return `miot-${createHash("sha256").update(identity).digest("hex")}`;
 }
+
+export function miotPushSourceId(userId: string) {
+  return `miot-mqtt-${createHash("sha256")
+    .update(JSON.stringify(["xiaomi", userId, "cn", "miot_mqtt"]))
+    .digest("hex")}`;
+}
+
+/** Subscription evidence and actual message evidence remain separate. */
+export const miotCloudPushProfile = {
+  contract_id: "miot-cloud-push",
+  contract_version: 1,
+  supplier: "xiaomi",
+  protocol: "mqtt5_tls",
+  applicability: {
+    region: "cn",
+    credentials: "unified_account_oauth",
+    device_scope: "explicit_selected_home_devices",
+    unsupported_identifiers: "slash_or_mqtt_wildcards",
+    gateway_and_firmware: "unverified",
+  },
+  delivery: {
+    normal: "live",
+    retained: "baseline",
+    observed_at: null,
+    source_event_id: null,
+    source_sequence: null,
+    equal_values: "preserved",
+  },
+  connection: {
+    library: "mqtt",
+    version: "5.16.0",
+    keepalive_seconds: 60,
+    connect_timeout_ms: 15000,
+    clean: true,
+    automatic_reconnect: false,
+  },
+  subscriptions: {
+    requested_qos: 2,
+    accepted_qos: [0, 1, 2],
+    concurrency: 16,
+    timeout_ms: 10000,
+    properties: "device/{did}/up/properties_changed/#",
+    online: "device/{did}/state/#",
+    require_notify_flag: false,
+    early_messages: "deliver_without_confirming_subscription",
+  },
+  evidence: {
+    subscription_models: [
+      "yeelink.light.bslamp2",
+      "cgllc.airm.cgd1st",
+      "miaomiaoce.sensor_ht.t9",
+      "xiaomi.sensor_occupy.p1",
+    ],
+    property_message_models: [
+      "yeelink.light.bslamp2",
+      "cgllc.airm.cgd1st",
+      "xiaomi.sensor_occupy.p1",
+    ],
+    same_value_delivery: "verified",
+    online_messages: {
+      status: "scoped_verified",
+      models: ["yeelink.light.bslamp2"],
+    },
+    offline_messages: {
+      status: "scoped_verified",
+      models: ["yeelink.light.bslamp2"],
+    },
+    independent_device_events: "not_integrated",
+  },
+} as const;
