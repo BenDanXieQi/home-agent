@@ -3,12 +3,7 @@
 import { createHash, randomInt, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { MiCloudError } from "./errors";
-import {
-  readHomes,
-  deviceLocations,
-  homeLocation,
-  type DeviceLocation,
-} from "./homes";
+import { readHomes, deviceLocations, type DeviceLocation } from "./homes";
 import { MiotSpecClient } from "./spec";
 import { cryptRc4 } from "./rc4";
 import { savedSessionSchema, type MiCloudSavedSession } from "./session";
@@ -389,6 +384,42 @@ export class MiCloud {
     };
   }
 
+  async getProfile(signal?: AbortSignal) {
+    const { userId } = this.getCredentials();
+    const url = new URL("https://api.account.xiaomi.com/pass/usersCard");
+    url.searchParams.set("ids", userId);
+    const response = z
+      .object({
+        code: z.literal(0),
+        data: z.object({
+          list: z.array(
+            z.object({
+              userId: z
+                .union([z.string(), z.number().int().safe()])
+                .transform(String),
+              miliaoNick: z.string(),
+              miliaoIcon: z.string(),
+            }),
+          ),
+        }),
+      })
+      .safeParse(await this.#requestJson(url, {}, signal, 10_000));
+    if (!response.success) throw new MiCloudError("invalid-response");
+    const profile = response.data.data.list.find(
+      (item) => item.userId === userId,
+    );
+    if (!profile) throw new MiCloudError("invalid-response");
+    const avatar = z
+      .url({ protocol: /^https?$/ })
+      .safeParse(profile.miliaoIcon);
+    return {
+      name: profile.miliaoNick.trim() || null,
+      avatarUrl: avatar.success
+        ? avatar.data.replace(/^http:/, "https:")
+        : null,
+    };
+  }
+
   getHomes(signal?: AbortSignal) {
     return readHomes(
       (path, data, requestSignal) =>
@@ -409,35 +440,65 @@ export class MiCloud {
     );
   }
 
-  async getDevices(signal?: AbortSignal) {
+  async getCatalog(signal?: AbortSignal) {
     const requestSignal = AbortSignal.any([
       this.#transport.signal,
       AbortSignal.timeout(30_000),
       ...(signal ? [signal] : []),
     ]);
-    const [result, homes] = await Promise.all([
-      this.#deviceRequest(
-        "/home/device_list",
-        { getVirtualModel: false, getHuamiDevices: 0 },
-        requestSignal,
-      ),
-      this.getHomes(requestSignal),
-    ]);
-    const list = object(result).list;
-    if (!Array.isArray(list)) throw new MiCloudError("invalid-response");
+    const homes = await this.getHomes(requestSignal);
     const locations = deviceLocations(homes);
+    const ids = [...locations.keys()];
+    const devices: MiCloudDevice[] = [];
+    // Account-wide device_list omits shared-home devices. Resolve the explicit
+    // membership IDs through the paged detail endpoint used by Xiaomi Home.
+    for (let offset = 0; offset < ids.length; offset += 150) {
+      const batch = ids.slice(offset, offset + 150);
+      const requested = new Set(batch);
+      const found = new Map<string, MiCloudDevice>();
+      const cursors = new Set<string>();
+      let cursor: string | undefined;
+      for (;;) {
+        const result = object(
+          await this.#deviceRequest(
+            "/v2/home/device_list_page",
+            {
+              limit: 200,
+              get_split_device: true,
+              get_third_device: true,
+              dids: batch,
+              ...(cursor ? { start_did: cursor } : {}),
+            },
+            requestSignal,
+          ),
+        );
+        if (
+          !Array.isArray(result.list) ||
+          (result.has_more !== undefined &&
+            typeof result.has_more !== "boolean")
+        )
+          throw new MiCloudError("invalid-response");
+        for (const item of result.list) {
+          const device = object(item);
+          const did = identifier(device.did);
+          if (!did) throw new MiCloudError("invalid-response");
+          if (!requested.has(did)) continue;
+          found.set(did, {
+            ...device,
+            did,
+            ...locations.get(did),
+          });
+        }
+        if (!result.has_more) break;
+        cursor = identifier(result.next_start_did);
+        if (!cursor || cursors.has(cursor) || cursors.size >= 100)
+          throw new MiCloudError("invalid-response");
+        cursors.add(cursor);
+      }
+      devices.push(...found.values());
+    }
     this.#transport.assertActive(requestSignal);
-    return list.map((item: unknown) => {
-      const device = object(item);
-      const did = identifier(device.did);
-      if (!did) throw new MiCloudError("invalid-response");
-      const normalized: MiCloudDevice = {
-        ...device,
-        did,
-        ...(locations.get(did) ?? homeLocation()),
-      };
-      return normalized;
-    });
+    return { homes, devices };
   }
 
   /** One batch over this account's existing RC4 session; scheduling belongs to properties/. */

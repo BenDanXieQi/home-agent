@@ -3,6 +3,8 @@ import { Video, VideoOff } from "lucide-react";
 import type { MijiaState } from "@home-agent/api/mijia";
 import { MijiaPlayer } from "./MijiaPlayer";
 
+const cameraNameOrder = new Intl.Collator("zh-CN", { numeric: true });
+
 const CameraTile = memo(function CameraTile({
   device,
   revision,
@@ -80,7 +82,14 @@ export default function CameraWall({
       return next;
     });
   }, []);
-  const cameras = state.devices.items.filter((device) => device.camera);
+  // Display order belongs to the camera wall, not the cloud response order.
+  const cameras = state.devices.items
+    .filter((device) => device.camera)
+    .toSorted(
+      (left, right) =>
+        cameraNameOrder.compare(left.name, right.name) ||
+        (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+    );
   const offlineCameras = cameras.filter(
     (device) => !device.online && device.retainedChannels.length === 0,
   );
@@ -133,7 +142,7 @@ export default function CameraWall({
               : "没有摄像头"}
           </h2>
           {state.devices.status === "ready" ? (
-            <p>当前米家账号下没有可显示的摄像头。</p>
+            <p>所选家庭没有可显示的摄像头。</p>
           ) : null}
         </div>
       ) : null}

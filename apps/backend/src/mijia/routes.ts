@@ -7,6 +7,8 @@ import {
   validateJson,
 } from "@home-agent/api/errors/hono";
 import {
+  mijiaHomeSelectionSchema,
+  mijiaHomeSelectionInputSchema,
   mijiaDeviceSpecSchema,
   mijiaHomeSchema,
   mijiaPlaybackInputSchema,
@@ -29,6 +31,8 @@ function stateResponse(c: Context, state: MijiaState, status: 200 | 202 = 200) {
 
 export type MijiaApi = Pick<
   MijiaService,
+  | "homes"
+  | "selectHome"
   | "getHome"
   | "getDeviceSpec"
   | "snapshot"
@@ -63,6 +67,17 @@ export function createMijiaRoutes(port: number, service: MijiaApi) {
     .get("/state", (c) => {
       return stateResponse(c, service.snapshot());
     })
+    .get("/homes", (c) =>
+      c.json(mijiaHomeSelectionSchema.parse(service.homes())),
+    )
+    .put(
+      "/home-selection",
+      validateJson(mijiaHomeSelectionInputSchema),
+      async (c) => {
+        const { accountId, homeId } = c.req.valid("json");
+        return stateResponse(c, await service.selectHome(accountId, homeId));
+      },
+    )
     .get("/home", async (c) =>
       c.json({
         code: 0,

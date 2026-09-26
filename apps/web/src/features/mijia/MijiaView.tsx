@@ -1,5 +1,6 @@
 import { RequestFeedback } from "../../components/RequestFeedback";
 import { RetryConnectionButton } from "./RetryConnectionButton";
+import { Link } from "@tanstack/react-router";
 import { lazy, Suspense } from "react";
 import { RefreshCw } from "lucide-react";
 import { useMijia } from "./use-mijia";
@@ -23,6 +24,9 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
     perform,
     refresh,
   } = useMijia();
+  const homeName = state?.homes.items.find(
+    (home) => home.id === state.homes.selectedHomeId,
+  )?.name;
   const count =
     state?.devices.status === "ready"
       ? view === "devices"
@@ -33,7 +37,10 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
     <>
       <div className="page-toolbar">
         <div className="flex items-center gap-2 text-sm">
-          <span>{view === "devices" ? "全部设备" : "全部摄像头"}</span>
+          <span>
+            {homeName ? `${homeName} · ` : ""}
+            {view === "devices" ? "全部设备" : "全部摄像头"}
+          </span>
           {count !== null ? <span className="count-badge">{count}</span> : null}
         </div>
         <Button
@@ -41,9 +48,23 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
           onClick={() => void perform({ type: "refreshDevices" })}
         >
           <RefreshCw size={13} />
-          刷新设备
+          {action === "refreshDevices"
+            ? "刷新中…"
+            : view === "devices"
+              ? "刷新设备"
+              : "刷新摄像头"}
         </Button>
       </div>
+      {state && state.homes.status !== "selected" ? (
+        <p className="notice notice-warning">
+          {state.homes.status === "unavailable"
+            ? "所选家庭已不可访问。"
+            : "尚未选择要接入的家庭。"}
+          <Link to="/settings" className="underline">
+            前往设置选择家庭
+          </Link>
+        </p>
+      ) : null}
       <RequestFeedback
         fetchError={fetchError}
         error={actionError}
@@ -61,7 +82,7 @@ export default function MijiaView({ view }: { view: "devices" | "cameras" }) {
         <div className="workspace-empty">
           <output>正在读取设备…</output>
         </div>
-      ) : (
+      ) : state.homes.status !== "selected" ? null : (
         <Suspense
           fallback={
             <output>

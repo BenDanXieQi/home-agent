@@ -52,7 +52,16 @@ export const mijiaDeviceSchema = z.object({
 });
 export const mijiaAccountSchema = z.discriminatedUnion("status", [
   z.object({ status: z.enum(["idle", "restoring"]) }),
-  z.object({ status: z.literal("authenticated"), id: z.uuid() }),
+  z.object({
+    status: z.literal("authenticated"),
+    id: z.uuid(),
+    profile: z
+      .object({
+        name: z.string().nullable(),
+        avatarUrl: z.url({ protocol: /^https$/ }).nullable(),
+      })
+      .nullable(),
+  }),
   z.object({
     status: z.enum(["restore_error", "reauth_required"]),
     error: mijiaErrorSchema,
@@ -97,7 +106,20 @@ export function isMijiaLoginAttemptActive(
   );
 }
 
+export const mijiaHomeSelectionInputSchema = z.strictObject({
+  accountId: z.uuid(),
+  homeId: z.string().min(1).max(128).nullable(),
+});
+export const mijiaHomeSelectionSchema = z.object({
+  selectedHomeId: z.string().nullable(),
+  status: z.enum(["unselected", "selected", "unavailable"]),
+  items: z.array(
+    z.object({ id: z.string(), name: z.string(), shared: z.boolean() }),
+  ),
+});
+
 export const mijiaStateSchema = z.object({
+  homes: mijiaHomeSelectionSchema,
   revision: z.uuid(),
   connectionOperation: operationSchema.nullable(),
   account: mijiaAccountSchema,

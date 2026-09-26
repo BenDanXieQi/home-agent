@@ -239,3 +239,24 @@
     min-height: 240px;
   }
 }
+
+@layer components {
+  .home-selection {
+    @apply mt-6 max-w-4xl border-b border-line pb-6;
+  }
+  .home-selection-row {
+    @apply grid items-center gap-4 md:grid-cols-2 md:gap-8;
+  }
+  .home-selection-row h2 {
+    @apply text-sm font-medium;
+  }
+  .home-selection-row p {
+    @apply mt-2 text-xs leading-6 text-muted;
+  }
+  .home-selection select {
+    @apply w-full rounded-lg border border-line bg-white px-3 py-2 text-sm text-ink disabled:opacity-50;
+  }
+  .home-selection-status {
+    @apply mt-3 block text-xs text-muted;
+  }
+}

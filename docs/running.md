@@ -28,6 +28,8 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 ## 服务连接
 
+Docker 数据库通过 `.env` 的 `POSTGRES_PORT` 映射到本机，容器内端口固定为 5432；`DATABASE_URL` 的端口须与 `POSTGRES_PORT` 一致。backend 和 Agent 运行在本机，监听地址分别由 `.env` 的 `BACKEND_HOST` / `BACKEND_PORT`、`AGENT_HOST` / `AGENT_PORT` 设置，无需 Docker 端口映射。前端开发服务器监听 `127.0.0.1:5173`，API 代理使用 backend 的环境变量配置。go2rtc 使用 host 网络，不配置 `ports` 映射；启动命令统一使用本机 1984（API）、8554（RTSP）和 8555（WebRTC）端口。
+
 backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
 
 backend 首次启动生成 `config/config.yaml`，修改后下次请求生效。默认 Agent 地址为 `http://127.0.0.1:1811`，go2rtc 地址为 `http://127.0.0.1:1984`。详细配置见[服务连接配置](service-connections.md)。

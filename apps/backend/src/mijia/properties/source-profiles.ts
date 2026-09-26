@@ -14,7 +14,7 @@ export const miotCloudCacheProfile = {
     region: "cn",
     credentials: "mijia_qr_session",
     account_binding: "same_micloud_account_instance",
-    device_scope: "current_account_directory",
+    device_scope: "selected_home_directory",
     model_and_spec: "current_device_model_with_readable_property",
     topology: "operator_selected_representative_devices",
     gateway_and_firmware: "unverified",

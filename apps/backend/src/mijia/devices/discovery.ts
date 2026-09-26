@@ -14,13 +14,68 @@ type DeviceDependencies = {
   renewalFailed: (account: MiCloud) => boolean;
   renew: (account: MiCloud) => Promise<void>;
   retainedChannels: (id: string) => (1 | 2)[];
+  onScopeChanged: () => void;
   onDevices: (devices: MiCloudDevice[], retryFailed: boolean) => void;
 };
 
-/** Owns the device snapshot, discovery timer and coalesced discovery work. */
+/** Owns the account catalog, selected household scope and discovery work. */
 export class DeviceDiscovery {
   private state: MijiaState["devices"] = { status: "idle", items: [] };
-  private devices: MiCloudDevice[] = [];
+  private catalog: Awaited<ReturnType<MiCloud["getCatalog"]>> = {
+    homes: [],
+    devices: [],
+  };
+  private selectedHomeId: string | null = null;
+  private scopeRevision = crypto.randomUUID();
+
+  get revision() {
+    return this.scopeRevision;
+  }
+  private get devices() {
+    return this.selectedHome
+      ? this.catalog.devices.filter(
+          (device) => device.home_id === this.selectedHomeId,
+        )
+      : [];
+  }
+  get selectedHome() {
+    return this.catalog.homes.find((home) => home.id === this.selectedHomeId);
+  }
+  homeSnapshot() {
+    return {
+      selectedHomeId: this.selectedHomeId,
+      status:
+        this.selectedHomeId === null
+          ? ("unselected" as const)
+          : this.selectedHome
+            ? ("selected" as const)
+            : ("unavailable" as const),
+      items: this.catalog.homes.map(({ id, name, shared }) => ({
+        id,
+        name,
+        shared,
+      })),
+    };
+  }
+  requireHome() {
+    if (this.selectedHomeId === null) throw new MijiaError("home_required");
+    if (!this.selectedHome) throw new MijiaError("home_unavailable");
+    return this.selectedHome;
+  }
+  validateSelection(homeId: string | null) {
+    if (homeId === null) return;
+    if (this.state.status !== "ready") throw new MijiaError("devices_failed");
+    if (!this.catalog.homes.some((home) => home.id === homeId))
+      throw new MijiaError("home_unavailable");
+  }
+  select(homeId: string | null) {
+    if (homeId === this.selectedHomeId) return;
+    this.selectedHomeId = homeId;
+    this.scopeRevision = crypto.randomUUID();
+    this.dependencies.onScopeChanged();
+    this.state = { ...this.state, items: describeMijiaDevices(this.devices) };
+    this.dependencies.onDevices(this.devices, false);
+  }
   private deviceLoadTask:
     | { account: MiCloud; promise: Promise<void> }
     | undefined;
@@ -55,7 +110,9 @@ export class DeviceDiscovery {
   }
   reset() {
     this.pause();
-    this.devices = [];
+    this.catalog = { homes: [], devices: [] };
+    this.selectedHomeId = null;
+    this.scopeRevision = crypto.randomUUID();
     this.state = { status: "idle", items: [] };
     this.discoveryFailedAccount = undefined;
     this.deviceLoadTask = undefined;
@@ -100,9 +157,23 @@ export class DeviceDiscovery {
     this.discoveryTimer.unref();
   }
 
-  set(devices: MiCloudDevice[], retryFailed = false) {
+  set(
+    catalog: Awaited<ReturnType<MiCloud["getCatalog"]>>,
+    retryFailed = false,
+  ) {
     this.discoveryFailedAccount = undefined;
-    this.devices = devices;
+    const previousHome = this.selectedHome?.id;
+    const previousDevices = this.devices;
+    this.catalog = catalog;
+    const remaining = new Set(this.devices.map((device) => device.did));
+    if (
+      previousHome !== this.selectedHome?.id ||
+      previousDevices.some((device) => !remaining.has(device.did))
+    ) {
+      this.scopeRevision = crypto.randomUUID();
+      this.dependencies.onScopeChanged();
+    }
+    const devices = this.devices;
     this.state = {
       status: "ready",
       items: describeMijiaDevices(devices),
@@ -131,17 +202,17 @@ export class DeviceDiscovery {
       };
     const operation = (async () => {
       try {
-        const devices = await mijiaOperation(
+        const catalog = await mijiaOperation(
           "devices.list",
           "devices_failed",
-          () => account.getDevices(),
+          () => account.getCatalog(),
         );
         if (
           this.dependencies.currentAccount() !== account ||
           this.dependencies.stopped()
         )
           return;
-        this.set(devices, true);
+        this.set(catalog, true);
       } catch (error) {
         if (
           this.dependencies.currentAccount() !== account ||

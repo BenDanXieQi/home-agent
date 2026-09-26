@@ -8,8 +8,8 @@ export async function renewAccountSession(
 ) {
   const client = await account.renewSession(signal);
   try {
-    const devices = await client.getDevices(signal);
-    return { client, devices };
+    const catalog = await client.getCatalog(signal);
+    return { client, catalog };
   } catch (error) {
     client.dispose();
     throw error;

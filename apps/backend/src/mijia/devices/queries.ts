@@ -23,6 +23,8 @@ export class DeviceQueries {
     if (!activeAccount(account)) throw new MijiaError("stale_session");
     if (discovery.stateSnapshot.status !== "ready")
       throw new MijiaError("devices_failed");
+    const home = discovery.requireHome();
+    const revision = discovery.revision;
     const source = discovery.list();
     const devices: MijiaHome["devices"] = [];
     // Bound concurrent metadata requests when filling a cold spec cache.
@@ -43,18 +45,14 @@ export class DeviceQueries {
     }
     if (
       !activeAccount(account) ||
+      discovery.revision !== revision ||
       source.some((device) => discovery.find(device.did) !== device)
     )
       throw new MijiaError("stale_session");
-    const homes = [
-      ...new Set(devices.map((device) => device.home).filter(Boolean)),
-    ];
     return {
-      home_name: homes.length === 1 ? homes[0]! : null,
+      home_name: home.name,
       devices,
-      areas: [...new Set(devices.map((device) => device.room).filter(Boolean))]
-        .toSorted()
-        .map((name) => ({ name })),
+      areas: home.rooms.map(({ name }) => ({ name })),
       scenes: [],
       persons: [],
     };
@@ -65,6 +63,8 @@ export class DeviceQueries {
     const account = currentAccount();
     if (!account) throw new MijiaError("not_bound");
     if (!activeAccount(account)) throw new MijiaError("stale_session");
+    discovery.requireHome();
+    const revision = discovery.revision;
     const device = discovery.find(id);
     if (!device) throw new MijiaError("device_not_found");
     return mijiaOperation("devices.spec", "spec_failed", async () => {
@@ -88,10 +88,12 @@ export class DeviceQueries {
             spec: capabilities,
           };
         });
-      if (!activeAccount(account)) throw new MijiaError("stale_session");
+      if (!activeAccount(account) || discovery.revision !== revision)
+        throw new MijiaError("stale_session");
       const current = discovery.find(id);
       if (
         !current ||
+        current.home_id !== device.home_id ||
         current.model !== device.model ||
         current.spec_type !== device.spec_type
       )

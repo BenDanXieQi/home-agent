@@ -83,14 +83,19 @@ export const mijiaCanStartPlaybackAtom = atom((get) => {
   return (
     get(mijiaAuthenticatedAtom) &&
     get(mijiaBindingAtom)?.status === "ready" &&
+    get(mijiaStateAtom)?.homes.status === "selected" &&
     get(mijiaUpdatedAtAtom) > get(mediaConfirmationAfterAtom) &&
-    command !== "logout"
+    command !== "logout" &&
+    command !== "selectHome"
   );
 });
 export const mijiaReliableAtom = atom((get) => {
   const command = get(mijiaPendingCommandAtom);
   return (
-    !!get(mijiaStateAtom) && !get(mijiaFetchErrorAtom) && command !== "logout"
+    !!get(mijiaStateAtom) &&
+    !get(mijiaFetchErrorAtom) &&
+    command !== "logout" &&
+    command !== "selectHome"
   );
 });
 export const mijiaDeviceCountAtom = atom((get) => {
@@ -135,7 +140,7 @@ export const performMijiaAtom = atom(
       error: null,
     });
     const current = () => get(commandStateAtom).requestId === requestId;
-    if (command.type === "logout") {
+    if (command.type === "logout" || command.type === "selectHome") {
       // An uncertain ownership change needs a new snapshot before media resumes.
       set(
         mediaConfirmationAfterAtom,

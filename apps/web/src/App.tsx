@@ -6,13 +6,13 @@ import {
   Video,
   Settings2,
   House,
-  UserRound,
   ChevronRight,
   PanelLeft,
 } from "lucide-react";
 import { m } from "motion/react";
 import { Dialog } from "radix-ui";
-import { mijiaFetchErrorAtom } from "./features/mijia/state";
+import { AccountAvatar } from "./features/mijia/AccountAvatar";
+import { mijiaAccountAtom, mijiaFetchErrorAtom } from "./features/mijia/state";
 import { accountDialogOpenAtom, navigationOpenAtom } from "./state/ui";
 import { BackendStatus } from "./features/connections/BackendStatus";
 const ConnectionNotice = lazy(() =>
@@ -25,13 +25,17 @@ const AccountDialog = lazy(() => import("./features/mijia/AccountDialog"));
 const navigation = [
   { to: "/devices", label: "设备", icon: LayoutGrid },
   { to: "/cameras", label: "摄像头", icon: Video },
-  { to: "/settings", label: "服务设置", icon: Settings2 },
+  { to: "/settings", label: "设置", icon: Settings2 },
 ] as const;
 export default function App() {
   const [loginOpen, openLogin] = useAtom(accountDialogOpenAtom);
   const path = useRouterState({ select: (state) => state.location.pathname });
   const current = navigation.find((item) => item.to === path);
   const fetchError = useAtomValue(mijiaFetchErrorAtom);
+  const account = useAtomValue(mijiaAccountAtom);
+  const accountName =
+    (account?.status === "authenticated" && account.profile?.name) ||
+    "米家账号";
   const expanded = useAtomValue(navigationOpenAtom);
   const setExpanded = useSetAtom(navigationOpenAtom);
   useEffect(() => {
@@ -77,13 +81,11 @@ export default function App() {
               <button
                 type="button"
                 className="account-button"
-                aria-label="米家账号，已登录"
+                aria-label={`${accountName}，${fetchError ? "状态不可用" : "已登录"}`}
               >
-                <span className="account-avatar">
-                  <UserRound size={17} />
-                </span>
+                <AccountAvatar />
                 <span className="account-copy">
-                  <strong>米家账号</strong>
+                  <strong title={accountName}>{accountName}</strong>
                   <span>{fetchError ? "状态不可用" : "已登录"}</span>
                 </span>
                 <ChevronRight size={13} />

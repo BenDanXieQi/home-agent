@@ -1,11 +1,17 @@
+import { useAtomValue } from "jotai";
+import { mijiaAccountAtom } from "./state";
+import { AccountAvatar } from "./AccountAvatar";
 import { Dialog } from "radix-ui";
-import { X, UserRound } from "lucide-react";
+import { X } from "lucide-react";
 import { Button } from "../../components/Button";
 import { RequestFeedback } from "../../components/RequestFeedback";
 import { useLogin } from "./use-login";
 
 export default function AccountDialog() {
   const flow = useLogin();
+  const account = useAtomValue(mijiaAccountAtom);
+  const name =
+    account?.status === "authenticated" ? account.profile?.name : null;
   return (
     <Dialog.Portal>
       <Dialog.Overlay className="dialog-overlay" />
@@ -24,11 +30,14 @@ export default function AccountDialog() {
           中国大陆 · 授权已加密保存，重启后自动恢复
         </Dialog.Description>
         <div className="my-8 flex items-center gap-3">
-          <span className="account-avatar">
-            <UserRound size={20} />
-          </span>
-          <div>
-            <p className="font-medium">
+          <AccountAvatar />
+          <div className="min-w-0">
+            {name ? (
+              <p className="truncate font-medium" title={name}>
+                {name}
+              </p>
+            ) : null}
+            <p className="text-xs text-muted">
               {flow.fetchError ? "暂时无法确认账号状态" : "已登录"}
             </p>
             {flow.deviceCount !== null ? (
