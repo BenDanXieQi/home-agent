@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { CredentialStoreError } from "../../src/credentials/store";
 import { accountSessionSchema } from "../../src/mijia/account/session";
-import type { MiCloud } from "../../src/mijia/protocols/micloud";
+import { MiCloudError } from "../../src/mijia/protocols/micloud";
 import { deferred, eventually, nextTurn } from "../support/async";
 import {
   holdCredentialWrite,
@@ -14,7 +14,7 @@ const households: Awaited<ReturnType<typeof runningHousehold>>[] = [];
 const logins: ReturnType<typeof loginHttp>[] = [];
 const releases: (() => void)[] = [];
 const accountA = '["cn","100001"]';
-const accountB = '["cn","200002"]';
+const accountB = accountA;
 const property = (did: string) => ({ did, siid: 2, piid: 1 });
 const signal = () => new AbortController().signal;
 
@@ -36,21 +36,12 @@ async function replacementHousehold() {
   });
   catalogA.homes[0]!.deviceIds.push("camera-a");
   const catalogB = householdCatalog();
-  catalogB.homes = catalogB.homes.filter((home) => home.id === "home-b");
-  catalogB.devices = catalogB.devices.filter(
-    (device) => device.did === "device-b",
-  );
+  catalogB.homes = [{ ...catalogB.homes[0]!, deviceIds: ["device-b"] }];
+  catalogB.devices = [{ ...catalogB.devices[2]!, home_id: "home-a" }];
   const h = await runningHousehold(catalogA);
   households.push(h);
-  h.catalog.mockImplementation(function (this: MiCloud) {
-    return Promise.resolve(
-      this.getCredentials().userId === "200002" ? catalogB : catalogA,
-    );
-  });
-  h.homes.read.mockImplementation((account) =>
-    Promise.resolve({ homeId: account === accountB ? "home-b" : "home-a" }),
-  );
-  logins.push(loginHttp(h, { userId: "200002" }));
+  h.catalog.mockResolvedValue(catalogB);
+  logins.push(loginHttp(h, { userId: "100001" }));
   await eventually(() => h.service.snapshot().binding.status === "ready");
   return h;
 }
@@ -67,8 +58,8 @@ function readyForB(h: Awaited<ReturnType<typeof runningHousehold>>) {
     () =>
       h.service.identity() === accountB &&
       h.runtime.ready &&
-      Object.values(h.runtime.snapshot().projection.spec).some(
-        (spec) => spec.status === "ready",
+      Object.values(h.runtime.snapshot().projection.device).some(
+        (device) => device.id === "device-b" && device.spec_status === "ready",
       ),
   );
 }
@@ -107,8 +98,40 @@ function publishProperty(
   );
 }
 
-describe("durable account replacement races", () => {
-  test("B becomes usable only after persistence, then A's read, push and viewer lose authority together", async () => {
+describe("durable reauthentication races", () => {
+  test("reauthentication can persist a replacement while the expired account's media cleanup is pending", async () => {
+    const h = await replacementHousehold();
+    const cleanupEntered = deferred();
+    const cleanupRelease = deferred();
+    releases.push(() => cleanupRelease.resolve());
+    h.peer.handlers.set("DELETE session", async () => {
+      cleanupEntered.resolve();
+      await cleanupRelease.promise;
+      return new Response(null, { status: 204 });
+    });
+    h.catalog.mockRejectedValueOnce(new MiCloudError("authentication"));
+    h.renewal.mockRejectedValueOnce(new MiCloudError("authentication"));
+    const expiration = h.service.loadDevices();
+    await cleanupEntered.promise;
+    expect(h.service.identity()).toBeNull();
+    expect(h.service.snapshot().account.status).toBe("reauth_required");
+
+    const writing = beginReplacement(h);
+    await writing.started;
+    writing.release();
+    await writing.committed;
+    await readyForB(h);
+    expect(await storedUser(h)).toBe("100001");
+    expect(h.service.identity()).toBe(accountB);
+
+    cleanupRelease.resolve();
+    h.peer.handlers.delete("DELETE session");
+    await expiration;
+    await eventually(() => h.service.snapshot().binding.status === "ready");
+    expect(h.service.identity()).toBe(accountB);
+  });
+
+  test("a new session becomes usable after persistence and invalidates old reads, push and viewers", async () => {
     const h = await replacementHousehold();
     expect(
       await h.service.readProperties([property("device-a")], signal()),
@@ -164,7 +187,7 @@ describe("durable account replacement races", () => {
 
     writing.release();
     await readyForB(h);
-    expect(await storedUser(h)).toBe("200002");
+    expect(await storedUser(h)).toBe("100001");
     expect(oldReadSignal?.aborted).toBe(true);
     expect(await oldRead).toMatchObject({ accepted: false });
     publishProperty(oldTransport, 3);
@@ -191,28 +214,18 @@ describe("durable account replacement races", () => {
     ).rejects.toMatchObject({ reason: "device_not_found" });
   });
 
-  test("cancelling after a credential write starts cannot split the persisted and accepted account", async () => {
-    const h = await replacementHousehold();
-    const writing = beginReplacement(h);
-    await writing.started;
-    const attempt = h.service.loginPublic();
-    if (!attempt.id) throw new Error("Expected an active login attempt");
-    h.service.cancelLogin(attempt.id);
+  test("a different account cannot replace the fixed binding or stored credentials", async () => {
+    const h = await runningHousehold();
+    households.push(h);
+    logins.push(loginHttp(h, { userId: "200002" }));
+    const before = h.runtime.epoch;
+    h.service.startLogin();
+    await eventually(() => h.service.loginPublic().status === "error");
+    expect(h.service.loginPublic().error?.code).toBe("mijia_binding_conflict");
     expect(h.service.identity()).toBe(accountA);
     expect(await storedUser(h)).toBe("100001");
-    writing.release();
-    await writing.committed;
-    await nextTurn();
-    expect(await storedUser(h)).toBe("200002");
-    expect(h.service.identity()).toBe(accountB);
-    await readyForB(h);
-    expect(h.service.loginPublic()).toMatchObject({
-      id: attempt.id,
-      status: "completed",
-    });
-    expect(
-      await h.service.readProperties([property("device-b")], signal()),
-    ).toMatchObject([{ status: "success" }]);
+    expect(h.runtime.epoch).toBe(before);
+    expect(h.runtime.ready).toBe(true);
   });
 
   test.each(["succeeds", "fails"] as const)(
@@ -261,7 +274,7 @@ describe("durable account replacement races", () => {
         });
         await readyForB(h);
         expect(h.service.identity()).toBe(accountB);
-        expect(await storedUser(h)).toBe("200002");
+        expect(await storedUser(h)).toBe("100001");
         expect(
           await h.service.readProperties([property("device-b")], signal()),
         ).toMatchObject([{ status: "success" }]);

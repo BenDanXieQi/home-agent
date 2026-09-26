@@ -4,7 +4,12 @@ import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { MijiaState } from "@home-agent/api/mijia";
 import type { MiCloud, MiCloudDevice } from "../protocols/micloud";
 import { describeMijiaDevice } from "./mapping";
-import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "../errors";
+import {
+  isRecoverableMijiaError,
+  MijiaError,
+  mijiaRetryAfter,
+  safeMijiaError,
+} from "../errors";
 import { mijiaOperation } from "../operation";
 
 const DEVICE_DISCOVERY_INTERVAL_MS = 5 * 60_000;
@@ -44,6 +49,8 @@ export class DeviceDiscovery {
   private scopeRevision = crypto.randomUUID();
   private confirmed = false;
   private readonly retry = new RetryTimer();
+  private retryAccountId: string | undefined;
+  private retryAfterAt = 0;
   private pendingCatalog:
     | { account: MiCloud; catalog: Awaited<ReturnType<MiCloud["getCatalog"]>> }
     | undefined;
@@ -119,39 +126,54 @@ export class DeviceDiscovery {
       throw new MijiaError("capacity_exceeded");
     this.pendingCatalog = { account, catalog };
   }
-  suspend() {
-    this.pause();
-    this.confirmed = false;
-    this.pendingCatalog = undefined;
-    this.loadController?.abort();
-    this.scopeRevision = crypto.randomUUID();
-    this.state = { status: "loading", items: [] };
-  }
-  revoke(next: Awaited<ReturnType<MiCloud["getCatalog"]>>) {
+  revocation(next: Awaited<ReturnType<MiCloud["getCatalog"]>>) {
     const accepted = new Map(
       next.devices.map((device) => [device.did, device]),
     );
-    const home = this.accessHomeId;
+    const homeIds = new Set(next.homes.map((home) => home.id));
+    const homeLost = Boolean(
+      this.selectedHome && !homeIds.has(this.selectedHome.id),
+    );
     const remaining = this.catalog.devices.filter((device) => {
       const replacement = accepted.get(device.did);
       return (
         replacement &&
-        replacement.home_id === device.home_id &&
-        replacement.model === device.model &&
-        replacement.spec_type === device.spec_type
+        device.home_id &&
+        homeIds.has(device.home_id) &&
+        replacement.home_id === device.home_id
       );
     });
-    if (
-      remaining.length !== this.catalog.devices.length ||
-      (home && !next.homes.some((item) => item.id === home))
-    ) {
-      this.set({
-        homes: this.catalog.homes.filter((item) =>
-          next.homes.some((candidate) => candidate.id === item.id),
-        ),
-        devices: remaining,
-      });
+    if (remaining.length !== this.catalog.devices.length || homeLost) {
+      const retained = new Set(remaining.map((device) => device.did));
+      return {
+        catalog: {
+          homes: this.catalog.homes.filter((item) => homeIds.has(item.id)),
+          devices: remaining,
+        },
+        deviceIds: this.devices
+          .filter((device) => homeLost || !retained.has(device.did))
+          .map((device) => device.did),
+        homeLost,
+      };
     }
+    return undefined;
+  }
+
+  definitionChanges(next: Awaited<ReturnType<MiCloud["getCatalog"]>>) {
+    const replacements = new Map(
+      next.devices.map((device) => [device.did, device]),
+    );
+    return this.devices
+      .filter((device) => {
+        const replacement = replacements.get(device.did);
+        return (
+          replacement &&
+          replacement.home_id === device.home_id &&
+          (replacement.model !== device.model ||
+            replacement.spec_type !== device.spec_type)
+        );
+      })
+      .map((device) => device.did);
   }
   private loadController: AbortController | undefined;
   private refreshAgain = false;
@@ -185,8 +207,32 @@ export class DeviceDiscovery {
     this.retry.cancel();
     this.discoveryTimer = undefined;
   }
+  private retryScope(account: MiCloud) {
+    const { region, userId } = account.getCredentials();
+    const id = JSON.stringify([region, userId]);
+    if (this.retryAccountId !== id) {
+      this.retry.cancel();
+      this.retryAccountId = id;
+      this.retryAfterAt = 0;
+    }
+    return id;
+  }
+  private scheduleRetry(account: MiCloud) {
+    const id = this.retryScope(account);
+    this.retry.schedule(() => {
+      const current = this.dependencies.currentAccount();
+      if (
+        current &&
+        this.dependencies.activeAccount(current) &&
+        this.retryScope(current) === id
+      )
+        void this.load(true, true);
+    }, this.retryAfterAt);
+  }
   reset() {
     this.pause();
+    this.retryAccountId = undefined;
+    this.retryAfterAt = 0;
     this.loadController?.abort();
     this.confirmed = false;
     this.pendingCatalog = undefined;
@@ -200,11 +246,12 @@ export class DeviceDiscovery {
   }
   fail(error: MijiaError) {
     const account = this.dependencies.currentAccount();
-    if (account && error.reason === "home_storage")
-      this.retry.schedule(() => {
-        if (this.dependencies.activeAccount(account))
-          void this.load(true, true);
-      });
+    if (
+      account &&
+      (error.reason === "home_storage" ||
+        error.reason === "home_storage_unconfirmed")
+    )
+      this.scheduleRetry(account);
     this.state = {
       status: "error",
       items: this.state.items,
@@ -245,27 +292,10 @@ export class DeviceDiscovery {
     this.confirmed = true;
     this.retry.cancel();
     this.discoveryFailedAccount = undefined;
-    const previousHome = this.selectedHome?.id;
-    const previousDevices = this.selectedDevices;
     this.catalog = catalog;
     if (this.pendingCatalog?.catalog === catalog)
       this.pendingCatalog = undefined;
     this.indexSelectedDevices();
-    if (
-      previousHome !== this.selectedHome?.id ||
-      [...previousDevices.values()].some((device) => {
-        const next = this.selectedDevices.get(device.did);
-        return (
-          !next ||
-          next.model !== device.model ||
-          next.spec_type !== device.spec_type ||
-          next.home_id !== device.home_id
-        );
-      })
-    ) {
-      this.scopeRevision = crypto.randomUUID();
-      this.dependencies.onScopeChanged();
-    }
     const devices = this.devices;
     this.state = {
       status: "ready",
@@ -279,10 +309,20 @@ export class DeviceDiscovery {
   async load(background = false, retryStorage = false) {
     const account = this.dependencies.currentAccount();
     if (!account) throw new MijiaError("not_bound");
+    this.retryScope(account);
     if (!background) this.discoveryFailedAccount = undefined;
     if (this.deviceLoadTask?.account === account) {
       this.refreshAgain = true;
       await this.deviceLoadTask.promise;
+      return this.snapshot();
+    }
+    const pendingCatalog =
+      retryStorage && this.pendingCatalog?.account === account
+        ? this.pendingCatalog.catalog
+        : undefined;
+    // Every trigger shares the supplier deadline; a local save needs no request.
+    if (!pendingCatalog && Date.now() < this.retryAfterAt) {
+      this.scheduleRetry(account);
       return this.snapshot();
     }
     if (this.dependencies.renewalFailed(account)) {
@@ -307,11 +347,10 @@ export class DeviceDiscovery {
     const operation = (async () => {
       try {
         const catalog =
-          retryStorage && this.pendingCatalog?.account === account
-            ? this.pendingCatalog.catalog
-            : await mijiaOperation("devices.list", "devices_failed", () =>
-                account.getCatalog(controller.signal),
-              );
+          pendingCatalog ??
+          (await mijiaOperation("devices.list", "devices_failed", () =>
+            account.getCatalog(controller.signal),
+          ));
         if (
           this.dependencies.currentAccount() !== account ||
           this.dependencies.stopped()
@@ -329,6 +368,10 @@ export class DeviceDiscovery {
         )
           return;
         const failure = safeMijiaError(error, "devices_failed");
+        this.retryAfterAt = Math.max(
+          this.retryAfterAt,
+          mijiaRetryAfter(failure),
+        );
         if (failure.reason === "authentication") {
           this.state = {
             status: "error",
@@ -340,12 +383,10 @@ export class DeviceDiscovery {
         }
         if (
           isRecoverableMijiaError(error) ||
-          failure.reason === "home_storage"
+          failure.reason === "home_storage" ||
+          failure.reason === "home_storage_unconfirmed"
         ) {
-          this.retry.schedule(() => {
-            if (this.dependencies.activeAccount(account))
-              void this.load(true, true);
-          });
+          this.scheduleRetry(account);
         } else this.discoveryFailedAccount = account;
         this.state = {
           status: "error",

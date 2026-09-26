@@ -1,5 +1,10 @@
 // Shared wire codes, HTTP statuses and safe messages. Never include upstream data.
 export const mijiaErrorDefinitions = {
+  mijia_binding_conflict: {
+    status: 409,
+    message:
+      "此实例已绑定家庭，请使用原账号。选错家庭需停止服务、修改绑定后重新启动。",
+  },
   mijia_capacity_exceeded: {
     status: 503,
     message: "家庭数据超出容量限制，保留上次已确认的数据。",
@@ -7,11 +12,15 @@ export const mijiaErrorDefinitions = {
   mijia_home_required: { status: 409, message: "请先选择要接入的米家家庭。" },
   mijia_home_unavailable: {
     status: 409,
-    message: "所选家庭已不可访问，请刷新目录并重新选择。",
+    message: "绑定家庭已不可访问，请检查原账号权限并重试。",
   },
   mijia_home_storage: {
     status: 503,
     message: "无法读取或保存家庭选择，请检查数据库和迁移。",
+  },
+  mijia_home_storage_unconfirmed: {
+    status: 503,
+    message: "家庭保存结果尚未确认，正在核对数据库；确认前不会再次写入。",
   },
   mijia_invalid_input: {
     status: 400,

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./immutable": "./src/immutable.ts",
     "./local-access": "./src/http/local-access.ts",
     "./mijia": "./src/contracts/mijia.ts",
     "./contracts": "./src/contracts/index.ts",
@@ -22,6 +23,7 @@
   "dependencies": {
     "@home-agent/observability": "workspace:*",
     "hono": "catalog:",
+    "mutative": "1.3.0",
     "zod": "catalog:"
   },
   "devDependencies": {

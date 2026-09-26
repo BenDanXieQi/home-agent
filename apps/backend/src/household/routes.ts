@@ -10,10 +10,15 @@ import { createHouseholdStream } from "./stream";
 export function createHouseholdRoutes(runtime: HouseholdRuntime) {
   return new Hono()
     .get("/state", (c) => c.json(runtime.snapshot()))
+    .get("/diagnostics", (c) => c.json(runtime.diagnostics()))
     .get("/events", createHouseholdStream(runtime))
-    .put("/scope/homes", validateJson(selectHomeSchema), (c) => {
+    .get("/setup/homes", (c) => c.json(runtime.setupHomes()))
+    .put("/scope/homes", validateJson(selectHomeSchema), async (c) => {
       const input = c.req.valid("json");
-      return c.json(runtime.selectHome(input.scope_epoch, input.home_id), 202);
+      return c.json(
+        await runtime.selectHome(input.scope_epoch, input.home_id),
+        202,
+      );
     })
     .post("/devices/refresh", validateJson(refreshDirectorySchema), (c) => {
       const input = c.req.valid("json");

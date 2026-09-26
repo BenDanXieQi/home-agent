@@ -10,6 +10,7 @@ import { MijiaError } from "../mijia/errors";
 import { subscribableDevice } from "../mijia/protocols/miot/messages";
 import type { MiotObservation } from "../mijia/protocols/miot/messages";
 import type { HouseholdRuntime } from "./runtime";
+import type { MijiaService } from "../mijia/service";
 
 const RECENT_ROWS = 500;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
@@ -27,6 +28,10 @@ export class DevicePushLogs {
   constructor(
     private readonly household: HouseholdRuntime,
     private readonly directory: string,
+    private readonly source: Pick<
+      MijiaService,
+      "observeDevices" | "getDeviceSpec"
+    >,
   ) {
     this.ready = this.restore();
   }
@@ -125,8 +130,9 @@ export class DevicePushLogs {
           account_id: scope.account_id,
           home_id: scope.home_id,
           home_name:
-            scope.homes.items.find((home) => home.id === scope.home_id)?.name ??
-            "当前家庭",
+            Object.values(snapshot.projection.home).find(
+              (home) => home.home_id === scope.home_id,
+            )?.name ?? "当前家庭",
           scope_epoch: snapshot.scope_epoch,
           status: "capturing",
           reason: null,
@@ -169,7 +175,7 @@ export class DevicePushLogs {
       this.capture = capture;
       try {
         await this.persist();
-        const watch = await this.household.service.observeDevices(
+        const watch = await this.source.observeDevices(
           devices.map((device) => device.id),
           capture.receive,
           capture.controller.signal,
@@ -271,7 +277,7 @@ export class DevicePushLogs {
           if (device) device.properties++;
           try {
             row.description =
-              this.household.service.getDeviceSpec(event.did).spec[row.property]
+              this.source.getDeviceSpec(event.did).spec[row.property]
                 ?.description ?? "未命名属性";
           } catch {
             row.description = "规格尚未就绪";

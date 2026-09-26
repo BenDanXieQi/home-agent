@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, jest, mock, test } from "bun:test";
+import { afterEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
 import { PlaybackManager } from "../../../src/mijia/media/playback-manager";
 import { CameraSourceManager } from "../../../src/mijia/media/camera-source-manager";
 import { MediaSession } from "../../../src/mijia/media/session";
 import { accountClient } from "../../support/protocol-fixtures";
-import { deferred } from "../../support/async";
+import { deferred, nextTurn } from "../../support/async";
 import { camera, mediaPeer, sourceId } from "./support";
 
 const peers: ReturnType<typeof mediaPeer>[] = [];
@@ -170,6 +170,51 @@ describe("independent viewers and bounded cleanup", () => {
 });
 
 describe("resident camera source ownership", () => {
+  test("removing a camera aborts only its pending preparation and preserves an active peer", async () => {
+    const peer = mediaPeer();
+    peers.push(peer);
+    await peer.install();
+    const playback = new PlaybackManager(async (_revision, did, channel) =>
+      manager.prepare(did, channel),
+    );
+    playbacks.push(playback);
+    const manager = new CameraSourceManager(peer.adapter, playback, () => {});
+    sources.push(manager);
+    await manager.update([camera]);
+    const viewer = playback.reserve("revision", camera.did, 1);
+    await playback.offer("revision", viewer.id, "offer", signal());
+    const entered = deferred<AbortSignal>();
+    const preparation = spyOn(
+      peer.adapter,
+      "prepareCamera",
+    ).mockImplementationOnce((_id, _device, requestSignal) => {
+      if (!requestSignal)
+        throw new Error("Expected camera preparation cancellation");
+      entered.resolve(requestSignal);
+      return new Promise<void>((_resolve, reject) => {
+        requestSignal.addEventListener(
+          "abort",
+          () => reject(requestSignal.reason),
+          { once: true },
+        );
+      });
+    });
+    try {
+      const updating = manager.update([
+        camera,
+        { ...camera, did: "pending-camera" },
+      ]);
+      const requestSignal = await entered.promise;
+      await manager.update([camera]);
+      await updating;
+      expect(requestSignal.aborted).toBe(true);
+      expect(playback.snapshot(viewer.id).phase).toBe("active");
+      expect(() => manager.validate("pending-camera", 1)).toThrow();
+    } finally {
+      preparation.mockRestore();
+    }
+  });
+
   test("dual lenses keep distinct backend sources and a failed lens preparation cannot retire the other viewer", async () => {
     // MiLoCo cameraChannel.test.ts covers synthetic did:ch0/ch1 identities.
     // This boundary uses one physical did with explicit 1/2 channels and source IDs;
@@ -294,28 +339,65 @@ describe("resident camera source ownership", () => {
 });
 
 describe("private media session boundary", () => {
+  test("closing drains an initialization waiting for its URL without creating a late adapter", async () => {
+    const peer = mediaPeer();
+    peers.push(peer);
+    const entered = deferred();
+    const url = deferred<string>();
+    const session = new MediaSession({
+      onChange: () => {},
+      readUrl: () => {
+        entered.resolve();
+        return url.promise;
+      },
+      currentAccount: () => undefined,
+      acceptsWork: () => true,
+      canBind: () => false,
+      stopped: () => false,
+      canReconfigure: () => true,
+    });
+    sessions.push(session);
+    const initializing = session.initialize();
+    await entered.promise;
+    const closing = session.close();
+    expect(session.close()).toBe(closing);
+    let closed = false;
+    void closing.then(() => {
+      closed = true;
+    });
+    try {
+      await nextTurn();
+      expect(closed).toBe(false);
+      expect(peer.calls).toEqual([]);
+    } finally {
+      url.resolve(peer.adapter.url);
+      await Promise.all([initializing, closing]);
+    }
+    expect(closed).toBe(true);
+    expect(peer.calls).toEqual([]);
+    await session.initialize();
+    await session.startBinding();
+    expect(peer.calls).toEqual([]);
+  });
+
   test("scope revocation changes revision synchronously and retries failed cleanup while no household is ready", async () => {
     const peer = mediaPeer();
     peers.push(peer);
     const account = accountClient();
     let ready = true;
-    let queue = Promise.resolve();
+    let awaitingCleanup = false;
+    const cleanupRecovered = deferred();
     const session = new MediaSession({
-      onChange: () => {},
+      onChange: () => {
+        if (!awaitingCleanup) return;
+        if (session.binding.status === "unbound") cleanupRecovered.resolve();
+      },
       readUrl: async () => peer.adapter.url,
       currentAccount: () => account,
       acceptsWork: () => true,
       canBind: () => ready,
       stopped: () => false,
       canReconfigure: () => true,
-      serial<T>(run: () => Promise<T>) {
-        const next = queue.then(run);
-        queue = next.then(
-          () => {},
-          () => {},
-        );
-        return next;
-      },
     });
     sessions.push(session);
     await session.initialize();
@@ -330,10 +412,12 @@ describe("private media session boundary", () => {
       Response.json({ code: "go2rtc_unavailable" }, { status: 503 }),
     );
     session.prepareRebind();
+    awaitingCleanup = true;
+    const cleanup = session.clearAdapter().catch((error: unknown) => error);
     expect(session.mediaRevision).not.toBe(revision);
     expect(() => session.playbackSnapshot(id)).toThrow();
     expect(() => session.reservePlayback(revision, camera.did, 1)).toThrow();
-    await queue;
+    expect(await cleanup).toMatchObject({ reason: "go2rtc_unavailable" });
     // Cleanup preserves the adapter error code; consumers cannot identify a
     // pending cleanup solely by looking for mijia_go2rtc_cleanup.
     expect(session.binding).toMatchObject({
@@ -342,7 +426,7 @@ describe("private media session boundary", () => {
     });
     peer.handlers.delete("DELETE session");
     jest.advanceTimersByTime(6_000);
-    await queue;
+    await cleanupRecovered.promise;
     expect(session.binding).toEqual({ status: "unbound" });
     expect(
       peer.calls.filter(

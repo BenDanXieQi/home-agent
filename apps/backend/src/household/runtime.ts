@@ -1,9 +1,10 @@
-import { createActor } from "xstate";
+import { createActor, type EventFromLogic } from "xstate";
+import { produce } from "@home-agent/api/immutable";
 import {
   directorySchema,
-  snapshotSchema,
-  deviceSchema,
   entityKey,
+  initialSpecification,
+  selectHomeSchema,
 } from "@home-agent/api/household";
 import type {
   DirectoryRefreshTarget,
@@ -11,131 +12,145 @@ import type {
 } from "@home-agent/api/household";
 import { householdMachine } from "./machine";
 import { householdLimits, jsonBytes } from "./config";
-import { publicDirectory } from "./projection";
+import { publicDirectory } from "./directory";
+import type { DirectoryCandidate } from "./directory";
 import { HouseholdSpecifications } from "./specifications";
 import type { HouseholdRepository } from "./repository";
-import type { MijiaService } from "../mijia/service";
-import type { deviceDirectory } from "../mijia/devices/directory";
-import { MijiaError, safeMijiaError } from "../mijia/errors";
+import type { HouseholdSource } from "./source";
+import { HouseholdError } from "./errors";
+import { directoryFits, projectionBytes } from "./capacity";
 
 export class HouseholdRuntime {
   private readonly actor = createActor(householdMachine);
   private readonly listeners = new Set<() => void>();
-  private readonly specs = new HouseholdSpecifications(
-    () => this.publishSpecs(),
-    (bytes) => {
-      const { home, room, device } = this.projection;
-      const accepted =
-        jsonBytes({ home, room, device }) + bytes <=
-        householdLimits.directoryBytes;
-      if (!accepted)
-        this.publish({
-          ...this.projection,
-          projection_health: {
-            projection_health: {
-              ...this.projection.projection_health.projection_health,
-              capacity_degraded: true,
-            },
-          },
-        });
-      return accepted;
-    },
-  );
+  private readonly specs;
   private unsubscribe: (() => void) | undefined;
   private handled = 0;
-  private switching = false;
-  private leaving = false;
-  private stopped = false;
-  private cached = false;
-  private accountInstance: string | null = null;
-  private refreshTask: Promise<void> | undefined;
-  private refreshEpoch: string | undefined;
-  private pendingRefresh: { directory: boolean; specs: boolean } | undefined;
-  private savedCandidate: ReturnType<typeof deviceDirectory> | undefined;
-  private cachedSnapshot: ReturnType<typeof snapshotSchema.parse> | undefined;
+  private started = false;
+  private closing: Promise<void> | undefined;
+  private selecting = false;
+  private logoutTask: Promise<void> | undefined;
+  private readonly refreshTasks = new Map<
+    DirectoryRefreshTarget,
+    { epoch: string; promise: Promise<void> }
+  >();
+  private readonly summaries = new WeakMap<
+    ReturnType<HouseholdSpecifications["snapshot"]>["specs"][string]["spec"],
+    {
+      category: string | null;
+      capability_tags: Projection["device"][string]["capability_tags"];
+    }
+  >();
+  private memory = process.memoryUsage();
+  private memoryPeak = this.memory.heapUsed;
+  private memorySampledAt = new Date().toISOString();
+  private memoryTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
-    readonly service: MijiaService,
+    private readonly source: HouseholdSource,
     private readonly repository: HouseholdRepository | undefined,
+    loader: ConstructorParameters<typeof HouseholdSpecifications>[0],
   ) {
-    service.attachHousehold({
-      restore: (id, home) => this.restore(id, home),
-      commit: (candidate, assert) => this.commitDirectory(candidate, assert),
-      ready: () => this.ready,
-      specification: (id) => this.specification(id),
-    });
+    this.specs = new HouseholdSpecifications(
+      loader,
+      () => this.publishSpecifications(),
+      (candidate) => {
+        if (jsonBytes(candidate.specs) <= householdLimits.specificationBytes)
+          return true;
+        this.reportCapacity();
+        return false;
+      },
+    );
+  }
+  private get context() {
+    return this.actor.getSnapshot().context;
+  }
+  private get projection() {
+    return this.context.projection;
+  }
+  private get stopped() {
+    return this.actor.getSnapshot().matches("stopping");
+  }
+  get epoch() {
+    return this.context.scope_epoch;
+  }
+  get ready() {
+    return this.actor.getSnapshot().matches("running");
   }
   start() {
+    if (this.started || this.stopped) return;
+    this.started = true;
     let published = this.version();
     this.actor.subscribe(({ context }) => {
+      if (context.input_sequence === this.handled) return;
+      // Mark the commit before calling subscribers, including reentrant consumers.
+      this.handled = context.input_sequence;
       if (
         context.scope_epoch !== published.scope_epoch ||
         context.sequence !== published.sequence
       ) {
-        published = this.version();
-        for (const listener of this.listeners) listener();
+        published = {
+          scope_epoch: context.scope_epoch,
+          sequence: context.sequence,
+        };
+        for (const listener of this.listeners) {
+          try {
+            listener();
+          } catch {
+            console.warn("Household state subscriber failed");
+          }
+        }
       }
-      if (context.input_sequence === this.handled) return;
-      this.handled = context.input_sequence;
       for (const effect of context.effects) {
-        const epoch = context.scope_epoch;
-        if (effect.kind === "select") {
-          this.switching = true;
-          this.refreshTask = undefined;
-          this.refreshEpoch = undefined;
-          this.pendingRefresh = undefined;
-          this.cached = false;
-          this.savedCandidate = undefined;
-          this.specs.clear();
-          this.service.suspendHousehold();
-          void this.service
-            .selectHome(effect.home_id, () => this.assertEpoch(epoch))
-            .catch((error) => this.fail(epoch, error, "selection"))
-            .finally(() => {
-              if (this.epoch === epoch) {
-                this.switching = false;
-                this.syncService();
-              }
-            });
-        } else this.refresh(effect.target, epoch);
+        try {
+          if (effect.kind === "reset") this.resetResources();
+          else if (effect.kind === "logout") {
+            this.resetResources();
+            this.logoutTask = this.leave(context.operation_id!);
+          } else this.refresh(effect.target, context.scope_epoch);
+        } catch (error) {
+          this.fail(context.scope_epoch, error, "directory");
+        }
       }
     });
     this.actor.start();
-    this.unsubscribe = this.service.subscribe(() => this.syncService());
-    this.syncService();
-  }
-  get epoch() {
-    return this.actor.getSnapshot().context.scope_epoch;
-  }
-  get ready() {
-    return (
-      this.projection.household.household.status === "running" &&
-      !this.leaving &&
-      !this.stopped
+    this.unsubscribe = this.source.subscribe(() => this.syncSource());
+    this.syncSource();
+    this.memoryTimer = setInterval(
+      () => this.sampleMemory(),
+      householdLimits.memorySampleMs,
     );
+    this.memoryTimer.unref();
   }
-  private get projection() {
-    return this.actor.getSnapshot().context.projection;
+  private sampleMemory() {
+    this.memory = process.memoryUsage();
+    this.memoryPeak = Math.max(this.memoryPeak, this.memory.heapUsed);
+    this.memorySampledAt = new Date().toISOString();
+  }
+  diagnostics() {
+    return {
+      state_version: this.version(),
+      bytes: {
+        ...projectionBytes(this.projection),
+        specifications: jsonBytes(this.specs.snapshot().specs),
+      },
+      memory: {
+        ...this.memory,
+        peak_heap_used: this.memoryPeak,
+        sampled_at: this.memorySampledAt,
+      },
+    };
   }
   snapshot() {
-    const { scope_epoch, sequence, projection } =
-      this.actor.getSnapshot().context;
-    if (
-      this.cachedSnapshot?.scope_epoch !== scope_epoch ||
-      this.cachedSnapshot.sequence !== sequence
-    )
-      this.cachedSnapshot = snapshotSchema.parse({
-        scope_epoch,
-        sequence,
-        projection,
-      });
-    return this.cachedSnapshot;
+    const { scope_epoch, sequence, projection } = this.context;
+    // Every record is already white-listed and identity-checked by the commit.
+    return { scope_epoch, sequence, projection };
   }
   changes() {
-    return this.actor.getSnapshot().context.changes;
+    return this.context.changes;
   }
   version() {
-    const { scope_epoch, sequence } = this.actor.getSnapshot().context;
+    const { scope_epoch, sequence } = this.context;
     return { scope_epoch, sequence };
   }
   subscribe(listener: () => void) {
@@ -144,178 +159,194 @@ export class HouseholdRuntime {
       this.listeners.delete(listener);
     };
   }
-  private publish(projection: Projection, newScope = false) {
-    if (!this.stopped)
-      this.actor.send({
-        type: "publish",
-        scope_epoch: this.epoch,
-        projection,
-        newScope,
-      });
+  private publish(projection: Projection) {
+    if (this.stopped) return;
+    this.actor.send({ type: "publish", scope_epoch: this.epoch, projection });
+  }
+  private reportCapacity() {
+    this.publish(
+      produce(this.projection, (draft) => {
+        draft.projection_health.projection_health.capacity_degraded = true;
+      }),
+    );
   }
   private assertEpoch(epoch: string) {
     if (this.stopped || epoch !== this.epoch)
-      throw new MijiaError("stale_session");
+      throw new HouseholdError("stale_session");
   }
-  selectHome(epoch: string, home_id: string | null) {
-    this.assertEpoch(epoch);
-    this.service.validateHome(home_id);
-    if (this.service.snapshot().account.status !== "authenticated")
-      throw new MijiaError("not_bound");
-    this.actor.send({
-      type: "command",
-      scope_epoch: epoch,
-      effect: { kind: "select", home_id },
+  private command(
+    event: Extract<
+      EventFromLogic<typeof householdMachine>,
+      { type: "command" }
+    >,
+  ) {
+    const input_sequence = this.context.input_sequence + 1;
+    const receipt: { context?: HouseholdRuntime["context"] } = {};
+    const subscription = this.actor.subscribe(({ context }) => {
+      if (context.input_sequence === input_sequence) receipt.context = context;
     });
-    return { state_version: this.version() };
+    try {
+      this.actor.send(event);
+    } finally {
+      subscription.unsubscribe();
+    }
+    // Effects may queue further inputs; only this command's commit is its receipt.
+    const context = receipt.context;
+    if (!context?.accepted) throw new HouseholdError("invalid_state");
+    return {
+      state_version: {
+        scope_epoch: context.scope_epoch,
+        sequence: context.sequence,
+      },
+    };
+  }
+  setupHomes() {
+    if (this.projection.household.household.home_id !== null)
+      return { items: [] };
+    if (this.source.snapshot().account.status !== "authenticated")
+      throw new HouseholdError("not_bound");
+    const items = this.source.snapshot().homes.items;
+    if (jsonBytes(items) > householdLimits.metadataBytes)
+      throw new HouseholdError("capacity_exceeded");
+    return { items };
+  }
+  async selectHome(epoch: string, home_id: string | null) {
+    this.assertEpoch(epoch);
+    const home = selectHomeSchema.shape.home_id.parse(home_id);
+    if (this.selecting || this.context.operation)
+      throw new HouseholdError("invalid_state");
+    const bound = this.projection.household.household.home_id;
+    if (bound !== null) throw new HouseholdError("binding_conflict");
+    this.source.validateHome(home);
+    this.selecting = true;
+    try {
+      await this.source.selectHome(home, () => this.assertEpoch(epoch));
+      this.assertEpoch(epoch);
+      this.actor.send({ type: "bound", scope_epoch: epoch, home_id: home });
+      this.refresh("directory", epoch);
+      return { state_version: this.version() };
+    } finally {
+      this.selecting = false;
+    }
   }
   requestRefresh(epoch: string, target: DirectoryRefreshTarget) {
     this.assertEpoch(epoch);
     if (
-      this.service.snapshot().account.status !== "authenticated" ||
-      this.switching
+      this.projection.account.account.status !== "authenticated" ||
+      this.context.operation ||
+      this.selecting
     )
-      throw new MijiaError("stale_session");
-    const household = this.projection.household.household;
-    if (
-      household.status === "initializing" &&
-      household.stage === "selection"
-    ) {
-      if (target === "specs") throw new MijiaError("invalid_state");
-      return this.selectHome(epoch, household.home_id);
-    }
-    this.actor.send({
+      throw new HouseholdError("stale_session");
+    return this.command({
       type: "command",
       scope_epoch: epoch,
       effect: { kind: "refresh", target },
     });
-    return { state_version: this.version() };
   }
   private refresh(target: DirectoryRefreshTarget, epoch: string) {
-    if (this.refreshTask) {
-      this.pendingRefresh = {
-        directory:
-          (this.pendingRefresh?.directory ?? false) || target !== "specs",
-        specs: (this.pendingRefresh?.specs ?? false) || target !== "directory",
-      };
-      return;
-    }
-    this.refreshEpoch = epoch;
-    this.refreshTask = (async () => {
-      if (target !== "specs") await this.service.loadDevices();
-      this.assertEpoch(epoch);
-      if (target !== "directory" && this.savedCandidate)
-        this.specs.update(this.savedCandidate.devices, true);
-      this.publishSpecs();
-    })()
-      .catch((error) => this.fail(epoch, error, "directory"))
-      .finally(() => {
-        if (this.refreshEpoch !== epoch) return;
-        this.refreshTask = undefined;
-        const pending = this.pendingRefresh;
-        this.pendingRefresh = undefined;
-        if (pending && this.epoch === epoch && !this.stopped)
-          this.refresh(
-            pending.directory ? (pending.specs ? "all" : "directory") : "specs",
-            epoch,
-          );
-      });
-  }
-  private async restore(accountId: string, homeId: string | null) {
-    const epoch = this.epoch;
-    const stored = homeId
-      ? await this.repository?.read(accountId, homeId)
-      : undefined;
-    this.assertEpoch(epoch);
-    this.cached = true;
-    const directory = stored
-      ? directorySchema.parse(stored.directory)
-      : { home: {}, room: {}, device: {} };
-    const homes = {
-      selectedHomeId: homeId,
-      status: homeId ? ("selected" as const) : ("unselected" as const),
-      items: Object.values(directory.home).map((home) => ({
-        id: home.home_id,
-        name: home.name,
-        shared: home.shared,
-      })),
+    if (this.refreshTasks.get(target)?.epoch === epoch) return;
+    const task = {
+      epoch,
+      promise: Promise.resolve()
+        .then(async () => {
+          if (target !== "specs") await this.source.refreshDirectory();
+          this.assertEpoch(epoch);
+          if (target !== "directory") await this.specs.refresh();
+        })
+        .catch((error) => this.fail(epoch, error, "directory")),
     };
-    this.publish({
-      ...this.projection,
-      ...directory,
-      household: {
-        household: {
-          ...this.projection.household.household,
-          account_id: accountId,
-          home_id: homeId,
-          homes,
-          status: "initializing",
-          stage: "account",
-          sync_status: "unsynced",
-          saved_at: stored?.savedAt ?? null,
-        },
-      },
+    this.refreshTasks.set(target, task);
+    void task.promise.finally(() => {
+      if (this.refreshTasks.get(target) === task)
+        this.refreshTasks.delete(target);
     });
   }
-  private async commitDirectory(
-    candidate: ReturnType<typeof deviceDirectory>,
+  async restore(accountId: string, homeId: string | null) {
+    const epoch = this.epoch;
+    let storageDegraded = false;
+    const stored = homeId
+      ? await this.repository?.read(accountId, homeId).catch(() => {
+          storageDegraded = true;
+          return undefined;
+        })
+      : undefined;
+    this.assertEpoch(epoch);
+    this.actor.send({
+      type: "restore",
+      scope_epoch: epoch,
+      account_id: accountId,
+      home_id: homeId,
+      provider: this.source.snapshot().provider,
+      directory: stored
+        ? directorySchema.parse(stored.directory)
+        : { home: {}, room: {}, device: {} },
+      saved_at: stored?.savedAt ?? null,
+    });
+    if (storageDegraded)
+      this.publish(
+        produce(this.projection, (draft) => {
+          draft.projection_health.projection_health.storage_degraded = true;
+        }),
+      );
+  }
+  async commitDirectory(
+    candidate: DirectoryCandidate,
     assertCurrent: () => void,
   ) {
     const epoch = this.epoch;
     const assert = () => {
       this.assertEpoch(epoch);
       assertCurrent();
-      // Discovery only records persisted access. The actor owns an in-progress
-      // selection, including its target when persistence has failed.
       const household = this.projection.household.household;
       if (
-        household.stage === "selection" &&
+        household.home_id !== null &&
         (candidate.accountId !== household.account_id ||
           candidate.homeId !== household.home_id)
       )
-        throw new MijiaError("stale_session");
+        throw new HouseholdError("stale_session");
     };
     assert();
     const now = new Date().toISOString();
     const directory = publicDirectory(candidate, now);
-    const nextHouse = {
-      ...this.projection.household.household,
-      account_id: candidate.accountId,
-      home_id: candidate.homeId,
-      homes: {
+    const provider = this.source.snapshot().provider;
+    const household = produce(this.projection.household.household, (draft) => {
+      draft.provider = provider;
+      draft.account_id = candidate.accountId;
+      draft.home_id = candidate.homeId;
+      draft.homes = {
         selectedHomeId: candidate.homeId,
         status:
           candidate.homeId === null
-            ? ("unselected" as const)
+            ? "unselected"
             : candidate.homes.some((home) => home.id === candidate.homeId)
-              ? ("selected" as const)
-              : ("unavailable" as const),
-        items: candidate.homes.map(({ id, name, shared }) => ({
-          id,
-          name,
-          shared,
-        })),
-      },
-      cloud_synced_at: now,
-    };
+              ? "selected"
+              : "unavailable",
+      };
+      draft.cloud_synced_at = now;
+      draft.error =
+        draft.homes.status === "unavailable"
+          ? this.source.failure(new HouseholdError("home_unavailable"))
+          : null;
+    });
+    const candidateProjection = () => ({
+      ...this.projection,
+      ...directory,
+      ...this.withSpecifications(directory.device),
+      household: { household },
+    });
     if (
-      jsonBytes({ ...directory, spec: this.projection.spec }) >
-      householdLimits.directoryBytes
+      !directoryFits({
+        ...directory,
+        ...this.withSpecifications(directory.device),
+      })
     ) {
-      this.publish({
-        ...this.projection,
-        projection_health: {
-          projection_health: {
-            ...this.projection.projection_health.projection_health,
-            capacity_degraded: true,
-          },
-        },
-      });
-      throw new MijiaError("capacity_exceeded");
+      this.reportCapacity();
+      throw new HouseholdError("capacity_exceeded");
     }
-    let savedAt: string | null = null;
+    let savedAt = this.projection.household.household.saved_at;
+    let storageDegraded = false;
     try {
-      if (!this.repository) throw new MijiaError("home_storage");
+      if (!this.repository) throw new HouseholdError("home_storage");
       if (candidate.homeId)
         savedAt = await this.repository.save(
           candidate.accountId,
@@ -324,308 +355,149 @@ export class HouseholdRuntime {
           assert,
         );
       assert();
-    } catch (error) {
-      const failure = safeMijiaError(error, "home_storage");
-      const capacity = failure.reason === "capacity_exceeded";
-      if (this.epoch === epoch)
-        this.publish({
-          ...this.projection,
-          household: {
-            household: {
-              ...this.projection.household.household,
-              cloud_synced_at: now,
-              error: failure.toPayload(),
-              sync_status: "error",
-            },
-          },
-          projection_health: {
-            projection_health: {
-              ...this.projection.projection_health.projection_health,
-              storage_degraded: !capacity,
-              capacity_degraded: capacity,
-            },
-          },
-        });
-      throw failure;
+    } catch {
+      assert();
+      storageDegraded = true;
     }
     return () => {
       assert();
-      this.cached = false;
-      this.savedCandidate = candidate;
-      this.specs.update(candidate.devices);
-      const status =
-        nextHouse.homes.status === "selected"
-          ? ("running" as const)
-          : ("waiting_for_home" as const);
-      this.publish({
-        ...this.projection,
-        ...directory,
-        ...this.withSpecifications(directory.device),
-        household: {
-          household: {
-            ...nextHouse,
-            status,
-            stage: "ready",
-            sync_status: "synced",
-            saved_at: savedAt,
-            error: null,
-          },
-        },
-        projection_health: {
-          projection_health: {
-            storage_degraded: false,
-            capacity_degraded: false,
-          },
-        },
+      const projection = candidateProjection();
+      this.actor.send({
+        type: "directory",
+        scope_epoch: epoch,
+        projection: produce(projection, (draft) => {
+          draft.household.household.saved_at = savedAt;
+          draft.projection_health.projection_health.storage_degraded =
+            storageDegraded;
+          draft.projection_health.projection_health.capacity_degraded = false;
+        }),
       });
+      assert();
+      if (!this.context.accepted) throw new HouseholdError("capacity_exceeded");
+      this.specs.retain(new Set(candidate.devices.map((device) => device.id)));
+      // Specification preparation cannot block an already accepted directory.
+      this.specs.update(candidate.devices);
+      this.publishSpecifications();
     };
   }
-  private withSpecifications(devices: Projection["device"]) {
-    const { specs, references } = this.specs.snapshot();
+  revoke(candidate: DirectoryCandidate, assertCurrent: () => void) {
+    assertCurrent();
+    const epoch = this.epoch;
+    const household = this.projection.household.household;
+    if (candidate.accountId !== household.account_id)
+      throw new HouseholdError("stale_session");
+    const homeLost =
+      household.home_id !== null &&
+      !candidate.homes.some((home) => home.id === household.home_id);
+    const ids = new Set(candidate.devices.map((device) => device.id));
+    const device = Object.fromEntries(
+      Object.entries(this.projection.device).filter(([, value]) =>
+        ids.has(value.id),
+      ),
+    );
+    const failure = homeLost
+      ? this.source.failure(new HouseholdError("home_unavailable"))
+      : null;
+    this.actor.send({
+      type: "revoke",
+      scope_epoch: epoch,
+      homeLost,
+      projection: produce(this.projection, (draft) => {
+        draft.device = homeLost ? {} : device;
+        if (homeLost) {
+          draft.home = {};
+          draft.room = {};
+          draft.household.household.sync_status = "error";
+          draft.household.household.error = failure;
+          draft.household.household.homes.status = "unavailable";
+        }
+      }),
+    });
+    assertCurrent();
+    this.specs.retain(homeLost ? new Set() : ids);
+  }
+  private withSpecifications(
+    devices: Projection["device"],
+    snapshot = this.specs.snapshot(),
+  ) {
+    const { specs, references } = snapshot;
     const device = Object.fromEntries(
       Object.entries(devices).map(([key, value]) => {
-        const spec_id = references.get(value.id) ?? null;
+        const { spec_id, spec_status, spec_error } =
+          references.get(value.id) ?? initialSpecification;
         const spec = spec_id ? specs[spec_id] : undefined;
-        const capabilities = Object.entries(spec?.spec ?? {});
-        const capability_tags = [
-          ...(["readable", "writeable", "notify"] as const).filter((tag) =>
-            capabilities.some(([, capability]) => capability[tag]),
-          ),
-          ...(["action", "event"] as const).filter((tag) =>
-            capabilities.some(([id]) => id.startsWith(`${tag}.`)),
-          ),
-        ];
+        let summary = spec ? this.summaries.get(spec.spec) : undefined;
+        if (spec && !summary) {
+          const capabilities = Object.entries(spec.spec);
+          const capability_tags = [
+            ...(["readable", "writeable", "notify"] as const).filter((tag) =>
+              capabilities.some(([, capability]) => capability[tag]),
+            ),
+            ...(["action", "event"] as const).filter((tag) =>
+              capabilities.some(([id]) => id.startsWith(tag + ".")),
+            ),
+          ];
+          summary = { category: spec.category, capability_tags };
+          this.summaries.set(spec.spec, summary);
+        }
+        const category = summary?.category ?? null;
+        const capability_tags = summary?.capability_tags ?? [];
         return [
           key,
-          deviceSchema.parse({
-            ...value,
-            spec_id,
-            category: spec?.category ?? null,
-            capability_tags,
-          }),
+          value.spec_id === spec_id &&
+          value.spec_status === spec_status &&
+          value.spec_error === spec_error &&
+          value.category === category &&
+          value.capability_tags.length === capability_tags.length &&
+          value.capability_tags.every(
+            (tag, index) => tag === capability_tags[index],
+          )
+            ? value
+            : {
+                ...value,
+                spec_id,
+                spec_status,
+                spec_error,
+                category,
+                capability_tags,
+              },
         ];
       }),
     );
-    return { device, spec: specs };
+    return { device };
   }
-  private publishSpecs() {
-    if (this.stopped || !this.savedCandidate) return;
+  private publishSpecifications() {
+    if (this.stopped) return;
     this.publish({
       ...this.projection,
       ...this.withSpecifications(this.projection.device),
     });
   }
-  private syncService() {
-    if (this.stopped) return;
-    const state = this.service.snapshot();
-    const identity = this.service.identity();
-    const before = this.projection;
-    const instance =
-      state.account.status === "authenticated" ? state.account.id : null;
-    const replacedAccount =
-      instance !== null &&
-      this.accountInstance !== null &&
-      instance !== this.accountInstance;
-    if (
-      instance !== null ||
-      ["idle", "reauth_required"].includes(state.account.status)
-    )
-      this.accountInstance = instance;
-    let next: Projection = {
-      ...before,
-      household: { household: { ...before.household.household } },
-      account: { account: state.account },
-      login: { login: this.service.loginPublic() },
-      connection: { connection: state.connectionOperation },
-      media: { media: { revision: state.revision, binding: state.binding } },
-    };
-    const changedAccount =
-      replacedAccount ||
-      (identity !== null &&
-        identity !== before.household.household.account_id) ||
-      (identity === null &&
-        ["idle", "reauth_required"].includes(state.account.status) &&
-        before.household.household.account_id !== null);
-    if (changedAccount && !this.switching) {
-      this.specs.clear();
-      this.savedCandidate = undefined;
-      this.cached = false;
-      this.refreshTask = undefined;
-      this.refreshEpoch = undefined;
-      this.pendingRefresh = undefined;
-      next = {
-        ...next,
-        home: {},
-        room: {},
-        device: {},
-        spec: {},
-        latest: {},
-        source_health: {},
-        rule_status: {},
-        household: {
-          household: {
-            ...next.household.household,
-            account_id: identity,
-            home_id: state.homes.selectedHomeId,
-            homes: state.homes,
-            status: identity ? "initializing" : "unbound",
-            stage: "account",
-            error: null,
-            sync_status: "unsynced",
-            cloud_synced_at: null,
-            saved_at: null,
-          },
-        },
-      };
-    }
-    if (!this.switching && !this.cached && !this.leaving) {
-      const current = this.service.directorySnapshot();
-      if (current && next.household.household.account_id === identity) {
-        const available = new Set(current.devices.map((device) => device.id));
-        if (
-          this.savedCandidate &&
-          this.savedCandidate.devices.some(
-            (device) => !available.has(device.id),
-          )
-        ) {
-          this.savedCandidate = {
-            ...this.savedCandidate,
-            devices: this.savedCandidate.devices.filter((device) =>
-              available.has(device.id),
-            ),
-          };
-          this.specs.update(this.savedCandidate.devices);
-        }
-        const device = Object.fromEntries(
-          Object.entries(next.device).filter(([, value]) =>
-            available.has(value.id),
-          ),
-        );
-        const specIds = new Set(
-          Object.values(device).map((value) => value.spec_id),
-        );
-        next = {
-          ...next,
-          device,
-          spec: Object.fromEntries(
-            Object.entries(next.spec).filter(([key]) => specIds.has(key)),
-          ),
-          household: {
-            household: {
-              ...next.household.household,
-              homes:
-                next.household.household.status === "initializing" &&
-                next.household.household.stage === "selection"
-                  ? {
-                      ...state.homes,
-                      selectedHomeId: next.household.household.home_id,
-                    }
-                  : state.homes,
-            },
-          },
-        };
-        if (
-          state.homes.status !== "selected" &&
-          next.household.household.status === "running"
-        )
-          next.household.household = {
-            ...next.household.household,
-            status: "waiting_for_home",
-            home_id: state.homes.selectedHomeId,
-          };
-      }
-    }
-    if (
-      state.account.status === "restore_error" ||
-      state.account.status === "reauth_required"
-    )
-      next.household.household = {
-        ...next.household.household,
-        error: state.account.error,
-        sync_status: "error",
-      };
-    if (state.devices.status === "error")
-      next.household.household = {
-        ...next.household.household,
-        error: state.devices.error,
-        sync_status: "error",
-      };
-    else if (
-      state.devices.status === "loading" &&
-      next.household.household.sync_status !== "error"
-    )
-      next.household.household = {
-        ...next.household.household,
-        sync_status: "syncing",
-      };
-    if (
-      state.devices.status === "error" &&
-      state.devices.error.code === "mijia_capacity_exceeded"
-    )
-      next.projection_health = {
-        projection_health: {
-          ...next.projection_health.projection_health,
-          capacity_degraded: true,
-        },
-      };
-    const lostHome =
-      !this.switching &&
-      before.household.household.status === "running" &&
-      state.homes.status === "unavailable";
-    if (lostHome) {
-      this.specs.clear();
-      this.savedCandidate = undefined;
-      next = {
-        ...next,
-        home: {},
-        room: {},
-        device: {},
-        spec: {},
-        latest: {},
-        source_health: {},
-        rule_status: {},
-        household: {
-          household: {
-            ...next.household.household,
-            status: "waiting_for_home",
-            sync_status: "error",
-            error: new MijiaError("home_unavailable").toPayload(),
-          },
-        },
-      };
-    }
-    this.publish(next, (changedAccount && !this.switching) || lostHome);
+  private syncSource() {
+    if (!this.stopped)
+      this.actor.send({ type: "source", state: this.source.snapshot() });
   }
-  private fail(
-    epoch: string,
-    error: unknown,
-    stage: "selection" | "directory",
-  ) {
+  private fail(epoch: string, error: unknown, stage: "account" | "directory") {
     if (epoch !== this.epoch || this.stopped) return;
-    this.publish({
-      ...this.projection,
-      household: {
-        household: {
-          ...this.projection.household.household,
-          stage,
-          error: safeMijiaError(
-            error,
-            stage === "selection" ? "home_storage" : "devices_failed",
-          ).toPayload(),
-          sync_status: "error",
-        },
-      },
+    this.actor.send({
+      type: "failure",
+      scope_epoch: epoch,
+      stage,
+      error: this.source.failure(error, stage),
     });
   }
-  private specification(id: string) {
+  specification(id: string) {
     const device =
-      this.projection.device[entityKey(this.service.identity() ?? "", id)];
-    if (!device) throw new MijiaError("device_not_found");
+      this.projection.device[
+        entityKey(this.projection.household.household.account_id ?? "", id)
+      ];
+    if (!device) throw new HouseholdError("device_not_found");
+    if (!this.specs.isApplicable(id, device.model))
+      throw new HouseholdError("spec_unavailable");
     const spec = device.spec_id
-      ? this.projection.spec[device.spec_id]
+      ? this.specs.snapshot().specs[device.spec_id]
       : undefined;
-    if (!spec || (spec.status !== "ready" && !Object.keys(spec.spec).length))
-      throw new MijiaError("spec_unavailable");
+    if (!spec) throw new HouseholdError("spec_unavailable");
     return {
       did: device.id,
       name: device.name,
@@ -641,55 +513,54 @@ export class HouseholdRuntime {
     this.assertEpoch(epoch);
     if (
       !this.ready ||
-      !this.projection.device[entityKey(this.service.identity()!, id)]
+      !this.projection.device[
+        entityKey(this.projection.household.household.account_id ?? "", id)
+      ]
     )
-      throw new MijiaError("devices_failed");
-    return this.service.reservePlayback(revision, id, channel);
+      throw new HouseholdError("devices_failed");
+    return this.source.reservePlayback(revision, id, channel);
   }
-  async logout() {
-    this.leaving = true;
-    this.cached = false;
-    this.savedCandidate = undefined;
-    this.specs.clear();
-    this.publish(
-      {
-        ...this.projection,
-        home: {},
-        room: {},
-        device: {},
-        spec: {},
-        latest: {},
-        source_health: {},
-        rule_status: {},
-        household: {
-          household: {
-            ...this.projection.household.household,
-            status: "initializing",
-            stage: "account",
-            sync_status: "unsynced",
-            error: null,
-          },
-        },
-      },
-      true,
-    );
+  logout() {
+    if (this.logoutTask) return this.logoutTask;
+    this.assertEpoch(this.epoch);
+    this.command({
+      type: "command",
+      scope_epoch: this.epoch,
+      effect: { kind: "logout" },
+    });
+    if (!this.logoutTask) throw new HouseholdError("invalid_state");
+    return this.logoutTask;
+  }
+  private async leave(operation_id: number) {
     try {
-      await this.service.logout();
+      await this.source.logout();
     } catch (error) {
-      this.fail(this.epoch, error, "selection");
+      if (this.context.operation_id === operation_id)
+        this.fail(this.epoch, error, "account");
       throw error;
     } finally {
-      this.leaving = false;
-      this.syncService();
+      this.actor.send({ type: "finished", operation_id, operation: "logout" });
+      this.syncSource();
+      this.logoutTask = undefined;
     }
   }
-  async close() {
-    this.actor.send({ type: "stop" });
-    this.stopped = true;
+  private resetResources() {
+    this.refreshTasks.clear();
     this.specs.clear();
+  }
+  close() {
+    if (this.closing) return this.closing;
+    this.actor.send({ type: "stop" });
+    this.resetResources();
+    clearInterval(this.memoryTimer);
     this.unsubscribe?.();
-    await this.service.close();
-    this.actor.stop();
-    this.listeners.clear();
+    this.closing = Promise.resolve()
+      .then(() => this.source.close())
+      .then(() => {})
+      .finally(() => {
+        this.actor.stop();
+        this.listeners.clear();
+      });
+    return this.closing;
   }
 }

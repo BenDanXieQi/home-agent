@@ -8,30 +8,81 @@ import {
   householdSyncedAtom,
   householdUpdatedAtom,
   householdReconnectAtom,
+  householdSnapshotReceivedAtom,
 } from "./household-state";
-import { appStore } from "../../lib/store";
 
-const noop = () => {};
 export const deviceSearchAtom = atom("");
 export const deviceFilterAtom = atom("all");
+const emptyDeviceFilters = { room: "", category: "", capability: "" };
+const scopedDeviceFiltersAtom = atom({
+  scope_epoch: "",
+  ...emptyDeviceFilters,
+});
+export const deviceFiltersAtom = atom(
+  (get) => {
+    const filters = get(scopedDeviceFiltersAtom);
+    return filters.scope_epoch === get(householdSnapshotAtom)?.scope_epoch
+      ? filters
+      : emptyDeviceFilters;
+  },
+  (get, set, filters: typeof emptyDeviceFilters) => {
+    set(scopedDeviceFiltersAtom, {
+      ...filters,
+      scope_epoch: get(householdSnapshotAtom)?.scope_epoch ?? "",
+    });
+  },
+);
 
+type Confirmation = {
+  version:
+    | Awaited<ReturnType<typeof executeMijiaCommand>>["state_version"]
+    | null;
+  snapshotAfter: number | null;
+};
+function confirmed(
+  snapshot: ReturnType<typeof householdSnapshotAtom.read>,
+  received: number,
+  confirmation: Confirmation,
+) {
+  return (
+    !!snapshot &&
+    ((confirmation.version !== null &&
+      snapshot.scope_epoch === confirmation.version.scope_epoch &&
+      snapshot.sequence >= confirmation.version.sequence) ||
+      (confirmation.snapshotAfter !== null &&
+        received > confirmation.snapshotAfter))
+  );
+}
 type CommandState = {
   pending: boolean;
   requestId: number;
   type: MijiaCommand["type"] | null;
   error: { message: string; recoverAfter?: number } | null;
+  confirmation: Confirmation | null;
 };
 const commandStateAtom = atom<CommandState>({
   pending: false,
   requestId: 0,
   type: null,
   error: null,
+  confirmation: null,
 });
 const commandControllerAtom = atom<AbortController | null>(null);
-const mediaConfirmationAfterAtom = atom(0);
+const mediaConfirmationAtom = atom<Confirmation | null>(null);
 export const mijiaPendingCommandAtom = atom((get) => {
   const command = get(commandStateAtom);
   return command.pending ? command.type : null;
+});
+export const mijiaCommandSyncPendingAtom = atom((get) => {
+  const confirmation = get(commandStateAtom).confirmation;
+  return (
+    confirmation !== null &&
+    !confirmed(
+      get(householdSnapshotAtom),
+      get(householdSnapshotReceivedAtom),
+      confirmation,
+    )
+  );
 });
 export const mijiaActionErrorAtom = atom((get) => {
   const state = get(mijiaStateAtom);
@@ -75,7 +126,7 @@ export const mijiaStateAtom = atom((get) => {
           : household.sync_status === "synced"
             ? ("ready" as const)
             : ("loading" as const),
-      items: Object.values(p.device),
+      items: get(devicesAtom),
       error: household.error,
     },
   };
@@ -108,18 +159,25 @@ export const mijiaAuthenticatedAtom = atom(
 );
 export const mijiaFetchingAtom = atom((get) => !get(householdSyncedAtom));
 export const mijiaUpdatedAtAtom = householdUpdatedAtom;
-export const mijiaFetchErrorAtom = atom((get) =>
-  get(householdSyncedAtom) ? null : "状态尚未同步，正在连接后台…",
-);
+export const mijiaFetchErrorAtom = atom((get) => {
+  if (get(mijiaCommandSyncPendingAtom)) return "操作已接收，正在等待状态同步…";
+  return get(householdSyncedAtom) ? null : "状态尚未同步，正在连接后台…";
+});
 export const mijiaCanStartPlaybackAtom = atom((get) => {
   const command = get(mijiaPendingCommandAtom);
+  const confirmation = get(mediaConfirmationAtom);
   return (
     get(mijiaAuthenticatedAtom) &&
     get(mijiaBindingAtom)?.status === "ready" &&
     get(mijiaStateAtom)?.homes.status === "selected" &&
     get(householdSnapshotAtom)?.projection.household.household.status ===
       "running" &&
-    get(mijiaUpdatedAtAtom) > get(mediaConfirmationAfterAtom) &&
+    (confirmation === null ||
+      confirmed(
+        get(householdSnapshotAtom),
+        get(householdSnapshotReceivedAtom),
+        confirmation,
+      )) &&
     command !== "logout" &&
     command !== "selectHome"
   );
@@ -140,21 +198,52 @@ export const mijiaDeviceCountAtom = atom((get) => {
 const emptyDevices: NonNullable<
   ReturnType<typeof householdSnapshotAtom.read>
 >["projection"]["device"][string][] = [];
-export const devicesAtom = atom(
-  (get) => get(mijiaStateAtom)?.devices.items ?? emptyDevices,
+const deviceRecordsAtom = atom(
+  (get) => get(householdSnapshotAtom)?.projection.device,
 );
+export const devicesAtom = atom((get) => {
+  const records = get(deviceRecordsAtom);
+  return records ? Object.values(records) : emptyDevices;
+});
+const byName = ([, left]: [string, string], [, right]: [string, string]) =>
+  left.localeCompare(right, "zh-CN");
+export const deviceFilterOptionsAtom = atom((get) => {
+  const rooms = new Map<string, string>();
+  const categories = new Map<string, string>();
+  const capabilities = new Set<string>();
+  for (const device of get(devicesAtom)) {
+    rooms.set(
+      JSON.stringify([device.home_id, device.room_id]),
+      device.room_name ?? "未分配房间",
+    );
+    categories.set(
+      JSON.stringify(device.category),
+      device.category ?? "未分类",
+    );
+    for (const capability of device.capability_tags)
+      capabilities.add(capability);
+  }
+  return {
+    rooms: [...rooms].toSorted(byName),
+    categories: [...categories].toSorted(byName),
+    capabilities,
+  };
+});
 export const filteredDevicesAtom = atom((get) => {
   const devices = get(devicesAtom);
   const filter = get(deviceFilterAtom);
   const search = get(deviceSearchAtom).trim().toLocaleLowerCase();
+  const { room, category, capability } = get(deviceFiltersAtom);
   return devices.filter(
     (device) =>
       (filter === "all" ||
-        (filter === "online"
-          ? device.availability === "online"
-          : filter === "unknown"
-            ? device.availability === "unknown"
-            : device.camera)) &&
+        (filter === "camera"
+          ? device.camera
+          : device.availability === filter)) &&
+      (!room || JSON.stringify([device.home_id, device.room_id]) === room) &&
+      (!category || JSON.stringify(device.category) === category) &&
+      (!capability ||
+        device.capability_tags.some((tag) => tag === capability)) &&
       `${device.name} ${device.alias ?? ""} ${device.model}`
         .toLocaleLowerCase()
         .includes(search),
@@ -172,7 +261,6 @@ export const performMijiaAtom = atom(
       (command.type === "cancelLogin" || command.type === "startLogin");
     if (previous.pending && !interruptsVerification) return;
     const snapshot = get(householdSnapshotAtom);
-    if (!snapshot || !get(householdSyncedAtom)) return;
     const requestId = previous.requestId + 1;
     get(commandControllerAtom)?.abort();
     const controller = new AbortController();
@@ -182,43 +270,42 @@ export const performMijiaAtom = atom(
       requestId,
       type: command.type,
       error: null,
+      confirmation: null,
     });
     const current = () => get(commandStateAtom).requestId === requestId;
-    if (command.type === "logout" || command.type === "selectHome") {
-      // An uncertain ownership change needs a new snapshot before media resumes.
-      set(mediaConfirmationAfterAtom, get(householdUpdatedAtom));
-    }
+    const changesScope = command.type === "logout";
+    if (changesScope)
+      set(mediaConfirmationAtom, { version: null, snapshotAfter: null });
+    const confirmationFor = (version: Confirmation["version"]) => {
+      const confirmation: Confirmation = { version, snapshotAfter: null };
+      const received = get(householdSnapshotReceivedAtom);
+      if (confirmed(get(householdSnapshotAtom), received, confirmation)) {
+        confirmation.snapshotAfter = received;
+      } else {
+        const reconnect = get(householdReconnectAtom);
+        if (reconnect) {
+          // This connection starts after the HTTP outcome. Its full snapshot
+          // may already supersede the returned version with another scope.
+          confirmation.snapshotAfter = received;
+          reconnect();
+        }
+      }
+      return confirmation;
+    };
     let error: CommandState["error"] = null;
+    let confirmation: Confirmation | null = null;
     try {
       const result = await executeMijiaCommand(
         command,
-        snapshot.scope_epoch,
+        snapshot?.scope_epoch,
         controller.signal,
       );
       if (!current()) return;
-      await new Promise<void>((resolve, reject) => {
-        let unsubscribe = noop;
-        const timer = setTimeout(() => {
-          unsubscribe();
-          reject(new Error("操作已接收，状态尚未同步"));
-        }, 5_000);
-        const check = () => {
-          const state = appStore.get(householdSnapshotAtom);
-          if (
-            state &&
-            state.scope_epoch === result.state_version.scope_epoch &&
-            state.sequence >= result.state_version.sequence
-          ) {
-            clearTimeout(timer);
-            unsubscribe();
-            resolve();
-          }
-        };
-        unsubscribe = appStore.sub(householdSnapshotAtom, check);
-        check();
-      });
+      confirmation = confirmationFor(result.state_version);
+      if (changesScope) set(mediaConfirmationAtom, confirmation);
     } catch (cause) {
       if (!current()) return;
+      if (changesScope) set(mediaConfirmationAtom, confirmationFor(null));
       const transient =
         cause instanceof RequestError &&
         ["network_error", "request_timeout"].includes(cause.details.code);
@@ -238,6 +325,7 @@ export const performMijiaAtom = atom(
           requestId,
           type: command.type,
           error,
+          confirmation,
         });
       }
     }
@@ -286,11 +374,11 @@ export const mijiaConnectionBusyAtom = atom(
 export const mijiaCanRetryConnectionAtom = atom((get) => {
   const state = get(mijiaStateAtom);
   return (
-    !!state &&
-    !get(mijiaFetchErrorAtom) &&
     !get(mijiaPendingCommandAtom) &&
-    !get(mijiaConnectionBusyAtom) &&
-    (state.account.status === "authenticated" ||
-      !isMijiaLoginAttemptActive(state.loginAttempt))
+    (!get(householdSyncedAtom) ||
+      (!get(mijiaConnectionBusyAtom) &&
+        (!state ||
+          state.account.status === "authenticated" ||
+          !isMijiaLoginAttemptActive(state.loginAttempt))))
   );
 });

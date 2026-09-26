@@ -7,6 +7,7 @@ import {
   householdSyncedAtom,
   householdUpdatedAtom,
   householdReconnectAtom,
+  householdSnapshotReceivedAtom,
 } from "../src/features/mijia/household-state";
 import {
   device,
@@ -35,6 +36,7 @@ beforeEach(() => {
   appStore.set(householdSnapshotAtom, undefined);
   appStore.set(householdSyncedAtom, false);
   appStore.set(householdUpdatedAtom, 0);
+  appStore.set(householdSnapshotReceivedAtom, 0);
   connections = [];
   fetchMock.mockImplementation(async (_input, init) => {
     const stream = eventStream(init?.signal);
@@ -61,6 +63,30 @@ async function start() {
 }
 
 describe("household stream ownership and version integrity", () => {
+  it("counts only complete snapshots when confirming a command-triggered reconnect", async () => {
+    const stream = await start();
+    stream.send("snapshot", householdSnapshot());
+    await flush();
+    expect(appStore.get(householdSnapshotReceivedAtom)).toBe(1);
+    stream.send("heartbeat", { scope_epoch: epoch, sequence: 1 });
+    stream.send("state_change", {
+      scope_epoch: epoch,
+      sequence: 2,
+      changes: [],
+    });
+    await flush();
+    expect(appStore.get(householdSnapshotReceivedAtom)).toBe(1);
+    appStore.get(householdReconnectAtom)?.();
+    await vi.advanceTimersByTimeAsync(1_000);
+    connection(1).send("snapshot", {
+      ...householdSnapshot(),
+      scope_epoch: otherEpoch,
+    });
+    await flush();
+    expect(stream.signal.aborted).toBe(true);
+    expect(appStore.get(householdSnapshotReceivedAtom)).toBe(2);
+  });
+
   it("decodes split UTF-8 and publishes an entire valid change batch once", async () => {
     const stream = await start();
     const snapshot = householdSnapshot();
@@ -232,7 +258,7 @@ describe("household stream transport lifecycle", () => {
   it("does not let an aborted connection's finally invalidate its replacement", async () => {
     const first = await start();
     appStore.get(householdReconnectAtom)?.();
-    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
     const replacement = connection(1);
     replacement.send("snapshot", householdSnapshot());
     await flush();
@@ -287,7 +313,7 @@ describe("household stream transport lifecycle", () => {
     stream.end();
     await flush();
     visibility.dispatchEvent(new Event("visibilitychange"));
-    await flush();
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const reconnect = appStore.get(householdReconnectAtom);
     stop();
@@ -299,5 +325,77 @@ describe("household stream transport lifecycle", () => {
     expect(connection(1).signal.aborted).toBe(true);
     expect(appStore.get(householdReconnectAtom)).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps manual and visible retries behind the server deadline without extending it", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, { status: 503, headers: { "Retry-After": "30" } }),
+    );
+    stop = subscribeHousehold();
+    await flush();
+    for (let second = 0; second < 29; second++) {
+      visibility.dispatchEvent(new Event("visibilitychange"));
+      appStore.get(householdReconnectAtom)?.();
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    connection().send("snapshot", householdSnapshot());
+    await flush();
+    expect(appStore.get(householdSyncedAtom)).toBe(true);
+  });
+
+  it("applies increasing backoff to repeated manual retries after transport loss", async () => {
+    const first = await start();
+    first.end();
+    await flush();
+    for (let attempt = 0; attempt < 5; attempt++)
+      appStore.get(householdReconnectAtom)?.();
+    await vi.advanceTimersByTimeAsync(999);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    connection(1).end();
+    await flush();
+    visibility.dispatchEvent(new Event("visibilitychange"));
+    appStore.get(householdReconnectAtom)?.();
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not overflow browser timers for a long server Retry-After", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, {
+        status: 503,
+        headers: { "Retry-After": "3000000" },
+      }),
+    );
+    stop = subscribeHousehold();
+    await flush();
+    appStore.get(householdReconnectAtom)?.();
+    await vi.advanceTimersByTimeAsync(2_147_483_647);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(3_000_000_000 - 2_147_483_647);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a stale connection's late retry deadline", async () => {
+    const pending = Promise.withResolvers<Response>();
+    fetchMock.mockReturnValueOnce(pending.promise);
+    stop = subscribeHousehold();
+    await flush();
+    appStore.get(householdReconnectAtom)?.();
+    await vi.advanceTimersByTimeAsync(1_000);
+    connection().send("snapshot", householdSnapshot());
+    pending.resolve(
+      new Response(null, { status: 503, headers: { "Retry-After": "120" } }),
+    );
+    await flush();
+    expect(appStore.get(householdSyncedAtom)).toBe(true);
+    connection().end();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

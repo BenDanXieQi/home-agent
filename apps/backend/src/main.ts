@@ -44,10 +44,10 @@ const mijiaService = new MijiaService({
     ? createHomeSelectionStore(database.db)
     : undefined,
 });
-const { HouseholdRuntime } = await import("./household/runtime");
+const { createMijiaHousehold } = await import("./mijia/household");
 const { DevicePushLogs } = await import("./household/device-logs");
 const { createHouseholdRepository } = await import("./household/repository");
-const household = new HouseholdRuntime(
+const household = createMijiaHousehold(
   mijiaService,
   database ? createHouseholdRepository(database.db) : undefined,
 );
@@ -55,6 +55,7 @@ household.start();
 const deviceLogs = new DevicePushLogs(
   household,
   resolvePath(import.meta.dir, "../../..", "data/mqtt-logs"),
+  mijiaService,
 );
 void mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
@@ -64,6 +65,7 @@ const app = createApp({
   environment,
   connectionStore,
   household,
+  mijiaService,
   deviceLogs,
   readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
 });

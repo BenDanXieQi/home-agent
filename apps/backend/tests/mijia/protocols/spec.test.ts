@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { MiotSpecClient } from "../../../src/mijia/protocols/micloud/spec";
+import { MiotSpecClient } from "../../../src/mijia/protocols/spec/client";
 import { deferred, eventually } from "../../support/async";
 import { specInstance, specUrn } from "../../support/protocol-fixtures";
 

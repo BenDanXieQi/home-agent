@@ -5,6 +5,7 @@ import {
 } from "@home-agent/api/mijia";
 import {
   commandResultSchema,
+  setupHomesSchema,
   loginMaterialSchema,
   type DirectoryRefreshTarget,
 } from "@home-agent/api/household";
@@ -19,13 +20,20 @@ import type { InferRequestType } from "hono/client";
 type MijiaApi =
   import("@home-agent/backend/client").BackendClient["api"]["mijia"];
 export type MijiaCommand =
-  | { type: "selectHome"; homeId: string | null }
+  | { type: "selectHome"; homeId: string }
   | { type: "startLogin" }
   | { type: "cancelLogin"; loginId: string }
   | { type: "verifyLogin"; loginId: string; ticket: string }
   | { type: "retryConnection" }
   | { type: "logout" }
   | { type: "refreshDevices"; target?: DirectoryRefreshTarget };
+export function getSetupHomes(signal: AbortSignal) {
+  return requestJson(
+    (client, options) => client.api.mijia.setup.homes.$get({}, options),
+    setupHomesSchema,
+    { signal },
+  );
+}
 export function getLoginMaterial(id: string, signal: AbortSignal) {
   return requestJson(
     (client, options) =>
@@ -36,7 +44,7 @@ export function getLoginMaterial(id: string, signal: AbortSignal) {
 }
 export function executeMijiaCommand(
   command: MijiaCommand,
-  scope_epoch: string,
+  scope_epoch: string | undefined,
   signal: AbortSignal,
 ) {
   const options = {
@@ -48,6 +56,7 @@ export function executeMijiaCommand(
   };
   switch (command.type) {
     case "selectHome":
+      if (!scope_epoch) throw new Error("尚未取得家庭标识，请先重新连接状态。");
       return requestJson(
         (client, opts) =>
           client.api.mijia.scope.homes.$put(
@@ -64,6 +73,7 @@ export function executeMijiaCommand(
         options,
       );
     case "cancelLogin":
+      if (!command.loginId) throw new Error("缺少要取消的登录尝试标识。");
       return requestJson(
         (client, opts) =>
           client.api.mijia.login[":id"].$delete(
@@ -74,6 +84,7 @@ export function executeMijiaCommand(
         options,
       );
     case "verifyLogin":
+      if (!command.loginId) throw new Error("缺少要验证的登录尝试标识。");
       return requestJson(
         (client, opts) =>
           client.api.mijia.login[":id"].verify.$post(
@@ -99,6 +110,7 @@ export function executeMijiaCommand(
         options,
       );
     case "refreshDevices":
+      if (!scope_epoch) throw new Error("尚未取得家庭标识，请先重新连接状态。");
       return requestJson(
         (client, opts) =>
           client.api.mijia.devices.refresh.$post(

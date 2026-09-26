@@ -18,13 +18,16 @@ import { createHouseholdRoutes } from "../household/routes";
 import { requireLocalAccess } from "@home-agent/api/local-access";
 import type { DevicePushLogs } from "../household/device-logs";
 import { createDeviceLogRoutes } from "../household/device-log-routes";
+import type { MijiaService } from "./service";
+import { HouseholdError } from "../household/errors";
+import { safeMijiaError } from "./errors";
 
 export function createMijiaRoutes(
   port: number,
   runtime: HouseholdRuntime,
   logs: DevicePushLogs,
+  service: MijiaService,
 ) {
-  const service = runtime.service;
   const commandResult = () => {
     service.flushChanges();
     return { state_version: runtime.version() };
@@ -114,6 +117,11 @@ export function createMijiaRoutes(
       await service.release(c.req.param("id"));
       return c.body(null, 204);
     });
-  app.onError(handleHttpError);
+  app.onError((error, c) =>
+    handleHttpError(
+      error instanceof HouseholdError ? safeMijiaError(error) : error,
+      c,
+    ),
+  );
   return routes;
 }

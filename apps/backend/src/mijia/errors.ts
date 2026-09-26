@@ -7,6 +7,8 @@ import {
   type MijiaFailureReason,
 } from "@home-agent/api/mijia";
 import { CredentialStoreError } from "../credentials/store";
+import { HouseholdError } from "../household/errors";
+import { StorageOutcomeUnknownError } from "../db/transaction-outcome";
 import { Go2RtcError } from "./media/go2rtc-adapter";
 import type { MessageParams } from "@home-agent/api/contracts";
 
@@ -56,6 +58,9 @@ export function safeMijiaError(
   fallback: MijiaFailureReason = "internal_error",
 ) {
   if (error instanceof MijiaError) return error;
+  if (error instanceof HouseholdError) return new MijiaError(error.reason);
+  if (error instanceof StorageOutcomeUnknownError)
+    return new MijiaError("home_storage_unconfirmed");
   if (error instanceof DOMException && error.name === "AbortError")
     return new MijiaError("cancelled");
   if (error instanceof DOMException && error.name === "TimeoutError")

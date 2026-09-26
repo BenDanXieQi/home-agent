@@ -29,6 +29,16 @@ export function LoginFlow() {
         retryLabel="重试连接"
         errorClassName="login-error"
       />
+      {!account && flow.fetchError ? (
+        <div className="mijia-actions">
+          <Button disabled={working} onClick={flow.startLogin}>
+            开始登录
+          </Button>
+          <Button variant="ghost" disabled={working} onClick={flow.logout}>
+            清除已保存授权
+          </Button>
+        </div>
+      ) : null}
       {flow.cleanupPending ? (
         <div className="my-8">
           <p className="login-help">当前未登录，摄像头会话清理尚未完成。</p>

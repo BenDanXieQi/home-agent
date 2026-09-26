@@ -1,8 +1,9 @@
 import { mock, spyOn } from "bun:test";
 import { HouseholdRuntime } from "../../src/household/runtime";
+import { createMijiaHousehold } from "../../src/mijia/household";
 import { MijiaService } from "../../src/mijia/service";
 import { MiCloud } from "../../src/mijia/protocols/micloud";
-import { MiotSpecClient } from "../../src/mijia/protocols/micloud/spec";
+import { MiotSpecClient } from "../../src/mijia/protocols/spec/client";
 import { interceptMqtt } from "../mijia/observations/support";
 import { mediaPeer } from "../mijia/media/support";
 import { credentialStore, homeSelectionStore } from "./account-fixtures";
@@ -63,6 +64,11 @@ export async function runningHousehold(
   initialCatalog: Awaited<
     ReturnType<MiCloud["getCatalog"]>
   > = householdCatalog(),
+  binding: {
+    homeId: string | null;
+    saveError?: Error;
+    initializationError?: boolean;
+  } = { homeId: "home-a" },
 ) {
   const mqtt = interceptMqtt();
   const peer = mediaPeer();
@@ -95,7 +101,9 @@ export async function runningHousehold(
     spec,
   });
   const store = credentialStore();
-  const homes = homeSelectionStore({ homeId: "home-a" });
+  const homes = homeSelectionStore(
+    binding.homeId ? { homeId: binding.homeId } : undefined,
+  );
   const repository = {
     read: mock<
       NonNullable<ConstructorParameters<typeof HouseholdRuntime>[1]>["read"]
@@ -104,6 +112,7 @@ export async function runningHousehold(
       NonNullable<ConstructorParameters<typeof HouseholdRuntime>[1]>["save"]
     >((_account, _home, _directory, assertCurrent) => {
       assertCurrent();
+      if (binding.saveError) return Promise.reject(binding.saveError);
       return Promise.resolve(new Date().toISOString());
     }),
   };
@@ -112,7 +121,7 @@ export async function runningHousehold(
     homeSelectionStore: homes,
     readGo2rtcUrl: () => Promise.resolve(peer.adapter.url),
   });
-  const runtime = new HouseholdRuntime(service, repository);
+  const runtime = createMijiaHousehold(service, repository);
   const close = async () => {
     try {
       await runtime.close();
@@ -136,12 +145,16 @@ export async function runningHousehold(
   try {
     runtime.start();
     await service.initialize();
-    await eventually(
-      () =>
-        runtime.ready &&
-        Object.values(runtime.snapshot().projection.spec).some(
-          (value) => value.status === "ready",
-        ),
+    await eventually(() =>
+      binding.initializationError
+        ? service.snapshot().devices.status === "error"
+        : binding.homeId === null
+          ? runtime.snapshot().projection.household.household.status ===
+            "waiting_for_home"
+          : runtime.ready &&
+            Object.values(runtime.snapshot().projection.device).some(
+              (value) => value.spec_status === "ready",
+            ),
     );
     return {
       service,

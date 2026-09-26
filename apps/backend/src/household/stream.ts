@@ -72,6 +72,13 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
     return cached;
   }
   return (c: Context) => {
+    // Hono dispatches HEAD through GET, then discards the body without cancelling it.
+    if (c.req.method === "HEAD")
+      return c.body(null, 200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
+      });
     if (connections >= householdLimits.connections) {
       c.header("Retry-After", "30");
       return c.body(null, 503);

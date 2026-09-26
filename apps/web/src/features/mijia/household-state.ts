@@ -5,4 +5,6 @@ export const householdSnapshotAtom = atom<
 >(undefined);
 export const householdSyncedAtom = atom(false);
 export const householdUpdatedAtom = atom(0);
+/** Counts complete authoritative snapshots; heartbeats do not confirm a new scope. */
+export const householdSnapshotReceivedAtom = atom(0);
 export const householdReconnectAtom = atom<(() => void) | null>(null);

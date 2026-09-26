@@ -271,6 +271,26 @@ export class MiotMqtt {
     this.reconcile();
     return {
       cancel,
+      removeTopics: (removedTopics: readonly string[]) => {
+        const removed = new Set(removedTopics);
+        for (let index = selected.length - 1; index >= 0; index--) {
+          const item = selected[index]!;
+          if (!removed.has(item.topic)) continue;
+          item.listeners.delete(callback);
+          selected.splice(index, 1);
+          this.emit(
+            callback,
+            subscriptionObservation(
+              this.sourceId,
+              this.generation,
+              item.topic,
+              "cancelled",
+              "scope_invalidated",
+            ),
+          );
+        }
+        this.reconcile();
+      },
       snapshot: () => this.snapshot(),
       retry: () => this.retry(),
     };

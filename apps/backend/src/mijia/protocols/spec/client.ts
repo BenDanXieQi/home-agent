@@ -4,8 +4,7 @@ import {
   ResponseBodyError,
 } from "@home-agent/api/http/read-body";
 import type { MijiaCapability, MijiaDeviceSpec } from "@home-agent/api/mijia";
-import { MiCloudError } from "./errors";
-import type { MiCloudDevice } from "./client";
+import { MiCloudError } from "../micloud/errors";
 
 const iid = z.number().int().positive();
 const urn = z.string().regex(/^urn:[^:]+:device:[^:]+:.+$/);
@@ -63,7 +62,7 @@ export class MiotSpecClient {
   >();
 
   async resolve(
-    device: Pick<MiCloudDevice, "model" | "spec_type">,
+    device: Pick<MijiaDeviceSpec, "model"> & { spec_type?: string },
     parentSignal: AbortSignal,
   ) {
     const requestSignal = AbortSignal.any([
