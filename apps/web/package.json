@@ -12,7 +12,8 @@
     "preview": "bun --env-file=../../.env --bun vite preview",
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
-    "check-types": "tsc -b"
+    "check-types": "tsc -b",
+    "test": "vitest run"
   },
   "dependencies": {
     "@home-agent/api": "workspace:*",
@@ -34,6 +35,7 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
+    "vitest": "^4.1.0",
     "@home-agent/typescript-config": "workspace:*",
     "@types/bun": "catalog:",
     "oxlint": "catalog:",
