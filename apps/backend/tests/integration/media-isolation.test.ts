@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, spyOn, test } from "bun:test";
-import { runningHousehold } from "../../support/household-harness";
-import { eventually } from "../../support/async";
+import { runningHousehold } from "../support/household-harness";
+import { eventually } from "../support/async";
 
 const households: Awaited<ReturnType<typeof runningHousehold>>[] = [];
 afterEach(async () => {
