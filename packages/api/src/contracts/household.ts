@@ -9,6 +9,12 @@ import {
 import { mijiaDeviceSpecSchema } from "./mijia-spec";
 import { operationSchema } from "./operations";
 
+export const householdStreamPolicy = {
+  snapshotBytes: 8 * 1024 * 1024,
+  heartbeatMs: 15_000,
+  silenceMs: 45_000,
+} as const;
+
 export const stateVersionSchema = z.object({
   scope_epoch: z.uuid(),
   sequence: z.number().int().nonnegative(),
@@ -134,20 +140,22 @@ function change<E extends string, S extends z.ZodType>(entity: E, schema: S) {
   });
 }
 export const changeSchema = z
-  .union([
-    change("account", mijiaAccountSchema),
-    change("login", loginPublicSchema),
-    change("connection", operationSchema.nullable()),
-    change("media", projectionSchema.shape.media.shape.media),
-    change("household", householdSchema),
-    change(
-      "projection_health",
-      projectionSchema.shape.projection_health.shape.projection_health,
-    ),
-    change("home", homeSchema),
-    change("room", roomSchema),
-    change("device", deviceSchema),
-    change("spec", specSchema),
+  .discriminatedUnion("op", [
+    z.discriminatedUnion("entity", [
+      change("account", mijiaAccountSchema),
+      change("login", loginPublicSchema),
+      change("connection", operationSchema.nullable()),
+      change("media", projectionSchema.shape.media.shape.media),
+      change("household", householdSchema),
+      change(
+        "projection_health",
+        projectionSchema.shape.projection_health.shape.projection_health,
+      ),
+      change("home", homeSchema),
+      change("room", roomSchema),
+      change("device", deviceSchema),
+      change("spec", specSchema),
+    ]),
     z.object({
       op: z.literal("remove"),
       entity: z.enum(["home", "room", "device", "spec"]),
@@ -219,6 +227,9 @@ export const refreshDirectorySchema = z.strictObject({
   scope_epoch: z.uuid(),
   target: z.enum(["directory", "specs", "all"]),
 });
+export type DirectoryRefreshTarget = z.infer<
+  typeof refreshDirectorySchema
+>["target"];
 
 /** Validate the whole batch before exposing any mutation. */
 export function applyChanges(

@@ -9,11 +9,11 @@
 - 复用唯一账号所有者和当前选定家庭的设备目录。扫码后由后端完成 OAuth 授权，MiCloud 与 OAuth 凭据统一保存、恢复、续期和清除，不增加独立登录入口或凭据仓库。
 - `observeDevices(deviceIds, onObservation, signal)` 校验明确设备集合，多个观察者共用连接与 topic，提供取消、快照及显式重试。
 - `protocols/miot/mqtt.ts` 使用 MQTT.js 5.16.0、MQTT 5/TLS、60 秒心跳、15 秒连接期限及 clean start。OAuth 与 MQTT 共用 32 位无连字符十六进制实例 UUID。
-- 每设备分别订阅属性和在线 topic；16 个在途名额、10 秒确认期限，逐 topic 区分期望、在途、确认及失败，仅 SUBACK QoS 0/1/2 算成功。权限、能力或 topic 拒绝跨断线保留至授权条件变化，不反复重试；新 topic 权限拒绝通知 service 刷新目录一次，不自动刷新 OAuth token。临时失败保留期望项，由显式重试或重连恢复。
+- 每设备分别订阅属性和在线 topic；16 个在途名额、10 秒确认期限，逐 topic 区分期望、在途、确认及失败，仅 SUBACK QoS 0/1/2 算成功。权限、能力或 topic 拒绝跨断线保留至授权条件变化，不反复重试；新 topic 权限拒绝通知 service 刷新目录一次，不自动刷新 OAuth token。临时 SUBACK 拒绝保留期望项，由显式重试或重连恢复；确认超时结束整代连接并释放 SDK 未确认请求，再按既有退避恢复。
 - 消息回调先于订阅注册。当前实例中仍被观察的合法早到消息可交付，消息到达不代替 SUBACK。
 - `messages.ts` 校验 method、did、属性地址及显式标量 value，支持 params 对象和数组，不按 notify 白名单过滤。同值上报保留；在线叶子仅接受 online/offline。
 - 不支持包含 `/` 或 MQTT 通配符等非法标识的 did，不猜测转义协议。正常消息为 live，retained 为 baseline；设备时间、业务事件 ID 和序号缺失时保持 null。
-- 取消移除回调，无消费者 topic 退订；账号／家庭范围撤销使旧实例失效。MQTT 局部失败不直接关闭媒体。活动观察的连接恢复见 [03-recovery.md](03-recovery.md)。
+- 取消移除回调，无消费者 topic 退订；账号／家庭范围撤销使旧实例失效。普通 MQTT 断线或订阅失败不直接关闭媒体；账号维护确认统一会话认证失效时撤销全部接入资源。活动观察的连接恢复见 [03-recovery.md](03-recovery.md)。
 
 具体 topic、拒绝分类、来源身份和交付限制以[来源契约](../../../mijia-source-contract.md)为准。
 

@@ -1,8 +1,9 @@
-import type { MijiaService } from "../service";
+import type { MijiaDeviceSpec } from "@home-agent/api/mijia";
 import { MijiaError } from "../errors";
 import type { MiotPropertyAddress } from "../protocols/micloud/properties";
 
-type PropertyReadPreparation = Pick<MijiaService, "getDeviceSpec"> & {
+type PropertyReadPreparation = {
+  getDeviceSpec: (did: string, signal: AbortSignal) => MijiaDeviceSpec;
   assertCurrent: () => void;
 };
 

@@ -6,7 +6,7 @@
 
 ## 当前接入与 MiLoCo 参考边界
 
-属性读取复用当前 MiCloud 扫码会话。协议依据是已固定的 `homebridge-miot` commit `8d27204423a569e11c468830e3df324d278954ee` 中 `MiCloud.js` 的 `miotGetProps`：通过同一用户的 MiCloud RC4 请求访问 `/miotspec/prop/get`，不需要另建 OAuth 或执行 unionId→uid 映射。
+属性读取复用当前 MiCloud 扫码会话。协议依据是已固定的 `homebridge-miot` commit `8d27204423a569e11c468830e3df324d278954ee` 中 `MiCloud.js` 的 `miotGetProps`：通过同一用户的 MiCloud RC4 请求访问 `/miotspec/prop/get`，该 HTTP 传输不使用 OAuth Bearer 或 unionId→uid 映射；应用仍须接纳包含 MiCloud 与 OAuth 凭据的完整会话。
 
 MiLoCo checkout 由 `AGENTS.local.md` 指定，源码基准为 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`。下表的 MiLoCo 路径均相对于该 checkout；它用于属性返回值、消息及恢复行为参考。整组任务遵守[账号接入前提](README.md#账号接入前提)，扫码后由同一账号所有者完成后端 OAuth 授权，不新增独立登录入口。OAuth、MQTT 连接、订阅及实际消息的证据范围见[来源契约](../../../mijia-source-contract.md#mqtt-授权边界)，未覆盖的型号和异常场景保留未验证。
 
@@ -103,7 +103,7 @@ Step 1 输出在线通知来源、连接／订阅失效及恢复事实；每设�
 | MQTT 连接                   | v5/TLS、keepalive 60 秒、请求 QoS 2、clean start；CONNACK 等待 15 秒，参照 `mips_cloud.py`                                                                                                                                            |
 | 连接重建                    | 1—120 秒退避，参照 paho reconnect_delay_set；TS 适配器集中管理一个重连计时器，不叠加库自动重连，不另设 ±20% 抖动或稳定 60 秒才复位条件。撤销时取消，认证拒绝交还账号所有者                                                            |
 | 订阅确认                    | 每次 10 秒；本项目对账／重订共用 16 个在途名额，对应 `_RECONCILE_CONCURRENCY`／`_REPLAY_CONCURRENCY`。共用限制属于 TS 单一适配器的组织方式，不声称 MiLoCo 低层重订已全局限流                                                          |
-| 订阅失败                    | 暂时失败保留期望项，由重连或显式重试重新发起；topic 权限拒绝通知账号所有者刷新目录，不等同于 token 失效。永久拒绝跨断线保留至授权条件变化，不通过普通重连反复尝试                                                                     |
+| 订阅失败                    | 临时 SUBACK 拒绝保留期望项，由重连或显式重试重新发起；ACK 超时关闭该代并按已有退避恢复，释放 SDK 未确认请求；topic 权限拒绝通知账号所有者刷新目录，不等同于 token 失效。永久拒绝跨断线保留至授权条件变化，不通过普通重连反复尝试      |
 | HTTP 属性读取               | 单次 30 秒、每批最多 150 项、批次串行，作为本项目应用预算。Step 3 计划共用此预算，命令总期限可以更早取消；失败不增加隐藏重试，等待真实恢复触发或显式读取                                                                              |
 | HTTP 限流等待               | 属性 reader 按稳定 source_id 保存 Retry-After；期限内后续批次及新读取不发请求，返回 read_started_at=null 的 unavailable，沿用原失败接收时刻。到期后只由下一次显式读取发起；账号自动／手动恢复续期也遵守 Retry-After，超长等待分段调度 |
 | Step 3 计划的上线／重连补读 | 上线防抖 20 秒、重连延迟 15 秒，参照 `PROP_TOPUP_DEBOUNCE_SEC`、`RECONNECT_PULL_DELAY_SECONDS`；在途触发合并，退出作用域取消                                                                                                          |

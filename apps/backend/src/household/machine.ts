@@ -1,11 +1,14 @@
 import { setup, assign } from "xstate";
-import type { Projection } from "@home-agent/api/household";
+import type {
+  DirectoryRefreshTarget,
+  Projection,
+} from "@home-agent/api/household";
 import { initialProjection, projectionChanges } from "./projection";
 import { householdLimits, jsonBytes } from "./config";
 
 type Effect =
   | { kind: "select"; home_id: string | null }
-  | { kind: "refresh"; target: "directory" | "specs" | "all" };
+  | { kind: "refresh"; target: DirectoryRefreshTarget };
 type Input =
   | {
       type: "publish";
@@ -22,25 +25,29 @@ function initialContext() {
     projection: initialProjection(),
     input_sequence: 0,
     effects: [] as Effect[],
+    changes: [] as ReturnType<typeof projectionChanges>,
   };
 }
 function transition(context: ReturnType<typeof initialContext>, event: Input) {
-  if (event.type === "stop")
+  if (event.type === "stop") {
+    const projection = {
+      ...context.projection,
+      household: {
+        household: {
+          ...context.projection.household.household,
+          status: "stopping" as const,
+        },
+      },
+    };
     return {
       ...context,
       input_sequence: context.input_sequence + 1,
       effects: [],
       sequence: context.sequence + 1,
-      projection: {
-        ...context.projection,
-        household: {
-          household: {
-            ...context.projection.household.household,
-            status: "stopping" as const,
-          },
-        },
-      },
+      projection,
+      changes: projectionChanges(context.projection, projection),
     };
+  }
   if (
     context.projection.household.household.status === "stopping" ||
     event.scope_epoch !== context.scope_epoch
@@ -86,6 +93,7 @@ function transition(context: ReturnType<typeof initialContext>, event: Input) {
       projection,
       input_sequence: context.input_sequence + 1,
       effects: [event.effect],
+      changes: [],
     };
   }
   let projection = event.projection;
@@ -106,14 +114,17 @@ function transition(context: ReturnType<typeof initialContext>, event: Input) {
       },
     };
   }
-  const changed = projectionChanges(context.projection, projection).length > 0;
+  const changes = projectionChanges(context.projection, projection);
   return {
     ...context,
     projection,
     scope_epoch: event.newScope ? crypto.randomUUID() : context.scope_epoch,
-    sequence: event.newScope ? 0 : context.sequence + Number(changed),
+    sequence: event.newScope
+      ? 0
+      : context.sequence + Number(changes.length > 0),
     input_sequence: context.input_sequence + 1,
     effects: [],
+    changes,
   };
 }
 export const householdMachine = setup({

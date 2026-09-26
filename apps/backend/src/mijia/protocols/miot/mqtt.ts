@@ -30,7 +30,6 @@ function entry(topic: string, rejectedCode: number | undefined) {
     listeners: new Set<Listener>(),
     subscribed: false,
     granted: null as number | null,
-    uncertain: false,
     pending: false,
     failure:
       rejectedCode === undefined
@@ -39,7 +38,7 @@ function entry(topic: string, rejectedCode: number | undefined) {
   };
 }
 
-/** One disposable MQTT generation. DeviceObservations owns reconnection orchestration. */
+/** One disposable MQTT generation. AccountObservations owns reconnection orchestration. */
 export class MiotMqtt {
   readonly generation = crypto.randomUUID();
   private readonly client;
@@ -288,7 +287,7 @@ export class MiotMqtt {
       if (item.pending) continue;
       const desired = item.listeners.size > 0;
       if (desired && item.failure) continue;
-      if (desired === item.subscribed && !item.uncertain) {
+      if (desired === item.subscribed) {
         if (!desired) this.topics.delete(item.topic);
         continue;
       }
@@ -310,7 +309,8 @@ export class MiotMqtt {
       if (reason) {
         item.failure = { reason, code };
         this.report(item, "failed", reason, code);
-        if (!subscribe) {
+        // MQTT.js retains unanswered requests until their ACK or connection shutdown.
+        if (!subscribe || reason === "ack_timeout") {
           void this.close(reason);
           return;
         }
@@ -318,13 +318,11 @@ export class MiotMqtt {
         item.failure = null;
         item.subscribed = subscribe;
         item.granted = subscribe ? code : null;
-        item.uncertain = false;
         this.report(item, subscribe ? "confirmed" : "cancelled", null, code);
       }
       this.reconcile();
     };
     const timer = setTimeout(() => {
-      item.uncertain = true;
       finish("ack_timeout");
     }, ACK_TIMEOUT);
     timer.unref();

@@ -1,5 +1,5 @@
 import { DirectoryNotifications } from "./devices/directory-notifications";
-import { DeviceObservations } from "./properties/observation";
+import { AccountObservations } from "./account/observations";
 import type { MiotObservation } from "./protocols/miot/messages";
 import { miotPushSourceId } from "./properties/source-profiles";
 import { authorizeOAuth } from "./protocols/oauth/client";
@@ -23,7 +23,7 @@ import type { MijiaDeviceSpec } from "@home-agent/api/mijia";
 import { mijiaOperation } from "./operation";
 
 import { accountSessionSchema } from "./account/session";
-import { describeMijiaDevices } from "./devices/mapping";
+import { deviceDirectory } from "./devices/directory";
 import type { HomeSelectionStore } from "./homes/store";
 
 export type MijiaDependencies = {
@@ -67,6 +67,7 @@ export class MijiaService {
       readUrl: readGo2rtcUrl,
       onChange: () => this.changed(),
       currentAccount: () => this.accountClient,
+      canBind: () => this.household?.ready() === true,
       acceptsWork: () => !this.stopped && !this.loggingOut,
       stopped: () => this.stopped,
       canReconfigure: () =>
@@ -124,7 +125,7 @@ export class MijiaService {
   private readonly directoryNotifications = new DirectoryNotifications(() =>
     this.discovery.load(true),
   );
-  private mqtt: DeviceObservations | undefined;
+  private mqtt: AccountObservations | undefined;
   private observationScope = new AbortController();
   private mqttClosing: Promise<void> = Promise.resolve();
   private readScope = new AbortController();
@@ -138,7 +139,7 @@ export class MijiaService {
     | {
         restore: (accountId: string, homeId: string | null) => Promise<void>;
         commit: (
-          directory: ReturnType<MijiaService["directoryCandidate"]>,
+          directory: ReturnType<typeof deviceDirectory>,
           assertCurrent: () => void,
         ) => Promise<() => void>;
         ready: () => boolean;
@@ -173,26 +174,13 @@ export class MijiaService {
     catalog: Awaited<ReturnType<MiCloud["getCatalog"]>>,
     account: MiCloud,
   ) {
-    const homeId = this.discovery.homeSnapshot().selectedHomeId;
-    return {
-      accountId: this.accountKey(account),
-      homeId,
-      homes: catalog.homes.map(({ id, name, shared, rooms }) => ({
-        id,
-        name,
-        shared,
-        rooms: rooms.map((room) => ({ id: room.id, name: room.name })),
-      })),
-      devices: describeMijiaDevices(
-        catalog.devices.filter((device) => device.home_id === homeId),
-      ).map((device) => ({
-        ...device,
-        spec_type:
-          catalog.devices.find((item) => item.did === device.id)?.spec_type ??
-          null,
-      })),
-    };
+    return deviceDirectory(
+      catalog,
+      this.accountKey(account),
+      this.discovery.homeSnapshot().selectedHomeId,
+    );
   }
+
   directorySnapshot() {
     return this.accountClient
       ? this.directoryCandidate(
@@ -221,7 +209,7 @@ export class MijiaService {
         assertCurrent,
       );
       assertCurrent();
-      this.discovery.select(catalog.homes[0]!.id);
+      this.discovery.acceptHome(catalog.homes[0]!.id);
     }
     this.chooseDefaultHome = false;
     if (!this.household) throw new MijiaError("invalid_state");
@@ -250,7 +238,7 @@ export class MijiaService {
   suspendHousehold() {
     this.invalidateDeviceAccess();
     this.discovery.suspend();
-    this.media.resetAccount();
+    this.media.revokeAccount();
     this.changed();
   }
 
@@ -286,7 +274,7 @@ export class MijiaService {
       );
       assertCurrent();
       if (!this.activeAccount(account)) throw new MijiaError("stale_session");
-      this.discovery.select(homeId);
+      this.discovery.acceptHome(homeId);
     });
     await this.loadDevices();
     if (this.activeAccount(account)) await this.media.startBinding();
@@ -316,7 +304,7 @@ export class MijiaService {
     const accountKey = this.accountKey(account);
     const scope = this.observationScope.signal;
     if (this.mqtt?.closed) this.mqtt = undefined;
-    return (this.mqtt ??= new DeviceObservations(
+    return (this.mqtt ??= new AccountObservations(
       miotPushSourceId(account.getCredentials().userId),
       () => {
         scope.throwIfAborted();
@@ -400,7 +388,8 @@ export class MijiaService {
     const assertDevices = () => {
       assertCurrent();
       this.discovery.requireHome();
-      if (!this.discovery.ready) throw new MijiaError("devices_failed");
+      if (!this.discovery.catalogConfirmed)
+        throw new MijiaError("devices_failed");
       if (ids.some((id) => !this.discovery.find(id)))
         throw new MijiaError("device_not_found");
     };
@@ -460,7 +449,8 @@ export class MijiaService {
     const uid = client.getCredentials().userId;
     const generation = this.readGeneration;
     this.discovery.requireHome();
-    if (!this.discovery.ready) throw new MijiaError("devices_failed");
+    if (!this.discovery.catalogConfirmed)
+      throw new MijiaError("devices_failed");
     const combined = AbortSignal.any([signal, this.readScope.signal]);
     const propertiesSnapshot = properties.map((property) => ({ ...property }));
     const devices = new Map(
@@ -473,7 +463,8 @@ export class MijiaService {
       combined.throwIfAborted();
       if (!this.activeAccount(client) || this.readGeneration !== generation)
         throw new MijiaError("stale_session");
-      if (!this.discovery.ready) throw new MijiaError("devices_failed");
+      if (!this.discovery.catalogConfirmed)
+        throw new MijiaError("devices_failed");
       for (const [did, previous] of devices) {
         const current = this.discovery.find(did);
         if (!previous || !current) throw new MijiaError("device_not_found");
@@ -752,7 +743,7 @@ export class MijiaService {
         profile: null,
       };
       this.changed();
-      this.discovery.select(homeId);
+      this.discovery.acceptHome(homeId);
       await this.commitCatalog(
         candidate.catalog,
         candidate.client,
@@ -775,7 +766,7 @@ export class MijiaService {
       this.invalidateDeviceAccess();
       this.accountClient = undefined;
       this.accountOAuth = undefined;
-      this.media.resetAccount(false);
+      this.media.revokeAccount(false);
       this.discovery.reset();
       this.state.account = {
         status: "reauth_required",
@@ -826,7 +817,7 @@ export class MijiaService {
         this.changed();
         this.state.connectionOperation = null;
         this.changed();
-        this.media.resetAccount();
+        this.media.revokeAccount();
         // Authorization is already revoked. A cleanup failure must remain a
         // media error, without restoring the account or reporting logout success.
         await this.media.clearAdapter();
@@ -950,7 +941,7 @@ export class MijiaService {
         if (!this.loginFlow.isCurrent(attempt)) return;
         this.cancelRestore();
         this.invalidateDeviceAccess();
-        this.media.resetAccount();
+        this.media.revokeAccount();
         this.discovery.reset();
         this.accountClient?.dispose();
         this.accountClient = attempt.cloud;
@@ -961,7 +952,7 @@ export class MijiaService {
           profile: null,
         };
         this.changed();
-        this.discovery.select(homeId);
+        this.discovery.acceptHome(homeId);
         this.loginFlow.adopt(attempt);
         this.state.connectionOperation = null;
         this.changed();

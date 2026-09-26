@@ -1,14 +1,14 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import { directoryTopics } from "../protocols/miot/messages";
-import type { DeviceObservations } from "../properties/observation";
+import type { AccountObservations } from "../account/observations";
 
 const DIRECTORY_DEBOUNCE_MS = 5_000;
 
 /** Account-wide directory invalidations; current household filtering happens on commit. */
 export class DirectoryNotifications {
   private controller: AbortController | undefined;
-  private binding: ReturnType<DeviceObservations["observeTopics"]> | undefined;
-  private owner: DeviceObservations | undefined;
+  private binding: ReturnType<AccountObservations["observeTopics"]> | undefined;
+  private owner: AccountObservations | undefined;
   private key = "";
   private timer: ReturnType<typeof setTimeout> | undefined;
   private received = 0;
@@ -19,7 +19,7 @@ export class DirectoryNotifications {
 
   constructor(private readonly refresh: () => Promise<unknown>) {}
 
-  update(owner: DeviceObservations, uid: string, ids: readonly string[]) {
+  update(owner: AccountObservations, uid: string, ids: readonly string[]) {
     const topics = directoryTopics(uid, ids).toSorted();
     const key = JSON.stringify(topics);
     if (owner === this.owner && key === this.key) return;

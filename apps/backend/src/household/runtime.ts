@@ -2,17 +2,20 @@ import { createActor } from "xstate";
 import {
   directorySchema,
   snapshotSchema,
-  projectionSchema,
   deviceSchema,
   entityKey,
 } from "@home-agent/api/household";
-import type { Projection } from "@home-agent/api/household";
+import type {
+  DirectoryRefreshTarget,
+  Projection,
+} from "@home-agent/api/household";
 import { householdMachine } from "./machine";
 import { householdLimits, jsonBytes } from "./config";
 import { publicDirectory } from "./projection";
 import { HouseholdSpecifications } from "./specifications";
 import type { HouseholdRepository } from "./repository";
 import type { MijiaService } from "../mijia/service";
+import type { deviceDirectory } from "../mijia/devices/directory";
 import { MijiaError, safeMijiaError } from "../mijia/errors";
 
 export class HouseholdRuntime {
@@ -48,9 +51,8 @@ export class HouseholdRuntime {
   private refreshTask: Promise<void> | undefined;
   private refreshEpoch: string | undefined;
   private pendingRefresh: { directory: boolean; specs: boolean } | undefined;
-  private savedCandidate:
-    | ReturnType<MijiaService["directoryCandidate"]>
-    | undefined;
+  private savedCandidate: ReturnType<typeof deviceDirectory> | undefined;
+  private cachedSnapshot: ReturnType<typeof snapshotSchema.parse> | undefined;
 
   constructor(
     readonly service: MijiaService,
@@ -64,8 +66,15 @@ export class HouseholdRuntime {
     });
   }
   start() {
+    let published = this.version();
     this.actor.subscribe(({ context }) => {
-      for (const listener of this.listeners) listener();
+      if (
+        context.scope_epoch !== published.scope_epoch ||
+        context.sequence !== published.sequence
+      ) {
+        published = this.version();
+        for (const listener of this.listeners) listener();
+      }
       if (context.input_sequence === this.handled) return;
       this.handled = context.input_sequence;
       for (const effect of context.effects) {
@@ -111,7 +120,19 @@ export class HouseholdRuntime {
   snapshot() {
     const { scope_epoch, sequence, projection } =
       this.actor.getSnapshot().context;
-    return snapshotSchema.parse({ scope_epoch, sequence, projection });
+    if (
+      this.cachedSnapshot?.scope_epoch !== scope_epoch ||
+      this.cachedSnapshot.sequence !== sequence
+    )
+      this.cachedSnapshot = snapshotSchema.parse({
+        scope_epoch,
+        sequence,
+        projection,
+      });
+    return this.cachedSnapshot;
+  }
+  changes() {
+    return this.actor.getSnapshot().context.changes;
   }
   version() {
     const { scope_epoch, sequence } = this.actor.getSnapshot().context;
@@ -128,7 +149,7 @@ export class HouseholdRuntime {
       this.actor.send({
         type: "publish",
         scope_epoch: this.epoch,
-        projection: projectionSchema.parse(projection),
+        projection,
         newScope,
       });
   }
@@ -148,13 +169,21 @@ export class HouseholdRuntime {
     });
     return { state_version: this.version() };
   }
-  requestRefresh(epoch: string, target: "directory" | "specs" | "all") {
+  requestRefresh(epoch: string, target: DirectoryRefreshTarget) {
     this.assertEpoch(epoch);
     if (
       this.service.snapshot().account.status !== "authenticated" ||
       this.switching
     )
       throw new MijiaError("stale_session");
+    const household = this.projection.household.household;
+    if (
+      household.status === "initializing" &&
+      household.stage === "selection"
+    ) {
+      if (target === "specs") throw new MijiaError("invalid_state");
+      return this.selectHome(epoch, household.home_id);
+    }
     this.actor.send({
       type: "command",
       scope_epoch: epoch,
@@ -162,7 +191,7 @@ export class HouseholdRuntime {
     });
     return { state_version: this.version() };
   }
-  private refresh(target: "directory" | "specs" | "all", epoch: string) {
+  private refresh(target: DirectoryRefreshTarget, epoch: string) {
     if (this.refreshTask) {
       this.pendingRefresh = {
         directory:
@@ -229,13 +258,22 @@ export class HouseholdRuntime {
     });
   }
   private async commitDirectory(
-    candidate: ReturnType<MijiaService["directoryCandidate"]>,
+    candidate: ReturnType<typeof deviceDirectory>,
     assertCurrent: () => void,
   ) {
     const epoch = this.epoch;
     const assert = () => {
       this.assertEpoch(epoch);
       assertCurrent();
+      // Discovery only records persisted access. The actor owns an in-progress
+      // selection, including its target when persistence has failed.
+      const household = this.projection.household.household;
+      if (
+        household.stage === "selection" &&
+        (candidate.accountId !== household.account_id ||
+          candidate.homeId !== household.home_id)
+      )
+        throw new MijiaError("stale_session");
     };
     assert();
     const now = new Date().toISOString();

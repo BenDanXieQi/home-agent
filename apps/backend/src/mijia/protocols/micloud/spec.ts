@@ -62,7 +62,10 @@ export class MiotSpecClient {
     ReturnType<MiotSpecClient["startRequest"]>
   >();
 
-  async get(device: MiCloudDevice, parentSignal: AbortSignal) {
+  async resolve(
+    device: Pick<MiCloudDevice, "model" | "spec_type">,
+    parentSignal: AbortSignal,
+  ) {
     const requestSignal = AbortSignal.any([
       parentSignal,
       AbortSignal.timeout(30_000),
@@ -87,44 +90,52 @@ export class MiotSpecClient {
     }
     if (!urn.safeParse(deviceUrn).success)
       throw new MiCloudError("spec-invalid-response");
-    const parsed = instanceSchema.safeParse(
-      await this.request(
-        "/miot-spec-v2/instance",
-        { type: deviceUrn },
-        requestSignal,
-      ),
-    );
-    if (!parsed.success) throw new MiCloudError("spec-invalid-response");
-    const instance = parsed.data;
-    parseSpec(instance, {});
-    let translations: Translations = {};
-    if (!requestSignal.aborted) {
-      try {
-        const translated = translationsSchema.safeParse(
-          await this.request(
-            "/instance/v2/multiLanguage",
-            { urn: deviceUrn },
-            requestSignal,
-          ),
-        );
-        if (translated.success)
-          translations = translated.data.data["zh_cn"] ?? {};
-      } catch {
-        // Optional translations do not invalidate successfully read capabilities.
-        this.assertActive(parentSignal);
+    return { urn: deviceUrn, requestSignal };
+  }
+
+  async read(
+    resolved: Awaited<ReturnType<MiotSpecClient["resolve"]>>,
+    parentSignal: AbortSignal,
+  ) {
+    const { urn: deviceUrn, requestSignal } = resolved;
+    this.assertActive(requestSignal);
+    const instanceRequest = this.acquireRequest("/miot-spec-v2/instance", {
+      type: deviceUrn,
+    });
+    try {
+      const parsed = instanceSchema.safeParse(
+        await this.waitForRequest(instanceRequest.request, requestSignal),
+      );
+      if (!parsed.success) throw new MiCloudError("spec-invalid-response");
+      const instance = parsed.data;
+      parseSpec(instance, {});
+      let translations: Translations = {};
+      if (!requestSignal.aborted) {
+        try {
+          const translated = translationsSchema.safeParse(
+            await this.request(
+              "/instance/v2/multiLanguage",
+              { urn: deviceUrn },
+              requestSignal,
+            ),
+          );
+          if (translated.success)
+            translations = translated.data.data["zh_cn"] ?? {};
+        } catch {
+          // Optional translations do not invalidate successfully read capabilities.
+          this.assertActive(parentSignal);
+        }
       }
+      this.assertActive(parentSignal);
+      return {
+        urn: deviceUrn,
+        ...parseSpec(instance, translations),
+      };
+    } finally {
+      // Keep the instance available while translation is pending. A model that
+      // resolves to this URN later can join without fetching the instance again.
+      this.releaseRequest(instanceRequest);
     }
-    this.assertActive(parentSignal);
-    return {
-      urn: deviceUrn,
-      did: device.did,
-      name: device.name ?? "",
-      home: device.home_name ?? "",
-      model,
-      room: device.room_name ?? "",
-      online: device.isOnline === true,
-      ...parseSpec(instance, translations),
-    };
   }
 
   private assertActive(signal: AbortSignal) {
@@ -142,13 +153,41 @@ export class MiotSpecClient {
     params: Record<string, string>,
     signal: AbortSignal,
   ) {
+    this.assertActive(signal);
+    const lease = this.acquireRequest(path, params);
+    try {
+      return await this.waitForRequest(lease.request, signal);
+    } finally {
+      this.releaseRequest(lease);
+    }
+  }
+
+  private acquireRequest(path: string, params: Record<string, string>) {
     const url = new URL(path, "https://miot-spec.org");
     url.search = new URLSearchParams(params).toString();
-    this.assertActive(signal);
     const key = url.toString();
     const request = this.requests.get(key) ?? this.startRequest(url);
     this.requests.set(key, request);
     request.waiters++;
+    return { key, request };
+  }
+
+  private releaseRequest({
+    key,
+    request,
+  }: ReturnType<MiotSpecClient["acquireRequest"]>) {
+    request.waiters--;
+    if (request.waiters === 0) {
+      if (this.requests.get(key) === request) this.requests.delete(key);
+      request.controller.abort();
+    }
+  }
+
+  private async waitForRequest(
+    request: ReturnType<MiotSpecClient["startRequest"]>,
+    signal: AbortSignal,
+  ) {
+    this.assertActive(signal);
     let abort: (() => void) | undefined;
     try {
       const result = await new Promise<Awaited<typeof request.promise>>(
@@ -166,13 +205,6 @@ export class MiotSpecClient {
       throw error;
     } finally {
       if (abort) signal.removeEventListener("abort", abort);
-      request.waiters--;
-      // A caller owns its deadline, not another caller's metadata request.
-      // Stop the shared transport only when nobody still needs its result.
-      if (request.waiters === 0) {
-        if (this.requests.get(key) === request) this.requests.delete(key);
-        request.controller.abort();
-      }
     }
   }
 
@@ -195,12 +227,7 @@ export class MiotSpecClient {
       });
       if (response.status === 404) throw new MiCloudError("spec-unavailable");
       if (!response.ok)
-        throw new MiCloudError(
-          response.status >= 500 || response.status === 429
-            ? "network"
-            : "network",
-          { httpStatus: response.status },
-        );
+        throw new MiCloudError("network", { httpStatus: response.status });
       return await readLimitedJson(response, this.maxResponseBytes, signal);
     } catch (error) {
       this.assertActive(signal);
