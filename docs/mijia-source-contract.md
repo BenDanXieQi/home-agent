@@ -22,7 +22,7 @@ service 为当前会话维护读取取消范围及 `collection_generation`。会
 
 [`MijiaService.readProperties(properties, signal)`](../apps/backend/src/mijia/service.ts) 接收 `readonly { did, siid, piid }[]` 与 `AbortSignal`，返回逐项 `PropertyReadObservation[]`。账号由 service 取得，调用方不提供凭据。设备必须属于当前账号完整成功同步的目录，属性必须属于该设备的 readable 规格。目录的 `online` 布尔值不作为读取禁令。规格的能力定义独立于展示翻译：翻译失败或耗尽元数据网络预算时沿用已取得的规格原文，不把已确认可读的属性判为不可读；能力请求自身超时、调用方取消、账号撤销或调用方自身期限到达仍会终止查询。
 
-请求前、规格查询后、批次执行前及异步返回前均检查当前账号、采集实例和目录归属；设备移除、家庭归属／型号／规格引用变化、会话撤销、调用取消或账号失效会拒绝旧结果。此入口不选择业务家庭，不维护 latest、availability 或属性版本，也不提交家庭状态。
+请求前、规格查询后、批次执行前及异步返回前均检查当前账号、采集实例和目录归属；设备移除、家庭归属／型号／规格引用变化、会话撤销、调用取消或账号失效会拒绝旧结果。此入口只允许读取已选业务家庭的设备，不修改家庭选择，不维护 latest、availability 或属性版本，也不提交家庭状态。
 
 [`preparePropertyRead`](../apps/backend/src/mijia/properties/read-request.ts) 复制属性请求，按设备分组，每组最多 3 台设备并发查询规格，逐设备验证其属性；保留原输入顺序，通过 service 提供的断言核验当前账号、采集实例和目录归属，再交给 [`PropertyReader`](../apps/backend/src/mijia/properties/reader.ts) 使用全局串行 HTTP 批次预算。
 

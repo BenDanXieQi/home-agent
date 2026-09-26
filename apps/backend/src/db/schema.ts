@@ -7,3 +7,11 @@ export const credentials = pgTable("credentials", {
     .notNull()
     .defaultNow(),
 });
+
+export const mijiaHomeSelections = pgTable("mijia_home_selections", {
+  accountKey: text("account_key").primaryKey(),
+  homeId: text("home_id"),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});

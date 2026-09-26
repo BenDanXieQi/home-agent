@@ -37,7 +37,7 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 
 若小米返回 `notificationUrl`，状态为 `security-required`。用户打开小米安全验证页面请求短信或邮件验证码，再通过 `submitSecurityCode()` 提交收到的数字验证码。验证码通过同次登录的 cookie 会话提交至小米验证接口；账号 token 不需要用户搬运。仅支持上游的 `authStart` 页面及电话／邮件验证类型，其他验证类型报告 `unsupported-security`。安全验证仍受原二维码过期时间约束。
 
-`getDevices()` 使用这个实例完成的设备会话，并通过 `getHomes()` 查询 `/v2/homeroom/gethome` 与归属分页 `/v2/homeroom/get_dev_room_page`，合并家庭和房间。设备与目录请求使用同一 RC4 签名传输，未找到归属时返回空值，不推测安装位置。`homes.ts` 负责目录响应校验、分页和归属映射。
+`getCatalog()` 通过 `getHomes()` 查询 `/v2/homeroom/gethome` 与归属分页 `/v2/homeroom/get_dev_room_page`，汇总自有及共享家庭、房间中的设备 ID，再分批调用 `/v2/home/device_list_page` 获取设备详情。每批最多 150 个 ID，并检查详情分页游标，按设备 ID 去重，只接纳本批请求的设备；空目录不发送设备详情请求。协议参数参考[小米官方集成](https://github.com/XiaoMi/ha_xiaomi_home/blob/main/custom_components/xiaomi_home/miot/miot_cloud.py)的设备详情读取，沿用现有 RC4 会话。详情接口返回的 `localip` 原样保留，供摄像头局域网连接使用。设备与目录请求使用同一 RC4 签名传输，未找到归属时返回空值，不推测安装位置。`homes.ts` 负责目录响应校验、分页和归属映射。
 
 `getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/mijia-source-contract.md)。
 
@@ -58,3 +58,5 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 原始设备数据只在 backend 内部使用，返回浏览器前必须投影字段白名单。本模块不提供 logger，不记录请求、响应、cookie、URL、二维码或验证码；所有错误均为静态 `MiCloudError.code`，不包含上游消息或底层异常 cause。调用者的日志和追踪同样不得记录本模块参数、返回值或实例。
 
 真实扫码、安全验证与具体摄像头型号兼容性需要在实际账号和设备上验收；编译通过不代表已经完成实机验证。
+
+`getProfile()` 使用当前会话的用户 ID 读取 `https://api.account.xiaomi.com/pass/usersCard`，校验返回用户身份，将 `miliaoNick` 和 `miliaoIcon` 转换为昵称和 HTTPS 头像地址。请求限时 10 秒，并随客户端释放取消；不需要额外 OAuth 授权。

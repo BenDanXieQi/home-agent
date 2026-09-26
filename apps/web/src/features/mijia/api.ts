@@ -20,6 +20,9 @@ type MijiaApi =
   import("@home-agent/backend/client").BackendClient["api"]["mijia"];
 
 export type MijiaCommand =
+  | ({ type: "selectHome" } & InferRequestType<
+      MijiaApi["home-selection"]["$put"]
+    >["json"])
   | { type: "startLogin" }
   | { type: "cancelLogin"; loginId: string }
   | { type: "verifyLogin"; loginId: string; ticket: string }
@@ -54,6 +57,15 @@ export function executeMijiaCommand(
   signal: AbortSignal,
 ) {
   switch (command.type) {
+    case "selectHome":
+      return requestSnapshot(
+        (client, options) =>
+          client.api.mijia["home-selection"].$put(
+            { json: { accountId: command.accountId, homeId: command.homeId } },
+            options,
+          ),
+        { signal },
+      );
     case "startLogin":
       return requestSnapshot(
         (client, options) => client.api.mijia.login.$post({}, options),

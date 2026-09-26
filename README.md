@@ -48,7 +48,7 @@ bun install --frozen-lockfile
 bun run setup
 ```
 
-编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。使用对话 API 时还需配置 `AGENT_MODEL`、`OPENAI_API_KEY`，按需填写 `OPENAI_BASE_URL`。
+编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_MODEL`、`OPENAI_API_KEY`，按需填写 `OPENAI_BASE_URL`。
 
 ```sh
 bun run db:up
@@ -56,7 +56,7 @@ bun run db:migrate
 bun run dev
 ```
 
-打开 <http://127.0.0.1:5173/>，使用米家 App 扫码登录。日常运行 `bun run dev`，停止应用与依赖使用 `bun run stop`。新增数据库迁移后需重新执行 `bun run db:migrate`。
+打开 <http://127.0.0.1:5173/>，使用米家 App 扫码登录。设备与摄像头仅接入已选择的家庭；首次使用请在“设置 → 米家家庭”选择要接入的家庭。日常运行 `bun run dev`，停止应用与依赖使用 `bun run stop`。新增数据库迁移后需重新执行 `bun run db:migrate`。
 
 本机配置与凭据不提交 Git。恢复已有数据库授权时，还需恢复对应的凭据加密密钥；详见[米家与摄像头](docs/mijia.md)。
 

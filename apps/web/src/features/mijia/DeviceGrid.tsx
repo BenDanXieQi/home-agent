@@ -105,12 +105,12 @@ export const DeviceGrid = memo(function DeviceGrid({
                 ? "正在读取设备…"
                 : search || filter !== "all"
                   ? "没有匹配的设备"
-                  : "账号下没有设备"}
+                  : "所选家庭没有设备"}
             </h2>
             <p>
               {search || filter !== "all"
                 ? "试试其他名称或筛选条件。"
-                : "当前仅显示中国大陆区域的设备。"}
+                : "请确认家庭选择，或刷新设备列表。"}
             </p>
           </div>
         ) : null}

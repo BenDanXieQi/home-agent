@@ -2,6 +2,7 @@ import { useAtomValue } from "jotai";
 import { Link } from "@tanstack/react-router";
 import { CircleCheck, CircleAlert } from "lucide-react";
 import {
+  mijiaStateAtom,
   mijiaBindingAtom,
   mijiaActionErrorAtom,
 } from "../features/mijia/state";
@@ -10,8 +11,12 @@ import { ServiceConnections } from "../features/connections/ServiceConnections";
 import { RequestFeedback } from "../components/RequestFeedback";
 import { RetryConnectionButton } from "../features/mijia/RetryConnectionButton";
 
+import { HomeSelection } from "../features/mijia/HomeSelection";
+
 export default function SettingsPage() {
   const { ready, message } = useAtomValue(connectionReadinessAtom);
+  const homeSelected =
+    useAtomValue(mijiaStateAtom)?.homes.status === "selected";
   const binding = useAtomValue(mijiaBindingAtom);
   const actionError = useAtomValue(mijiaActionErrorAtom);
   return (
@@ -26,19 +31,22 @@ export default function SettingsPage() {
                 ? "正在检查服务连接"
                 : "需要检查服务连接"}
           </h2>
-          <p>{ready ? "可以查看设备与摄像头了。" : message}</p>
+          <p>{ready ? "服务已就绪。" : message}</p>
         </div>
         <Link to="/cameras" className="button button-secondary">
           {ready ? "查看摄像头" : "稍后处理"}
         </Link>
       </div>
+      <HomeSelection />
       <ServiceConnections />
       <section className="binding-connection">
         <div>
           <h2>米家摄像头接入</h2>
           <p>
             {binding?.status === "ready"
-              ? "已连接，摄像头可尝试播放。"
+              ? homeSelected
+                ? "已连接，摄像头可尝试播放。"
+                : "服务已连接，选择家庭后可接入摄像头。"
               : binding?.status === "installing"
                 ? "正在连接…"
                 : binding?.status === "error"

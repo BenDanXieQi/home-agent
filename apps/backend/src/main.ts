@@ -3,6 +3,7 @@ import { initializeTelemetry } from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
 import { createDatabase } from "./db";
 import { createCredentialStore } from "./credentials/store";
+import { createHomeSelectionStore } from "./mijia/homes/store";
 import { readCredentialKey } from "./credentials/key";
 import {
   createConnectionStore,
@@ -39,6 +40,9 @@ const credentialStore = database
 const mijia = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
+  homeSelectionStore: database
+    ? createHomeSelectionStore(database.db)
+    : undefined,
 });
 void mijia.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");

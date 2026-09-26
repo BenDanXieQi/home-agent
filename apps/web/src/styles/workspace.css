@@ -27,13 +27,13 @@
     @apply flex w-full items-center gap-2.5 rounded-md p-2 text-left hover:bg-black/4;
   }
   .account-avatar {
-    @apply grid size-8 shrink-0 place-items-center rounded-full border border-line bg-white text-muted;
+    @apply grid size-8 shrink-0 place-items-center overflow-hidden rounded-full border border-line bg-white text-muted;
   }
   .account-copy {
     @apply min-w-0 flex-1;
   }
   .account-copy strong {
-    @apply block text-xs font-medium;
+    @apply block truncate text-xs font-medium;
   }
   .account-copy span {
     @apply mt-0.5 block text-[11px] text-muted;

@@ -1,12 +1,21 @@
 // Shared wire codes, HTTP statuses and safe messages. Never include upstream data.
 export const mijiaErrorDefinitions = {
+  mijia_home_required: { status: 409, message: "请先选择要接入的米家家庭。" },
+  mijia_home_unavailable: {
+    status: 409,
+    message: "所选家庭已不可访问，请刷新目录并重新选择。",
+  },
+  mijia_home_storage: {
+    status: 503,
+    message: "无法读取或保存家庭选择，请检查数据库和迁移。",
+  },
   mijia_invalid_input: {
     status: 400,
     message: "米家请求参数无效。",
   },
   mijia_device_not_found: {
     status: 404,
-    message: "当前账号设备列表中没有此设备，请刷新设备列表。",
+    message: "当前所选家庭中没有此设备，请刷新设备列表。",
   },
   mijia_spec_unavailable: {
     status: 404,
@@ -71,7 +80,7 @@ export const mijiaErrorDefinitions = {
   mijia_not_bound: { status: 409, message: "请先完成米家扫码登录。" },
   mijia_camera_invalid: {
     status: 400,
-    message: "只能选择当前账号设备列表中的摄像头。",
+    message: "只能选择当前所选家庭中的摄像头。",
   },
   mijia_camera_offline: {
     status: 409,

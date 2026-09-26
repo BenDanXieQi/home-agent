@@ -30,9 +30,9 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 `/api/mijia` 提供扫码、验证码提交、授权恢复与退出、设备读取、按镜头预留观看连接及 SDP 信令；沿用本机管理限制。统一重试连接返回 HTTP 202，由 `/api/mijia/state` 展示后台进展。`src/credentials/` 负责通用 AES-256-GCM 凭据存储，`src/mijia/service.ts` 拥有当前 MiCloud 账号、读取采集范围和串行提交边界。`account/login-flow.ts` 管理独立扫码尝试，`account/maintenance.ts` 管理 MiCloud 恢复续期任务；候选会话由 `account/session.ts` 准备，持久化与接纳由 service 提交。
 
-设备快照包含米家家庭和房间归属；`GET /api/mijia/home` 聚合设备、房间及规格，`GET /api/mijia/devices/:did/spec` 按需查询设备可读、可写、可通知属性及动作定义。两者通过 `devices/queries.ts` 读取 `DeviceDiscovery` 的唯一目录，查询前后核验当前账号和设备归属；成功响应和业务字段采用 MiLoCo 的结构。规格解析使用不带账号凭据的独立公开请求，不包含当前属性值或执行设备动作。详见[家庭、房间与设备能力](../../docs/mijia.md#家庭房间与设备能力)。
+设备快照只包含所选家庭的设备及家庭、房间归属；`GET /api/mijia/home` 聚合设备、房间及规格，`GET /api/mijia/devices/:did/spec` 按需查询设备可读、可写、可通知属性及动作定义。两者通过 `devices/queries.ts` 读取 `DeviceDiscovery` 的唯一目录，查询前后核验当前账号和设备归属；成功响应和业务字段采用 MiLoCo 的结构。规格解析使用不带账号凭据的独立公开请求，不包含当前属性值或执行设备动作。详见[家庭、房间与设备能力](../../docs/mijia.md#家庭房间与设备能力)。
 
-米家账号以现有扫码流程为唯一用户登录入口，同一所有者统一负责保存、恢复、续期和退出；新增能力复用该账号，不新增独立 OAuth、额外授权页面、账号映射或第二套 token 仓库。属性读取直接使用现有中国大陆区 MiCloud 会话。`MijiaService.readProperties(properties, signal)` 是指定属性读取的正式内部入口，由 service 核验账号、采集代次及设备目录归属，`properties/read-request.ts` 按设备分组预检 readable 规格；所有调用共用 `PropertyReader` 的串行批次，应用预算为每批最多 150 项、单次 HTTP 最长 30 秒。输出逐项 `baseline`／`cloud_cache` 结果、UTC RFC3339 毫秒时间和 `observed_at=null`，缺失 value 不补 null，部分失败保留成功项。`Retry-After` 按稳定来源约束后续批次和新读取；期限内直接返回未发送的 unavailable，到期后等待下一次显式读取，不隐藏重试。账号自动及手动恢复续期同样遵守供应商重试期限。`datasource=1` 为缓存优先，缓存缺失可能触发设备 RPC，不保证最新值。4 台代表设备的 13 项属性已实读成功，不能泛化为所有型号可用。当前没有属性读取 HTTP 路由或周期读取；MQTT 鉴权待核实，推送尚未接入。接口、返回码规则和能力矩阵见[米家来源契约](../../docs/mijia-source-contract.md)。
+米家账号以现有扫码流程为唯一用户登录入口，同一所有者统一负责保存、恢复、续期和退出；新增能力复用该账号，不新增独立 OAuth、额外授权页面、账号映射或第二套 token 仓库。属性读取直接使用现有中国大陆区 MiCloud 会话。`MijiaService.readProperties(properties, signal)` 是指定属性读取的正式内部入口，由 service 核验账号、采集代次及所选家庭归属，`properties/read-request.ts` 按设备分组预检 readable 规格；所有调用共用 `PropertyReader` 的串行批次，应用预算为每批最多 150 项、单次 HTTP 最长 30 秒。输出逐项 `baseline`／`cloud_cache` 结果、UTC RFC3339 毫秒时间和 `observed_at=null`，缺失 value 不补 null，部分失败保留成功项。`Retry-After` 按稳定来源约束后续批次和新读取；期限内直接返回未发送的 unavailable，到期后等待下一次显式读取，不隐藏重试。账号自动及手动恢复续期同样遵守供应商重试期限。`datasource=1` 为缓存优先，缓存缺失可能触发设备 RPC，不保证最新值。4 台代表设备的 13 项属性已实读成功，不能泛化为所有型号可用。当前没有属性读取 HTTP 路由或周期读取；MQTT 鉴权待核实，推送尚未接入。接口、返回码规则和能力矩阵见[米家来源契约](../../docs/mijia-source-contract.md)。
 
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。backend 不接收或中转视频包。官方能力目录声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道目录生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 
@@ -65,6 +65,7 @@ src/
 │   ├── operation.ts        # 米家操作 span、静态错误码与取消语义
 │   ├── retry-timer.ts      # 失败工作拥有的可取消退避等待
 │   ├── errors.ts           # 上游错误到公共错误码的转换
+│   ├── homes/store.ts     # 按稳定账号身份持久化家庭选择
 │   ├── account/
 │   │   ├── login-flow.ts  # 独立扫码尝试与授权材料
 │   │   ├── maintenance.ts # MiCloud 恢复续期任务及计时器
@@ -104,7 +105,7 @@ src/
 
 聊天路由只接收 Agent 地址读取函数、端口与超时；米家服务只接收 go2rtc 地址读取函数和凭据仓库。地址函数由启动入口连接到配置仓库，调用时读取当前配置，业务模块不依赖 YAML 存储结构。数据库由凭据存储模块持有，不放入 HTTP 请求上下文。`environment.ts` 负责读取和校验进程环境变量。
 
-米家内部按所有权封装状态：当前 MiCloud 账号、读取取消范围和采集代次属于 `MijiaService`；`LoginFlow` 与 `AccountMaintenance` 只管理各自操作状态、任务、计时器及候选工作。设备目录属于 `DeviceDiscovery`，`DeviceQueries` 直接查询该目录；绑定与播放状态属于 `MediaSession`，属性批次预算属于 `PropertyReader`。协调层通过显式回调提供当前账号、任务有效性、凭据提交和续期能力，并将发现的设备交给媒体模块；子模块不引用协调服务或 Hono Context。凭据提交与媒体清理共用协调层的串行队列，避免退出登录、账号接管和重新绑定交错。会话替换、失效、退出或关闭会使旧采集实例失效；属性传输失败不自动更换协议。HTTP 状态查询只组合快照；后台任务和播放资源的生命周期独立于单个请求。
+米家内部按所有权封装状态：当前 MiCloud 账号、读取取消范围和采集代次属于 `MijiaService`；`LoginFlow` 与 `AccountMaintenance` 只管理各自操作状态、任务、计时器及候选工作。账号家庭／设备目录及当前家庭选择属于 `DeviceDiscovery`，`DeviceQueries` 直接查询该目录；绑定与播放状态属于 `MediaSession`，属性批次预算属于 `PropertyReader`。协调层通过显式回调提供当前账号、任务有效性、凭据提交和续期能力，并将发现的设备交给媒体模块；子模块不引用协调服务或 Hono Context。凭据提交与媒体清理共用协调层的串行队列，避免退出登录、账号接管和重新绑定交错。会话替换、失效、退出或关闭会使旧采集实例失效；属性传输失败不自动更换协议。HTTP 状态查询只组合快照；后台任务和播放资源的生命周期独立于单个请求。
 
 连接配置路径由 `connections/store.ts` 解析，仓库根目录由顶层入口传入，避免移动功能目录改变用户配置位置。`drizzle/` 存放迁移，`scripts/` 存放开发与构建工具，[`tests/`](tests/README.md) 预留测试目录和约定，当前不包含测试用例。
 
@@ -124,6 +125,8 @@ bun run db:down      # 停止容器，保留数据卷
 本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
 
 `db:check` 核对 backend 迁移时间戳、文件哈希和 TimescaleDB 扩展，再执行 Agent 检查；不写入数据，不验证写权限或完整表结构。缺少迁移时运行 `db:migrate`；已执行的迁移文件被修改时，应恢复原文件并新增迁移。
+
+`mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表、选择 API 与切换语义见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 
 `credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
 
