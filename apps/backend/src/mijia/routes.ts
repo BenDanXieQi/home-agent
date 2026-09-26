@@ -1,4 +1,4 @@
-import { Hono, type Context } from "hono";
+import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
 import {
@@ -7,48 +7,22 @@ import {
   validateJson,
 } from "@home-agent/api/errors/hono";
 import {
-  mijiaHomeSelectionSchema,
-  mijiaHomeSelectionInputSchema,
-  mijiaDeviceSpecSchema,
-  mijiaHomeSchema,
   mijiaPlaybackInputSchema,
   mijiaPlaybackReservationInputSchema,
   mijiaVerificationInputSchema,
-  mijiaStateSchema,
-  mijiaPollIntervalMs,
   mijiaPlaybackStateSchema,
-  type MijiaState,
 } from "@home-agent/api/mijia";
+import { loginMaterialSchema } from "@home-agent/api/household";
+import type { HouseholdRuntime } from "../household/runtime";
+import { createHouseholdRoutes } from "../household/routes";
 import { requireLocalAccess } from "@home-agent/api/local-access";
-import type { MijiaService } from "./service";
 
-function stateResponse(c: Context, state: MijiaState, status: 200 | 202 = 200) {
-  const snapshot = mijiaStateSchema.parse(state);
-  c.header("Retry-After", String(mijiaPollIntervalMs(snapshot) / 1_000));
-  if (status === 202) c.header("Location", "/api/mijia/state");
-  return c.json(snapshot, status);
-}
-
-export type MijiaApi = Pick<
-  MijiaService,
-  | "homes"
-  | "selectHome"
-  | "getHome"
-  | "getDeviceSpec"
-  | "snapshot"
-  | "startLogin"
-  | "cancelLogin"
-  | "verifyLogin"
-  | "requestConnection"
-  | "logout"
-  | "loadDevices"
-  | "reservePlayback"
-  | "playbackSnapshot"
-  | "offer"
-  | "release"
->;
-
-export function createMijiaRoutes(port: number, service: MijiaApi) {
+export function createMijiaRoutes(port: number, runtime: HouseholdRuntime) {
+  const service = runtime.service;
+  const commandResult = () => {
+    service.flushChanges();
+    return { state_version: runtime.version() };
+  };
   const app = new Hono();
   app.use(requireLocalAccess([port, 5173]));
   app
@@ -64,64 +38,45 @@ export function createMijiaRoutes(port: number, service: MijiaApi) {
       await next();
     });
   const routes = app
-    .get("/state", (c) => {
-      return stateResponse(c, service.snapshot());
+    .route("/", createHouseholdRoutes(runtime))
+    .get("/directory/push", (c) => c.json(service.directoryPushStatus()))
+    .get("/login/:id/material", (c) =>
+      c.json(
+        loginMaterialSchema.parse(service.loginMaterial(c.req.param("id"))),
+      ),
+    )
+    .post("/login", (c) => {
+      service.startLogin();
+      return c.json(commandResult(), 202);
     })
-    .get("/homes", (c) =>
-      c.json(mijiaHomeSelectionSchema.parse(service.homes())),
-    )
-    .put(
-      "/home-selection",
-      validateJson(mijiaHomeSelectionInputSchema),
-      async (c) => {
-        const { accountId, homeId } = c.req.valid("json");
-        return stateResponse(c, await service.selectHome(accountId, homeId));
-      },
-    )
-    .get("/home", async (c) =>
-      c.json({
-        code: 0,
-        message: "Home info retrieved successfully",
-        data: mijiaHomeSchema.parse(await service.getHome(c.req.raw.signal)),
-      }),
-    )
-    .get("/devices/:did/spec", async (c) =>
-      c.json({
-        code: 0,
-        message: "ok",
-        data: mijiaDeviceSpecSchema.parse(
-          await service.getDeviceSpec(c.req.param("did"), c.req.raw.signal),
-        ),
-      }),
-    )
-    .post("/login", (c) => stateResponse(c, service.startLogin(), 202))
-    .delete("/login/:id", (c) =>
-      stateResponse(c, service.cancelLogin(c.req.param("id"))),
+    .delete(
+      "/login/:id",
+      (c) => (service.cancelLogin(c.req.param("id")), c.json(commandResult())),
     )
     .post(
       "/login/:id/verify",
       validateJson(mijiaVerificationInputSchema),
       async (c) => {
         const input = c.req.valid("json");
-        return stateResponse(
-          c,
-          await service.verifyLogin(c.req.param("id"), input.ticket),
-        );
+        await service.verifyLogin(c.req.param("id"), input.ticket);
+        return c.json(commandResult());
       },
     )
-    .post("/connection/retry", (c) =>
-      stateResponse(c, service.requestConnection(), 202),
+    .post(
+      "/connection/retry",
+      (c) => (service.requestConnection(), c.json(commandResult(), 202)),
     )
-    .delete("/session", async (c) => stateResponse(c, await service.logout()))
-    .post("/devices/refresh", async (c) => {
-      return stateResponse(c, await service.loadDevices());
+    .delete("/session", async (c) => {
+      await runtime.logout();
+      return c.json(commandResult());
     })
     .post(
       "/playback/reservations",
       validateJson(mijiaPlaybackReservationInputSchema),
       async (c) => {
         const input = c.req.valid("json");
-        const reservation = service.reservePlayback(
+        const reservation = runtime.reservePlayback(
+          input.scope_epoch,
           input.revision,
           input.deviceId,
           input.channel,

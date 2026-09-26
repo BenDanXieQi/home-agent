@@ -27,6 +27,7 @@ export const DeviceGrid = memo(function DeviceGrid({
           {[
             { value: "all", label: "全部" },
             { value: "online", label: "在线" },
+            { value: "unknown", label: "未知" },
             { value: "camera", label: "摄像头" },
           ].map((item) => (
             <Tabs.Trigger key={item.value} value={item.value}>
@@ -76,10 +77,16 @@ export const DeviceGrid = memo(function DeviceGrid({
                   {device.model}
                 </span>
                 <span
-                  className={`device-status ${reliable && device.online ? "online" : ""}`}
+                  className={`device-status ${reliable && device.availability === "online" ? "online" : ""}`}
                 >
                   <i />
-                  {!reliable ? "待确认" : device.online ? "在线" : "离线"}
+                  {!reliable
+                    ? "待确认"
+                    : device.availability === "online"
+                      ? "在线"
+                      : device.availability === "offline"
+                        ? "离线"
+                        : "未知"}
                 </span>
                 {device.camera ? (
                   <Link

@@ -1,3 +1,5 @@
+import { RetryTimer } from "../retry-timer";
+import { householdLimits, jsonBytes } from "../../household/config";
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { MijiaState } from "@home-agent/api/mijia";
 import type { MiCloud, MiCloudDevice } from "../protocols/micloud";
@@ -8,25 +10,45 @@ import { mijiaOperation } from "../operation";
 const DEVICE_DISCOVERY_INTERVAL_MS = 5 * 60_000;
 
 type DeviceDependencies = {
+  onChange: () => void;
+  commit: (
+    catalog: Awaited<ReturnType<MiCloud["getCatalog"]>>,
+    account: MiCloud,
+    assertCurrent: () => void,
+  ) => Promise<void>;
   currentAccount: () => MiCloud | undefined;
   activeAccount: (account: MiCloud) => boolean;
   stopped: () => boolean;
   renewalFailed: (account: MiCloud) => boolean;
   renew: (account: MiCloud) => Promise<void>;
-  retainedChannels: (id: string) => (1 | 2)[];
   onScopeChanged: () => void;
   onDevices: (devices: MiCloudDevice[], retryFailed: boolean) => void;
 };
 
 /** Owns the account catalog, selected household scope and discovery work. */
 export class DeviceDiscovery {
-  private state: MijiaState["devices"] = { status: "idle", items: [] };
+  private currentState: MijiaState["devices"] = { status: "idle", items: [] };
+  get state() {
+    return this.currentState;
+  }
+  private set state(value: MijiaState["devices"]) {
+    this.currentState = value;
+    this.dependencies.onChange();
+  }
   private catalog: Awaited<ReturnType<MiCloud["getCatalog"]>> = {
     homes: [],
     devices: [],
   };
   private selectedHomeId: string | null = null;
   private scopeRevision = crypto.randomUUID();
+  private confirmed = false;
+  private readonly retry = new RetryTimer();
+  private pendingCatalog:
+    | { account: MiCloud; catalog: Awaited<ReturnType<MiCloud["getCatalog"]>> }
+    | undefined;
+  get ready() {
+    return this.confirmed;
+  }
 
   get revision() {
     return this.scopeRevision;
@@ -64,7 +86,6 @@ export class DeviceDiscovery {
   }
   validateSelection(homeId: string | null) {
     if (homeId === null) return;
-    if (this.state.status !== "ready") throw new MijiaError("devices_failed");
     if (!this.catalog.homes.some((home) => home.id === homeId))
       throw new MijiaError("home_unavailable");
   }
@@ -76,6 +97,54 @@ export class DeviceDiscovery {
     this.state = { ...this.state, items: describeMijiaDevices(this.devices) };
     this.dependencies.onDevices(this.devices, false);
   }
+  catalogSnapshot() {
+    return this.catalog;
+  }
+  retain(
+    catalog: Awaited<ReturnType<MiCloud["getCatalog"]>>,
+    account: MiCloud,
+  ) {
+    this.pendingCatalog = undefined;
+    if (jsonBytes(catalog) > householdLimits.directoryBytes)
+      throw new MijiaError("capacity_exceeded");
+    this.pendingCatalog = { account, catalog };
+  }
+  suspend() {
+    this.pause();
+    this.confirmed = false;
+    this.pendingCatalog = undefined;
+    this.loadController?.abort();
+    this.scopeRevision = crypto.randomUUID();
+    this.state = { status: "loading", items: [] };
+  }
+  revoke(next: Awaited<ReturnType<MiCloud["getCatalog"]>>) {
+    const accepted = new Map(
+      next.devices.map((device) => [device.did, device]),
+    );
+    const home = this.selectedHomeId;
+    const remaining = this.catalog.devices.filter((device) => {
+      const replacement = accepted.get(device.did);
+      return (
+        replacement &&
+        replacement.home_id === device.home_id &&
+        replacement.model === device.model &&
+        replacement.spec_type === device.spec_type
+      );
+    });
+    if (
+      remaining.length !== this.catalog.devices.length ||
+      (home && !next.homes.some((item) => item.id === home))
+    ) {
+      this.set({
+        homes: this.catalog.homes.filter((item) =>
+          next.homes.some((candidate) => candidate.id === item.id),
+        ),
+        devices: remaining,
+      });
+    }
+  }
+  private loadController: AbortController | undefined;
+  private refreshAgain = false;
   private deviceLoadTask:
     | { account: MiCloud; promise: Promise<void> }
     | undefined;
@@ -98,18 +167,19 @@ export class DeviceDiscovery {
   snapshot() {
     return {
       ...this.state,
-      items: describeMijiaDevices(
-        this.devices,
-        this.dependencies.retainedChannels,
-      ),
+      items: describeMijiaDevices(this.devices),
     };
   }
   pause() {
     clearTimeout(this.discoveryTimer);
+    this.retry.cancel();
     this.discoveryTimer = undefined;
   }
   reset() {
     this.pause();
+    this.loadController?.abort();
+    this.confirmed = false;
+    this.pendingCatalog = undefined;
     this.catalog = { homes: [], devices: [] };
     this.selectedHomeId = null;
     this.scopeRevision = crypto.randomUUID();
@@ -118,6 +188,12 @@ export class DeviceDiscovery {
     this.deviceLoadTask = undefined;
   }
   fail(error: MijiaError) {
+    const account = this.dependencies.currentAccount();
+    if (account && error.reason === "home_storage")
+      this.retry.schedule(() => {
+        if (this.dependencies.activeAccount(account))
+          void this.load(true, true);
+      });
     this.state = {
       status: "error",
       items: this.state.items,
@@ -132,27 +208,21 @@ export class DeviceDiscovery {
       this.discoveryFailedAccount === account
     )
       return;
-    const confirmingOffline = describeMijiaDevices(this.devices, (id) =>
-      this.dependencies.retainedChannels(id),
-    ).some((device) => device.retainedChannels.length > 0);
     this.discoveryTimer = context.with(ROOT_CONTEXT, () =>
-      setTimeout(
-        () => {
-          this.discoveryTimer = undefined;
-          if (
-            !this.dependencies.activeAccount(account) ||
-            this.dependencies.renewalFailed(account)
-          )
-            return;
-          void this.load(true)
-            .catch(() => {})
-            .finally(() => {
-              if (this.dependencies.activeAccount(account))
-                this.schedule(account);
-            });
-        },
-        confirmingOffline ? 15_000 : DEVICE_DISCOVERY_INTERVAL_MS,
-      ),
+      setTimeout(() => {
+        this.discoveryTimer = undefined;
+        if (
+          !this.dependencies.activeAccount(account) ||
+          this.dependencies.renewalFailed(account)
+        )
+          return;
+        void this.load(true)
+          .catch(() => {})
+          .finally(() => {
+            if (this.dependencies.activeAccount(account))
+              this.schedule(account);
+          });
+      }, DEVICE_DISCOVERY_INTERVAL_MS),
     );
     this.discoveryTimer.unref();
   }
@@ -161,10 +231,14 @@ export class DeviceDiscovery {
     catalog: Awaited<ReturnType<MiCloud["getCatalog"]>>,
     retryFailed = false,
   ) {
+    this.confirmed = true;
+    this.retry.cancel();
     this.discoveryFailedAccount = undefined;
     const previousHome = this.selectedHome?.id;
     const previousDevices = this.devices;
     this.catalog = catalog;
+    if (this.pendingCatalog?.catalog === catalog)
+      this.pendingCatalog = undefined;
     const remaining = new Set(this.devices.map((device) => device.did));
     if (
       previousHome !== this.selectedHome?.id ||
@@ -191,11 +265,12 @@ export class DeviceDiscovery {
     if (account) this.schedule(account);
   }
 
-  async load(background = false) {
+  async load(background = false, retryStorage = false) {
     const account = this.dependencies.currentAccount();
     if (!account) throw new MijiaError("not_bound");
     if (!background) this.discoveryFailedAccount = undefined;
     if (this.deviceLoadTask?.account === account) {
+      this.refreshAgain = true;
       await this.deviceLoadTask.promise;
       return this.snapshot();
     }
@@ -208,20 +283,35 @@ export class DeviceDiscovery {
         status: "loading",
         items: this.state.items,
       };
+    const controller = new AbortController();
+    this.loadController = controller;
+    const assertCurrent = () => {
+      controller.signal.throwIfAborted();
+      if (
+        this.dependencies.currentAccount() !== account ||
+        this.dependencies.stopped()
+      )
+        throw new MijiaError("stale_session");
+    };
     const operation = (async () => {
       try {
-        const catalog = await mijiaOperation(
-          "devices.list",
-          "devices_failed",
-          () => account.getCatalog(),
-        );
+        const catalog =
+          retryStorage && this.pendingCatalog?.account === account
+            ? this.pendingCatalog.catalog
+            : await mijiaOperation("devices.list", "devices_failed", () =>
+                account.getCatalog(controller.signal),
+              );
         if (
           this.dependencies.currentAccount() !== account ||
           this.dependencies.stopped()
         )
           return;
-        this.set(catalog, true);
+        assertCurrent();
+        await this.dependencies.commit(catalog, account, assertCurrent);
+        if (this.pendingCatalog?.catalog === catalog)
+          this.pendingCatalog = undefined;
       } catch (error) {
+        if (controller.signal.aborted) return;
         if (
           this.dependencies.currentAccount() !== account ||
           this.dependencies.stopped()
@@ -237,8 +327,15 @@ export class DeviceDiscovery {
           await this.dependencies.renew(account);
           return;
         }
-        if (!isRecoverableMijiaError(error))
-          this.discoveryFailedAccount = account;
+        if (
+          isRecoverableMijiaError(error) ||
+          failure.reason === "home_storage"
+        ) {
+          this.retry.schedule(() => {
+            if (this.dependencies.activeAccount(account))
+              void this.load(true, true);
+          });
+        } else this.discoveryFailedAccount = account;
         this.state = {
           status: "error",
           items: this.state.items,
@@ -250,7 +347,13 @@ export class DeviceDiscovery {
     await operation;
     if (this.deviceLoadTask?.promise === operation)
       this.deviceLoadTask = undefined;
-    if (this.dependencies.activeAccount(account)) this.schedule(account);
+    if (this.dependencies.activeAccount(account)) {
+      this.schedule(account);
+      if (this.refreshAgain) {
+        this.refreshAgain = false;
+        void this.load(true);
+      }
+    }
     return this.snapshot();
   }
 }

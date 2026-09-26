@@ -30,6 +30,7 @@
     "postgres": "catalog:",
     "tough-cookie": "6.0.2",
     "write-file-atomic": "catalog:",
+    "xstate": "5.33.2",
     "yaml": "catalog:",
     "zod": "catalog:"
   },

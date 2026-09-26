@@ -37,14 +37,21 @@ const keyPath = resolvePath(
 const credentialStore = database
   ? createCredentialStore(database.db, () => readCredentialKey(keyPath))
   : undefined;
-const mijia = new MijiaService({
+const mijiaService = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
   homeSelectionStore: database
     ? createHomeSelectionStore(database.db)
     : undefined,
 });
-void mijia.initialize().catch(() => {
+const { HouseholdRuntime } = await import("./household/runtime");
+const { createHouseholdRepository } = await import("./household/repository");
+const mijia = new HouseholdRuntime(
+  mijiaService,
+  database ? createHouseholdRepository(database.db) : undefined,
+);
+mijia.start();
+void mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
 const app = createApp({

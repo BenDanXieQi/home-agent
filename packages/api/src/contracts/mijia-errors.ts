@@ -1,5 +1,9 @@
 // Shared wire codes, HTTP statuses and safe messages. Never include upstream data.
 export const mijiaErrorDefinitions = {
+  mijia_capacity_exceeded: {
+    status: 503,
+    message: "家庭数据超出容量限制，保留上次已确认的数据。",
+  },
   mijia_home_required: { status: 409, message: "请先选择要接入的米家家庭。" },
   mijia_home_unavailable: {
     status: 409,

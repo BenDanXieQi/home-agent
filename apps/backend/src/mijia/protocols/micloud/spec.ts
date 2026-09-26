@@ -47,8 +47,6 @@ const translationsSchema = z.object({
 type Spec = Pick<MijiaDeviceSpec, "category" | "spec">;
 type Instance = z.infer<typeof instanceSchema>;
 type Translations = z.infer<typeof translationsSchema>["data"][string];
-const CACHE_TTL_MS = 24 * 60 * 60_000;
-const CACHE_LIMIT = 128;
 
 function typeName(type: string) {
   const name = type.split(":")[3];
@@ -58,18 +56,7 @@ function typeName(type: string) {
 
 /** Public metadata only. This client never receives account cookies or tokens. */
 export class MiotSpecClient {
-  private readonly models = new Map<
-    string,
-    { urn: string; expiresAt: number }
-  >();
-  private readonly instances = new Map<
-    string,
-    { instance: Instance; expiresAt: number }
-  >();
-  private readonly translations = new Map<
-    string,
-    { values: Translations; expiresAt: number }
-  >();
+  constructor(private readonly maxResponseBytes: number) {}
 
   async get(device: MiCloudDevice, parentSignal: AbortSignal) {
     const requestSignal = AbortSignal.any([
@@ -78,121 +65,62 @@ export class MiotSpecClient {
     ]);
     this.assertActive(requestSignal);
     const model = typeof device.model === "string" ? device.model : "";
-    let deviceUrn: string;
-    if (typeof device.spec_type === "string" && device.spec_type.length > 0) {
-      const parsed = urn.safeParse(device.spec_type);
-      if (!parsed.success) throw new MiCloudError("spec-invalid-response");
-      deviceUrn = parsed.data;
-    } else {
+    let deviceUrn = device.spec_type;
+    if (!deviceUrn) {
       if (!model) throw new MiCloudError("spec-unavailable");
-      const cached = this.models.get(model);
-      if (cached && cached.expiresAt > Date.now()) deviceUrn = cached.urn;
-      else {
-        const result = z
-          .object({ urn: urn.nullish() })
-          .safeParse(
-            await this.request(
-              "/internal/urn-by-model-version",
-              { model, version: "0" },
-              requestSignal,
-            ),
-          );
-        if (!result.success) throw new MiCloudError("spec-invalid-response");
-        if (!result.data.urn) throw new MiCloudError("spec-unavailable");
-        deviceUrn = result.data.urn;
-        this.limit(this.models);
-        this.models.set(model, {
-          urn: deviceUrn,
-          expiresAt: Date.now() + CACHE_TTL_MS,
-        });
+      const response = z
+        .object({ urn: urn.nullish() })
+        .safeParse(
+          await this.request(
+            "/internal/urn-by-model-version",
+            { model, version: "0" },
+            requestSignal,
+          ),
+        );
+      if (!response.success) throw new MiCloudError("spec-invalid-response");
+      if (!response.data.urn) throw new MiCloudError("spec-unavailable");
+      deviceUrn = response.data.urn;
+    }
+    if (!urn.safeParse(deviceUrn).success)
+      throw new MiCloudError("spec-invalid-response");
+    const parsed = instanceSchema.safeParse(
+      await this.request(
+        "/miot-spec-v2/instance",
+        { type: deviceUrn },
+        requestSignal,
+      ),
+    );
+    if (!parsed.success) throw new MiCloudError("spec-invalid-response");
+    const instance = parsed.data;
+    parseSpec(instance, {});
+    let translations: Translations = {};
+    if (!requestSignal.aborted) {
+      try {
+        const translated = translationsSchema.safeParse(
+          await this.request(
+            "/instance/v2/multiLanguage",
+            { urn: deviceUrn },
+            requestSignal,
+          ),
+        );
+        if (translated.success)
+          translations = translated.data.data["zh_cn"] ?? {};
+      } catch {
+        // Optional translations do not invalidate successfully read capabilities.
+        this.assertActive(parentSignal);
       }
     }
-    const cached = this.instances.get(deviceUrn);
-    let instance: Instance;
-    if (cached && cached.expiresAt > Date.now()) instance = cached.instance;
-    else {
-      const parsed = instanceSchema.safeParse(
-        await this.request(
-          "/miot-spec-v2/instance",
-          { type: deviceUrn },
-          requestSignal,
-        ),
-      );
-      if (!parsed.success) throw new MiCloudError("spec-invalid-response");
-      instance = parsed.data;
-      // Validate structural relationships before caching capabilities. Display
-      // translations are optional and cannot turn readable properties into an empty spec.
-      parseSpec(instance, {});
-      this.assertActive(requestSignal);
-      this.limit(this.instances);
-      this.instances.set(deviceUrn, {
-        instance,
-        expiresAt: Date.now() + CACHE_TTL_MS,
-      });
-    }
-    const translations = await this.getTranslations(
-      deviceUrn,
-      requestSignal,
-      parentSignal,
-    );
-    // Once capabilities are available, exhausting the optional translation's
-    // network budget must not discard them. The caller's lifetime still applies.
     this.assertActive(parentSignal);
     return {
+      urn: deviceUrn,
       did: device.did,
       name: device.name ?? "",
       home: device.home_name ?? "",
       model,
       room: device.room_name ?? "",
       online: device.isOnline === true,
-      ...structuredClone(parseSpec(instance, translations)),
+      ...parseSpec(instance, translations),
     };
-  }
-
-  private async getTranslations(
-    deviceUrn: string,
-    requestSignal: AbortSignal,
-    parentSignal: AbortSignal,
-  ) {
-    this.assertActive(parentSignal);
-    const cached = this.translations.get(deviceUrn);
-    if (cached && cached.expiresAt > Date.now()) return cached.values;
-    // Translations consume only the remaining metadata budget; no fresh timeout
-    // or detached background request is started after that budget expires.
-    if (requestSignal.aborted) return {};
-    try {
-      const parsed = translationsSchema.safeParse(
-        await this.request(
-          "/instance/v2/multiLanguage",
-          { urn: deviceUrn },
-          requestSignal,
-        ),
-      );
-      this.assertActive(parentSignal);
-      if (requestSignal.aborted || !parsed.success) return {};
-      const values = parsed.data.data["zh_cn"] ?? {};
-      this.limit(this.translations);
-      this.translations.set(deviceUrn, {
-        values,
-        expiresAt: Date.now() + CACHE_TTL_MS,
-      });
-      return values;
-    } catch (error) {
-      // Parent cancellation, account revocation and caller deadlines remain
-      // terminal; only the optional request's own failure is isolated.
-      this.assertActive(parentSignal);
-      if (!(error instanceof MiCloudError)) throw error;
-      // Keep failed translations out of the cache so a later query can recover
-      // without re-fetching the already validated capability instance.
-      return {};
-    }
-  }
-
-  private limit(map: Map<string, unknown>) {
-    if (map.size >= CACHE_LIMIT) {
-      const first = map.keys().next().value;
-      if (first !== undefined) map.delete(first);
-    }
   }
 
   private assertActive(signal: AbortSignal) {
@@ -220,15 +148,21 @@ export class MiotSpecClient {
         credentials: "omit",
       });
       if (response.status === 404) throw new MiCloudError("spec-unavailable");
-      if (!response.ok) throw new MiCloudError("spec-failed");
-      return await readLimitedJson(response, 4 * 1024 * 1024, signal);
+      if (!response.ok)
+        throw new MiCloudError(
+          response.status >= 500 || response.status === 429
+            ? "network"
+            : "network",
+          { httpStatus: response.status },
+        );
+      return await readLimitedJson(response, this.maxResponseBytes, signal);
     } catch (error) {
       this.assertActive(signal);
       if (error instanceof MiCloudError) throw error;
       throw new MiCloudError(
         error instanceof ResponseBodyError
           ? "spec-invalid-response"
-          : "spec-failed",
+          : "network",
       );
     } finally {
       await response?.body?.cancel().catch(() => {});
@@ -300,6 +234,31 @@ function parseSpec(instance: Instance, translations: Translations) {
               })),
             }
           : {}),
+      });
+    }
+    for (const event of service.events ?? []) {
+      if (!event.type.startsWith("urn:miot-spec-v2:")) continue;
+      const args = event.arguments.map((id) => {
+        const property = properties.get(id);
+        if (!property) throw new MiCloudError("spec-invalid-response");
+        return {
+          piid: id,
+          name: typeName(property.type),
+          format: property.format,
+        };
+      });
+      add(`event.${service.iid}.${event.iid}`, {
+        ...common,
+        description: description(
+          `${prefix}:event:${pad(event.iid)}`,
+          event.description,
+        ),
+        format: JSON.stringify(args),
+        writeable: false,
+        readable: false,
+        notify: true,
+        type_name: typeName(event.type),
+        prop_description: event.description,
       });
     }
     for (const action of service.actions ?? []) {

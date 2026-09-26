@@ -61,7 +61,7 @@ export function LoginFlow() {
         </div>
       ) : (
         <>
-          {login?.status === "security_required" ? (
+          {login?.status === "security_required" && login.verificationUrl ? (
             <MijiaVerification
               key={login.id}
               verificationUrl={login.verificationUrl}
@@ -71,7 +71,7 @@ export function LoginFlow() {
           ) : (
             <>
               <div className="login-code">
-                {login?.status === "pending" ? (
+                {login?.status === "pending" && login.qrImageUrl ? (
                   <img
                     src={login.qrImageUrl}
                     alt="使用米家 App 扫码登录"
@@ -135,7 +135,7 @@ export function LoginFlow() {
             </div>
           ) : null}
           {login?.status === "pending" ||
-          login?.status === "security_required" ? (
+          (login?.status === "security_required" && login.verificationUrl) ? (
             <p className="mt-3 text-xs text-muted">
               有效期至 {new Date(login.expiresAt).toLocaleTimeString("zh-CN")}
             </p>

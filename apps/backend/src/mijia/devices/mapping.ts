@@ -19,10 +19,7 @@ export function cameraChannels(device: MiCloudDevice) {
   ) satisfies CameraSourceSpec["channel"][];
 }
 
-export function describeMijiaDevices(
-  devices: readonly MiCloudDevice[],
-  retainedChannels: (deviceId: string) => (1 | 2)[] = () => [],
-) {
+export function describeMijiaDevices(devices: readonly MiCloudDevice[]) {
   return devices.map((device) => ({
     id: device.did,
     name: typeof device.name === "string" ? device.name : "未命名设备",
@@ -34,6 +31,5 @@ export function describeMijiaDevices(
     online: device.isOnline === true,
     camera: isCamera(device),
     channels: cameraChannels(device),
-    retainedChannels: retainedChannels(device.did),
   }));
 }

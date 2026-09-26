@@ -1,4 +1,10 @@
-import { pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  timestamp,
+  jsonb,
+  primaryKey,
+} from "drizzle-orm/pg-core";
 
 export const credentials = pgTable("credentials", {
   key: text("key").primaryKey(),
@@ -15,3 +21,16 @@ export const mijiaHomeSelections = pgTable("mijia_home_selections", {
     .notNull()
     .defaultNow(),
 });
+
+export const householdDirectories = pgTable(
+  "household_directories",
+  {
+    accountId: text("account_id").notNull(),
+    homeId: text("home_id").notNull(),
+    directory: jsonb("directory").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.accountId, table.homeId] })],
+);

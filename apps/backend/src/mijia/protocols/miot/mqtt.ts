@@ -86,9 +86,10 @@ export class MiotMqtt {
         return;
       }
       for (const event of events) {
-        const filter = deviceTopics(event.did)[
-          event.kind === "property" ? 0 : 1
-        ]!;
+        const filter =
+          event.kind === "directory"
+            ? event.topic
+            : deviceTopics(event.did)[event.kind === "property" ? 0 : 1]!;
         const subscription = this.topics.get(filter);
         if (!subscription?.listeners.size) {
           this.stats.discarded++;
@@ -178,6 +179,35 @@ export class MiotMqtt {
   ) {
     signal.throwIfAborted();
     if (this.closed) throw new Error("MQTT instance is closed");
+    for (const did of new Set(deviceIds)) {
+      if (subscribableDevice(did)) continue;
+      for (const topic of deviceTopics(did)) {
+        if (signal.aborted) break;
+        this.emit(
+          listener,
+          subscriptionObservation(
+            this.sourceId,
+            this.generation,
+            topic,
+            "failed",
+            "unsupported_device_id",
+          ),
+        );
+      }
+    }
+    return this.observeTopics(
+      deviceIds.filter(subscribableDevice).flatMap(deviceTopics),
+      listener,
+      signal,
+    );
+  }
+  observeTopics(
+    topics: readonly string[],
+    listener: Listener,
+    signal: AbortSignal,
+  ) {
+    signal.throwIfAborted();
+    if (this.closed) throw new Error("MQTT instance is closed");
     const callback: Listener = (event) => {
       if (!signal.aborted) listener(event);
     };
@@ -201,43 +231,26 @@ export class MiotMqtt {
         this.reason,
       ),
     );
-    for (const did of new Set(deviceIds)) {
-      if (signal.aborted || this.closed) break;
-      for (const topic of deviceTopics(did)) {
-        if (signal.aborted || !this.observers.has(callback) || this.closed)
-          break;
-        if (!subscribableDevice(did)) {
-          this.emit(
-            callback,
-            subscriptionObservation(
-              this.sourceId,
-              this.generation,
-              topic,
-              "failed",
-              "unsupported_device_id",
-            ),
-          );
-          continue;
-        }
-        let item = this.topics.get(topic);
-        if (!item) {
-          item = entry(topic);
-          this.topics.set(topic, item);
-        }
-        item.listeners.add(callback);
-        selected.push(item);
-        this.emit(
-          callback,
-          subscriptionObservation(
-            this.sourceId,
-            this.generation,
-            topic,
-            item.failure ? "failed" : item.subscribed ? "confirmed" : "pending",
-            item.failure?.reason ?? null,
-            item.failure?.code ?? item.granted,
-          ),
-        );
+    for (const topic of new Set(topics)) {
+      if (signal.aborted || !this.observers.has(callback) || this.closed) break;
+      let item = this.topics.get(topic);
+      if (!item) {
+        item = entry(topic);
+        this.topics.set(topic, item);
       }
+      item.listeners.add(callback);
+      selected.push(item);
+      this.emit(
+        callback,
+        subscriptionObservation(
+          this.sourceId,
+          this.generation,
+          topic,
+          item.failure ? "failed" : item.subscribed ? "confirmed" : "pending",
+          item.failure?.reason ?? null,
+          item.failure?.code ?? item.granted,
+        ),
+      );
     }
     this.reconcile();
     return {

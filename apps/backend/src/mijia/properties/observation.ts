@@ -3,7 +3,9 @@ import { MiotMqtt } from "../protocols/miot/mqtt";
 import type { MiotObservation } from "../protocols/miot/messages";
 
 type Watch = {
-  ids: readonly string[];
+  selection:
+    | { kind: "devices"; ids: readonly string[] }
+    | { kind: "topics"; topics: readonly string[] };
   listener: (event: MiotObservation) => void;
   signal: AbortSignal;
   detach: () => void;
@@ -70,32 +72,36 @@ export class DeviceObservations {
   }
 
   private bind(watch: Watch, connection: MiotMqtt) {
-    watch.binding = connection.observe(
-      watch.ids,
-      (event) => {
-        if (this.connection !== connection || !this.watches.has(watch)) return;
-        if (event.kind === "connection") {
-          if (event.status === "connected") this.delay = 1_000;
-          if (event.status === "closed") {
-            if (
-              [
-                "connack_134",
-                "connack_135",
-                "connack_138",
-                "server_disconnect_135",
-              ].includes(event.reason ?? "")
-            ) {
-              if (!this.authenticationFailed) {
-                this.authenticationFailed = true;
-                this.onAuthenticationFailure();
-              }
-            } else this.schedule();
-          }
+    const listener: Watch["listener"] = (event) => {
+      if (this.connection !== connection || !this.watches.has(watch)) return;
+      if (event.kind === "connection") {
+        if (event.status === "connected") this.delay = 1_000;
+        if (event.status === "closed") {
+          if (
+            [
+              "connack_134",
+              "connack_135",
+              "connack_138",
+              "server_disconnect_135",
+            ].includes(event.reason ?? "")
+          ) {
+            if (!this.authenticationFailed) {
+              this.authenticationFailed = true;
+              this.onAuthenticationFailure();
+            }
+          } else this.schedule();
         }
-        watch.listener(event);
-      },
-      watch.signal,
-    );
+      }
+      watch.listener(event);
+    };
+    watch.binding =
+      watch.selection.kind === "devices"
+        ? connection.observe(watch.selection.ids, listener, watch.signal)
+        : connection.observeTopics(
+            watch.selection.topics,
+            listener,
+            watch.signal,
+          );
   }
 
   observe(
@@ -103,10 +109,28 @@ export class DeviceObservations {
     listener: Watch["listener"],
     signal: AbortSignal,
   ) {
+    return this.watch({ kind: "devices", ids: [...ids] }, listener, signal);
+  }
+  observeTopics(
+    topics: readonly string[],
+    listener: Watch["listener"],
+    signal: AbortSignal,
+  ) {
+    return this.watch(
+      { kind: "topics", topics: [...topics] },
+      listener,
+      signal,
+    );
+  }
+  private watch(
+    selection: Watch["selection"],
+    listener: Watch["listener"],
+    signal: AbortSignal,
+  ) {
     signal.throwIfAborted();
     if (this.stopped) throw new Error("Device observations are closed");
     const watch: Watch = {
-      ids: [...ids],
+      selection,
       listener,
       signal,
       detach: () => signal.removeEventListener("abort", cancel),

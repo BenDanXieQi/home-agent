@@ -1,13 +1,17 @@
 import { atom } from "jotai";
-import { atomWithQuery, queryClientAtom } from "jotai-tanstack-query";
-import {
-  isMijiaLoginAttemptActive,
-  type MijiaState,
-} from "@home-agent/api/mijia";
+
+import { isMijiaLoginAttemptActive } from "@home-agent/api/mijia";
 import { RequestError, requestErrorMessage } from "../../lib/api";
 import { executeMijiaCommand, type MijiaCommand } from "./api";
-import { mijiaStateQueryOptions } from "./queries";
+import {
+  householdSnapshotAtom,
+  householdSyncedAtom,
+  householdUpdatedAtom,
+  householdReconnectAtom,
+} from "./household-state";
+import { appStore } from "../../lib/store";
 
+const noop = () => {};
 export const deviceSearchAtom = atom("");
 export const deviceFilterAtom = atom("all");
 
@@ -52,13 +56,30 @@ export const mijiaActionErrorAtom = atom((get) => {
   return error.message;
 });
 
-export const mijiaQueryAtom = atomWithQuery((get) => ({
-  ...mijiaStateQueryOptions,
-  enabled:
-    !get(commandStateAtom).pending ||
-    get(commandStateAtom).type === "verifyLogin",
-}));
-export const mijiaStateAtom = atom((get) => get(mijiaQueryAtom).data);
+export const mijiaStateAtom = atom((get) => {
+  const snapshot = get(householdSnapshotAtom);
+  if (!snapshot) return undefined;
+  const p = snapshot.projection;
+  const household = p.household.household;
+  return {
+    account: p.account.account,
+    loginAttempt: p.login.login,
+    connectionOperation: p.connection.connection,
+    revision: p.media.media.revision,
+    binding: p.media.media.binding,
+    homes: household.homes,
+    devices: {
+      status:
+        household.sync_status === "error"
+          ? ("error" as const)
+          : household.sync_status === "synced"
+            ? ("ready" as const)
+            : ("loading" as const),
+      items: Object.values(p.device),
+      error: household.error,
+    },
+  };
+});
 export const mijiaLoginAttemptAtom = atom(
   (get) => get(mijiaStateAtom)?.loginAttempt,
 );
@@ -66,24 +87,38 @@ export const mijiaConnectionPendingAtom = atom(
   (get) => get(mijiaStateAtom)?.connectionOperation?.status === "running",
 );
 export const mijiaAccountAtom = atom((get) => get(mijiaStateAtom)?.account);
+export const mijiaAccountLabelAtom = atom((get) => {
+  if (get(mijiaFetchErrorAtom)) return "状态不可用";
+  switch (get(mijiaAccountAtom)?.status) {
+    case "authenticated":
+      return "已登录";
+    case "restoring":
+      return "正在恢复";
+    case "restore_error":
+      return "恢复失败";
+    case "reauth_required":
+      return "需要重新登录";
+    default:
+      return "未登录";
+  }
+});
 export const mijiaBindingAtom = atom((get) => get(mijiaStateAtom)?.binding);
 export const mijiaAuthenticatedAtom = atom(
   (get) => get(mijiaAccountAtom)?.status === "authenticated",
 );
-export const mijiaFetchingAtom = atom((get) => get(mijiaQueryAtom).isFetching);
-export const mijiaUpdatedAtAtom = atom(
-  (get) => get(mijiaQueryAtom).dataUpdatedAt,
+export const mijiaFetchingAtom = atom((get) => !get(householdSyncedAtom));
+export const mijiaUpdatedAtAtom = householdUpdatedAtom;
+export const mijiaFetchErrorAtom = atom((get) =>
+  get(householdSyncedAtom) ? null : "状态尚未同步，正在连接后台…",
 );
-export const mijiaFetchErrorAtom = atom((get) => {
-  const error = get(mijiaQueryAtom).error;
-  return error ? requestErrorMessage(error) : null;
-});
 export const mijiaCanStartPlaybackAtom = atom((get) => {
   const command = get(mijiaPendingCommandAtom);
   return (
     get(mijiaAuthenticatedAtom) &&
     get(mijiaBindingAtom)?.status === "ready" &&
     get(mijiaStateAtom)?.homes.status === "selected" &&
+    get(householdSnapshotAtom)?.projection.household.household.status ===
+      "running" &&
     get(mijiaUpdatedAtAtom) > get(mediaConfirmationAfterAtom) &&
     command !== "logout" &&
     command !== "selectHome"
@@ -102,7 +137,9 @@ export const mijiaDeviceCountAtom = atom((get) => {
   const devices = get(mijiaStateAtom)?.devices;
   return devices?.status === "ready" ? devices.items.length : null;
 });
-const emptyDevices: MijiaState["devices"]["items"] = [];
+const emptyDevices: NonNullable<
+  ReturnType<typeof householdSnapshotAtom.read>
+>["projection"]["device"][string][] = [];
 export const devicesAtom = atom(
   (get) => get(mijiaStateAtom)?.devices.items ?? emptyDevices,
 );
@@ -113,8 +150,14 @@ export const filteredDevicesAtom = atom((get) => {
   return devices.filter(
     (device) =>
       (filter === "all" ||
-        (filter === "online" ? device.online : device.camera)) &&
-      `${device.name} ${device.model}`.toLocaleLowerCase().includes(search),
+        (filter === "online"
+          ? device.availability === "online"
+          : filter === "unknown"
+            ? device.availability === "unknown"
+            : device.camera)) &&
+      `${device.name} ${device.alias ?? ""} ${device.model}`
+        .toLocaleLowerCase()
+        .includes(search),
   );
 });
 
@@ -128,7 +171,8 @@ export const performMijiaAtom = atom(
       previous.type === "verifyLogin" &&
       (command.type === "cancelLogin" || command.type === "startLogin");
     if (previous.pending && !interruptsVerification) return;
-    const client = get(queryClientAtom);
+    const snapshot = get(householdSnapshotAtom);
+    if (!snapshot || !get(householdSyncedAtom)) return;
     const requestId = previous.requestId + 1;
     get(commandControllerAtom)?.abort();
     const controller = new AbortController();
@@ -142,22 +186,37 @@ export const performMijiaAtom = atom(
     const current = () => get(commandStateAtom).requestId === requestId;
     if (command.type === "logout" || command.type === "selectHome") {
       // An uncertain ownership change needs a new snapshot before media resumes.
-      set(
-        mediaConfirmationAfterAtom,
-        client.getQueryState(mijiaStateQueryOptions.queryKey)?.dataUpdatedAt ??
-          0,
-      );
+      set(mediaConfirmationAfterAtom, get(householdUpdatedAtom));
     }
     let error: CommandState["error"] = null;
     try {
-      await client.cancelQueries({ queryKey: mijiaStateQueryOptions.queryKey });
+      const result = await executeMijiaCommand(
+        command,
+        snapshot.scope_epoch,
+        controller.signal,
+      );
       if (!current()) return;
-      const state = await executeMijiaCommand(command, controller.signal);
-      if (!current()) return;
-      // Verification polls may have captured the preceding login state.
-      await client.cancelQueries({ queryKey: mijiaStateQueryOptions.queryKey });
-      if (!current()) return;
-      client.setQueryData(mijiaStateQueryOptions.queryKey, state);
+      await new Promise<void>((resolve, reject) => {
+        let unsubscribe = noop;
+        const timer = setTimeout(() => {
+          unsubscribe();
+          reject(new Error("操作已接收，状态尚未同步"));
+        }, 5_000);
+        const check = () => {
+          const state = appStore.get(householdSnapshotAtom);
+          if (
+            state &&
+            state.scope_epoch === result.state_version.scope_epoch &&
+            state.sequence >= result.state_version.sequence
+          ) {
+            clearTimeout(timer);
+            unsubscribe();
+            resolve();
+          }
+        };
+        unsubscribe = appStore.sub(householdSnapshotAtom, check);
+        check();
+      });
     } catch (cause) {
       if (!current()) return;
       const transient =
@@ -167,15 +226,10 @@ export const performMijiaAtom = atom(
         message: requestErrorMessage(cause),
         ...(transient
           ? {
-              recoverAfter:
-                client.getQueryState(mijiaStateQueryOptions.queryKey)
-                  ?.dataUpdatedAt ?? 0,
+              recoverAfter: get(householdUpdatedAtom),
             }
           : {}),
       };
-      await client
-        .fetchQuery({ ...mijiaStateQueryOptions, staleTime: 0 })
-        .catch(() => undefined);
     } finally {
       if (current()) {
         set(commandControllerAtom, null);
@@ -213,17 +267,15 @@ export const startMijiaLoginAutomaticallyAtom = atom(null, async (get, set) => {
   await set(performMijiaAtom, { type: "startLogin" });
 });
 
-export const refreshMijiaAtom = atom(null, async (get) => {
-  const command = get(commandStateAtom);
-  if (command.pending && command.type !== "verifyLogin") return;
-  await get(queryClientAtom)
-    .fetchQuery({ ...mijiaStateQueryOptions, staleTime: 0 })
-    .catch(() => undefined);
+export const refreshMijiaAtom = atom(null, (get) => {
+  get(householdReconnectAtom)?.();
 });
 
 export const mijiaActiveLoginIdAtom = atom((get) => {
   const attempt = get(mijiaLoginAttemptAtom);
-  return isMijiaLoginAttemptActive(attempt) ? attempt.id : undefined;
+  return isMijiaLoginAttemptActive(attempt)
+    ? (attempt?.id ?? undefined)
+    : undefined;
 });
 export const mijiaConnectionBusyAtom = atom(
   (get) =>

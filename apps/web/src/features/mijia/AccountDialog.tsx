@@ -1,5 +1,5 @@
 import { useAtomValue } from "jotai";
-import { mijiaAccountAtom } from "./state";
+import { mijiaAccountAtom, mijiaAccountLabelAtom } from "./state";
 import { AccountAvatar } from "./AccountAvatar";
 import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
@@ -10,6 +10,7 @@ import { useLogin } from "./use-login";
 export default function AccountDialog() {
   const flow = useLogin();
   const account = useAtomValue(mijiaAccountAtom);
+  const accountLabel = useAtomValue(mijiaAccountLabelAtom);
   const name =
     account?.status === "authenticated" ? account.profile?.name : null;
   return (
@@ -37,9 +38,7 @@ export default function AccountDialog() {
                 {name}
               </p>
             ) : null}
-            <p className="text-xs text-muted">
-              {flow.fetchError ? "暂时无法确认账号状态" : "已登录"}
-            </p>
+            <p className="text-xs text-muted">{accountLabel}</p>
             {flow.deviceCount !== null ? (
               <p className="mt-1 text-xs text-muted">
                 {flow.deviceCount} 台设备

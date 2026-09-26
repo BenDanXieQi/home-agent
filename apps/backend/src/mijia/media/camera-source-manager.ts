@@ -1,5 +1,4 @@
 import type { MiCloudDevice } from "../protocols/micloud";
-import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import type { Go2RtcAdapter } from "./go2rtc-adapter";
 import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "../errors";
 import type { PlaybackManager } from "./playback-manager";
@@ -18,13 +17,9 @@ type CameraSourceEntry = {
   error?: MijiaError;
 };
 
-const OFFLINE_GRACE_MS = 60_000;
-
-/** Owns shared sources; a cloud-offline report has a bounded grace period only for prepared sources. */
+/** Owns camera sources; actual media connectivity determines playback availability. */
 export class CameraSourceManager {
   private readonly streams = new Map<string, CameraSourceEntry>();
-  private readonly offlineUntil = new Map<string, number>();
-  private offlineTimer: ReturnType<typeof setTimeout> | undefined;
   private devices = new Map<string, MiCloudDevice>();
   private closed = false;
   private paused = false;
@@ -38,86 +33,17 @@ export class CameraSourceManager {
   update(devices: readonly MiCloudDevice[], retryFailed = false) {
     if (this.closed) return Promise.resolve();
     this.devices = new Map(devices.map((device) => [device.did, device]));
-    for (const id of this.offlineUntil.keys()) {
-      if (!this.devices.has(id)) this.offlineUntil.delete(id);
-    }
-    for (const device of devices) {
-      if (device.isOnline || !isCamera(device)) {
-        this.offlineUntil.delete(device.did);
-      } else if (
-        !this.offlineUntil.has(device.did) &&
-        cameraChannels(device).some((channel) =>
-          this.preparedSource(device, channel),
-        )
-      ) {
-        this.offlineUntil.set(device.did, performance.now() + OFFLINE_GRACE_MS);
-      }
-    }
-    this.scheduleOfflineExpiry();
     return this.reconcile(retryFailed);
-  }
-
-  /** Cloud state stays unchanged; these existing channels remain usable during confirmation. */
-  retainedChannels(deviceId: string) {
-    const device = this.devices.get(deviceId);
-    const until = this.offlineUntil.get(deviceId);
-    if (
-      this.closed ||
-      !device ||
-      device.isOnline ||
-      until === undefined ||
-      performance.now() >= until
-    )
-      return [];
-    return cameraChannels(device).filter((channel) =>
-      this.preparedSource(device, channel),
-    );
-  }
-
-  private preparedSource(device: MiCloudDevice, channel: 1 | 2) {
-    const stream = this.streams.get(`${device.did}:${channel}`);
-    return (
-      stream?.prepared === true &&
-      !stream.retiring &&
-      !stream.error &&
-      stream.device.model === device.model &&
-      stream.device.localIp === device.localip
-    );
-  }
-
-  private scheduleOfflineExpiry() {
-    clearTimeout(this.offlineTimer);
-    this.offlineTimer = undefined;
-    if (this.closed || this.paused) return;
-    const now = performance.now();
-    const deadlines = [...this.offlineUntil.values()].filter(
-      (until) => until > now,
-    );
-    if (!deadlines.length) return;
-    this.offlineTimer = context.with(ROOT_CONTEXT, () =>
-      setTimeout(
-        () => {
-          this.offlineTimer = undefined;
-          void this.reconcile();
-          this.scheduleOfflineExpiry();
-        },
-        Math.ceil(Math.min(...deadlines) - now),
-      ),
-    );
-    this.offlineTimer.unref();
   }
 
   pause() {
     this.paused = true;
-    clearTimeout(this.offlineTimer);
-    this.offlineTimer = undefined;
     for (const stream of this.streams.values()) stream.retry.cancel();
   }
 
   resume() {
     if (this.closed) return;
     this.paused = false;
-    this.scheduleOfflineExpiry();
     for (const [key, stream] of this.streams) {
       if (stream.error && isRecoverableMijiaError(stream.error))
         stream.retry.schedule(() => this.retry(key, stream));
@@ -131,7 +57,6 @@ export class CameraSourceManager {
     this.pause();
     this.streams.clear();
     this.devices.clear();
-    this.offlineUntil.clear();
   }
 
   validate(deviceId: string, channel: 1 | 2) {
@@ -143,8 +68,6 @@ export class CameraSourceManager {
       !cameraChannels(device).includes(channel)
     )
       throw new MijiaError("camera_invalid");
-    if (!device.isOnline && !this.retainedChannels(deviceId).includes(channel))
-      throw new MijiaError("camera_offline");
     return {
       deviceId,
       channel,
@@ -271,9 +194,7 @@ export class CameraSourceManager {
     const desired = new Set<string>();
     const pending: Promise<unknown>[] = [];
     for (const device of this.devices.values()) {
-      const channels = device.isOnline
-        ? cameraChannels(device)
-        : this.retainedChannels(device.did);
+      const channels = cameraChannels(device);
       for (const channel of channels) {
         desired.add(`${device.did}:${channel}`);
         pending.push(this.ensure(device.did, channel, retryFailed));

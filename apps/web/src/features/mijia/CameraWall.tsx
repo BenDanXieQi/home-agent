@@ -1,5 +1,5 @@
 import { memo, useCallback, useState } from "react";
-import { Video, VideoOff } from "lucide-react";
+import { Video } from "lucide-react";
 import type { MijiaState } from "@home-agent/api/mijia";
 import { MijiaPlayer } from "./MijiaPlayer";
 
@@ -67,7 +67,9 @@ export default function CameraWall({
   ready,
   confirming,
 }: {
-  state: MijiaState;
+  state: Pick<MijiaState, "account" | "revision" | "binding"> & {
+    devices: Pick<MijiaState["devices"], "items" | "status">;
+  };
   ready: boolean;
   confirming: boolean;
 }) {
@@ -90,48 +92,25 @@ export default function CameraWall({
         cameraNameOrder.compare(left.name, right.name) ||
         (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
     );
-  const offlineCameras = cameras.filter(
-    (device) => !device.online && device.retainedChannels.length === 0,
-  );
   return (
     <>
       <div className="camera-wall">
         {cameras.flatMap((device) =>
-          (device.online ? device.channels : device.retainedChannels).map(
-            (channel) => (
-              <CameraTile
-                key={`${state.revision}:${device.id}:${channel}`}
-                device={device}
-                channel={channel}
-                revision={state.revision}
-                ready={ready}
-                confirming={confirming}
-                playbackKey={`${device.id}:${channel}`}
-                enabled={!paused.has(`${device.id}:${channel}`)}
-                onEnabledChange={changeEnabled}
-              />
-            ),
-          ),
+          device.channels.map((channel) => (
+            <CameraTile
+              key={`${state.revision}:${device.id}:${channel}`}
+              device={device}
+              channel={channel}
+              revision={state.revision}
+              ready={ready}
+              confirming={confirming}
+              playbackKey={`${device.id}:${channel}`}
+              enabled={!paused.has(`${device.id}:${channel}`)}
+              onEnabledChange={changeEnabled}
+            />
+          )),
         )}
       </div>
-      {offlineCameras.length ? (
-        <section className="offline-cameras" aria-label="离线摄像头">
-          <h2>
-            离线设备 <span>{offlineCameras.length}</span>
-          </h2>
-          <ul>
-            {offlineCameras.map((device) => (
-              <li key={device.id}>
-                <VideoOff size={15} strokeWidth={1.5} aria-hidden="true" />
-                <span className="offline-camera-name" title={device.name}>
-                  {device.name}
-                </span>
-                <span className="offline-camera-status">离线</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
       {!cameras.length && state.devices.status !== "error" ? (
         <div className="workspace-empty">
           <Video size={26} strokeWidth={1.25} />

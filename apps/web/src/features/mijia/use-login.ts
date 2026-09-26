@@ -1,3 +1,5 @@
+import { useQuery } from "@tanstack/react-query";
+import { getLoginMaterial } from "./api";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   mijiaLoginAttemptAtom,
@@ -16,7 +18,37 @@ export function useLogin() {
   const activeLoginId = useAtomValue(mijiaActiveLoginIdAtom);
   const account = useAtomValue(mijiaAccountAtom);
   const binding = useAtomValue(mijiaBindingAtom);
-  const login = useAtomValue(mijiaLoginAttemptAtom);
+  const publicLogin = useAtomValue(mijiaLoginAttemptAtom);
+  const material = useQuery({
+    queryKey: [
+      "mijia-login-material",
+      publicLogin?.id,
+      publicLogin?.material_version,
+    ],
+    enabled:
+      !!publicLogin?.id &&
+      ["pending", "security_required"].includes(publicLogin.status),
+    queryFn: ({ signal }) => getLoginMaterial(publicLogin!.id!, signal),
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+  });
+  const currentMaterial =
+    material.data?.id === publicLogin?.id &&
+    material.data?.material_version === publicLogin?.material_version
+      ? material.data
+      : undefined;
+  const login = publicLogin
+    ? {
+        ...publicLogin,
+        id: publicLogin.id ?? "",
+        qrImageUrl: currentMaterial?.qr_image_url ?? "",
+        verificationUrl: currentMaterial?.verification_url ?? "",
+        expiresAt: currentMaterial?.expires_at ?? "",
+      }
+    : undefined;
   const command = useAtomValue(mijiaPendingCommandAtom);
   const fetchError = useAtomValue(mijiaFetchErrorAtom);
   const actionError = useAtomValue(mijiaActionErrorAtom);
@@ -44,12 +76,14 @@ export function useLogin() {
     fetchError,
     error:
       actionError ??
+      (material.isError ? "登录材料读取失败，请重试。" : null) ??
       loginError ??
       (account && "error" in account ? account.error.message : null) ??
       cleanupError,
     deviceCount,
     refresh: () => {
-      void refresh();
+      if (material.isError) void material.refetch();
+      refresh();
     },
     startLogin: () => {
       void perform({ type: "startLogin" });
