@@ -147,7 +147,9 @@ export const miotCloudPushProfile = {
     keepalive_seconds: 60,
     connect_timeout_ms: 15000,
     clean: true,
-    automatic_reconnect: false,
+    automatic_reconnect: true,
+    reconnect_backoff_ms: [1000, 120000],
+    reconnect_owner: "device_observations",
   },
   subscriptions: {
     requested_qos: 2,
