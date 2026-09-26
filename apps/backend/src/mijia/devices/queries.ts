@@ -17,13 +17,14 @@ export class DeviceQueries {
   constructor(private readonly dependencies: DeviceQueryDependencies) {}
 
   async getHome(signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const { currentAccount, activeAccount, discovery } = this.dependencies;
     const account = currentAccount();
     if (!account) throw new MijiaError("not_bound");
     if (!activeAccount(account)) throw new MijiaError("stale_session");
     if (discovery.stateSnapshot.status !== "ready")
       throw new MijiaError("devices_failed");
-    const home = discovery.requireHome();
+    discovery.requireHome();
     const revision = discovery.revision;
     const source = discovery.list();
     const devices: MijiaHome["devices"] = [];
@@ -43,15 +44,29 @@ export class DeviceQueries {
       );
       devices.push(...batch);
     }
+    signal?.throwIfAborted();
     if (
       !activeAccount(account) ||
       discovery.revision !== revision ||
-      source.some((device) => discovery.find(device.did) !== device)
+      discovery.list().length !== source.length
     )
       throw new MijiaError("stale_session");
+    const home = discovery.requireHome();
     return {
       home_name: home.name,
-      devices,
+      // Catalog refreshes replace objects even when membership and capabilities
+      // are unchanged. Project one current set of display metadata at completion.
+      devices: devices.map((device) => {
+        const current = discovery.find(device.did);
+        if (!current) throw new MijiaError("stale_session");
+        return {
+          ...device,
+          name: current.name ?? "",
+          home: current.home_name ?? "",
+          room: current.room_name ?? "",
+          online: current.isOnline === true,
+        };
+      }),
       areas: home.rooms.map(({ name }) => ({ name })),
       scenes: [],
       persons: [],

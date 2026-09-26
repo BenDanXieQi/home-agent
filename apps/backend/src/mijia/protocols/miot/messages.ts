@@ -49,24 +49,20 @@ export function decodePush(topic: string, payload: Buffer) {
   const entries = Array.isArray(parsed.data.params)
     ? parsed.data.params
     : [parsed.data.params];
-  const rows = entries.filter(
-    (item): item is Record<string, unknown> =>
-      item !== null && typeof item === "object" && !Array.isArray(item),
-  );
-  if (
-    rows.some(
-      (row) =>
-        row.did !== undefined &&
-        row.did !== null &&
-        ((typeof row.did !== "string" && typeof row.did !== "number") ||
-          String(row.did) !== address[1]),
+  const changes: z.infer<typeof change>[] = [];
+  for (const row of entries) {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
+    const did = "did" in row ? row.did : undefined;
+    if (
+      did !== undefined &&
+      did !== null &&
+      ((typeof did !== "string" && typeof did !== "number") ||
+        String(did) !== address[1])
     )
-  )
-    return [];
-  const changes = rows.flatMap((row) => {
+      return [];
     const value = change.safeParse(row);
-    return value.success && Object.hasOwn(row, "value") ? [value.data] : [];
-  });
+    if (value.success && Object.hasOwn(row, "value")) changes.push(value.data);
+  }
   if (
     changes.length === 1 &&
     address[2] !== undefined &&

@@ -19,13 +19,10 @@ export function createHomeSelectionStore(db: Database) {
     async write(accountKey: string, homeId: string | null) {
       try {
         const data = { accountKey, homeId, updatedAt: new Date() };
-        await db
-          .insert(mijiaHomeSelections)
-          .values(data)
-          .onConflictDoUpdate({
-            target: mijiaHomeSelections.accountKey,
-            set: data,
-          });
+        await db.insert(mijiaHomeSelections).values(data).onConflictDoUpdate({
+          target: mijiaHomeSelections.accountKey,
+          set: data,
+        });
       } catch {
         throw new MijiaError("home_storage");
       }

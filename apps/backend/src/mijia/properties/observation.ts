@@ -12,10 +12,11 @@ type Watch = {
   binding?: ReturnType<MiotMqtt["observe"]>;
 };
 
-/** Keeps active observations across disposable connections; owns the only retry timer. */
+/** Owns observations, topic authorization failures and connection recovery. */
 export class DeviceObservations {
   private connection: MiotMqtt | undefined;
   private readonly watches = new Set<Watch>();
+  private readonly rejectedTopics = new Map<string, number>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private delay = 1_000;
   private stopped = false;
@@ -29,6 +30,9 @@ export class DeviceObservations {
       typeof MiotMqtt
     >[1],
     private readonly onAuthenticationFailure: () => void,
+    private readonly onPermissionRejected: (
+      event: Extract<MiotObservation, { kind: "subscription" }>,
+    ) => void,
   ) {}
 
   get closed() {
@@ -65,7 +69,11 @@ export class DeviceObservations {
         // This attempt uses current credentials, including updates during close.
         clearTimeout(this.timer);
         this.timer = undefined;
-        const connection = new MiotMqtt(this.sourceId, this.credentials());
+        const connection = new MiotMqtt(
+          this.sourceId,
+          this.credentials(),
+          this.rejectedTopics,
+        );
         this.connection = connection;
         for (const watch of this.watches) {
           if (this.stopped || connection.closed) break;
@@ -90,6 +98,8 @@ export class DeviceObservations {
       }
     } finally {
       this.connecting = false;
+      // A synchronous callback can replace the last watch while this attempt closes.
+      if (this.connection?.closed) this.schedule();
     }
   }
 
@@ -98,6 +108,17 @@ export class DeviceObservations {
       watch.ids,
       (event) => {
         if (this.connection !== connection || !this.watches.has(watch)) return;
+        if (
+          event.kind === "subscription" &&
+          event.status === "failed" &&
+          event.reason === "subscription_rejected" &&
+          event.code !== null &&
+          !this.rejectedTopics.has(event.topic)
+        ) {
+          this.rejectedTopics.set(event.topic, event.code);
+          // Topic ACL rejection is not evidence that the account token is invalid.
+          if (event.code === 0x87) this.onPermissionRejected(event);
+        }
         if (event.kind === "connection") {
           if (event.status === "connected") {
             this.delay = 1_000;
@@ -112,7 +133,8 @@ export class DeviceObservations {
             } else this.schedule();
           }
         }
-        watch.listener(event);
+        if (this.connection === connection && this.watches.has(watch))
+          watch.listener(event);
       },
       watch.signal,
     );
@@ -145,7 +167,11 @@ export class DeviceObservations {
       watch.detach();
       this.watches.delete(watch);
       watch.binding?.cancel();
-      if (!this.watches.size) void this.close("cancelled");
+      if (!this.watches.size) {
+        clearTimeout(this.timer);
+        this.timer = undefined;
+        void this.connection?.close("cancelled");
+      }
     };
     this.watches.add(watch);
     signal.addEventListener("abort", cancel, { once: true });
@@ -169,8 +195,11 @@ export class DeviceObservations {
   }
 
   credentialsUpdated() {
-    if (this.stopped || !this.watches.size) return;
+    if (this.stopped) return;
     this.authenticationFailed = false;
+    this.failure = null;
+    this.rejectedTopics.clear();
+    if (!this.watches.size) return;
     void this.connection?.close("credentials_updated");
     this.schedule();
   }
@@ -182,5 +211,6 @@ export class DeviceObservations {
     await this.connection?.close(reason);
     for (const watch of this.watches) watch.detach();
     this.watches.clear();
+    this.rejectedTopics.clear();
   }
 }

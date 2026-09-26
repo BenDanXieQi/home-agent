@@ -24,7 +24,7 @@ export function isMqttAuthenticationFailure(reason: string | null) {
 }
 
 type Listener = (observation: MiotObservation) => void;
-function entry(topic: string) {
+function entry(topic: string, rejectedCode: number | undefined) {
   return {
     topic,
     listeners: new Set<Listener>(),
@@ -32,7 +32,10 @@ function entry(topic: string) {
     granted: null as number | null,
     uncertain: false,
     pending: false,
-    failure: null as { reason: string; code: number | null } | null,
+    failure:
+      rejectedCode === undefined
+        ? (null as { reason: string; code: number | null } | null)
+        : { reason: "subscription_rejected", code: rejectedCode },
   };
 }
 
@@ -58,6 +61,7 @@ export class MiotMqtt {
   constructor(
     private readonly sourceId: string,
     session: z.infer<typeof oauthSessionSchema>,
+    private readonly rejectedTopics: ReadonlyMap<string, number>,
   ) {
     this.client = connect("mqtts://cn-ha.mqtt.io.mi.com:8883", {
       protocolVersion: 5,
@@ -232,7 +236,7 @@ export class MiotMqtt {
         }
         let item = this.topics.get(topic);
         if (!item) {
-          item = entry(topic);
+          item = entry(topic, this.rejectedTopics.get(topic));
           this.topics.set(topic, item);
         }
         item.listeners.add(callback);
@@ -312,20 +316,29 @@ export class MiotMqtt {
     this.timers.add(timer);
     try {
       if (subscribe) {
-        this.client.subscribe(item.topic, { qos: 2 }, (error, grants) => {
-          const grant = grants?.find((value) => value.topic === item.topic);
-          const code = grant?.qos;
-          if (code !== undefined && code >= 128)
-            finish(
-              RETRYABLE_SUBACK_CODES.has(code)
-                ? "subscribe_failed"
-                : "subscription_rejected",
-              code,
-            );
-          else if (error || !grant || ![0, 1, 2].includes(grant.qos))
-            finish("subscribe_failed");
-          else finish(null, grant.qos);
-        });
+        this.client.subscribe(
+          item.topic,
+          { qos: 2 },
+          (error, _grants, packet) => {
+            // MQTT.js leaves grants at the requested QoS when SUBACK rejects it.
+            const code =
+              packet?.granted.length === 1 ? packet.granted[0] : undefined;
+            if (typeof code !== "number") {
+              finish("subscribe_failed");
+              return;
+            }
+            if (code >= 128)
+              finish(
+                RETRYABLE_SUBACK_CODES.has(code)
+                  ? "subscribe_failed"
+                  : "subscription_rejected",
+                code,
+              );
+            else if (error || ![0, 1, 2].includes(code))
+              finish("subscribe_failed");
+            else finish(null, code);
+          },
+        );
       } else {
         this.client.unsubscribe(item.topic, (error, packet) => {
           const codes = packet?.cmd === "unsuback" ? packet.granted : undefined;

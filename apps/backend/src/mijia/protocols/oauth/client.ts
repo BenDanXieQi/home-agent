@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { CookieJar } from "tough-cookie";
 import { z } from "zod";
+import {
+  readLimitedBytes,
+  ResponseBodyError,
+} from "@home-agent/api/http/read-body";
+import { parseRetryAfter } from "@home-agent/api/http/retry-after";
 import type { MiCloudSavedSession } from "../micloud/session";
 import { MijiaError } from "../../errors";
 
@@ -8,6 +13,7 @@ const APP_ID = "2882303761520431603";
 const ACCOUNT = "https://account.xiaomi.com";
 const REDIRECT = "https://127.0.0.1";
 const TOKEN_URL = "https://mico.api.mijia.tech/app/v2/mico/oauth/get_token";
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 export const oauthSessionSchema = z.strictObject({
   uuid: z.string().regex(/^[a-f0-9]{32}$/),
   accessToken: z.string().min(1).max(8192),
@@ -30,31 +36,43 @@ const confirmationSchema = z.object({
 
 // Never let supplier URLs, response bodies or credentials escape as error messages.
 async function request(url: URL, init: RequestInit, signal: AbortSignal) {
+  let response: Response | undefined;
   try {
-    const response = await fetch(url, { ...init, redirect: "manual", signal });
-    const text = await response.text();
-    if (response.status === 401 || response.status === 403)
-      throw new MijiaError("authentication");
-    if (response.status === 429) {
-      const retry = response.headers.get("retry-after");
-      const at =
-        retry && /^\d+$/.test(retry)
-          ? Date.now() + Number(retry) * 1000
-          : Date.parse(retry ?? "");
+    response = await fetch(url, { ...init, redirect: "manual", signal });
+    signal.throwIfAborted();
+    if (response.status >= 400) {
+      const now = Date.now();
+      const retryDelay = parseRetryAfter(
+        response.headers.get("retry-after"),
+        now,
+      );
       throw new MijiaError(
-        "network",
-        Number.isFinite(at)
-          ? { retry_after_at: new Date(at).toISOString() }
-          : undefined,
+        response.status === 401 || response.status === 403
+          ? "authentication"
+          : response.status === 408 ||
+              response.status === 429 ||
+              response.status >= 500
+            ? "network"
+            : "cloud_invalid_response",
+        retryDelay === undefined
+          ? undefined
+          : { retry_after_at: new Date(now + retryDelay).toISOString() },
       );
     }
-    if (response.status >= 500) throw new MijiaError("network");
-    if (response.status >= 400) throw new MijiaError("cloud_invalid_response");
+    // OAuth redirects carry their result in Location and may have no body.
+    if (response.status === 302) return { response, text: "" };
+    const text = new TextDecoder().decode(
+      await readLimitedBytes(response, MAX_RESPONSE_BYTES, signal),
+    );
     return { response, text };
   } catch (error) {
-    if (error instanceof MijiaError) throw error;
     if (signal.aborted) signal.throwIfAborted();
+    if (error instanceof MijiaError) throw error;
+    if (error instanceof ResponseBodyError)
+      throw new MijiaError("cloud_invalid_response");
     throw new MijiaError("network");
+  } finally {
+    await response?.body?.cancel().catch(() => {});
   }
 }
 function decode(text: string) {

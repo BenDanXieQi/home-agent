@@ -40,11 +40,16 @@ type PrepareCamera = (
 /** Owns viewers only. Releasing a viewer never stops a resident camera source. */
 export class PlaybackManager {
   private readonly entries = new Map<string, Reservation | Playback>();
+  private readonly releases = new Map<
+    string,
+    { target: CameraTarget; pending?: Promise<void> }
+  >();
 
   constructor(private readonly prepareCamera: PrepareCamera) {}
 
   reserve(revision: string, deviceId: string, channel: 1 | 2) {
-    if (this.entries.size >= 32) throw new MijiaError("playback_failed");
+    if (this.entries.size + this.releases.size >= 32)
+      throw new MijiaError("playback_failed");
     const id = crypto.randomUUID();
     const timer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => this.entries.delete(id), 30_000),
@@ -78,6 +83,21 @@ export class PlaybackManager {
         this.entries.delete(id);
         entry.controller.abort();
       }
+    }
+  }
+
+  /** A confirmed session deletion also retires its outstanding viewer cleanup. */
+  forgetAdapter(adapter: Go2RtcAdapter) {
+    for (const [id, release] of this.releases) {
+      if (release.target.adapter === adapter) this.releases.delete(id);
+    }
+  }
+
+  /** A successful heartbeat supplies the next opportunity to retry revoked viewers. */
+  retryReleases(adapter: Go2RtcAdapter) {
+    for (const [id, release] of this.releases) {
+      if (release.target.adapter === adapter)
+        void this.release(id).catch(() => {});
     }
   }
 
@@ -189,15 +209,32 @@ export class PlaybackManager {
 
   async release(id: string) {
     const entry = this.entries.get(id);
-    if (!entry) return;
-    this.entries.delete(id);
-    clearTimeout(entry.timer);
-    if (entry.phase === "reserved") return;
-    entry.controller.abort();
-    if (!entry.target) return;
-    const { adapter, sourceId } = entry.target;
-    await mijiaOperation("playback.release", "playback_failed", () =>
-      adapter.release({ id, sourceId }),
-    );
+    if (entry) {
+      // Revoke access immediately, but retain remote ownership until DELETE succeeds.
+      this.entries.delete(id);
+      clearTimeout(entry.timer);
+      if (entry.phase !== "reserved") {
+        if (entry.target) this.releases.set(id, { target: entry.target });
+        entry.controller.abort();
+      }
+    }
+    const release = this.releases.get(id);
+    if (!release) return;
+    if (!release.pending) {
+      const { adapter, sourceId } = release.target;
+      release.pending = Promise.resolve()
+        .then(() =>
+          mijiaOperation("playback.release", "playback_failed", () =>
+            adapter.release({ id, sourceId }),
+          ),
+        )
+        .then(() => {
+          if (this.releases.get(id) === release) this.releases.delete(id);
+        })
+        .finally(() => {
+          delete release.pending;
+        });
+    }
+    await release.pending;
   }
 }
