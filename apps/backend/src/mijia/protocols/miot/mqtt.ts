@@ -12,8 +12,19 @@ import {
 
 const CONCURRENCY = 16;
 const ACK_TIMEOUT = 10_000;
+// MQTT 5 SUBACK: unspecified/internal error, packet ID in use, or quota exceeded.
+const RETRYABLE_SUBACK_CODES = new Set([0x80, 0x83, 0x91, 0x97]);
+export function isMqttAuthenticationFailure(reason: string | null) {
+  return [
+    "connack_134",
+    "connack_135",
+    "connack_138",
+    "server_disconnect_135",
+  ].includes(reason ?? "");
+}
+
 type Listener = (observation: MiotObservation) => void;
-function entry(topic: string) {
+function entry(topic: string, rejectedCode: number | undefined) {
   return {
     topic,
     listeners: new Set<Listener>(),
@@ -21,7 +32,10 @@ function entry(topic: string) {
     granted: null as number | null,
     uncertain: false,
     pending: false,
-    failure: null as { reason: string; code: number | null } | null,
+    failure:
+      rejectedCode === undefined
+        ? (null as { reason: string; code: number | null } | null)
+        : { reason: "subscription_rejected", code: rejectedCode },
   };
 }
 
@@ -47,6 +61,7 @@ export class MiotMqtt {
   constructor(
     private readonly sourceId: string,
     session: z.infer<typeof oauthSessionSchema>,
+    private readonly rejectedTopics: ReadonlyMap<string, number>,
   ) {
     this.client = connect("mqtts://cn-ha.mqtt.io.mi.com:8883", {
       protocolVersion: 5,
@@ -179,10 +194,16 @@ export class MiotMqtt {
   ) {
     signal.throwIfAborted();
     if (this.closed) throw new Error("MQTT instance is closed");
+    const binding = this.observeTopics(
+      deviceIds.filter(subscribableDevice).flatMap(deviceTopics),
+      listener,
+      signal,
+    );
     for (const did of new Set(deviceIds)) {
+      if (signal.aborted || this.closed) break;
       if (subscribableDevice(did)) continue;
       for (const topic of deviceTopics(did)) {
-        if (signal.aborted) break;
+        if (signal.aborted || this.closed) break;
         this.emit(
           listener,
           subscriptionObservation(
@@ -195,11 +216,7 @@ export class MiotMqtt {
         );
       }
     }
-    return this.observeTopics(
-      deviceIds.filter(subscribableDevice).flatMap(deviceTopics),
-      listener,
-      signal,
-    );
+    return binding;
   }
   observeTopics(
     topics: readonly string[],
@@ -235,7 +252,7 @@ export class MiotMqtt {
       if (signal.aborted || !this.observers.has(callback) || this.closed) break;
       let item = this.topics.get(topic);
       if (!item) {
-        item = entry(topic);
+        item = entry(topic, this.rejectedTopics.get(topic));
         this.topics.set(topic, item);
       }
       item.listeners.add(callback);
@@ -314,15 +331,29 @@ export class MiotMqtt {
     this.timers.add(timer);
     try {
       if (subscribe) {
-        this.client.subscribe(item.topic, { qos: 2 }, (error, grants) => {
-          const grant = grants?.find((value) => value.topic === item.topic);
-          const code = grant?.qos;
-          if (code !== undefined && code >= 128)
-            finish("subscription_rejected", code);
-          else if (error || !grant || ![0, 1, 2].includes(grant.qos))
-            finish("subscribe_failed");
-          else finish(null, grant.qos);
-        });
+        this.client.subscribe(
+          item.topic,
+          { qos: 2 },
+          (error, _grants, packet) => {
+            // MQTT.js leaves grants at the requested QoS when SUBACK rejects it.
+            const code =
+              packet?.granted.length === 1 ? packet.granted[0] : undefined;
+            if (typeof code !== "number") {
+              finish("subscribe_failed");
+              return;
+            }
+            if (code >= 128)
+              finish(
+                RETRYABLE_SUBACK_CODES.has(code)
+                  ? "subscribe_failed"
+                  : "subscription_rejected",
+                code,
+              );
+            else if (error || ![0, 1, 2].includes(code))
+              finish("subscribe_failed");
+            else finish(null, code);
+          },
+        );
       } else {
         this.client.unsubscribe(item.topic, (error, packet) => {
           const codes = packet?.cmd === "unsuback" ? packet.granted : undefined;

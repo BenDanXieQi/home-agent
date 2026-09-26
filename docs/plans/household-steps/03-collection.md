@@ -10,15 +10,15 @@
 
 ## 本步使用的几个名称
 
-| 名称 | 在本文中的意思 |
-| --- | --- |
-| 观测 | 一次设备上报、读取结果或在线通知 |
-| `latest` | 每个设备属性的当前值，以及它的来源、时间和有效性 |
-| `quality` | 当前值是否还能使用；具体状态见下文 |
-| `availability` | 设备的在线、离线或未知状态 |
-| `source_health` | 数据连接、授权和订阅是否正常 |
-| `scope_epoch` | 当前家庭这一次运行的标识；切家后换新标识，沿用 Step 2 |
-| `collection_generation` | 这一轮采集连接的标识；重连或更换凭据后换新标识 |
+| 名称                    | 在本文中的意思                                        |
+| ----------------------- | ----------------------------------------------------- |
+| 观测                    | 一次设备上报、读取结果或在线通知                      |
+| `latest`                | 每个设备属性的当前值，以及它的来源、时间和有效性      |
+| `quality`               | 当前值是否还能使用；具体状态见下文                    |
+| `availability`          | 设备的在线、离线或未知状态                            |
+| `source_health`         | 数据连接、授权和订阅是否正常                          |
+| `scope_epoch`           | 当前家庭这一次运行的标识；切家后换新标识，沿用 Step 2 |
+| `collection_generation` | 这一轮采集连接的标识；重连或更换凭据后换新标识        |
 
 “最近读到过”与“现在仍然有效”分开表达。连接成功、设备在线、某个属性可信，也分别记录。
 
@@ -54,20 +54,20 @@ MIoT 通路沿用 Step 1 已确认的解释：活动连接上的合法属性／�
 
 属性使用真实的服务标识 `siid` 和属性标识 `piid`；独立事件使用 `siid/eiid`，参数按事件规格校验；在线通知只带设备与在线事实。
 
-| 字段 | 含义 |
-| --- | --- |
-| `account_id / home_id / device_id` | 账号、家庭和设备身份 |
-| `scope_epoch / source_id / collection_generation` | 所属家庭运行、数据来源和采集连接 |
-| `observation_id` | 本次被接纳观测的内部 ID |
-| `input_sequence` | 家庭状态机接纳输入的先后序号，从 1 开始；用于顺序关联，不是数据库回执 |
-| `siid / piid / value` | 属性标识和经过类型校验的值；超规格范围报错，不悄悄裁剪 |
-| `source` | `push` 上报、`initial_read` 初始化读取、`reconnect_read` 恢复读取、`on_demand_read` 按需读取 |
-| `delivery_kind` | `live` 实时、`baseline` 初始参考、`replayed` 重放、`unknown` 无法确认；由来源通路决定 |
-| `read_semantics` | 读取返回的是 `cloud_cache` 云缓存、`device_live` 设备即时值，还是 `unknown`；推送不填 |
-| `observed_at / received_at` | 可信观测时间／backend 接收时间；没有可信观测时间时前者为 null |
-| `source_event_id / source_sequence` | 来源实际提供的消息 ID／序号，没有就不填 |
-| `read_started_at` | 读取开始时间，用于识别读取期间发生的新上报 |
-| `quality` | 下文的有效性结构 |
+| 字段                                              | 含义                                                                                         |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `account_id / home_id / device_id`                | 账号、家庭和设备身份                                                                         |
+| `scope_epoch / source_id / collection_generation` | 所属家庭运行、数据来源和采集连接                                                             |
+| `observation_id`                                  | 本次被接纳观测的内部 ID                                                                      |
+| `input_sequence`                                  | 家庭状态机接纳输入的先后序号，从 1 开始；用于顺序关联，不是数据库回执                        |
+| `siid / piid / value`                             | 属性标识和经过类型校验的值；超规格范围报错，不悄悄裁剪                                       |
+| `source`                                          | `push` 上报、`initial_read` 初始化读取、`reconnect_read` 恢复读取、`on_demand_read` 按需读取 |
+| `delivery_kind`                                   | `live` 实时、`baseline` 初始参考、`replayed` 重放、`unknown` 无法确认；由来源通路决定        |
+| `read_semantics`                                  | 读取返回的是 `cloud_cache` 云缓存、`device_live` 设备即时值，还是 `unknown`；推送不填        |
+| `observed_at / received_at`                       | 可信观测时间／backend 接收时间；没有可信观测时间时前者为 null                                |
+| `source_event_id / source_sequence`               | 来源实际提供的消息 ID／序号，没有就不填                                                      |
+| `read_started_at`                                 | 读取开始时间，用于识别读取期间发生的新上报                                                   |
+| `quality`                                         | 下文的有效性结构                                                                             |
 
 时间使用 UTC；超时按实际经过的时长计量，避免系统时间调整影响等待长度。来源时间只有通过 Step 1 验证才可信；比接收时间晚超过 5 秒或超出已验证偏差时，将 `observed_at` 置空并记录异常。旧消息可能只是晚到，不能仅因它很旧就认定设备时钟错误。
 
@@ -75,16 +75,16 @@ MIoT 通路沿用 Step 1 已确认的解释：活动连接上的合法属性／�
 
 `latest` 按 `{ device_id, siid, piid }` 保存一份当前值。未映射的合法属性也可在容量范围内保存，但标为未知，不进入规则判断。
 
-| 字段 | 含义 |
-| --- | --- |
-| `has_value / value` | 是否已有值；缺值用 false／null，不能冒充 0 或 false 的设备值 |
-| `observation_id` 和来源字段 | 当前值来自哪次观测；没有值时为 null |
-| `observed_at / received_at / effective_at` | 设备观测、后台接收、成为当前值的时间 |
-| `last_reported` | 最近收到合法实时上报的时间；读取和重放不推进它 |
-| `last_changed` | 后台最近观察到已有值改变的时间；首次赋值为 null，同值不更新 |
-| `last_read_at` | 最近一次成功读取的时间 |
-| `read_candidate` | 一份无法确认比当前值更新的读取结果，供诊断使用 |
-| `quality / policy_version` | 当前有效性和采用的配置版本 |
+| 字段                                       | 含义                                                         |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| `has_value / value`                        | 是否已有值；缺值用 false／null，不能冒充 0 或 false 的设备值 |
+| `observation_id` 和来源字段                | 当前值来自哪次观测；没有值时为 null                          |
+| `observed_at / received_at / effective_at` | 设备观测、后台接收、成为当前值的时间                         |
+| `last_reported`                            | 最近收到合法实时上报的时间；读取和重放不推进它               |
+| `last_changed`                             | 后台最近观察到已有值改变的时间；首次赋值为 null，同值不更新  |
+| `last_read_at`                             | 最近一次成功读取的时间                                       |
+| `read_candidate`                           | 一份无法确认比当前值更新的读取结果，供诊断使用               |
+| `quality / policy_version`                 | 当前有效性和采用的配置版本                                   |
 
 读取候选包含 `value、read_semantics、received_at、observed_at、observation_id`，计入最新值容量。新的可信观测到来后清除候选；候选放不下时只报告该次读取失败，不降低原有可信值的质量。
 
@@ -92,12 +92,12 @@ MIoT 通路沿用 Step 1 已确认的解释：活动连接上的合法属性／�
 
 `quality` 为 `{ status, time_basis, reason }`。`time_basis` 表示时间依据：`source` 使用可信设备时间，`received` 使用已验证实时通路的接收时间，`unknown` 表示无法确认。
 
-| status | 页面和规则应怎样理解 |
-| --- | --- |
-| `valid` | 设备能力和来源已验证，所需订阅已确认，值与类型合法，期间没有丢报且未过期；可用于规则 |
-| `unconfirmed` | 有值，但可能是旧缓存、恢复后的旧值或已过期；可以展示，规则按未知处理 |
-| `unavailable` | 设备明确离线，或所需连接／授权不可用；保留旧值并显示原因 |
-| `unknown` | 尚无值、能力未映射或来源语义未验证 |
+| status        | 页面和规则应怎样理解                                                                 |
+| ------------- | ------------------------------------------------------------------------------------ |
+| `valid`       | 设备能力和来源已验证，所需订阅已确认，值与类型合法，期间没有丢报且未过期；可用于规则 |
+| `unconfirmed` | 有值，但可能是旧缓存、恢复后的旧值或已过期；可以展示，规则按未知处理                 |
+| `unavailable` | 设备明确离线，或所需连接／授权不可用；保留旧值并显示原因                             |
+| `unknown`     | 尚无值、能力未映射或来源语义未验证                                                   |
 
 温度等连续数值默认 15 分钟后待确认，可按实测调整。门磁等“变化时才上报”的状态，在通路及恢复方式已经验证时可以一直有效，直到断线、离线或丢报；不因长时间没变化而自动过期。未验证的能力不参与规则。
 
@@ -107,13 +107,13 @@ MIoT 通路沿用 Step 1 已确认的解释：活动连接上的合法属性／�
 
 从当前事实重新计算质量，按下表从上往下选第一个适用原因。原始事实仍保留，便于一个原因解除后显示另一个。
 
-| 顺序 | 条件 | 公开结果 |
-| --- | --- | --- |
-| 1 | 能力未映射／尚无值／来源或策略未验证 | `unknown`：`unmapped / no_observation / contract_unverified` |
-| 2 | 设备明确离线／来源连接或授权不可用 | `unavailable`：`device_offline / source_disconnected` |
-| 3 | 不支持持续推送／订阅被拒绝／等待确认 | `unconfirmed`：`unsupported / subscription_rejected / subscription_unconfirmed` |
-| 4 | 当前值受容量、丢报、非法值、时间异常、过期或恢复影响 | `unconfirmed`，原因按下面的顺序选择 |
-| 5 | 以上均不成立，满足有效条件 | `valid / confirmed` |
+| 顺序 | 条件                                                 | 公开结果                                                                        |
+| ---- | ---------------------------------------------------- | ------------------------------------------------------------------------------- |
+| 1    | 能力未映射／尚无值／来源或策略未验证                 | `unknown`：`unmapped / no_observation / contract_unverified`                    |
+| 2    | 设备明确离线／来源连接或授权不可用                   | `unavailable`：`device_offline / source_disconnected`                           |
+| 3    | 不支持持续推送／订阅被拒绝／等待确认                 | `unconfirmed`：`unsupported / subscription_rejected / subscription_unconfirmed` |
+| 4    | 当前值受容量、丢报、非法值、时间异常、过期或恢复影响 | `unconfirmed`，原因按下面的顺序选择                                             |
+| 5    | 以上均不成立，满足有效条件                           | `valid / confirmed`                                                             |
 
 第 4 项的原因顺序为 `capacity_exceeded、collection_gap、invalid_value、source_time_invalid、expired、restoring、cached_unverified`。没有持续推送、但读取通路已验证的能力走第 3 项。`read_failed` 用于读取失败诊断，不因一次读取失败就推翻已有可信值。
 
@@ -132,13 +132,13 @@ reason 使用 `confirmed、no_observation、unsupported、contract_unverified、
 - [ ] **D8：保护较新的值。** 读取开始时记下属性版本。期间收到新推送，较晚返回的读取响应不能直接覆盖它。只有来源序号或观测时间可信且可比较时，才据此判断先后；否则实时推送按当前连接的接收顺序处理。
 - [ ] **D9：区分值更新与事件。** 同值实时上报更新收到时间和有效期，不产生“值变了”的事件。初始化、恢复和主动读取用于建立当前状态，不推测断线期间发生过什么。
 
-| 收到的数据 | 怎样处理 |
-| --- | --- |
-| 可信实时推送 | 通过顺序检查后更新当前值；恢复后的第一条建立新的比较起点 |
-| 已验证为当前状态的初始消息 | 可以建立当前值，是否有效仍按质量规则判断 |
-| 设备即时读取 | 没有被期间的新推送超过时可更新当前值；不自动证明设备在线 |
-| 带可比较设备时间的云缓存 | 只有比当前证据新才替换，新鲜度按原时间判断 |
-| 没有时间保证的缓存／未知读取 | 尚无值时作为待确认初值；已有值时只保存读取候选 |
+| 收到的数据                           | 怎样处理                                                             |
+| ------------------------------------ | -------------------------------------------------------------------- |
+| 可信实时推送                         | 通过顺序检查后更新当前值；恢复后的第一条建立新的比较起点             |
+| 已验证为当前状态的初始消息           | 可以建立当前值，是否有效仍按质量规则判断                             |
+| 设备即时读取                         | 没有被期间的新推送超过时可更新当前值；不自动证明设备在线             |
+| 带可比较设备时间的云缓存             | 只有比当前证据新才替换，新鲜度按原时间判断                           |
+| 没有时间保证的缓存／未知读取         | 尚无值时作为待确认初值；已有值时只保存读取候选                       |
 | 已确认晚到、重放或交付性质未知的消息 | 不凭到达时间覆盖新状态；可作为符合条件的历史证据，不触发即时规则事件 |
 
 “属性边沿”指可确认的前后变化，例如“关门→开门”。只有同一采集连接内，两条连续、有效的实时推送才能构成它。首次读到开门、恢复后发现开门、从缓存读到不同值，都不能据此报告“刚刚开门”。独立按钮事件有自己的消息身份和已验证通路，可以直接处理，不要求先有属性值。
@@ -156,12 +156,12 @@ reason 使用 `confirmed、no_observation、unsupported、contract_unverified、
 
 请求最多 100 项、32 KiB，同一属性去重，并与当前连接已有的读取任务合并。backend 检查家庭归属、可读性和配置；家庭尚未就绪返回 HTTP 409 `household_not_ready`，切家后的旧请求也返回 409。
 
-| 每项 status | 含义 |
-| --- | --- |
-| `applied` | 已进入当前值；仍须看 quality，不能直接说“全部已确认” |
-| `candidate` | 只保留为读取候选 |
-| `unchanged` | 合法结果，但没有替换当前值 |
-| `failed` | 没有可接纳结果；附错误原因 |
+| 每项 status | 含义                                                 |
+| ----------- | ---------------------------------------------------- |
+| `applied`   | 已进入当前值；仍须看 quality，不能直接说“全部已确认” |
+| `candidate` | 只保留为读取候选                                     |
+| `unchanged` | 合法结果，但没有替换当前值                           |
+| `failed`    | 没有可接纳结果；附错误原因                           |
 
 合法接纳结果带 `observation_id`，否则为 null；成功时 `error_code=null`。错误枚举为 `not_in_scope、not_readable、capability_unverified、device_offline、source_unavailable、rate_limited、deadline_exceeded、upstream_error、invalid_response、capacity_exceeded`。候选因容量被丢弃时返回 failed，不报 candidate。
 
@@ -195,23 +195,33 @@ reason 使用 `confirmed、no_observation、unsupported、contract_unverified、
 本机文件结构如下；文件可省略，账号和设备 ID 只出现在本机配置中：
 
 ```ts
-{ devices: [{ account_id, home_id, device_id, alias, usage,
-  capabilities: [{ siid, kind, iid, overrides }] }] }
+{
+  devices: [
+    {
+      account_id,
+      home_id,
+      device_id,
+      alias,
+      usage,
+      capabilities: [{ siid, kind, iid, overrides }],
+    },
+  ];
+}
 ```
 
 `kind` 是 property 或 event，`iid` 对应属性 piid 或事件 eiid；alias、usage 可省略，capabilities 默认空。`overrides` 只允许下表的读取、新鲜度、历史、阈值、汇总、展示和规则开关，不修改来源验证结论。
 
-| 策略字段 | 含义与默认值 |
-| --- | --- |
-| `policy_id / policy_version / effective_at / capability_key` | 生效配置身份、版本、时间和具体设备能力 |
-| `mapping_verified / source_contract_verified` | 来自 Step 1 和规格验证，不接受手动填写“已验证” |
-| `read_enabled` | 是否允许主动读取；默认 false，能力可读且通路已验证后启用 |
-| `freshness_mode / max_age_ms` | `max_age / 900000`：15 分钟期限；已验证变化上报用 `until_gap / null`；未验证用 `unverified / null` |
-| `history_mode` | `none` 不保存、`all` 全部、`changes` 变化时保存、`last_valid_per_window` 每个时间段保留最后有效值；默认 none |
-| `history_window_ms / important_change_threshold` | 采样段默认 60000 毫秒；其他模式 window=null；重要变化阈值默认 null，可按属性单位配置 |
-| `summary_enabled / summary_window_ms` | 是否生成统计摘要，默认 false／null；开启后固定 5 分钟，并合成小时摘要 |
-| `metric_kind / interpolation / counter_reset_signal` | 指标类型为 `gauge / power / counter`；数值按上次有效值保持（`interpolation=previous`），计数器须有可信重置信号；未声明为 null，算法见 Step 4 |
-| `display_enabled / rule_eligible` | 已映射能力默认可展示；默认不参与规则，验证语义后启用 |
+| 策略字段                                                     | 含义与默认值                                                                                                                                 |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy_id / policy_version / effective_at / capability_key` | 生效配置身份、版本、时间和具体设备能力                                                                                                       |
+| `mapping_verified / source_contract_verified`                | 来自 Step 1 和规格验证，不接受手动填写“已验证”                                                                                               |
+| `read_enabled`                                               | 是否允许主动读取；默认 false，能力可读且通路已验证后启用                                                                                     |
+| `freshness_mode / max_age_ms`                                | `max_age / 900000`：15 分钟期限；已验证变化上报用 `until_gap / null`；未验证用 `unverified / null`                                           |
+| `history_mode`                                               | `none` 不保存、`all` 全部、`changes` 变化时保存、`last_valid_per_window` 每个时间段保留最后有效值；默认 none                                 |
+| `history_window_ms / important_change_threshold`             | 采样段默认 60000 毫秒；其他模式 window=null；重要变化阈值默认 null，可按属性单位配置                                                         |
+| `summary_enabled / summary_window_ms`                        | 是否生成统计摘要，默认 false／null；开启后固定 5 分钟，并合成小时摘要                                                                        |
+| `metric_kind / interpolation / counter_reset_signal`         | 指标类型为 `gauge / power / counter`；数值按上次有效值保持（`interpolation=previous`），计数器须有可信重置信号；未声明为 null，算法见 Step 4 |
+| `display_enabled / rule_eligible`                            | 已映射能力默认可展示；默认不参与规则，验证语义后启用                                                                                         |
 
 可覆盖字段为 `read_enabled、freshness_mode、max_age_ms、history_mode、important_change_threshold、summary_enabled、display_enabled、rule_eligible`。时间段长度、算法和计数器重置依据由模板确定。
 
@@ -229,14 +239,14 @@ reason 使用 `confirmed、no_observation、unsupported、contract_unverified、
 
 上限集中放在运行配置中，首轮实测后再调整。它们用于限制实际资源占用，不为每一类消息建立调度系统。
 
-| 编号 | 对象 | 初始上限和处理 |
-| --- | --- | --- |
-| E1 | 当前值 | 最多 20,000 项或 2 MiB，包含读取候选；按 Step 5 提交前检查，给质量和错误字段留空间。超限保留旧值并标待确认，新键不接纳。 |
-| E2 | 单次输入与诊断样本 | 单值 16 KiB、消息 256 KiB；更小的协议限制优先。脱敏样本最多 100 条或 256 KiB，覆盖最旧样本，切家清空。 |
-| E3 | 一轮处理量 | 每轮最多 128 条观测，然后交还事件循环；低流量立即处理，不固定等满批次。 |
-| E4 | 观测缓冲 | 单一先进先出队列，最多 2,048 条或 4 MiB；数据按接收顺序处理，不按类别切出配额。 |
-| E4 | 历史缓冲 | 独立于采集，最多 10,000 条或 16 MiB，包含正在写入的批次；具体失败处理见 Step 4。 |
-| E7 | 统计输出 | 每 10 秒合并更新日志与报告，不逐条打印高频消息。 |
+| 编号 | 对象               | 初始上限和处理                                                                                                           |
+| ---- | ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| E1   | 当前值             | 最多 20,000 项或 2 MiB，包含读取候选；按 Step 5 提交前检查，给质量和错误字段留空间。超限保留旧值并标待确认，新键不接纳。 |
+| E2   | 单次输入与诊断样本 | 单值 16 KiB、消息 256 KiB；更小的协议限制优先。脱敏样本最多 100 条或 256 KiB，覆盖最旧样本，切家清空。                   |
+| E3   | 一轮处理量         | 每轮最多 128 条观测，然后交还事件循环；低流量立即处理，不固定等满批次。                                                  |
+| E4   | 观测缓冲           | 单一先进先出队列，最多 2,048 条或 4 MiB；数据按接收顺序处理，不按类别切出配额。                                          |
+| E4   | 历史缓冲           | 独立于采集，最多 10,000 条或 16 MiB，包含正在写入的批次；具体失败处理见 Step 4。                                         |
+| E7   | 统计输出           | 每 10 秒合并更新日志与报告，不逐条打印高频消息。                                                                         |
 
 大小按序列化数据估算，并监测实际内存。公共状态与 SSE 的限制统一见 Step 5。
 

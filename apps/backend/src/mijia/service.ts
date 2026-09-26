@@ -86,7 +86,7 @@ export class MijiaService {
       renewalFailed: (account) => this.maintenance.renewalFailed(account),
       renew: (account) => this.maintenance.renew(account),
       onScopeChanged: () => {
-        this.invalidatePropertyReads();
+        this.invalidateDeviceAccess();
         this.media.prepareRebind();
         if (this.household?.ready())
           void this.media.startBinding().catch(() => {});
@@ -248,7 +248,7 @@ export class MijiaService {
     return this.loginFlow.publicSnapshot();
   }
   suspendHousehold() {
-    this.invalidatePropertyReads();
+    this.invalidateDeviceAccess();
     this.discovery.suspend();
     this.media.resetAccount();
     this.changed();
@@ -292,19 +292,21 @@ export class MijiaService {
     if (this.activeAccount(account)) await this.media.startBinding();
   }
 
-  private invalidatePropertyReads(preserveObservations = false) {
-    if (!preserveObservations) {
-      this.directoryNotifications.close();
-      const mqtt = this.mqtt;
-      this.mqtt = undefined;
-      if (mqtt)
-        this.mqttClosing = Promise.all([
-          this.mqttClosing,
-          mqtt.close("scope_invalidated"),
-        ]).then(() => {});
-      this.observationScope.abort();
-      this.observationScope = new AbortController();
-    }
+  private invalidateDeviceAccess() {
+    this.directoryNotifications.close();
+    const mqtt = this.mqtt;
+    this.mqtt = undefined;
+    if (mqtt)
+      this.mqttClosing = Promise.all([
+        this.mqttClosing,
+        mqtt.close("scope_invalidated"),
+      ]).then(() => {});
+    this.observationScope.abort();
+    this.observationScope = new AbortController();
+    this.invalidatePropertyReads();
+  }
+
+  private invalidatePropertyReads() {
     this.readScope.abort();
     this.readScope = new AbortController();
     this.readGeneration = crypto.randomUUID();
@@ -312,10 +314,12 @@ export class MijiaService {
 
   private accountObservations(account: MiCloud) {
     const accountKey = this.accountKey(account);
+    const scope = this.observationScope.signal;
     if (this.mqtt?.closed) this.mqtt = undefined;
     return (this.mqtt ??= new DeviceObservations(
       miotPushSourceId(account.getCredentials().userId),
       () => {
+        scope.throwIfAborted();
         if (
           !this.accountClient ||
           !this.activeAccount(this.accountClient) ||
@@ -327,11 +331,26 @@ export class MijiaService {
         return this.accountOAuth;
       },
       () => {
+        const current = this.accountClient;
         if (
-          this.accountClient &&
-          this.accountKey(this.accountClient) === accountKey
+          current &&
+          this.activeAccount(current) &&
+          this.accountKey(current) === accountKey &&
+          this.observationScope.signal === scope
         )
-          void this.maintenance.renew(this.accountClient);
+          void this.maintenance.rejectOAuth(current);
+      },
+      () => {
+        const current = this.accountClient;
+        if (
+          current &&
+          this.activeAccount(current) &&
+          this.accountKey(current) === accountKey &&
+          this.observationScope.signal === scope
+        ) {
+          // A topic ACL refusal can revoke device access without invalidating the token.
+          void this.discovery.load(true).catch(() => {});
+        }
       },
     ));
   }
@@ -360,36 +379,43 @@ export class MijiaService {
     signal.throwIfAborted();
     if (!this.household?.ready()) throw new MijiaError("devices_failed");
     const account = this.accountClient;
-    const oauth = this.accountOAuth;
-    if (!account || !oauth) throw new MijiaError("not_bound");
+    if (!account || !this.accountOAuth) throw new MijiaError("not_bound");
     const ids = [...new Set(deviceIds)];
     if (!ids.length) throw new MijiaError("invalid_input");
-    const accountKey = this.accountKey(account);
     const scope = this.observationScope.signal;
+    const revision = this.discovery.revision;
     const combined = AbortSignal.any([signal, scope]);
     const assertCurrent = () => {
       combined.throwIfAborted();
       if (
         !this.accountClient ||
         !this.activeAccount(this.accountClient) ||
-        this.accountKey(this.accountClient) !== accountKey
+        this.observationScope.signal !== scope ||
+        this.discovery.revision !== revision
       )
         throw new MijiaError("stale_session");
+    };
+    // Membership is checked on admission. Revoking membership/model/spec changes
+    // the scope revision and aborts its observers, so delivery needs no catalog scan.
+    const assertDevices = () => {
+      assertCurrent();
       this.discovery.requireHome();
       if (!this.discovery.ready) throw new MijiaError("devices_failed");
       if (ids.some((id) => !this.discovery.find(id)))
         throw new MijiaError("device_not_found");
     };
-    assertCurrent();
+    assertDevices();
     return this.serial(async () => {
       await this.mqttClosing;
-      assertCurrent();
-      if (oauth.expiresAt <= Date.now()) throw new MijiaError("authentication");
+      assertDevices();
       if (this.mqtt?.closed) {
         await this.mqtt.close();
         this.mqtt = undefined;
       }
-      assertCurrent();
+      assertDevices();
+      // A renewal can replace the account while this operation is queued.
+      if (!this.accountOAuth || this.accountOAuth.expiresAt <= Date.now())
+        throw new MijiaError("authentication");
       const mqtt = this.accountObservations(account);
       const observation = mqtt.observe(
         ids,
@@ -677,7 +703,7 @@ export class MijiaService {
         if (reinstall) this.media.prepareRebind();
         const oauthChanged =
           this.accountOAuth?.accessToken !== candidate.oauth.accessToken;
-        this.invalidatePropertyReads(true);
+        this.invalidatePropertyReads();
         this.accountClient = candidate.client;
         this.accountOAuth = candidate.oauth;
         account.dispose();
@@ -717,7 +743,7 @@ export class MijiaService {
         }),
       );
       assertCurrent();
-      this.invalidatePropertyReads();
+      this.invalidateDeviceAccess();
       this.accountClient = candidate.client;
       this.accountOAuth = candidate.oauth;
       this.state.account = {
@@ -746,7 +772,7 @@ export class MijiaService {
       this.stopAccountMaintenance();
       this.media.cancelBinding();
       account.dispose();
-      this.invalidatePropertyReads();
+      this.invalidateDeviceAccess();
       this.accountClient = undefined;
       this.accountOAuth = undefined;
       this.media.resetAccount(false);
@@ -766,7 +792,7 @@ export class MijiaService {
     const wasBinding = this.media.bindingPending;
     this.cancelConnectionOperation();
     this.loggingOut = true;
-    this.invalidatePropertyReads();
+    this.invalidateDeviceAccess();
     this.stopAccountMaintenance();
     this.cancelRestore();
     this.media.cancelBinding();
@@ -791,7 +817,7 @@ export class MijiaService {
           throw failure;
         }
         this.loginFlow.dispose();
-        this.invalidatePropertyReads();
+        this.invalidateDeviceAccess();
         this.accountClient?.dispose();
         this.accountClient = undefined;
         this.accountOAuth = undefined;
@@ -923,7 +949,7 @@ export class MijiaService {
         );
         if (!this.loginFlow.isCurrent(attempt)) return;
         this.cancelRestore();
-        this.invalidatePropertyReads();
+        this.invalidateDeviceAccess();
         this.media.resetAccount();
         this.discovery.reset();
         this.accountClient?.dispose();
@@ -987,7 +1013,7 @@ export class MijiaService {
     this.cancelConnectionOperation();
     this.stopped = true;
     const maintenanceClosing = this.maintenance.shutdown();
-    this.invalidatePropertyReads();
+    this.invalidateDeviceAccess();
     this.initialRestorePending = false;
     this.discovery.pause();
     this.media.cancelBinding();

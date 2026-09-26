@@ -40,6 +40,7 @@ export class DeviceDiscovery {
     devices: [],
   };
   private selectedHomeId: string | null = null;
+  private selectedDevices = new Map<string, MiCloudDevice>();
   private scopeRevision = crypto.randomUUID();
   private confirmed = false;
   private readonly retry = new RetryTimer();
@@ -54,11 +55,16 @@ export class DeviceDiscovery {
     return this.scopeRevision;
   }
   private get devices() {
-    return this.selectedHome
-      ? this.catalog.devices.filter(
-          (device) => device.home_id === this.selectedHomeId,
-        )
-      : [];
+    return [...this.selectedDevices.values()];
+  }
+  private indexSelectedDevices() {
+    this.selectedDevices = new Map(
+      this.selectedHome
+        ? this.catalog.devices
+            .filter((device) => device.home_id === this.selectedHomeId)
+            .map((device) => [device.did, device])
+        : [],
+    );
   }
   get selectedHome() {
     return this.catalog.homes.find((home) => home.id === this.selectedHomeId);
@@ -92,6 +98,7 @@ export class DeviceDiscovery {
   select(homeId: string | null) {
     if (homeId === this.selectedHomeId) return;
     this.selectedHomeId = homeId;
+    this.indexSelectedDevices();
     this.scopeRevision = crypto.randomUUID();
     this.dependencies.onScopeChanged();
     this.state = { ...this.state, items: describeMijiaDevices(this.devices) };
@@ -154,11 +161,11 @@ export class DeviceDiscovery {
   constructor(private readonly dependencies: DeviceDependencies) {}
 
   list() {
-    return [...this.devices];
+    return this.devices;
   }
 
   find(id: string) {
-    return this.devices.find((device) => device.did === id);
+    return this.selectedDevices.get(id);
   }
 
   get stateSnapshot() {
@@ -182,6 +189,7 @@ export class DeviceDiscovery {
     this.pendingCatalog = undefined;
     this.catalog = { homes: [], devices: [] };
     this.selectedHomeId = null;
+    this.selectedDevices.clear();
     this.scopeRevision = crypto.randomUUID();
     this.state = { status: "idle", items: [] };
     this.discoveryFailedAccount = undefined;
@@ -235,20 +243,20 @@ export class DeviceDiscovery {
     this.retry.cancel();
     this.discoveryFailedAccount = undefined;
     const previousHome = this.selectedHome?.id;
-    const previousDevices = this.devices;
+    const previousDevices = this.selectedDevices;
     this.catalog = catalog;
     if (this.pendingCatalog?.catalog === catalog)
       this.pendingCatalog = undefined;
-    const remaining = new Set(this.devices.map((device) => device.did));
+    this.indexSelectedDevices();
     if (
       previousHome !== this.selectedHome?.id ||
-      previousDevices.some((device) => {
-        const next = this.devices.find((item) => item.did === device.did);
+      [...previousDevices.values()].some((device) => {
+        const next = this.selectedDevices.get(device.did);
         return (
-          !remaining.has(device.did) ||
-          next?.model !== device.model ||
-          next?.spec_type !== device.spec_type ||
-          next?.home_id !== device.home_id
+          !next ||
+          next.model !== device.model ||
+          next.spec_type !== device.spec_type ||
+          next.home_id !== device.home_id
         );
       })
     ) {
