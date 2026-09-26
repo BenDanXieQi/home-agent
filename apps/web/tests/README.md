@@ -9,7 +9,7 @@ bun run --cwd apps/web check-types
 bun run --cwd apps/web lint
 ```
 
-测试以 [设备接入职责参考](../../../docs/device-access-code-reference.md) 第 10、11 节为契约，使用 Vitest 的 Node 环境。无需浏览器、数据库、米家账号或 go2rtc。
+测试以 [设备接入职责参考](../../../docs/reference/device-access-code-reference.md) 第 10、11 节为契约，使用 Vitest 的 Node 环境。无需浏览器、数据库、米家账号或 go2rtc。
 
 | 测试文件               | 行为边界                                                                                                       |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------- |

@@ -34,10 +34,14 @@ Agent 将其映射为 LangGraph 的 `configurable.thread_id`，只追加本次�
 
 运行超时会取消模型执行，并向仍连接的客户端发送 `run_failed`，最多等待 1 秒发送与关闭，随后强制断开。客户端主动断开时直接取消，不再发送事件。客户端必须将未收到 `run_completed` 或 `run_failed` 的流结束视为异常，不能把 EOF 当成成功；失败后也不应自动重发消息。同会话锁在后台执行结束后释放，而非在 SSE 关闭时释放。
 
-HTTP 错误使用共享 `{ code, message, params?, issues?, traceId? }` 结构；`run_failed` 返回 `{ runId, threadId, error }`，其中 `error` 使用同一结构，超时码为 `run_timeout`，执行失败码为 `agent_execution_failed`。详见[错误处理](../../docs/errors.md)。
+HTTP 错误使用共享 `{ code, message, params?, issues?, traceId? }` 结构；`run_failed` 返回 `{ runId, threadId, error }`，其中 `error` 使用同一结构，超时码为 `run_timeout`，执行失败码为 `agent_execution_failed`。详见[错误处理](../../packages/api/README.md#错误响应)。
 
 聊天接口只接受 TCP loopback 对端，Host 和浏览器 Origin 必须为本机地址及 Agent 配置端口，不信任转发头；通过 `@home-agent/api/local-access` 与 backend 复用检查。`/health` 独立用于服务探测。
 
 仅限可信本机使用，尚无身份认证和会话归属校验，UUID 不是权限控制。存储含完整消息内容，与 OTel 是否采集内容无关。不提供长期记忆 Store、自动历史清理、会话列表、恢复任务调度或 SSE 断线续传。
 
 依据：[LangGraph JS 持久化](https://docs.langchain.com/oss/javascript/langgraph/persistence)、[官方 PostgreSQL 适配器](https://github.com/langchain-ai/langgraphjs/tree/main/libs/checkpoint-postgres)。
+
+## 验证边界
+
+服务健康检查、连接成功与静态检查只覆盖各自范围，不能证明真实模型多轮对话、重启后的历史恢复、同会话并发拒绝、超时、客户端取消或执行中停机已经通过端到端验证。当前使用边界为可信本机、单 Agent 进程；持久化与取消语义仍需在实际模型和数据库环境下验证。

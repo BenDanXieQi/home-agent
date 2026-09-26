@@ -26,7 +26,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `GET /api/services/status` | 检查 Agent 与 go2rtc 的接口是否可用      |
 | `POST /api/chat`           | 将 JSON 请求转发至 Agent，透传响应与 SSE |
 
-连接地址来自根目录 `config/config.yaml`，每次请求重新读取文件，内容未变时复用解析结果。生成规则、`--config`、接口结构与错误处理见[服务连接配置](../../docs/service-connections.md)。
+连接地址来自根目录 `config/config.yaml`，每次请求重新读取文件，内容未变时复用解析结果。配置生成、编辑和 `--config` 用法见[本地运行](../../docs/running.md#服务连接)。
 
 `/api/mijia` 提供扫码、验证码提交、授权恢复与退出、设备读取、按镜头预留观看连接及 SDP 信令；沿用本机管理限制。统一重试连接返回 HTTP 202，由 `/api/mijia/events` 的 SSE 公共状态展示后台进展；`/api/mijia/state` 提供诊断快照。`src/credentials/` 负责通用 AES-256-GCM 凭据存储，`src/mijia/service.ts` 拥有当前 MiCloud 与 OAuth 完整账号会话、读取和观察范围及串行提交边界。`account/login-flow.ts` 管理独立扫码尝试，`account/maintenance.ts` 管理账号恢复续期任务；候选会话由 `account/session.ts` 准备，持久化与接纳由 service 提交。
 
@@ -36,7 +36,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 `MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、采集代次及所选家庭归属，`properties/read-request.ts` 按设备分组预检 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。当前没有属性读取 HTTP 路由或周期读取。
 
-`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，目录通知与属性观察共享连接，取消全部观察（含目录通知）后停止连接与计时器。该入口不提交家庭状态，未接前端实时展示；独立设备事件与自动补读尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/mijia-source-contract.md)。
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，目录通知与属性观察共享连接，取消全部观察（含目录通知）后停止连接与计时器。该入口已用于[限时上报日志](../../docs/household.md#设备上报日志)，不提交家庭 `latest` 或 `availability`；持续采集、独立设备事件与自动补读尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/reference/mijia-source-contract.md)。
 
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。backend 不接收或中转视频包。官方能力目录声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道目录生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 
@@ -48,7 +48,17 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 聊天代理要求上游为本项目 Agent；响应体原样透传，错误连接到其他服务时不会将其 HTML 等响应转换为本项目错误格式。
 
-收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../docs/observability.md)。
+收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
+
+## 连接配置与探测
+
+`GET /api/config` 返回 `{ config, writable, path }`；`PUT /api/config` 接收完整配置 JSON（最多 16 KiB），保存后返回同一结构。字段、默认值、运行时校验与编辑器 schema 来自 `packages/api/src/contracts/` 的同一套 Zod 定义。配置仓库复用内容未变的解析结果，但不跳过文件访问、大小和权限检查；写入通过 `yaml` Document API 保留注释，并由 `write-file-atomic` 原子替换。
+
+配置错误返回 503，输入错误 400，只读或不可信来源 403，非 JSON 请求 415，超大请求 413，保存失败 500；统一响应与字段错误约定见 [API 契约](../../packages/api/README.md#错误响应)。
+
+`GET /api/services/status` 返回 `{ services: { agent, go2rtc } }`，每项包含 `url`、`status`、`checkedAt`、`reasonCode` 和可选 `params`。每次请求直接探测 Agent `/health` 与 go2rtc `/api`，不缓存；每项限时 3 秒、响应最多 16 KiB，支持客户端取消，拒绝重定向并校验 JSON。go2rtc 响应要求 `version`、`revision`、`host` 为字符串，且 `version`、`host` 非空，允许附加字段。Web 保存时取消旧查询，避免旧结果覆盖新地址；状态轮询不覆盖未保存输入。
+
+管理接口同时校验 TCP 对端、Host 与浏览器 Origin。对端必须是 loopback（包含 IPv4 映射的 loopback），无法取得对端信息时拒绝访问。Host 与 Origin 只允许 `localhost`、`127.0.0.1`、`[::1]` 的 backend 端口及 Vite `5173`；不信任转发头，不开放 CORS。Vite 保留浏览器 Host，JSON 修改请求显式校验 Origin。Agent 复用同一规则，仅接受其配置端口对应的本机 Host／Origin。
 
 ## 目录与约定
 
@@ -73,7 +83,8 @@ src/
 │   ├── account/
 │   │   ├── login-flow.ts  # 独立扫码尝试与授权材料
 │   │   ├── maintenance.ts # 完整账号恢复续期任务及计时器
-│   │   └── session.ts     # MiCloud 与 OAuth 恢复和续期候选
+│   │   ├── session.ts     # MiCloud 与 OAuth 恢复和续期候选
+│   │   └── observations.ts # 属性与目录观察、共享连接及重连退避
 │   ├── devices/
 │   │   ├── discovery.ts   # 设备快照、发现任务、刷新合并与定时器
 │   │   ├── directory-notifications.ts # 账号级目录通知与刷新防抖
@@ -81,7 +92,6 @@ src/
 │   ├── properties/
 │   │   ├── read-request.ts # 请求复制、按设备分组与 readable 规格预检
 │   │   ├── reader.ts      # 指定属性读取、共用串行批次与取消
-│   │   ├── observation.ts # 属性与目录观察、共享连接及重连退避
 │   │   └── source-profiles.ts # 读取通路配置、来源身份与证据范围
 │   ├── media/
 │   │   ├── session.ts     # 配置巡检、媒体绑定、代次与资源生命周期
@@ -107,7 +117,7 @@ src/
 
 普通 TypeScript 文件和目录使用小写短横线命名，类与类型使用 PascalCase，变量和方法使用 camelCase。对外错误码使用小写下划线；上游协议的原始字段和错误标识在适配边界转换。定时器句柄使用 `*Timer`，时间戳使用 `*At`，毫秒时长使用 `*Ms`。
 
-业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../docs/errors.md)。
+业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../packages/api/README.md#错误响应)。
 
 `main.ts` 是应用级依赖的唯一装配入口：读取环境、创建配置仓库、数据库、凭据仓库和米家服务，并负责启动与关闭。`createApp({ environment, connectionStore, mijia, readAgentUrl, staticRoot })` 只组装 HTTP 应用，不读取环境或隐式创建资源。路由工厂通过参数接收依赖，米家路由只依赖业务操作接口 `MijiaApi`，不拥有初始化与关闭权限。
 

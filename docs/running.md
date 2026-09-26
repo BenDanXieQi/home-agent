@@ -32,7 +32,42 @@ Docker 数据库通过 `.env` 的 `POSTGRES_PORT` 映射到本机，容器内端
 
 backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
 
-backend 首次启动生成 `config/config.yaml`，修改后下次请求生效。默认 Agent 地址为 `http://127.0.0.1:1811`，go2rtc 地址为 `http://127.0.0.1:1984`。详细配置见[服务连接配置](service-connections.md)。
+backend 首次启动在仓库根目录创建 `config/config.yaml` 与相邻的 `config.schema.json`，已有 YAML 不覆盖。默认路径不受启动工作目录影响，源码与构建入口使用同一文件；整个 `/config/` 忽略 Git。
+
+```yaml
+# yaml-language-server: $schema=./config.schema.json
+services:
+  agent:
+    url: http://127.0.0.1:1811
+  go2rtc:
+    url: http://127.0.0.1:1984
+```
+
+连接 YAML 仅保存服务地址，不保存账号凭据或运行状态；数据库、模型与追踪使用各自的环境变量。地址必须是无内嵌凭据的 HTTP(S) 服务根地址，可带端口，不支持路径前缀、query 或 fragment。go2rtc 自身的监听与用户流配置使用 `config/go2rtc/go2rtc.yaml`；米家摄像头共享流由 backend 在 go2rtc 内存中创建，不写入这两个文件。原生／容器模式通过启动命令切换，无需修改地址。
+
+服务设置页与手动编辑使用同一文件。配置查询、聊天转发和连接检查每次重新读取文件，内容变化后重新校验，下次请求生效；在途请求沿用开始时读取的地址。米家媒体连接由后台每 3 秒检查配置变更并自动迁移。文件损坏或无法读取时，相关调用暂停，页面显示错误；修复后下次请求恢复，无需重启。backend 的 `/api/health` 独立于连接配置。
+
+配置必须完整，拒绝未知字段、重复 YAML key、别名引用和超过 64 KiB 的文件。schema 导出或写入失败只提示，不影响有效 YAML 的读取。保存尽量保留注释并原子替换文件，需要可写目录，单文件挂载不满足条件；只读文件或目录仍可读取，页面禁用保存。手动编辑与页面保存应错开，当前没有并发修改冲突检测。
+
+### 自定义配置路径
+
+backend 支持 `--config <path>`，schema 放在指定 YAML 旁边。从仓库根目录启动：
+
+```sh
+bun --env-file=.env apps/backend/src/main.ts --config ./local-config/config.yaml
+# 先运行 bun run build，再使用构建入口
+bun --env-file=.env apps/backend/dist/main.js --config ./local-config/config.yaml
+```
+
+相对路径按 **backend 进程启动目录** 解析。例如在 `apps/backend` 中执行 `bun run dev --config ../../local-config/config.yaml`。Turbo 转发参数也按子进程目录解析；使用绝对路径可避免歧义。自定义配置目录请自行忽略 Git。
+
+### 连接状态与访问范围
+
+服务设置页约每 10 秒检查 Agent `/health` 与 go2rtc `/api`，每项限时 3 秒。**已连接只表示服务接口可用，不代表模型、米家授权或摄像头出流已就绪。** go2rtc `/api` 的 `revision` 是构建版本信息，与米家的媒体代次无关。米家绑定、共享流和浏览器出帧的区别见[组件与资源](mijia.md#组件与资源)。
+
+设置页管理已运行服务的地址，并提供摄像头接入重试；扫码、重新扫码与退出登录见[米家与摄像头](mijia.md)。接口结构和探测协议见 [Backend](../apps/backend/README.md#连接配置与探测)。
+
+配置、服务检查、米家和聊天接口要求 TCP 对端为 loopback，Host 与浏览器 Origin 为允许的本机地址和端口；不信任转发头，不开放 CORS。修改监听地址不会放宽限制。Agent 的 `/api/*` 同样限制本机访问，不能通过直连绕过 backend 边界。
 
 ## 单独启动与检查
 
