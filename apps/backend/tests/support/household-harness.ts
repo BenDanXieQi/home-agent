@@ -3,8 +3,8 @@ import { HouseholdRuntime } from "../../src/household/runtime";
 import { MijiaService } from "../../src/mijia/service";
 import { MiCloud } from "../../src/mijia/protocols/micloud";
 import { MiotSpecClient } from "../../src/mijia/protocols/micloud/spec";
-import { interceptMqtt } from "../device-access/observations/support";
-import { mediaPeer } from "../device-access/media/support";
+import { interceptMqtt } from "../mijia/observations/support";
+import { mediaPeer } from "../mijia/media/support";
 import { credentialStore, homeSelectionStore } from "./account-fixtures";
 import { deferred, eventually } from "./async";
 import {

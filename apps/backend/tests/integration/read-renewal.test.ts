@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { MiCloudError } from "../../../src/mijia/protocols/micloud";
-import { deferred, nextTurn } from "../../support/async";
-import { runningHousehold } from "../../support/household-harness";
-import { accountClient } from "../../support/protocol-fixtures";
+import { MiCloudError } from "../../src/mijia/protocols/micloud";
+import { deferred, nextTurn } from "../support/async";
+import { runningHousehold } from "../support/household-harness";
+import { accountClient } from "../support/protocol-fixtures";
 
 const households: Awaited<ReturnType<typeof runningHousehold>>[] = [];
 const releases: (() => void)[] = [];

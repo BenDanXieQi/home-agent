@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
-import type { MiotObservation } from "../../../src/mijia/protocols/miot/messages";
-import { eventually, nextTurn } from "../../support/async";
-import { runningHousehold } from "../../support/household-harness";
+import type { MiotObservation } from "../../src/mijia/protocols/miot/messages";
+import { eventually, nextTurn } from "../support/async";
+import { runningHousehold } from "../support/household-harness";
 
 const households: Awaited<ReturnType<typeof runningHousehold>>[] = [];
 afterEach(async () => {

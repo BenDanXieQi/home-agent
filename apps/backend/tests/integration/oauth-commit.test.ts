@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
-import { MiCloudError } from "../../../src/mijia/protocols/micloud/errors";
-import { accountSessionSchema } from "../../../src/mijia/account/session";
-import { accountClient } from "../../support/protocol-fixtures";
-import { deferred, nextTurn } from "../../support/async";
+import { MiCloudError } from "../../src/mijia/protocols/micloud/errors";
+import { accountSessionSchema } from "../../src/mijia/account/session";
+import { accountClient } from "../support/protocol-fixtures";
+import { deferred, nextTurn } from "../support/async";
 import {
   holdCredentialWrite,
   runningHousehold,
-} from "../../support/household-harness";
-import type { MiotObservation } from "../../../src/mijia/protocols/miot/messages";
+} from "../support/household-harness";
+import type { MiotObservation } from "../../src/mijia/protocols/miot/messages";
 
 const households: Awaited<ReturnType<typeof runningHousehold>>[] = [];
 const releaseBarriers: (() => void)[] = [];

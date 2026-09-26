@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { CredentialStoreError } from "../../../src/credentials/store";
-import { accountSessionSchema } from "../../../src/mijia/account/session";
-import type { MiCloud } from "../../../src/mijia/protocols/micloud";
-import { deferred, eventually, nextTurn } from "../../support/async";
+import { CredentialStoreError } from "../../src/credentials/store";
+import { accountSessionSchema } from "../../src/mijia/account/session";
+import type { MiCloud } from "../../src/mijia/protocols/micloud";
+import { deferred, eventually, nextTurn } from "../support/async";
 import {
   holdCredentialWrite,
   householdCatalog,
   loginHttp,
   runningHousehold,
-} from "../../support/household-harness";
+} from "../support/household-harness";
 
 const households: Awaited<ReturnType<typeof runningHousehold>>[] = [];
 const logins: ReturnType<typeof loginHttp>[] = [];
