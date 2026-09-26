@@ -12,6 +12,8 @@ import {
 
 const CONCURRENCY = 16;
 const ACK_TIMEOUT = 10_000;
+// MQTT 5 SUBACK: unspecified/internal error, packet ID in use, or quota exceeded.
+const RETRYABLE_SUBACK_CODES = new Set([0x80, 0x83, 0x91, 0x97]);
 export function isMqttAuthenticationFailure(reason: string | null) {
   return [
     "connack_134",
@@ -314,7 +316,12 @@ export class MiotMqtt {
           const grant = grants?.find((value) => value.topic === item.topic);
           const code = grant?.qos;
           if (code !== undefined && code >= 128)
-            finish("subscription_rejected", code);
+            finish(
+              RETRYABLE_SUBACK_CODES.has(code)
+                ? "subscribe_failed"
+                : "subscription_rejected",
+              code,
+            );
           else if (error || !grant || ![0, 1, 2].includes(grant.qos))
             finish("subscribe_failed");
           else finish(null, grant.qos);

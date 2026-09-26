@@ -62,6 +62,9 @@ export class DeviceObservations {
         await this.connection?.close();
         if (this.stopped || !this.watches.size || this.authenticationFailed)
           return;
+        // This attempt uses current credentials, including updates during close.
+        clearTimeout(this.timer);
+        this.timer = undefined;
         const connection = new MiotMqtt(this.sourceId, this.credentials());
         this.connection = connection;
         for (const watch of this.watches) {

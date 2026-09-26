@@ -28,11 +28,11 @@ service 为当前会话维护读取取消范围及 `collection_generation`。会
 
 OAuth 与 MQTT 必须使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，MQTT 的 `client_id=miloco:<uuid>`。UUID 按 MiLoCo `manager.py` 的 `uuid.uuid4().hex` 生成，为不带连字符的 32 位十六进制字符串。实机对照中，两组均成功取得 OAuth token，并使用 MQTT 5、TLS、60 秒心跳及 clean start 连接 `cn-ha.mqtt.io.mi.com:8883`；32 位 UUID 在 Paho 2.1.0 与手写 CONNECT 两种客户端中均收到成功 CONNACK，带连字符的 36 位 UUID 在两种客户端中均返回 `135 / 0x87`（Not authorized）。该对照将本次连接失败定位到实例 UUID 格式，不能据此认定应用未获 MQTT 准入；服务端具体字段校验实现未知。
 
-已验证当前账号及 MiLoCo 参考应用参数下的后端授权、token 交换与 MQTT 连接。正式内部观察入口已验证代表设备的订阅确认、属性变化与同值上报。重连恢复及 Home Agent 自有应用准入未验证；设备在线通知的实机范围见下文。
+已验证当前账号及 MiLoCo 参考应用参数下的后端授权、token 交换与 MQTT 连接。正式内部观察入口已验证代表设备的订阅确认、属性变化与同值上报，以及断线后的自动重连、活动订阅恢复和 OAuth 更新后的重建。Home Agent 自有应用准入及供应商真实认证拒绝仍未验证；设备在线通知的实机范围见下文。
 
 ## 正式推送入口
 
-`MijiaService.observeDevices(deviceIds, onObservation, signal)` 校验当前账号、所选家庭和目录中的明确设备集合，按需创建一个 MQTT 采集实例。多个观察者共用连接与 topic，通过引用计数对账；返回 `cancel()`、`snapshot()` 和 `retry()`。`snapshot()` 提供逐 topic 的期望、确认、在途、获准 QoS、失败原因及接收／丢弃计数；`retry()` 只重试临时失败，不反复尝试已被拒绝的订阅。该入口没有 HTTP 路由，不自动选择全家庭，不提交家庭 latest 或 availability。
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 校验当前账号、所选家庭和目录中的明确设备集合，按需创建一个 MQTT 采集实例。多个观察者共用连接与 topic，通过引用计数对账；返回 `cancel()`、`snapshot()` 和 `retry()`。`snapshot()` 提供逐 topic 的期望、确认、在途、获准 QoS、失败原因及接收／丢弃计数；`retry()` 只重试临时失败，包括配额不足等临时 SUBACK 拒绝，不反复尝试权限、topic 或能力不支持等永久拒绝。临时拒绝保留原始原因码，等待显式重试或重连，不立即循环订阅。该入口没有 HTTP 路由，不自动选择全家庭，不提交家庭 latest 或 availability。
 
 设备目录由 `DeviceDiscovery` 维护所选家庭的派生索引，目录更新、家庭选择和清除时同步更新。新观察在接纳前校验完整设备集合；消息交付检查账号仍活动、取消信号及作用域代次，不逐条扫描目录。目录刷新中的 `loading` 或临时错误不撤销已接纳观察；成功目录更新确认设备移除、归属／型号／规格变化时才撤销对应作用域。同账号续期期间排队的观察使用稳定来源身份和出队后的当前 OAuth 凭据。
 
