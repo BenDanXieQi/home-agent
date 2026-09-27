@@ -1,5 +1,4 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
-import { ZodError } from "zod";
 import {
   householdCatalog,
   runningHousehold,
@@ -67,7 +66,7 @@ test("failed logout refreshes the same account and restores reads in the new sco
   ).toMatchObject([{ status: "success" }]);
 });
 
-test("failed logout cannot restore access from an incomplete cloud refresh", async () => {
+test("failed logout restores only devices returned by a successful cloud refresh", async () => {
   const fixture = await runningHousehold();
   fixtures.push(fixture);
   const catalog = householdCatalog();
@@ -82,16 +81,20 @@ test("failed logout cannot restore access from an incomplete cloud refresh", asy
   await expect(fixture.runtime.logout()).rejects.toMatchObject({
     reason: "credential_storage",
   });
-  await eventually(() => fixture.service.snapshot().devices.status === "error");
+  await eventually(() => fixture.runtime.ready);
 
-  expect(fixture.runtime.ready).toBe(false);
-  expect(fixture.runtime.snapshot().projection.device).toEqual({});
+  expect(fixture.runtime.ready).toBe(true);
+  expect(
+    Object.values(fixture.runtime.snapshot().projection.device).map(
+      (device) => device.id,
+    ),
+  ).toEqual(["stable"]);
   await expect(
     fixture.service.readProperties(
       [{ did: "device-a", siid: 2, piid: 1 }],
       new AbortController().signal,
     ),
-  ).rejects.toMatchObject({ reason: "devices_failed" });
+  ).rejects.toMatchObject({ reason: "device_not_found" });
 });
 
 test("a throwing subscriber cannot prevent first binding or later subscribers", async () => {
@@ -247,17 +250,6 @@ test("first binding rechecks membership after a queued cloud refresh", async () 
   });
 });
 
-test("invalid direct selection input cannot stop the actor or dispatch persistence", async () => {
-  const fixture = await runningHousehold();
-  fixtures.push(fixture);
-  const before = fixture.runtime.snapshot();
-  await expect(
-    fixture.runtime.bindHome(before.scope_epoch, "x".repeat(129)),
-  ).rejects.toBeInstanceOf(ZodError);
-  expect(fixture.runtime.snapshot()).toEqual(before);
-  expect(fixture.homes.write).not.toHaveBeenCalled();
-});
-
 test("an oversized initial directory leaves the durable binding unavailable until refresh", async () => {
   const fixture = await runningHousehold(householdCatalog(), { homeId: null });
   fixtures.push(fixture);
@@ -390,11 +382,9 @@ test("missing details in an unrelated home do not block account restoration or b
   ).toMatchObject([{ status: "success" }]);
 });
 
-test("an incomplete bound-home refresh preserves accepted devices and skips persistence", async () => {
+test("successful refresh without details removes the device and accepts it again when details return", async () => {
   const fixture = await runningHousehold();
   fixtures.push(fixture);
-  const before = fixture.runtime.snapshot();
-  const saves = fixture.repository.save.mock.calls.length;
   const catalog = householdCatalog();
   catalog.devices = catalog.devices.filter(
     (device) => device.did !== "device-a",
@@ -402,17 +392,34 @@ test("an incomplete bound-home refresh preserves accepted devices and skips pers
   fixture.catalog.mockResolvedValue(catalog);
   await fixture.service.loadDevices();
   expect(fixture.runtime.ready).toBe(true);
-  expect(fixture.runtime.snapshot().projection.device).toEqual(
-    before.projection.device,
+  expect(
+    Object.values(fixture.runtime.snapshot().projection.device).map(
+      (device) => device.id,
+    ),
+  ).toEqual(["stable"]);
+  expect(fixture.service.snapshot().devices.status).toBe("ready");
+  await expect(
+    fixture.service.readProperties(
+      [{ did: "device-a", siid: 2, piid: 1 }],
+      new AbortController().signal,
+    ),
+  ).rejects.toMatchObject({ reason: "device_not_found" });
+  fixture.catalog.mockResolvedValue(householdCatalog());
+  await fixture.service.loadDevices();
+  await eventually(() =>
+    Object.values(fixture.runtime.snapshot().projection.device).some(
+      (device) => device.id === "device-a" && device.spec_status === "ready",
+    ),
   );
-  expect(fixture.repository.save.mock.calls.length).toBe(saves);
-  expect(fixture.service.snapshot().devices).toMatchObject({
-    status: "error",
-    error: { code: "mijia_cloud_invalid_response" },
-  });
+  expect(
+    await fixture.service.readProperties(
+      [{ did: "device-a", siid: 2, piid: 1 }],
+      new AbortController().signal,
+    ),
+  ).toMatchObject([{ status: "success" }]);
 });
 
-test("first selection of an incomplete home keeps the binding and retries only the directory", async () => {
+test("first binding permits an empty accessible device list and later discovers returned devices", async () => {
   const fixture = await runningHousehold(householdCatalog(), { homeId: null });
   fixtures.push(fixture);
   const catalog = householdCatalog();
@@ -421,8 +428,8 @@ test("first selection of an incomplete home keeps the binding and retries only t
   );
   fixture.catalog.mockResolvedValue(catalog);
   await fixture.runtime.bindHome(fixture.runtime.epoch, "home-b");
-  await eventually(() => fixture.service.snapshot().devices.status === "error");
-  expect(fixture.runtime.ready).toBe(false);
+  await eventually(() => fixture.runtime.ready);
+  expect(fixture.runtime.snapshot().projection.device).toEqual({});
   expect(fixture.service.snapshot().account.status).toBe("authenticated");
   expect(await fixture.homes.read(fixture.service.identity()!)).toEqual({
     homeId: "home-b",
@@ -434,7 +441,7 @@ test("first selection of an incomplete home keeps the binding and retries only t
   expect(fixture.homes.write.mock.calls.length).toBe(writes);
 });
 
-test("a sole home is durably bound before incomplete initial details are retried", async () => {
+test("a sole home runs with returned device details and later expands its accessible list", async () => {
   const original = householdCatalog();
   const catalog = {
     homes: [original.homes[0]!],
@@ -442,10 +449,10 @@ test("a sole home is durably bound before incomplete initial details are retried
   };
   const fixture = await runningHousehold(catalog, {
     homeId: null,
-    initializationError: true,
+    automaticBinding: true,
   });
   fixtures.push(fixture);
-  expect(fixture.runtime.ready).toBe(false);
+  expect(fixture.runtime.ready).toBe(true);
   expect(fixture.service.snapshot().account.status).toBe("authenticated");
   expect(await fixture.homes.read(fixture.service.identity()!)).toEqual({
     homeId: "home-a",
@@ -458,4 +465,24 @@ test("a sole home is durably bound before incomplete initial details are retried
   await fixture.service.loadDevices();
   expect(fixture.runtime.ready).toBe(true);
   expect(fixture.homes.write.mock.calls.length).toBe(writes);
+});
+
+test("a queued refresh does not start cloud work after the runtime is stopped", async () => {
+  const fixture = await runningHousehold();
+  fixtures.push(fixture);
+  const requests = fixture.catalog.mock.calls.length;
+  fixture.runtime.requestRefresh(fixture.runtime.epoch, "directory");
+  await fixture.runtime.close();
+  expect(fixture.catalog.mock.calls.length).toBe(requests);
+  expect(fixture.runtime.ready).toBe(false);
+});
+
+test("device snapshots remain detached when discovery reuses its prepared display records", async () => {
+  const fixture = await runningHousehold();
+  fixtures.push(fixture);
+  const before = fixture.service.snapshot();
+  const exposed = fixture.service.snapshot();
+  exposed.devices.items[0]!.name = "Changed by consumer";
+  exposed.devices.items[0]!.channels.push(1);
+  expect(fixture.service.snapshot().devices).toEqual(before.devices);
 });

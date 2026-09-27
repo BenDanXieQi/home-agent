@@ -81,8 +81,20 @@ export class HouseholdSpecifications {
   ) {}
 
   update(devices: readonly Device[]) {
+    if (
+      devices.length === this.bindings.size &&
+      devices.every((device) => {
+        const binding = this.bindings.get(device.id);
+        return (
+          binding?.model === device.model &&
+          binding.source === (device.spec_type || device.model)
+        );
+      })
+    )
+      return;
     const sources: typeof this.sources = new Map();
     const bindings: typeof this.bindings = new Map();
+    const attached = new Set<string>();
     for (const device of devices) {
       const key = device.spec_type || device.model;
       let source = sources.get(key) ?? this.sources.get(key);
@@ -99,26 +111,30 @@ export class HouseholdSpecifications {
         };
       }
       sources.set(key, source);
-      bindings.set(device.id, {
-        source: key,
-        model: device.model,
-        urn: this.bindings.get(device.id)?.urn ?? null,
-      });
+      const previous = this.bindings.get(device.id);
+      const urn =
+        source.status === "ready" &&
+        source.resolvedUrn &&
+        this.accepted.has(source.resolvedUrn)
+          ? source.resolvedUrn
+          : (previous?.urn ?? null);
+      bindings.set(device.id, { source: key, model: device.model, urn });
+      if (
+        source.status === "ready" &&
+        urn !== null &&
+        (previous?.source !== key ||
+          previous.model !== device.model ||
+          previous.urn !== urn)
+      )
+        attached.add(device.id);
     }
     for (const [key, source] of this.sources)
       if (!sources.has(key)) source.controller.abort();
     this.sources = sources;
     this.bindings = bindings;
     this.accepted = this.referencedMetadata(bindings);
-    // Attaching shared metadata is a data commit, even when no HTTP read is needed.
-    for (const binding of bindings.values()) {
-      const source = sources.get(binding.source)!;
-      if (source.status === "ready" && binding.urn !== source.resolvedUrn) {
-        source.done = false;
-        source.status = "loading";
-        source.error = null;
-      }
-    }
+    // Already accepted metadata adds no bytes and does not restart a shared source.
+    if (attached.size) this.changed(attached);
     this.pump();
     this.finishBatch();
   }
@@ -163,6 +179,7 @@ export class HouseholdSpecifications {
 
   /** Revocation only removes references and work; it cannot fail a capacity check. */
   retain(deviceIds: ReadonlySet<string>) {
+    if ([...this.bindings.keys()].every((id) => deviceIds.has(id))) return;
     const bindings = new Map(
       [...this.bindings].filter(([id]) => deviceIds.has(id)),
     );

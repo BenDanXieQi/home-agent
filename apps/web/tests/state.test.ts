@@ -499,3 +499,45 @@ describe("shared account and playback gates", () => {
     expect(options.categories).toContainEqual([JSON.stringify(null), "未分类"]);
   });
 });
+
+it("synchronization metadata does not rebuild device lists or notify their subscribers", () => {
+  const baseline = withDevices(
+    device(),
+    device({ id: "peer", device_id: "peer" }),
+  );
+  state.appStore.set(state.householdSnapshotAtom, baseline);
+  const devices = state.appStore.get(state.devicesAtom);
+  const filters = state.appStore.get(state.deviceFilterOptionsAtom);
+  const changed = vi.fn();
+  const unsubscribe = state.appStore.sub(state.devicesAtom, changed);
+  try {
+    const next = applyChanges(
+      baseline.projection,
+      stateChangeSchema.parse({
+        scope_epoch: baseline.scope_epoch,
+        sequence: baseline.sequence + 1,
+        changes: [
+          {
+            op: "upsert",
+            entity: "household",
+            key: "household",
+            value: {
+              ...baseline.projection.household.household,
+              cloud_synced_at: "2026-09-27T04:00:00.000Z",
+            },
+          },
+        ],
+      }),
+    );
+    state.appStore.set(state.householdSnapshotAtom, {
+      ...baseline,
+      sequence: baseline.sequence + 1,
+      projection: next,
+    });
+    expect(state.appStore.get(state.devicesAtom)).toBe(devices);
+    expect(state.appStore.get(state.deviceFilterOptionsAtom)).toBe(filters);
+    expect(changed).not.toHaveBeenCalled();
+  } finally {
+    unsubscribe();
+  }
+});

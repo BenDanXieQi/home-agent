@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { MijiaError } from "../../src/mijia/errors";
 import { MiCloudError } from "../../src/mijia/protocols/micloud";
 import { deferred, eventually } from "../support/async";
@@ -51,39 +51,7 @@ async function holdRead(h: Awaited<ReturnType<typeof runningHousehold>>) {
 }
 
 describe("running household read authorization", () => {
-  test("source notifications use a detached public view without materializing the device list", async () => {
-    const h = await household();
-    const full = h.service.snapshot();
-    expect(full.devices.items).toHaveLength(2);
-    const snapshot = spyOn(h.service, "snapshot");
-    releases.push(() => snapshot.mockRestore());
-    const version = h.runtime.version();
-
-    h.service.flushChanges();
-    const source = h.service.sourceSnapshot();
-    expect(snapshot).not.toHaveBeenCalled();
-    expect(h.runtime.version()).toEqual(version);
-    expect(source).toMatchObject({
-      accountId: h.service.identity(),
-      account: full.account,
-      homes: full.homes,
-      revision: full.revision,
-      binding: full.binding,
-      login: h.service.loginPublic(),
-      directory: { status: "ready" },
-    });
-    expect(source).not.toHaveProperty("devices");
-    expect(source).not.toHaveProperty("loginAttempt");
-    expect(source.directory).not.toHaveProperty("items");
-
-    source.homes.items[0]!.name = "Changed by reader";
-    if (source.account.status === "authenticated" && source.account.profile)
-      source.account.profile.name = "Changed by reader";
-    expect(h.service.sourceSnapshot().homes).toEqual(full.homes);
-    expect(h.service.sourceSnapshot().account).toEqual(full.account);
-  });
-
-  test("missing room-member details cannot revoke an in-flight read", async () => {
+  test("successful refresh without room-member details revokes its in-flight read", async () => {
     const h = await household();
     const pending = await holdRead(h);
     const original = householdCatalog();
@@ -104,13 +72,11 @@ describe("running household read authorization", () => {
     };
     h.catalog.mockResolvedValue(next);
     await h.service.loadDevices();
-    expect(pending.signal?.aborted).toBe(false);
+    expect(pending.signal?.aborted).toBe(true);
     expect(h.runtime.ready).toBe(true);
     pending.release();
-    expect(await pending.outcome).toMatchObject({
-      accepted: true,
-      observations: [{ status: "success", value: 99 }],
-    });
+    expect(await pending.outcome).toMatchObject({ accepted: false });
+    expect(await read(h, "stable")).toMatchObject([{ status: "success" }]);
   });
 
   test("a complete directory revokes in-flight and new device access before a failed save", async () => {

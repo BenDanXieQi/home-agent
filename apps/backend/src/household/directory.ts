@@ -1,7 +1,7 @@
+import { prepareProjection } from "./projection";
 import { z } from "zod";
 import {
-  deviceSchema,
-  directorySchema,
+  type Projection,
   entityKey,
   homeSchema,
   initialSpecification,
@@ -32,11 +32,14 @@ export const directoryCandidateSchema = z.object({
 });
 export type DirectoryCandidate = z.infer<typeof directoryCandidateSchema>;
 
-export function publicDirectory(input: DirectoryCandidate, now: string) {
+export function publicDirectory(
+  input: DirectoryCandidate,
+  previous: Projection,
+) {
   const candidate = directoryCandidateSchema.parse(input);
   const home = candidate.homes.find((item) => item.id === candidate.homeId);
   const account_id = candidate.accountId;
-  return directorySchema.parse({
+  const incoming = {
     home: home
       ? {
           [entityKey(account_id, home.id)]: {
@@ -44,7 +47,6 @@ export function publicDirectory(input: DirectoryCandidate, now: string) {
             home_id: home.id,
             name: home.name,
             shared: home.shared,
-            last_seen_at: now,
             archived: false,
           },
         }
@@ -57,7 +59,6 @@ export function publicDirectory(input: DirectoryCandidate, now: string) {
           home_id: home!.id,
           room_id: room.id,
           name: room.name,
-          last_seen_at: now,
           archived: false,
         },
       ]),
@@ -65,20 +66,29 @@ export function publicDirectory(input: DirectoryCandidate, now: string) {
     device: Object.fromEntries(
       candidate.devices.map((device) => [
         entityKey(account_id, device.id),
-        deviceSchema.parse({
-          ...device,
-          account_id,
-          device_id: device.id,
+        {
           ...initialSpecification,
           category: null,
           capability_tags: [],
-          availability: "unknown",
+          availability: "unknown" as const,
           read_enabled_properties: [],
           alias: null,
-          last_seen_at: now,
+          ...previous.device[entityKey(account_id, device.id)],
+          ...device,
+          account_id,
+          device_id: device.id,
           archived: false,
-        }),
+        },
       ]),
     ),
-  });
+  };
+  const { projection } = prepareProjection(
+    { projection: previous },
+    { ...previous, ...incoming },
+  );
+  return {
+    home: projection.home,
+    room: projection.room,
+    device: projection.device,
+  };
 }

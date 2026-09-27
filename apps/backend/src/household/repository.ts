@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import {
   directorySchema,
   deviceSchema,
@@ -46,35 +46,54 @@ export function createHouseholdRepository(db: Database) {
     db,
     householdLimits.transactionMs,
   );
+  async function readStored(
+    tx: Parameters<Parameters<typeof transaction>[1]>[0],
+    accountId: string,
+    homeId: string,
+  ) {
+    const [row] = await tx
+      .select()
+      .from(householdDirectories)
+      .where(directoryIdentity(accountId, homeId));
+    return row
+      ? {
+          directory: storedDirectorySchema.parse(row.directory),
+          savedAt: row.updatedAt.toISOString(),
+        }
+      : undefined;
+  }
   const write = createConfirmedWriter(transaction);
+  // Only confirmed durable contents may bypass another database transaction.
+  let acknowledged:
+    | {
+        key: string;
+        data: z.infer<typeof storedDirectorySchema>;
+        savedAt: string;
+      }
+    | undefined;
   return {
     async read(accountId: string, homeId: string) {
-      const [row] = await transaction(
-        directoryLockKey(accountId, homeId),
-        (tx) =>
-          tx
-            .select()
-            .from(householdDirectories)
-            .where(directoryIdentity(accountId, homeId)),
+      const row = await transaction(directoryLockKey(accountId, homeId), (tx) =>
+        readStored(tx, accountId, homeId),
       ).catch(() => {
         throw new HouseholdError("home_storage");
       });
       if (!row) return undefined;
-      const stored = storedDirectorySchema.parse(row.directory);
+      const stored = row.directory;
       const data = {
         ...stored,
         device: Object.fromEntries(
           Object.entries(stored.device).map(([key, device]) => [
             key,
-            deviceSchema.parse({
+            {
               ...device,
               category: null,
               capability_tags: [],
               ...initialSpecification,
-              availability: "unknown",
+              availability: "unknown" as const,
               read_enabled_properties: [],
               alias: null,
-            }),
+            },
           ]),
         ),
       };
@@ -87,7 +106,7 @@ export function createHouseholdRepository(db: Database) {
             ),
           ]),
         ),
-        savedAt: row.updatedAt.toISOString(),
+        savedAt: row.savedAt,
       };
     },
     async save(
@@ -99,44 +118,69 @@ export function createHouseholdRepository(db: Database) {
       const data = storedDirectorySchema.parse(directory);
       if (jsonBytes(data) > householdLimits.directoryBytes)
         throw new HouseholdError("capacity_exceeded");
+      assertCurrent();
+      const key = directoryLockKey(accountId, homeId);
+      if (
+        acknowledged?.key === key &&
+        isDeepStrictEqual(acknowledged.data, data)
+      )
+        return acknowledged.savedAt;
+      // A failed or unconfirmed candidate must never reuse an earlier acknowledgement.
+      acknowledged = undefined;
       try {
         const savedAt = await write(
           directoryLockKey(accountId, homeId),
           async (tx, beforeWrite) => {
             assertCurrent();
-            const [row] = await tx
-              .select()
-              .from(householdDirectories)
-              .where(directoryIdentity(accountId, homeId));
+            const row = await readStored(tx, accountId, homeId);
             assertCurrent();
             if (row && isDeepStrictEqual(row.directory, data))
-              return row.updatedAt.toISOString();
+              return row.savedAt;
             const updatedAt = new Date();
             beforeWrite();
-            await tx
-              .insert(householdDirectories)
-              .values({ accountId, homeId, directory: data, updatedAt })
-              .onConflictDoUpdate({
-                target: [
-                  householdDirectories.accountId,
-                  householdDirectories.homeId,
-                ],
-                set: { directory: data, updatedAt },
+            if (!row) {
+              await tx.insert(householdDirectories).values({
+                accountId,
+                homeId,
+                directory: data,
+                updatedAt,
               });
+            } else {
+              const previous = row.directory;
+              let expression = sql`${householdDirectories.directory}`;
+              for (const entity of ["home", "room", "device"] as const) {
+                const removed = Object.keys(previous[entity]).filter(
+                  (id) => !Object.hasOwn(data[entity], id),
+                );
+                const upserts = Object.fromEntries(
+                  Object.entries(data[entity]).filter(
+                    ([id, value]) =>
+                      !isDeepStrictEqual(previous[entity][id], value),
+                  ),
+                );
+                if (!removed.length && !Object.keys(upserts).length) continue;
+                const records = sql`((${householdDirectories.directory} -> ${entity})
+                  - ARRAY(SELECT jsonb_array_elements_text(${JSON.stringify(removed)}::jsonb)))
+                  || ${JSON.stringify(upserts)}::jsonb`;
+                expression = sql`jsonb_set(${expression}, ARRAY[${entity}], ${records})`;
+              }
+              await tx
+                .update(householdDirectories)
+                .set({ directory: expression, updatedAt })
+                .where(directoryIdentity(accountId, homeId));
+            }
             assertCurrent();
             return updatedAt.toISOString();
           },
           async (tx) => {
-            const [row] = await tx
-              .select()
-              .from(householdDirectories)
-              .where(directoryIdentity(accountId, homeId));
+            const row = await readStored(tx, accountId, homeId);
             return row && isDeepStrictEqual(row.directory, data)
-              ? { committed: true, value: row.updatedAt.toISOString() }
+              ? { committed: true, value: row.savedAt }
               : { committed: false };
           },
         );
         assertCurrent();
+        acknowledged = { key, data, savedAt };
         return savedAt;
       } catch (error) {
         if (

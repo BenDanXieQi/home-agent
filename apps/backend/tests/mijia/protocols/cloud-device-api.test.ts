@@ -204,7 +204,7 @@ describe("MiCloud device API boundary", () => {
     expect(pages).toBe(2);
   });
 
-  test("preserves missing membership references for household-scoped completeness validation", async () => {
+  test("preserves membership references while granting access only to returned details", async () => {
     const { client } = cloudDeviceApi((path) => {
       if (path === "/app/v2/homeroom/gethome")
         return {

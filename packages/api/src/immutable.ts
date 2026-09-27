@@ -1,7 +1,7 @@
 import { create, type Draft } from "mutative";
 import type { z } from "zod";
 
-/** Build a synchronous candidate without freezing values owned by its caller. */
+/** Build a candidate without freezing values owned by its caller. */
 export function produce<T extends object>(
   base: T,
   recipe: (draft: Draft<T>) => undefined,
@@ -9,24 +9,20 @@ export function produce<T extends object>(
   return create(base, recipe);
 }
 
-/** Freeze an owned result while retaining its schema-derived type. */
-export function update<T extends object>(
-  base: T,
-  recipe: Parameters<typeof produce<T>>[1],
-) {
-  const next = produce(base, recipe);
-  void create(next, () => {}, { enableAutoFreeze: true });
-  return next;
+/** Freeze an owned value in place; no draft update or schema copy is needed. */
+export function freeze<T extends object>(value: T) {
+  void create(value, () => {}, { enableAutoFreeze: true });
+  return value;
 }
 
 const immutable = new WeakSet<object>();
 
-/** Parse a detached public value before trusting its deeply frozen contents. */
+/** Validation detaches external inputs before they become trusted frozen values. */
 export function parseImmutable<T extends object>(
   schema: z.ZodType<T>,
   input: unknown,
 ) {
-  const value = update(schema.parse(input), () => {});
+  const value = freeze(schema.parse(input));
   immutable.add(value);
   return value;
 }

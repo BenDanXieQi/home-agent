@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { RetryTimer } from "../retry-timer";
 import { householdLimits, jsonBytes } from "../../household/config";
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
@@ -192,15 +193,6 @@ export class DeviceDiscovery {
     return this.selectedDevices.get(id);
   }
 
-  get stateSnapshot() {
-    return this.state;
-  }
-  snapshot() {
-    return {
-      ...this.state,
-      items: this.devices.map(describeMijiaDevice),
-    };
-  }
   pause() {
     clearTimeout(this.discoveryTimer);
     this.retry.cancel();
@@ -296,10 +288,22 @@ export class DeviceDiscovery {
       this.pendingCatalog = undefined;
     this.indexSelectedDevices();
     const devices = this.devices;
-    this.state = {
-      status: "ready",
-      items: devices.map(describeMijiaDevice),
-    };
+    const previous = new Map(
+      this.state.items.map((device) => [device.id, device]),
+    );
+    const items = devices.map((device) => {
+      const value = describeMijiaDevice(device);
+      const existing = previous.get(device.did);
+      return existing && isDeepStrictEqual(existing, value) ? existing : value;
+    });
+    const unchanged =
+      items.length === this.state.items.length &&
+      items.every((item) => previous.get(item.id) === item);
+    if (this.state.status !== "ready" || !unchanged)
+      this.state = {
+        status: "ready",
+        items: unchanged ? this.state.items : items,
+      };
     this.dependencies.onDevices(devices, retryFailed);
     const account = this.dependencies.currentAccount();
     if (account) this.schedule(account);
@@ -313,7 +317,7 @@ export class DeviceDiscovery {
     if (this.deviceLoadTask?.account === account) {
       this.refreshAgain = true;
       await this.deviceLoadTask.promise;
-      return this.snapshot();
+      return this.state;
     }
     const pendingCatalog =
       retryStorage && this.pendingCatalog?.account === account
@@ -322,11 +326,11 @@ export class DeviceDiscovery {
     // Every trigger shares the supplier deadline; a local save needs no request.
     if (!pendingCatalog && Date.now() < this.retryAfterAt) {
       this.scheduleRetry(account);
-      return this.snapshot();
+      return this.state;
     }
     if (this.dependencies.renewalFailed(account)) {
       if (!background) await this.dependencies.renew(account);
-      return this.snapshot();
+      return this.state;
     }
     if (!background)
       this.state = {
@@ -405,6 +409,6 @@ export class DeviceDiscovery {
         void this.load(true);
       }
     }
-    return this.snapshot();
+    return this.state;
   }
 }

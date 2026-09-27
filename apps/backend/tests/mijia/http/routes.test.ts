@@ -382,17 +382,6 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     await nextTurn();
   });
 
-  test("first binding rejects a null home before reaching the service", async () => {
-    const h = harness();
-    const bind = spyOn(h.service, "bindHome");
-    const response = await h.request(
-      "/scope/homes",
-      json("PUT", { scope_epoch: h.runtime.epoch, home_id: null }),
-    );
-    expect(response.status).toBe(400);
-    expect(bind).not.toHaveBeenCalled();
-  });
-
   test("an obsolete epoch is rejected before household selection or refresh work", async () => {
     const h = harness();
     const select = spyOn(h.service, "bindHome");

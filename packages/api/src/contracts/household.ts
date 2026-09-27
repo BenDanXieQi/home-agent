@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { update } from "../immutable";
+import { produce, freeze } from "../immutable";
 import {
   mijiaAccountSchema,
   mijiaDeviceSchema,
@@ -135,7 +135,6 @@ export const homeSchema = z.object({
   home_id: z.string(),
   name: z.string(),
   shared: z.boolean(),
-  last_seen_at: z.iso.datetime(),
   archived: z.boolean(),
 });
 export const roomSchema = z.object({
@@ -143,7 +142,6 @@ export const roomSchema = z.object({
   home_id: z.string(),
   room_id: z.string(),
   name: z.string(),
-  last_seen_at: z.iso.datetime(),
   archived: z.boolean(),
 });
 const specificationIdSchema = z
@@ -161,7 +159,6 @@ export const deviceSchema = mijiaDeviceSchema.extend({
     mijiaErrorSchema,
     householdSpecificationPolicy,
   ).nullable(),
-  last_seen_at: z.iso.datetime(),
   archived: z.boolean(),
   alias: z.string().nullable(),
   category: categorySchema,
@@ -322,23 +319,13 @@ export function applyChanges(
 ) {
   const { changes } = input;
   if (!changes.length) return projection;
-  return update(projection, (draft) => {
-    const copied = new Map<keyof Projection, Record<string, unknown>>();
-    for (const item of changes) {
-      let records = copied.get(item.entity);
-      if (!records) {
-        records = { ...projection[item.entity] };
-        copied.set(item.entity, records);
-        Object.assign(draft, { [item.entity]: records });
+  return freeze(
+    produce(projection, (draft) => {
+      for (const item of changes) {
+        const records: Record<string, unknown> = draft[item.entity];
+        if (item.op === "remove") delete records[item.key];
+        else records[item.key] = item.value;
       }
-      if (item.op === "remove") delete records[item.key];
-      else
-        Object.defineProperty(records, item.key, {
-          value: item.value,
-          enumerable: true,
-          configurable: true,
-          writable: true,
-        });
-    }
-  });
+    }),
+  );
 }

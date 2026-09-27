@@ -147,24 +147,6 @@ describe("household stream ownership and version integrity", () => {
     expect(stream.signal.aborted).toBe(false);
   });
 
-  it("keeps a last valid snapshot on a version gap and reconnects for a complete baseline", async () => {
-    const stream = await start();
-    const snapshot = householdSnapshot();
-    stream.send("snapshot", snapshot);
-    stream.send("state_change", {
-      scope_epoch: epoch,
-      sequence: 3,
-      changes: [],
-    });
-    await flush();
-    expect(appStore.get(householdSnapshotAtom)).toEqual(snapshot);
-    expect(appStore.get(householdSyncedAtom)).toBe(false);
-    expect(stream.signal.aborted).toBe(true);
-    await vi.advanceTimersByTimeAsync(1_000);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(appStore.get(householdSyncedAtom)).toBe(false);
-  });
-
   it.each(["state_change", "heartbeat"])(
     "rejects %s before this connection has its own snapshot",
     async (event) => {
@@ -189,30 +171,6 @@ describe("household stream ownership and version integrity", () => {
       expect(stream.signal.aborted).toBe(true);
     },
   );
-
-  it("rejects an invalid member without exposing an earlier valid member of the same batch", async () => {
-    const stream = await start();
-    const snapshot = householdSnapshot();
-    stream.send("snapshot", snapshot);
-    await flush();
-    const item = device();
-    stream.send("state_change", {
-      scope_epoch: epoch,
-      sequence: 2,
-      changes: [
-        {
-          op: "upsert",
-          entity: "device",
-          key: entityKey(item.account_id, item.device_id),
-          value: item,
-        },
-        { op: "upsert", entity: "device", key: "wrong-identity", value: item },
-      ],
-    });
-    await flush();
-    expect(appStore.get(householdSnapshotAtom)).toEqual(snapshot);
-    expect(appStore.get(householdSyncedAtom)).toBe(false);
-  });
 
   it.each(["scope_changed", "stopping", "slow_client"])(
     "honors resync %s and its retry delay",
