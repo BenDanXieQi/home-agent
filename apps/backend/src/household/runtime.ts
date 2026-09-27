@@ -32,7 +32,7 @@ export class HouseholdRuntime {
   private logoutTask: Promise<void> | undefined;
   private readonly refreshTasks = new Map<
     DirectoryRefreshTarget,
-    { epoch: string; promise: Promise<void> }
+    { epoch: string }
   >();
   private readonly summaries = new WeakMap<
     ReturnType<HouseholdSpecifications["snapshot"]>["specs"][string]["spec"],
@@ -206,9 +206,10 @@ export class HouseholdRuntime {
   setupHomes() {
     if (this.projection.household.household.home_id !== null)
       return { items: [] };
-    if (this.source.snapshot().account.status !== "authenticated")
+    const source = this.source.snapshot();
+    if (source.account.status !== "authenticated")
       throw new HouseholdError("not_bound");
-    const items = this.source.snapshot().homes.items;
+    const items = source.homes.items;
     if (jsonBytes(items) > householdLimits.metadataBytes)
       throw new HouseholdError("capacity_exceeded");
     return { items };
@@ -250,22 +251,22 @@ export class HouseholdRuntime {
   }
   private refresh(target: DirectoryRefreshTarget, epoch: string) {
     if (this.refreshTasks.get(target)?.epoch === epoch) return;
-    const task = {
-      epoch,
-      promise: Promise.resolve()
-        .then(async () => {
-          if (target !== "specs") await this.source.refreshDirectory();
-          this.assertEpoch(epoch);
-          if (target !== "directory") await this.specs.refresh();
-        })
-        .catch((error) => this.fail(epoch, error, "directory")),
-    };
+    const task = { epoch };
     this.refreshTasks.set(target, task);
-    void task.promise.finally(() => {
-      if (this.refreshTasks.get(target) === task)
-        this.refreshTasks.delete(target);
-    });
+    void Promise.resolve()
+      .then(async () => {
+        this.assertEpoch(epoch);
+        if (target !== "specs") await this.source.refreshDirectory();
+        this.assertEpoch(epoch);
+        if (target !== "directory") await this.specs.refresh();
+      })
+      .catch((error) => this.fail(epoch, error, "directory"))
+      .finally(() => {
+        if (this.refreshTasks.get(target) === task)
+          this.refreshTasks.delete(target);
+      });
   }
+
   async restore(accountId: string, homeId: string | null) {
     const epoch = this.epoch;
     let storageDegraded = false;
@@ -312,7 +313,8 @@ export class HouseholdRuntime {
     };
     assert();
     const now = new Date().toISOString();
-    const directory = publicDirectory(candidate, now);
+    const previousDevices = this.projection.device;
+    const directory = publicDirectory(candidate, this.projection);
     const provider = this.source.snapshot().provider;
     const household = produce(this.projection.household.household, (draft) => {
       draft.provider = provider;
@@ -333,16 +335,32 @@ export class HouseholdRuntime {
           ? this.source.failure(new HouseholdError("home_unavailable"))
           : null;
     });
-    const candidateProjection = () => ({
-      ...this.projection,
-      ...directory,
-      ...this.withSpecifications(directory.device),
-      household: { household },
-    });
+    const changedDevices = new Set(
+      Object.entries(directory.device)
+        .filter(([key, value]) => value !== this.projection.device[key])
+        .map(([, value]) => value.id),
+    );
+    const candidateProjection = () => {
+      // Specification tasks can finish while persistence is awaiting I/O.
+      // Rebase inventory fields on the latest summaries instead of rolling them back.
+      const current =
+        this.projection.device === previousDevices
+          ? directory
+          : publicDirectory(candidate, this.projection);
+      return {
+        ...this.projection,
+        ...current,
+        device: this.withSpecifications(current.device, changedDevices),
+        household: { household },
+      };
+    };
     if (
+      (directory.home !== this.projection.home ||
+        directory.room !== this.projection.room ||
+        directory.device !== this.projection.device) &&
       !directoryFits({
         ...directory,
-        ...this.withSpecifications(directory.device),
+        device: this.withSpecifications(directory.device, changedDevices),
       })
     ) {
       this.reportCapacity();
@@ -379,10 +397,9 @@ export class HouseholdRuntime {
       });
       assert();
       if (!this.context.accepted) throw new HouseholdError("capacity_exceeded");
-      this.specs.retain(new Set(candidate.devices.map((device) => device.id)));
       // Specification preparation cannot block an already accepted directory.
       this.specs.update(candidate.devices);
-      this.publishSpecifications();
+      this.publishSpecifications(changedDevices);
     };
   }
   revoke(candidate: DirectoryCandidate, assertCurrent: () => void) {
@@ -423,14 +440,13 @@ export class HouseholdRuntime {
   }
   private withSpecifications(
     devices: Projection["device"],
-    deviceIds?: ReadonlySet<string>,
+    deviceIds: ReadonlySet<string>,
   ) {
+    if (!deviceIds.size) return devices;
     const { specs, references } = this.specs.snapshot(deviceIds);
     const account = this.projection.household.household.account_id ?? "";
-    const keys = deviceIds
-      ? [...deviceIds].map((id) => entityKey(account, id))
-      : Object.keys(devices);
-    const device = produce(devices, (draft) => {
+    const keys = [...deviceIds].map((id) => entityKey(account, id));
+    return produce(devices, (draft) => {
       for (const key of keys) {
         const value = devices[key];
         if (!value) continue;
@@ -473,14 +489,12 @@ export class HouseholdRuntime {
         });
       }
     });
-    return { device };
   }
-  private publishSpecifications(deviceIds?: ReadonlySet<string>) {
-    if (this.stopped) return;
-    this.publish({
-      ...this.projection,
-      ...this.withSpecifications(this.projection.device, deviceIds),
-    });
+  private publishSpecifications(deviceIds: ReadonlySet<string>) {
+    if (this.stopped || !deviceIds.size) return;
+    const device = this.withSpecifications(this.projection.device, deviceIds);
+    if (device !== this.projection.device)
+      this.publish({ ...this.projection, device });
   }
   private syncSource() {
     if (!this.stopped)

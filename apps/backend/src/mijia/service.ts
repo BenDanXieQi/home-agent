@@ -240,10 +240,6 @@ export class MijiaService {
     this.discovery.set(catalog, true);
     this.revokeDevices(definitionChanges);
     this.syncDirectoryNotifications();
-    this.media.updateDevices(
-      this.household.ready() ? this.discovery.list() : [],
-      true,
-    );
     if (this.household.ready() && this.media.binding.status === "unbound")
       void this.media.startBinding().catch(() => {});
     this.changed();
@@ -626,9 +622,9 @@ export class MijiaService {
       return "error" in this.media.binding
         ? this.media.binding.error
         : new MijiaError("go2rtc_unavailable").toPayload();
-    if (this.discovery.stateSnapshot.status !== "ready")
-      return "error" in this.discovery.stateSnapshot
-        ? this.discovery.stateSnapshot.error
+    if (this.discovery.state.status !== "ready")
+      return "error" in this.discovery.state
+        ? this.discovery.state.error
         : new MijiaError("devices_failed").toPayload();
     return undefined;
   }
@@ -658,7 +654,7 @@ export class MijiaService {
       await this.media.retryBinding();
       assertCurrent();
     }
-    if (this.discovery.stateSnapshot.status !== "ready") {
+    if (this.discovery.state.status !== "ready") {
       await this.loadDevices();
       assertCurrent();
     }
@@ -827,7 +823,7 @@ export class MijiaService {
     // A durable login write already in progress must finish selecting the same
     // account in memory before the queued deletion can succeed or fail.
     if (!this.committingCredentials) this.loginFlow.dispose();
-    this.media.pauseSources();
+    this.media.pauseForLogout();
     try {
       const revoked = await this.serial(async () => {
         // Delete durable authorization first. Failure must never report a successful logout.
@@ -918,12 +914,12 @@ export class MijiaService {
       revision: this.media.mediaRevision,
       binding: this.media.binding,
       loginAttempt: this.loginFlow.state,
-      devices: this.discovery.snapshot(),
+      devices: this.discovery.state,
     });
   }
 
   sourceSnapshot() {
-    const directory = this.discovery.stateSnapshot;
+    const directory = this.discovery.state;
     return structuredClone({
       ...this.state,
       accountId: this.identity(),

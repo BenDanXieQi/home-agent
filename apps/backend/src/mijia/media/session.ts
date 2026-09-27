@@ -102,8 +102,13 @@ export class MediaSession {
       this.state = { status: "error", error: error.toPayload() };
   }
 
-  pauseSources() {
+  pauseForLogout() {
+    // Ending the current household run revokes viewers even if credential
+    // deletion fails. Keep resident sources available for a confirmed recovery.
+    this.revision = crypto.randomUUID();
+    this.playback.invalidate();
     this.cameraSources?.pause();
+    this.dependencies.onChange();
   }
 
   resumeAfterLogout(wasBinding: boolean, accountChanged: boolean) {

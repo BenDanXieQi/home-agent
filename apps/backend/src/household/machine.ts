@@ -104,37 +104,33 @@ function commit(
   context: ReturnType<typeof initialContext>,
   { prepared, accepted, options }: ReturnType<typeof prepareCommit>,
 ) {
-  return {
+  const committed = {
     ...context,
     ...prepared,
     accepted,
     input_sequence: context.input_sequence + 1,
-    scope_epoch:
-      accepted && options.newScope ? crypto.randomUUID() : context.scope_epoch,
-    sequence:
-      accepted && options.newScope
-        ? 0
-        : context.sequence + Number(prepared.changes.length > 0),
+    sequence: context.sequence + Number(prepared.changes.length > 0),
+    effects: [],
+  };
+  if (!accepted) return committed;
+  return {
+    ...committed,
+    scope_epoch: options.newScope ? crypto.randomUUID() : context.scope_epoch,
+    sequence: options.newScope ? 0 : committed.sequence,
     operation:
-      accepted && options.operation !== undefined
-        ? options.operation
-        : context.operation,
-    operation_id: accepted
-      ? options.operation_id !== undefined
+      options.operation !== undefined ? options.operation : context.operation,
+    operation_id:
+      options.operation_id !== undefined
         ? options.operation_id
         : options.operation === null
           ? null
-          : context.operation_id
-      : context.operation_id,
-    cached:
-      accepted && options.cached !== undefined
-        ? options.cached
-        : context.cached,
+          : context.operation_id,
+    cached: options.cached ?? context.cached,
     accountInstance:
-      accepted && options.accountInstance !== undefined
+      options.accountInstance !== undefined
         ? options.accountInstance
         : context.accountInstance,
-    effects: accepted ? (options.effects ?? []) : [],
+    effects: options.effects ?? [],
   };
 }
 function sourceIdentity(
@@ -246,7 +242,7 @@ function sourceChanged(
     if (source.directory_capacity) health.capacity_degraded = true;
     if (source.directory_storage) health.storage_degraded = true;
   });
-  const candidate = prepareCommit(
+  return prepareCommit(
     context,
     projection,
     {
@@ -258,7 +254,6 @@ function sourceChanged(
     },
     lifecycle,
   );
-  return candidate;
 }
 /** Prepare one input before the internal commit chooses a lifecycle target. */
 function prepareInput(

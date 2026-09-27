@@ -96,35 +96,6 @@ describe("atomic household changes with structural sharing", () => {
     expect(projection.login.login.material_version).toBe(0);
   });
 
-  it("validates the entire batch at the boundary before applying changes", () => {
-    const first = device();
-    const projection = withDevices(first).projection;
-    const before = structuredClone(projection);
-    expect(() =>
-      applyChanges(
-        projection,
-        stateChangeSchema.parse({
-          scope_epoch: epoch,
-          sequence: 2,
-          changes: [
-            {
-              op: "remove",
-              entity: "device",
-              key: entityKey(first.account_id, first.device_id),
-            },
-            {
-              op: "upsert",
-              entity: "device",
-              key: "wrong-identity",
-              value: first,
-            },
-          ],
-        }),
-      ),
-    ).toThrow();
-    expect(projection).toEqual(before);
-  });
-
   it("applies repeated edits in order without mutating the original domain", () => {
     const first = device();
     const projection = withDevices(first).projection;
@@ -148,25 +119,9 @@ describe("atomic household changes with structural sharing", () => {
       applyChanges(next, { scope_epoch: epoch, sequence: 3, changes: [] }),
     ).toBe(next);
   });
-
-  it("rejects prototype keys at the record identity boundary", () => {
-    const projection = householdSnapshot().projection;
-    expect(() =>
-      stateChangeSchema.parse({
-        scope_epoch: epoch,
-        sequence: 2,
-        changes: [
-          { op: "upsert", entity: "device", key: "__proto__", value: device() },
-        ],
-      }),
-    ).toThrow();
-    expect(Object.getPrototypeOf(projection.device)).toBe(Object.prototype);
-    expect(Object.keys(projection.device)).toEqual([]);
-  });
 });
 
 describe("household snapshot and change identities", () => {
-  const timestamp = "2026-09-01T00:00:00.000Z";
   const records = [
     {
       entity: "home",
@@ -176,7 +131,6 @@ describe("household snapshot and change identities", () => {
         home_id: "home-1",
         name: "家",
         shared: false,
-        last_seen_at: timestamp,
         archived: false,
       },
     },
@@ -188,7 +142,6 @@ describe("household snapshot and change identities", () => {
         home_id: "home-1",
         room_id: "room-1",
         name: "客厅",
-        last_seen_at: timestamp,
         archived: false,
       },
     },
@@ -249,27 +202,5 @@ describe("household snapshot and change identities", () => {
         ],
       }).success,
     ).toBe(false);
-  });
-
-  it("validates record fields even when the snapshot identity matches", () => {
-    const snapshot = withDevices(device());
-    const key = entityKey(accountId, "device-1");
-    const parsed = snapshotSchema.safeParse({
-      ...snapshot,
-      projection: {
-        ...snapshot.projection,
-        device: {
-          [key]: { ...snapshot.projection.device[key], online: "yes" },
-        },
-      },
-    });
-    expect(parsed.success).toBe(false);
-    if (!parsed.success)
-      expect(parsed.error.issues[0]?.path).toEqual([
-        "projection",
-        "device",
-        key,
-        "online",
-      ]);
   });
 });

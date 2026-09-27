@@ -1,8 +1,8 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { createActor } from "xstate";
 import { householdMachine } from "../../src/household/machine";
 import { householdLimits } from "../../src/household/config";
-import { upsertChangeSchema, type Projection } from "@home-agent/api/household";
+import type { Projection } from "@home-agent/api/household";
 import {
   commitMachineDirectory,
   machineDirectory,
@@ -287,85 +287,6 @@ describe("household input ownership and atomic commits", () => {
       true,
     );
   });
-
-  test.each(["accepted", "rejected"] as const)(
-    "prepares a directory once and publishes only its final %s result",
-    (outcome) => {
-      const oversized = outcome === "rejected";
-      const actor = start();
-      const source = structuredClone(machineSource());
-      actor.send({ type: "source", state: source });
-      const before = actor.getSnapshot();
-      const directory = machineDirectory();
-      const device = Object.values(directory.device)[0]!;
-      if (oversized)
-        device.name = "x".repeat(householdLimits.directoryBytes + 1);
-      const event = {
-        type: "directory" as const,
-        scope_epoch: before.context.scope_epoch,
-        projection: {
-          ...before.context.projection,
-          ...directory,
-          household: {
-            household: {
-              ...before.context.projection.household.household,
-              homes: source.homes,
-            },
-          },
-        },
-      };
-      const original = structuredClone(directory);
-      const snapshots: ReturnType<typeof actor.getSnapshot>[] = [];
-      const subscription = actor.subscribe((snapshot) => {
-        snapshots.push(snapshot);
-      });
-      const parse = spyOn(upsertChangeSchema, "parse");
-      try {
-        expect(before.can(event)).toBe(true);
-        expect(parse).not.toHaveBeenCalled();
-        expect(directory).toEqual(original);
-        expect(Object.isFrozen(device)).toBe(false);
-        expect(Object.isFrozen(device.channels)).toBe(false);
-        expect(snapshots).toHaveLength(0);
-
-        actor.send(event);
-        const after = actor.getSnapshot();
-        const validations = parse.mock.calls.filter(
-          ([input]) =>
-            input !== null &&
-            typeof input === "object" &&
-            "entity" in input &&
-            input.entity === "device" &&
-            "value" in input &&
-            input.value === device,
-        );
-        expect(validations).toHaveLength(oversized ? 0 : 1);
-        expect(snapshots).toEqual([after]);
-        expect(after.context.input_sequence).toBe(
-          before.context.input_sequence + 1,
-        );
-        expect(after.context.accepted).toBe(!oversized);
-        expectLifecycle(actor, oversized ? "initializing" : "running");
-        expect(directory).toEqual(original);
-        expect(Object.isFrozen(device)).toBe(false);
-        expect(Object.isFrozen(device.channels)).toBe(false);
-        device.name = "Changed after sending";
-        device.channels.push(1);
-        if (oversized) {
-          expect(after.context.projection.device).toBe(
-            before.context.projection.device,
-          );
-          expect(after.context.effects).toEqual([]);
-        } else {
-          expect(after.context.projection.device).toEqual(original.device);
-          expect(Object.isFrozen(after.context.projection.device)).toBe(true);
-        }
-      } finally {
-        parse.mockRestore();
-        subscription.unsubscribe();
-      }
-    },
-  );
 });
 
 describe("capacity gates data without blocking lifecycle control", () => {

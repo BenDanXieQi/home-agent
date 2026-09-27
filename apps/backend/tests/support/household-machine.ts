@@ -4,7 +4,6 @@ import { householdMachine } from "../../src/household/machine";
 import { initialProjection } from "../../src/household/projection";
 import type { HouseholdSourceState } from "../../src/household/source";
 
-const timestamp = "2026-09-01T00:00:00.000Z";
 const accountId = '["cn","100001"]';
 const homes = [
   { id: "home-a", name: "Home A", shared: false },
@@ -53,7 +52,6 @@ export function machineDirectory(account_id = accountId, home_id = "home-a") {
     spec_id: null,
     spec_status: "loading",
     spec_error: null,
-    last_seen_at: timestamp,
     archived: false,
     alias: null,
     category: null,
@@ -68,7 +66,6 @@ export function machineDirectory(account_id = accountId, home_id = "home-a") {
         home_id,
         name: "Home A",
         shared: false,
-        last_seen_at: timestamp,
         archived: false,
       },
     },

@@ -70,7 +70,7 @@ export async function runningHousehold(
   binding: {
     homeId: string | null;
     saveError?: Error;
-    initializationError?: boolean;
+    automaticBinding?: boolean;
   } = { homeId: "home-a" },
 ) {
   const mqtt = interceptMqtt();
@@ -148,15 +148,13 @@ export async function runningHousehold(
     runtime.start();
     await service.initialize();
     await eventually(() =>
-      binding.initializationError
-        ? service.snapshot().devices.status === "error"
-        : binding.homeId === null
-          ? runtime.snapshot().projection.household.household.status ===
-            "waiting_for_home"
-          : runtime.ready &&
-            Object.values(runtime.snapshot().projection.device).some(
-              (value) => value.spec_status === "ready",
-            ),
+      binding.homeId === null && !binding.automaticBinding
+        ? runtime.snapshot().projection.household.household.status ===
+          "waiting_for_home"
+        : runtime.ready &&
+          Object.values(runtime.snapshot().projection.device).some(
+            (value) => value.spec_status === "ready",
+          ),
     );
     return {
       service,

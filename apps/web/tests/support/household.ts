@@ -76,7 +76,6 @@ export function device(
     camera: false,
     channels: [],
     ...initialSpecification,
-    last_seen_at: timestamp,
     archived: false,
     category: null,
     capability_tags: [],

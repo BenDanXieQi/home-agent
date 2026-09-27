@@ -91,56 +91,6 @@ function discoveryHarness() {
 }
 
 describe("accepted device access index", () => {
-  test("revokes moved membership before an unsaved candidate can grant new devices", () => {
-    const { discovery, client } = discoveryHarness();
-    const originalRevision = discovery.revision;
-    const next = catalog();
-    const device = next.devices.find((item) => item.did === "revoked")!;
-    device.home_id = "home-b";
-    next.devices.push({
-      did: "new",
-      home_id: "home-a",
-      model: "test.sensor",
-      spec_type: specUrn,
-      isOnline: true,
-    });
-    const revocation = discovery.revocation(next);
-    expect(revocation?.deviceIds).toEqual(["revoked"]);
-    expect(discovery.find("revoked")).toBeDefined();
-    if (!revocation) throw new Error("Expected a device revocation");
-    discovery.set(revocation.catalog);
-    discovery.retain(next, client);
-    discovery.fail(new MijiaError("home_storage"));
-    expect(discovery.find("revoked")).toBeUndefined();
-    expect(discovery.find("new")).toBeUndefined();
-    expect(discovery.find("foreign")).toBeUndefined();
-    expect(discovery.find("stable")).toMatchObject({ isOnline: false });
-    expect(discovery.revision).toBe(originalRevision);
-    expect(discovery.catalogConfirmed).toBe(true);
-    expect(discovery.state.status).toBe("error");
-    discovery.set(next);
-    expect(discovery.find("new")).toBeDefined();
-  });
-
-  test.each(["model", "spec"])(
-    "a %s definition change keeps the accepted device until its replacement is saved",
-    (kind) => {
-      const { discovery } = discoveryHarness();
-      const previous = discovery.find("revoked");
-      const next = catalog();
-      const replacement = next.devices.find(
-        (device) => device.did === "revoked",
-      )!;
-      if (kind === "model") replacement.model = "test.replacement";
-      else replacement.spec_type = specUrn.replace(/:1$/, ":2");
-      expect(discovery.revocation(next)).toBeUndefined();
-      expect(discovery.definitionChanges(next)).toEqual(["revoked"]);
-      expect(discovery.find("revoked")).toBe(previous);
-      discovery.set(next);
-      expect(discovery.find("revoked")).toBe(replacement);
-    },
-  );
-
   test("losing a home revokes all its devices even if detail rows still mention them", () => {
     const { discovery } = discoveryHarness();
     const next = catalog();

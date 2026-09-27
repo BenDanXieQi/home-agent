@@ -5,7 +5,12 @@ import {
   projectionSchema,
   type Projection,
 } from "@home-agent/api/household";
-import { isImmutable, parseImmutable, update } from "@home-agent/api/immutable";
+import {
+  isImmutable,
+  parseImmutable,
+  produce,
+  freeze,
+} from "@home-agent/api/immutable";
 
 export function initialProjection() {
   return projectionSchema.parse({
@@ -56,27 +61,28 @@ export function prepareProjection(
   candidate: Projection,
 ) {
   const changes: ReturnType<typeof changeSchema.parse>[] = [];
-  const projection = update(state.projection, (draft) => {
+  const projection = produce(state.projection, (draft) => {
     for (const entity of entities) {
       if (state.projection[entity] === candidate[entity]) continue;
-      const records: Record<string, unknown> = { ...state.projection[entity] };
+      const records: Record<string, unknown> = draft[entity];
       const incoming: Record<string, unknown> = candidate[entity];
       for (const key of Object.keys(records)) {
         if (Object.hasOwn(incoming, key)) continue;
         changes.push(changeSchema.parse({ op: "remove", entity, key }));
         delete records[key];
       }
-      let changed =
-        Object.keys(records).length !==
-        Object.keys(state.projection[entity]).length;
       for (const [key, value] of Object.entries(incoming)) {
-        if (records[key] === value || isDeepStrictEqual(records[key], value))
+        const previous: Record<string, unknown> = state.projection[entity];
+        if (previous[key] === value || isDeepStrictEqual(previous[key], value))
           continue;
         const input =
           value !== null && typeof value === "object" && isImmutable(value)
             ? value
             : undefined;
-        const cached = input ? validated.get(input) : undefined;
+        const cached =
+          value !== null && typeof value === "object"
+            ? validated.get(value)
+            : undefined;
         const change =
           cached?.entity === entity && cached.key === key
             ? cached
@@ -87,17 +93,12 @@ export function prepareProjection(
                 value,
               });
         if (input) validated.set(input, change);
-        Object.defineProperty(records, key, {
-          value: change.value,
-          enumerable: true,
-          configurable: true,
-          writable: true,
-        });
+        if (change.value !== null && typeof change.value === "object")
+          validated.set(change.value, change);
+        records[key] = change.value;
         changes.push(change);
-        changed = true;
       }
-      if (changed) Object.assign(draft, { [entity]: records });
     }
   });
-  return { projection, changes: update(changes, () => {}) };
+  return { projection: freeze(projection), changes: freeze(changes) };
 }

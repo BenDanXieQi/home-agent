@@ -205,7 +205,20 @@ export class CameraSourceManager {
     for (const device of this.devices.values()) {
       const channels = cameraChannels(device);
       for (const channel of channels) {
-        desired.add(`${device.did}:${channel}`);
+        const key = `${device.did}:${channel}`;
+        desired.add(key);
+        const stream = this.streams.get(key);
+        const localIp =
+          typeof device.localip === "string" ? device.localip : undefined;
+        if (
+          stream?.prepared &&
+          !stream.retiring &&
+          !stream.error &&
+          stream.device.model === device.model &&
+          stream.device.channelCount === cameraChannelCount(device.model) &&
+          stream.device.localIp === localIp
+        )
+          continue;
         pending.push(this.ensure(device.did, channel, retryFailed));
       }
     }
