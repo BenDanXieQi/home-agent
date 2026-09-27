@@ -1,6 +1,6 @@
 # Step 3：接收设备变化，维护当前状态
 
-**状态：待执行。** 前置条件是所需设备通路已按[米家来源契约](../../reference/mijia-source-contract.md)验证，Step 2 已能选择并运行一个家庭。
+**状态：待执行。** 前置条件是所需设备通路已按[米家来源契约](../../reference/mijia-source-contract.md)验证，[家庭运行时](../../household.md#绑定与运行资格)已完成唯一绑定并取得当前运行的完整设备清单。
 
 [返回总览](../backend-household-perception.md)
 
@@ -15,7 +15,7 @@
 | 设备清单                | 家庭、房间、设备及其归属关系                                             |
 | 观测                    | 一次设备上报、读取结果或在线通知                                         |
 | 来源                    | 数据来自哪条设备消息连接或读取通路                                       |
-| 家庭状态机              | Step 2 启动的 XState 实例，负责按规则更新并提交家庭状态                  |
+| 家庭状态机              | [家庭运行时](../../household.md#领域职责与状态)启动的 XState 实例，统一提交家庭状态                  |
 | 公共状态                | 家庭状态机已提交、供页面和 Agent 读取的数据                              |
 | `latest`                | 每个设备属性的当前值，以及它的来源、时间和有效性                         |
 | `quality`               | 所在记录的有效性；观测与当前值的字段关系见下文                           |
@@ -32,7 +32,7 @@
 
 `household/collection.ts` 管理订阅和读取；`household/observations.ts` 校验消息并交给家庭状态机。小米协议继续由 Step 1 的 `properties/` 和 `protocols/` 实现。
 
-采集使用 Step 2 家庭运行范围内的 XState actor 管理启停、观察、过载恢复与暂停；订阅适配可用 callback actor，单次异步读取可用 promise actor。actor 只拥有采集资源与运行进度，latest、质量和公共版本仍由家庭状态机统一提交。协议连接重连与凭据更新继续由现有米家观察模块负责，采集 actor 消费其状态，不再另设一套协议重连循环。
+采集使用当前家庭运行范围内的 XState actor 管理启停、观察、过载恢复与暂停；订阅适配可用 callback actor，单次异步读取可用 promise actor。actor 只拥有采集资源与运行进度，latest、质量和公共版本仍由家庭状态机统一提交。协议连接重连与凭据更新继续由现有米家观察模块负责，采集 actor 消费其状态，不再另设一套协议重连循环。
 
 退出采集状态时取消观察、读取和待执行计时；清理仍须调用适配器取消接口、转发 AbortSignal，并等待在途资源真正退出再启动冲突任务。保留 scope_epoch 与 collection_generation 检查，不能仅靠 actor 已停止排除外部迟到回调。属性仲裁与质量规则使用纯函数，不为每个属性创建 actor。
 
@@ -69,7 +69,7 @@ MIoT 通路沿用 Step 1 已确认的解释：活动连接上的合法属性／�
 | `account_id / home_id / device_id`                | 账号、家庭和设备身份                                                                         |
 | `scope_epoch / source_id / collection_generation` | 所属家庭运行、数据来源和采集连接                                                             |
 | `observation_id`                                  | 本次被接纳观测的内部 ID                                                                      |
-| `input_sequence`                                  | 沿用 Step 2 的进程内状态提交序号，从 1 开始；本进程内不重置，用于顺序关联，不是数据库回执    |
+| `input_sequence`                                  | 沿用[家庭状态机](../../household.md#领域职责与状态)的进程内状态提交序号，从 1 开始；本进程内不重置，用于顺序关联，不是数据库回执    |
 | `siid / piid / value`                             | 属性标识和经过类型校验的值；超规格范围报错，不悄悄裁剪                                       |
 | `source`                                          | `push` 上报、`initial_read` 初始化读取、`reconnect_read` 恢复读取、`on_demand_read` 按需读取 |
 | `delivery_kind`                                   | `live` 实时、`baseline` 初始参考、`replayed` 重放、`unknown` 无法确认；由来源通路决定        |
@@ -197,7 +197,7 @@ reason 使用 `confirmed、no_observation、unsupported、contract_unverified、
 1. 校验当前家庭、连接和设备归属，判断消息是否可接纳。
 2. 读取变更前的状态，计算本次新值、质量、准备保存的历史记录和统计。Step 6 的规则计算也使用这份变更前后数据，此时不做网络或数据库操作。
 3. 一次提交本次状态、规则运行状态和后续操作描述。每次状态提交递增 `input_sequence`；只有公共内容改变才增加 `state_version.sequence`。同时记录属性是否被用作当前值证据（`state_applied`）、该次提交的 UTC `effective_at`；候选和迟到值的 state_applied/effective_at 为 false／null。
-4. 按 Step 2 C12，在状态提交后统一发布状态、调整计时器，将历史记录交给 Step 4，并向 Step 6 发布带本次证据的事件。
+4. 沿用[家庭状态机的提交顺序](../../household.md#领域职责与状态)，在原子提交后统一发布状态、调整计时器，将历史记录交给 Step 4，并向 Step 6 发布带本次证据的事件。
 
 候选公共状态复用 `@home-agent/api/immutable`，保留未变化条目引用；本次设备状态与场景结果一起接纳，提交后再执行外部操作。优先使用现有提交路径，不先建设变更键或 patches 优化机制。用实际家庭消息量观察处理耗时、内存和事件循环延迟，出现瓶颈后才优化对应扫描或复制路径，且保持现有 upsert/remove 协议与原子性。
 
