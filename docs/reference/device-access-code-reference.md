@@ -312,8 +312,6 @@ flowchart TD
 
 ### 4.4 [homes/store.ts](../../apps/backend/src/mijia/homes/store.ts)
 
-`assertCompleteHome` 在清单接纳前检查绑定家庭及房间成员的详情，检查先于撤销和保存。其他家庭缺失详情不阻断账号恢复；供应商设备清单保留成员引用，不能把未返回详情的设备误认成已移除。
-
 `createHomeSelectionStore` 在部署级 `household_binding` 事务锁下读取和保存唯一记录。read(accountKey) 检查账号一致及记录唯一；write 拒绝 null、异账号或不同家庭，已有同值直接确认。事务最多五秒，写入结果不确定时在同一锁下核对，未确认前不继续写入。退出保留绑定；纠错由停机配置完成。
 
 ### 4.5 [properties/read-request.ts](../../apps/backend/src/mijia/properties/read-request.ts)

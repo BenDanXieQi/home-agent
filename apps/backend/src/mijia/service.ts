@@ -23,7 +23,7 @@ import type { MijiaDeviceSpec } from "@home-agent/api/mijia";
 import { mijiaOperation } from "./operation";
 
 import { accountSessionSchema } from "./account/session";
-import { assertCompleteHome, deviceDirectory } from "./devices/directory";
+import { deviceDirectory } from "./devices/directory";
 import type { HomeSelectionStore } from "./homes/store";
 
 export type MijiaDependencies = {
@@ -201,8 +201,8 @@ export class MijiaService {
     assertCurrent();
     this.flushChanges();
     if (!this.household) throw new MijiaError("invalid_state");
-    const homeId = this.discovery.homeSnapshot().selectedHomeId;
-    assertCompleteHome(catalog, homeId);
+    // Membership can name devices whose details are unavailable to this account.
+    // getCatalog completes every page before its returned devices define access.
     const definitionChanges = this.discovery.definitionChanges(catalog);
     const revocation = this.discovery.revocation(catalog);
     if (revocation) {
@@ -231,8 +231,6 @@ export class MijiaService {
       this.discovery.acceptHome(catalog.homes[0]!.id);
     }
     this.chooseDefaultHome = false;
-    if (homeId === null)
-      assertCompleteHome(catalog, this.discovery.homeSnapshot().selectedHomeId);
     const commit = await this.household.commit(
       this.directoryCandidate(catalog, account),
       assertCurrent,
