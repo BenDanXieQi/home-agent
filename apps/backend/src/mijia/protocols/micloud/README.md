@@ -41,6 +41,8 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 
 `getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/reference/mijia-source-contract.md)。
 
+家庭和房间成员列表用于映射归属，不保证当前账号能取得每个成员的详情。`getCatalog()` 只有在全部详情请求和分页完成后才返回；成功响应未返回的设备不进入可访问清单，原始成员引用仍保留。响应结构非法、请求失败和分页异常继续使整次获取失败。小米官方集成的 `get_devices_async()` 同样排除详情结果中不存在的成员；业务层不得把这种情况当作整个家庭响应无法解析。
+
 公开设备规格由独立的 [`spec/`](../spec/README.md) 协议客户端读取，不使用本模块的账号会话。
 
 `getCredentials()` 明确包含上游会话导出遗漏的 `passToken`，供 backend 比较续期前后的凭据，并通过 `Go2RtcAdapter` 将凭据安装到 go2rtc 运行时会话。设备与摄像头统一使用中国大陆区域 `cn`；其他区域被拒绝。

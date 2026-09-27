@@ -488,6 +488,8 @@ export class MiCloud {
       devices.push(...found.values());
     }
     this.#transport.assertActive(requestSignal);
+    // Home membership does not guarantee that this account can obtain details.
+    // Keep membership for location mapping; only returned details grant access.
     return { homes, devices };
   }
 
