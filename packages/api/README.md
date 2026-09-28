@@ -6,6 +6,8 @@
 
 Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agent/api/household` 等入口使用 `src/contracts/`。契约层包含定义数据格式并执行校验的 Zod schema、由它推导的类型，以及不涉及网络或数据库的协议数据转换，不依赖 Hono、追踪或服务端错误处理。backend 与 Agent 按需导入 `@home-agent/api/errors` 和 `@home-agent/api/errors/hono`，服务端错误处理层向契约层依赖。
 
+`@home-agent/api/playback` 提供 `src/domain/playback.ts` 中的播放目标、go2rtc 连接观测以及一次性连接耗时摘要，不依赖 HTTP 或存储。播放连接响应将 SDP 与 `connection` 一同返回；客户端据此选择本地预估样本。媒体适配器独立校验外部观测，观测异常不破坏有效的媒体答案。
+
 网络接收入口负责完整校验输入。家庭 SSE（服务端持续推送事件的 HTTP 连接）入口使用 `stateChangeSchema.parse` 一次性校验整批变化及每条数据的标识，再把已校验批次交给 `applyChanges`；后者生成新的状态，不修改原状态，并复用未变化的数据对象。快照通过 `snapshotSchema` 校验结构并复用相同的条目标识规则，不对已校验条目重复运行 schema 校验。
 
 完整规格由后端按 URN 共享，不进入公共状态。设备记录仅包含 `spec_id/spec_status/spec_error`、分类和能力标签；初始准备值由 `initialSpecification` 提供。候选家庭只由设置专用接口返回，当前协议不包含 `latest/source_health/rule_status` 空占位字段。
@@ -59,3 +61,13 @@ SSE 开始后，通过 `run_failed` 发送 `{ runId, threadId, error }`；其中
 连接状态接口正常完成探测时返回 200，即使外围服务不可用。每个服务返回 `reasonCode` 与可选 `params`，例如 `timeout` 携带 `timeoutMs`、`http_error` 携带上游 `status`。页面负责生成可读说明。读取连接配置失败则返回普通 HTTP 错误。
 
 参考：[Hono 异常处理](https://hono.dev/docs/api/exception)、[流式响应机制](https://hono.dev/docs/helpers/streaming)。
+
+## 测试
+
+`tests/contracts/household.test.ts` 对应 `src/contracts/household.ts`，验证共享增量合并的顺序、不修改输入和引用复用，以及快照、变化批次中的实体标识校验。测试数据位于本包的 `tests/support/household.ts`，不依赖 Web 或 backend 的测试辅助代码。
+
+```sh
+bun run --cwd packages/api test -- tests/contracts/household.test.ts
+```
+
+消费方只测试自己如何使用契约和处理校验失败，不重复枚举这些共享规则。
