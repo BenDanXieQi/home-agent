@@ -72,7 +72,7 @@ export function createMijiaHousehold(
         };
       },
       subscribe: (listener) => service.subscribe(listener),
-      bindHome: (id, assert) => service.bindHome(id, assert),
+      bindHome: (id, assert, commit) => service.bindHome(id, assert, commit),
       refreshDirectory: () => service.loadDevices(),
       logout: () => service.logout(),
       close: () => service.close(),

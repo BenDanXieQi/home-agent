@@ -284,18 +284,27 @@ function prepareInput(
         return undefined;
       return prepareCommit(context, context.projection, { operation: null });
     case "bound":
-      if (context.projection.household.household.home_id !== null)
-        return undefined;
       return prepareCommit(
         context,
-        updateHousehold(context.projection, {
-          home_id: event.home_id,
-          homes: { selectedHomeId: event.home_id, status: "selected" },
-          stage: "directory",
-          sync_status: "syncing",
-          error: null,
+        produce(context.projection, (draft) => {
+          clearRuntime(draft);
+          draft.projection_health.projection_health.capacity_degraded = false;
+          draft.projection_health.projection_health.storage_degraded = false;
+          Object.assign(draft.household.household, {
+            home_id: event.home_id,
+            homes: { selectedHomeId: event.home_id, status: "selected" },
+            stage: "directory",
+            sync_status: "syncing",
+            cloud_synced_at: null,
+            saved_at: null,
+            error: null,
+          } satisfies Partial<Household>);
         }),
-        {},
+        {
+          newScope: context.projection.household.household.home_id !== null,
+          cached: false,
+          effects: [{ kind: "reset" }],
+        },
         lifecycle,
       );
     case "failure":
@@ -560,7 +569,7 @@ export const householdMachine = setup({
       "initializing",
       ({ event, context }) =>
         event.type === "bound" &&
-        context.projection.household.household.home_id === null,
+        context.projection.account.account.status === "authenticated",
     ),
     stop: prepareTransition("stopping", () => true),
   },

@@ -11,6 +11,15 @@ export type LoginCandidate = {
   expiryTimer?: ReturnType<typeof setTimeout>;
 };
 
+function loginMaterial(state: MijiaLoginAttempt) {
+  return {
+    id: "id" in state ? state.id : null,
+    qr_image_url: "qrImageUrl" in state ? state.qrImageUrl : null,
+    verification_url: "verificationUrl" in state ? state.verificationUrl : null,
+    expires_at: "expiresAt" in state ? state.expiresAt : null,
+  };
+}
+
 /** Owns only an interactive attempt. Account adoption belongs to the coordinator. */
 export class LoginFlow {
   private currentState: MijiaLoginAttempt = { status: "idle" };
@@ -18,6 +27,11 @@ export class LoginFlow {
     return this.currentState;
   }
   private set state(value: MijiaLoginAttempt) {
+    if (
+      JSON.stringify(loginMaterial(value)) !==
+      JSON.stringify(loginMaterial(this.currentState))
+    )
+      this.materialVersion++;
     this.currentState = value;
     this.onChange();
   }
@@ -29,18 +43,8 @@ export class LoginFlow {
   ) {}
 
   private materialVersion = 0;
-  private materialFingerprint = "";
   publicSnapshot() {
     const state = this.state;
-    const fingerprint = JSON.stringify([
-      "id" in state ? state.id : null,
-      "qrImageUrl" in state ? state.qrImageUrl : null,
-      "verificationUrl" in state ? state.verificationUrl : null,
-    ]);
-    if (fingerprint !== this.materialFingerprint) {
-      this.materialFingerprint = fingerprint;
-      this.materialVersion++;
-    }
     return {
       id: "id" in state ? state.id : null,
       status: state.status,
@@ -53,12 +57,9 @@ export class LoginFlow {
     if (!("id" in state) || state.id !== id || !this.active)
       throw new MijiaError("stale_session");
     return {
+      ...loginMaterial(state),
       id,
-      material_version: this.publicSnapshot().material_version,
-      qr_image_url: "qrImageUrl" in state ? state.qrImageUrl : null,
-      verification_url:
-        "verificationUrl" in state ? state.verificationUrl : null,
-      expires_at: "expiresAt" in state ? state.expiresAt : null,
+      material_version: this.materialVersion,
     };
   }
   get active() {
