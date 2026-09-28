@@ -7,9 +7,9 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
-    "dev": "bun --env-file=../../.env --watch src/main.ts",
-    "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external && bun scripts/copy-web.ts",
-    "start": "bun --env-file=../../.env dist/main.js",
+    "dev": "ORT_DISABLE_TELEMETRY=1 bun --env-file=../../.env --watch src/main.ts",
+    "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external && bun run build:perception && bun scripts/copy-web.ts",
+    "start": "ORT_DISABLE_TELEMETRY=1 bun --env-file=../../.env dist/main.js",
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
@@ -19,7 +19,10 @@
     "db:studio": "bun --env-file=../../.env --bun run drizzle-kit studio",
     "db:check": "bun --env-file=../../.env scripts/db-check.ts",
     "build:rpc": "tsc --project tsconfig.rpc.json",
-    "dev:rpc": "tsc --project tsconfig.rpc.json --watch --preserveWatchOutput"
+    "dev:rpc": "tsc --project tsconfig.rpc.json --watch --preserveWatchOutput",
+    "detect:image": "ORT_DISABLE_TELEMETRY=1 bun scripts/detect-image.ts",
+    "benchmark:perception": "ORT_DISABLE_TELEMETRY=1 bun scripts/benchmark-detection.ts",
+    "build:perception": "bun build src/perception/compute/process-entry.ts src/perception/compute/inference-worker.ts --target=bun --packages=external --outdir=dist/perception/compute --sourcemap=external && bun build scripts/detect-image.ts --target=bun --packages=external --outdir=dist --sourcemap=external"
   },
   "dependencies": {
     "@home-agent/api": "workspace:*",
@@ -27,7 +30,10 @@
     "drizzle-orm": "catalog:",
     "hono": "catalog:",
     "mqtt": "5.16.0",
+    "onnxruntime-node": "1.30.0",
+    "piscina": "5.3.2",
     "postgres": "catalog:",
+    "sharp": "0.35.5",
     "tough-cookie": "6.0.2",
     "write-file-atomic": "catalog:",
     "xstate": "5.33.2",
