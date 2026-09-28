@@ -7,6 +7,7 @@
 4. Prefer type inference over explicit definitions. Derive types from existing schemas, values, and implementations with `z.infer`, `typeof`, `ReturnType`, `Awaited`, and indexed access as appropriate. Do not maintain standalone type definitions that repeat these sources. Define necessary input boundaries once and reuse them; do not create schemas or wrapper functions solely to manufacture a type.
 5. Do not hand-write function or method return types; let TypeScript infer them from the implementation. Preserve discriminated unions through actual values and narrow literals. Do not replace inference with `any`, double assertions, or casts that conceal a type mismatch.
 6. Follow domain-driven design (DDD): organize modules around domain concepts, responsibilities, and ownership. Keep domain rules and invariants independent of HTTP, persistence, and vendor protocols; application orchestration coordinates domain work, while adapters handle external systems and boundary conversion. Give each domain state a single owner, and name modules in domain terms. Introduce abstractions and layers only when actual domain responsibilities require them.
+7. Place code shared across projects in the repository-root `packages/` directory, and reuse it from there instead of duplicating it in individual projects.
 
 ## Local environment
 

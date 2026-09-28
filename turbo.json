@@ -29,7 +29,14 @@
     },
     "@home-agent/backend#build": {
       "dependsOn": ["^build", "@home-agent/web#build"],
-      "outputs": ["dist/main.js", "dist/main.js.map", "dist/public/**"]
+      "outputs": [
+        "dist/main.js",
+        "dist/main.js.map",
+        "dist/public/**",
+        "dist/perception/**",
+        "dist/detect-image.js",
+        "dist/detect-image.js.map"
+      ]
     },
     "@home-agent/web#build": {
       "dependsOn": ["^build:rpc", "check-types"],
@@ -77,6 +84,14 @@
     "@home-agent/web#lint:fix": {
       "dependsOn": ["^build:rpc"],
       "cache": false
+    },
+    "@home-agent/backend#test": {
+      "cache": false,
+      "passThroughEnv": [
+        "PERCEPTION_MODEL_PATH",
+        "PERCEPTION_BUS_IMAGE_PATH",
+        "ORT_DISABLE_TELEMETRY"
+      ]
     }
   },
   "globalPassThroughEnv": [

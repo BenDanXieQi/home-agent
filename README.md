@@ -24,7 +24,9 @@ Home Agent 是一个通过家庭情景推断驱动全屋自动化的 Agent 项�
 
 设备清单包含家庭、房间、设备及其归属；设备规格描述设备支持的属性、动作和事件。已实现米家登录与授权恢复、家庭选择与设备清单保存、后台设备规格准备、SSE 状态订阅、多摄像头预览，以及流式对话 API、会话持久化和调用追踪。
 
-上述设计目标尚未实现。backend 已提供指定属性读取、MQTT 属性／在线观察和限时上报日志，尚未将其接入持续采集，也尚未根据各来源消息确定家庭的当前属性值。视觉理解、设备控制，以及 Agent 的家庭数据、语音和长期记忆尚未接入；Web 暂无聊天界面。仅供可信本机使用。
+backend 还提供独立的[本地图片检测命令](docs/perception.md)，可加载 `det_4C.onnx` 返回目标框并保存标注图片；尚未接入摄像头持续采集或家庭上下文。
+
+上述设计目标尚未实现。backend 已提供指定属性读取、MQTT 属性／在线观察和限时上报日志，尚未将其接入持续采集，也尚未根据各来源消息确定家庭的当前属性值。视觉语义理解、设备控制，以及 Agent 的家庭数据、语音和长期记忆尚未接入；Web 暂无聊天界面。仅供可信本机使用。
 
 ## 当前服务分工
 
@@ -66,6 +68,7 @@ bun run dev
 - [设备感知实施计划（规划）](docs/plans/backend-household-perception.md)：固定家庭运行与按场景接入的采集、历史、Web 和 Agent 能力
 - [本地运行](docs/running.md)：运行模式、Docker 网络、服务连接配置与开发命令
 - [米家与摄像头](docs/mijia.md)：登录、预览、授权保存与支持范围
+- [本地目标检测](docs/perception.md)：模型准备、图片检测命令、计算池和运行限制
 - [家庭运行时](docs/household.md)：设备清单、规格、家庭绑定与公共状态订阅
 - [米家来源契约](docs/reference/mijia-source-contract.md) · [设备接入代码参考](docs/reference/device-access-code-reference.md)
 - [Agent 与对话 API](apps/agent/README.md)
