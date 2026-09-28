@@ -13,6 +13,7 @@ import (
 
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
+	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
 	"github.com/google/uuid"
 	"github.com/pion/rtp"
 )
@@ -24,6 +25,7 @@ type homeAgentCameraState struct {
 	cancel        context.CancelFunc
 	gate          chan struct{}
 	playbacks     map[string]*homeAgentPlaybackState
+	activity      atomic.Pointer[homeAgentPacketActivity]
 	releaseSource func()
 }
 
@@ -120,7 +122,11 @@ func homeAgentCloseCamera(camera *homeAgentCameraState) {
 
 // A packet-only consumer maintains source ownership without decoding or storing
 // video. Liveness uses every packet, independent of keyframe cadence.
-type homeAgentPacketActivity struct{ last atomic.Int64 }
+type homeAgentPacketActivity struct {
+	last          atomic.Int64
+	firstObserved atomic.Bool
+	first         chan time.Time
+}
 type homeAgentSourceConsumer struct {
 	core.Connection
 	activity *homeAgentPacketActivity
@@ -138,7 +144,13 @@ func homeAgentNewConsumer(activity *homeAgentPacketActivity) *homeAgentSourceCon
 }
 func (c *homeAgentSourceConsumer) AddTrack(media *core.Media, _ *core.Codec, track *core.Receiver) error {
 	sender := core.NewSender(media, track.Codec)
-	sender.Handler = func(_ *rtp.Packet) { c.activity.last.Store(time.Now().UnixNano()) }
+	sender.Handler = func(_ *rtp.Packet) {
+		now := time.Now()
+		c.activity.last.Store(now.UnixNano())
+		if c.activity.firstObserved.CompareAndSwap(false, true) {
+			c.activity.first <- now
+		}
+	}
 	sender.HandleRTP(track)
 	c.Senders = append(c.Senders, sender)
 	return nil
@@ -173,6 +185,7 @@ func homeAgentRestartStalled(session *homeAgentSession, camera *homeAgentCameraS
 	// Removing only the resident consumer cannot stop a producer still owned by
 	// a browser. Close resets the private producer so the next attachment redials.
 	// Viewer cleanup can acquire homeAgentMu, so Close must run outside that lock.
+	camera.activity.CompareAndSwap(activity, nil)
 	camera.stream.Close()
 	return true
 }
@@ -185,7 +198,7 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 		for ctx.Err() == nil {
 			// A closed sender may still drain buffered packets. Its activity must
 			// never count as a first packet from a newer resident attachment.
-			activity := &homeAgentPacketActivity{}
+			activity := &homeAgentPacketActivity{first: make(chan time.Time, 1)}
 			consumer := homeAgentNewConsumer(activity)
 			select {
 			case camera.gate <- struct{}{}:
@@ -196,9 +209,12 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 				<-camera.gate
 				return
 			}
-			attachedAt := time.Now()
+			sourceStarted := time.Now()
+			attachedAt := sourceStarted
+			camera.activity.Store(activity)
 			err := camera.stream.AddConsumer(consumer)
 			<-camera.gate
+			diagnostic.ReportDuration("resident_source_attach", time.Since(sourceStarted), err)
 			if err == nil {
 				lastActivity := attachedAt
 				firstPacket := time.Time{}
@@ -208,6 +224,8 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 					select {
 					case <-ctx.Done():
 						break receiving
+					case packetAt := <-activity.first:
+						diagnostic.ReportDuration("source_first_packet", packetAt.Sub(sourceStarted), nil)
 					case <-ticker.C:
 						// The producer already owns retries after an established source
 						// fails. Removing its last consumer would reset that backoff.
@@ -239,6 +257,7 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 				}
 				ticker.Stop()
 			}
+			camera.activity.CompareAndSwap(activity, nil)
 			camera.gate <- struct{}{}
 			camera.stream.RemoveConsumer(consumer)
 			<-camera.gate

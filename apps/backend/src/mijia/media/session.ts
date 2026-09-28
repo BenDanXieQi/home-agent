@@ -456,11 +456,16 @@ export class MediaSession {
     signal: AbortSignal,
   ) {
     const { adapter, cameras } = this.requireReady(revision);
-    await mijiaOperation("session.renew_lease", "go2rtc_lost", () =>
-      adapter.renewSessionLease(signal),
-    );
-    this.requireReady(revision);
-    const camera = await cameras.prepare(deviceId, channel);
+    // Both operations belong to the resident session and can run independently.
+    // No viewer is offered until renewal and source preparation both succeed.
+    const [, camera] = await Promise.all([
+      mijiaOperation("session.renew_lease", "go2rtc_lost", () =>
+        adapter.renewSessionLease(signal),
+      ),
+      mijiaOperation("camera.prepare", "camera_failed", () =>
+        cameras.prepare(deviceId, channel),
+      ),
+    ]);
     if (signal.aborted) throw new MijiaError("cancelled");
     if (this.requireReady(revision).adapter !== adapter)
       throw new MijiaError("stale_session");
