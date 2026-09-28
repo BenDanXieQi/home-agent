@@ -29,6 +29,7 @@ Within `overlay/internal/xiaomi/`:
 - `home_agent_camera.go`: private camera-channel streams, resident consumers and capture recovery.
 - `home_agent_dual_camera.go`: dual-camera shared-connection ownership and per-channel private dialers.
 - `home_agent_playback.go`: viewer negotiation and retirement.
+- `home_agent_playback_timing.go`: viewer timing snapshots and correlated diagnostics.
 
 ## Internal API
 
@@ -41,10 +42,14 @@ The base path is `/api/home-agent/mijia/`. Requests require `X-Home-Agent: mijia
 | `DELETE session`  | `reset: true`                                                                 | Backend startup cleanup of residual Home-Agent state                                  |
 | `POST heartbeat`  | `sessionId`                                                                   | Renew the 60-second session lease and return `playbackIds`                            |
 | `PUT camera`      | `sessionId`, `sourceId`, `did`, `channel`, `channelCount`, `model`, `localip` | Prepare a shared camera-channel stream and its resident consumer                      |
-| `POST playback`   | `sessionId`, `sourceId`, `playbackId`, `offer`                                | Return only `playbackId` and SDP `answer`                                             |
+| `POST playback`   | `sessionId`, `sourceId`, `playbackId`, `offer`                                | Return `playbackId`, SDP `answer` and `telemetry`                                     |
 | `DELETE playback` | `sessionId`, `sourceId`, `playbackId`                                         | Close the owned subscription                                                          |
 
 `DELETE camera` accepts `sessionId` and `sourceId` to release a source removed from inventory. A successful `PUT camera` registers the stream and starts asynchronous capture; it does not wait for the first video packet. A successful `POST playback` completes SDP negotiation, not browser frame presentation. Runtime-session and camera mutations return HTTP 204; heartbeat and playback return JSON. Failures use static error codes. The backend coordinates session ownership and viewer reservations.
+
+Playback telemetry contains `stage`, `elapsedMs`, `sourceRecentlyActive` and `timings`. Stages are `queued` (waiting for the camera gate), `connecting` (validating the offer and attaching the source), `signaling` (creating the answer and gathering connection candidates), and `answer_ready` (answer preparation complete). This final stage does not assert that the browser's WebRTC transport is connected or a frame is visible. `elapsedMs` uses the process's monotonic clock, starts when go2rtc accepts the viewer, and stops when answer preparation completes or negotiation fails. `sourceRecentlyActive` records whether the current resident attachment had received a video packet in the preceding 30 seconds when this viewer started; registering a stream alone does not count as packet activity. Optional `timings.queueMs`, `sourceMs` and `answerMs` appear as the gate wait, source attachment, and answer preparation finish. A successful offer has all three timings. These measurements exclude browser setup, network transit and first-frame presentation; the backend and browser record those separately. Telemetry is returned with the offer response and written to negotiation diagnostics; there is no separate playback-status request.
+
+Diagnostics report negotiation outcomes with their timing snapshot, resident attachment duration, and the duration until each resident attachment's first video packet. Viewer negotiation records contain `attempt_id`, the first 16 lowercase hexadecimal characters of SHA-256 over the UTF-8 `playbackId`, matching the backend's correlation key. Logs do not include the resource ID, SDP, device identifiers, addresses or credentials. The adapter does not predict remaining time; each browser derives estimates from its own local playback history. The backend includes connection measurements in the accepted answer; first-frame timing and historical estimates stay in the browser.
 
 ## Upstream changes
 
