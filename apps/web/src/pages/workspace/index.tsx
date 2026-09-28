@@ -1,0 +1,80 @@
+import { WorkspaceFrame } from "./WorkspaceFrame";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Outlet, useRouterState } from "@tanstack/react-router";
+import { useAtom } from "jotai";
+import { AnimatePresence, useReducedMotion } from "motion/react";
+import { Dialog } from "radix-ui";
+import { navigation } from "../../navigation";
+import { PageHeaderContext } from "../../components/page-header-context";
+import { accountDialogOpenAtom } from "./account-dialog-state";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
+import { WorkspaceHeader } from "./WorkspaceHeader";
+// Keep the dialog eager so the first open can animate immediately.
+import AccountDialog from "./AccountDialog";
+
+export default function WorkspaceLayout() {
+  const [headerDetails, setHeaderDetails] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [headerActions, setHeaderActions] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [loginOpen, openLogin] = useAtom(accountDialogOpenAtom);
+  const path = useRouterState({ select: (state) => state.location.pathname });
+  const current = navigation.find((item) => item.to === path);
+  const page = useRef<HTMLDivElement>(null);
+  const reducedMotion = useReducedMotion();
+  const headerSlots = useMemo(
+    () => ({ details: headerDetails, actions: headerActions }),
+    [headerDetails, headerActions],
+  );
+  useLayoutEffect(() => {
+    if (reducedMotion) return undefined;
+    const animation = page.current?.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: 260,
+      easing: "cubic-bezier(0, 0, 0.58, 1)",
+    });
+    return () => animation?.cancel();
+  }, [
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A committed route change replays the page entrance without remounting it.
+    path,
+    reducedMotion,
+  ]);
+  useEffect(() => {
+    document.title = `${current?.label ?? "Home Agent"} · Home Agent`;
+  }, [current?.label]);
+  return (
+    <Dialog.Root open={loginOpen} onOpenChange={openLogin}>
+      <>
+        <a
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:bg-white focus:p-3"
+          href="#main-content"
+        >
+          跳到主内容
+        </a>
+        <WorkspaceFrame
+          sidebar={<WorkspaceSidebar path={path} />}
+          header={
+            <WorkspaceHeader
+              path={path}
+              detailsRef={setHeaderDetails}
+              actionsRef={setHeaderActions}
+            />
+          }
+        >
+          <main id="main-content" tabIndex={-1} className="px-4 pb-6">
+            {/* The router owns page lifetimes; animating must not remount its outlet. */}
+            <div ref={page} className="min-h-[calc(100dvh-90px)]">
+              <PageHeaderContext value={headerSlots}>
+                <Outlet />
+              </PageHeaderContext>
+            </div>
+          </main>
+        </WorkspaceFrame>
+        <AnimatePresence>
+          {loginOpen ? <AccountDialog key="account" /> : null}
+        </AnimatePresence>
+      </>
+    </Dialog.Root>
+  );
+}
