@@ -1,3 +1,6 @@
+import { HouseholdCollection } from "../household/collection";
+import { createMijiaCollectionSource } from "./collection";
+import { defaultCollectionPolicy } from "../household/collection-policy";
 import { HouseholdRuntime } from "../household/runtime";
 import type { HouseholdRepository } from "../household/repository";
 import type { MiotSpecClient } from "./protocols/spec/client";
@@ -38,6 +41,7 @@ export function createMijiaHousehold(
   service: MijiaService,
   repository: HouseholdRepository | undefined,
   loader: ConstructorParameters<typeof HouseholdRuntime>[2],
+  policy = defaultCollectionPolicy,
 ) {
   const runtime = new HouseholdRuntime(
     {
@@ -94,5 +98,12 @@ export function createMijiaHousehold(
     ready: () => runtime.ready,
     specification: (id) => runtime.specification(id),
   });
+  runtime.attachCollection(
+    new HouseholdCollection(
+      runtime,
+      createMijiaCollectionSource(service),
+      policy,
+    ),
+  );
   return runtime;
 }

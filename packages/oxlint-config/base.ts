@@ -1,8 +1,14 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "oxlint";
 
 export default defineConfig({
   plugins: ["typescript", "unicorn", "oxc"],
-  jsPlugins: ["eslint-plugin-turbo"],
+  jsPlugins: [
+    {
+      name: "turbo",
+      specifier: fileURLToPath(import.meta.resolve("eslint-plugin-turbo")),
+    },
+  ],
   categories: {
     correctness: "error",
     suspicious: "warn",

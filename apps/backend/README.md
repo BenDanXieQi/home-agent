@@ -2,7 +2,7 @@
 
 基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放和聊天转发。模型执行与对话会话持久化由独立 [Agent](../agent/README.md) 负责。
 
-当前设备清单与规格接入尚未形成家庭语义模型，也未实现属性集采、人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/backend-household-perception.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/backend-household-perception.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
 ## 运行
 
@@ -34,9 +34,9 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 米家账号以扫码为唯一用户登录入口，backend 复用扫码身份静默完成 OAuth 授权。MiCloud 与 OAuth 共同构成完整接入会话，由 `MijiaService` 统一负责保存、恢复、续期和退出。新会话必须符合持久家庭绑定，完成授权并保存成功后才采用，OAuth 失败不覆盖现有账号；活动会话续期最终认证失败则撤销整个账号的设备清单、读取、观察和媒体访问，进入重新认证状态。MQTT 连接认证拒绝先交账号维护强制刷新 token；普通网络、限流及单 topic 权限拒绝不直接等价于整账号失效。完整生命周期见[授权与配置](../../docs/mijia.md#授权与配置)。
 
-`MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、所选家庭归属及读取运行标识；该标识用于排除会话更新前的旧读取结果。`properties/read-request.ts` 按设备分组检查 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。当前没有属性读取 HTTP 路由或周期读取。
+`MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、所选家庭归属及读取运行标识；该标识用于排除会话更新前的旧读取结果。`properties/read-request.ts` 按设备分组检查 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。应用层通过 `POST /api/mijia/properties/read` 提供一次性读取，不做周期属性轮询。
 
-`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。该入口已用于[限时上报日志](../../docs/household.md#设备上报日志)，不提交家庭 `latest` 或 `availability`；持续采集、独立设备事件与自动补读尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/reference/mijia-source-contract.md)。
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。家庭采集模块和[限时上报日志](../../docs/household.md#设备上报日志)分别消费该入口；只有家庭运行时提交 `latest` 与有效在线状态。采集范围、必要补读与房间查询见[设备事实与房间快照](../../docs/reference/device-facts.md)。独立设备事件尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/reference/mijia-source-contract.md)。
 
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。backend 不接收或中转视频包。官方能力列表声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道能力列表生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 

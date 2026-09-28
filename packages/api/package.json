@@ -13,7 +13,8 @@
     "./http/retry-after": "./src/http/retry-after.ts",
     "./http/read-body": "./src/http/read-body.ts",
     "./household": "./src/contracts/household.ts",
-    "./device-logs": "./src/contracts/device-logs.ts"
+    "./device-logs": "./src/contracts/device-logs.ts",
+    "./observations": "./src/contracts/observations.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",
