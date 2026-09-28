@@ -12,7 +12,7 @@ import {
   type MijiaErrorCode,
 } from "@home-agent/api/mijia";
 
-import type { ClientErrorCode } from "../lib/api";
+import { RequestError, type ClientErrorCode } from "../api/errors";
 export type DisplayError = {
   code: ErrorCode | ClientErrorCode;
   params?: MessageParams | undefined;
@@ -111,4 +111,15 @@ export function connectionMessage(service: ServiceStatus) {
     return `连接检查超时（${service.params.timeoutMs / 1000} 秒）。`;
   }
   return connectionMessages[service.reasonCode];
+}
+
+export function describeError(error: unknown) {
+  return error instanceof RequestError
+    ? error.details
+    : ({ code: "network_error" } satisfies DisplayError);
+}
+
+export function requestErrorMessage(error: unknown) {
+  if (!(error instanceof RequestError)) return "操作失败，请重试。";
+  return `${errorMessage(error.details)}（${error.details.code}）`;
 }

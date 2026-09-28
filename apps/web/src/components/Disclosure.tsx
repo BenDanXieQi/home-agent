@@ -1,35 +1,65 @@
-import { useState, type ReactNode } from "react";
+import { twMerge } from "tailwind-merge";
+import { useState, type ComponentProps } from "react";
 import { m, AnimatePresence } from "motion/react";
 import { Collapsible } from "radix-ui";
 import { ChevronDown } from "lucide-react";
+import { spring } from "../utils/motion";
+
+const MotionChevron = m.create(ChevronDown);
 
 export function Disclosure({
   title,
   children,
-}: {
+  className = "",
+  ...props
+}: Omit<
+  ComponentProps<typeof Collapsible.Root>,
+  | "asChild"
+  | "open"
+  | "defaultOpen"
+  | "onOpenChange"
+  | "title"
+  | "dangerouslySetInnerHTML"
+> & {
   title: string;
-  children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <Collapsible.Root
+      {...props}
       open={open}
       onOpenChange={setOpen}
-      className="border-t border-line pt-4"
+      className={twMerge(`pt-2 ${className}`)}
     >
-      <Collapsible.Trigger className="group flex w-full items-center justify-between text-xs text-muted">
+      <Collapsible.Trigger className="flex min-h-10 w-full items-center justify-between gap-3 text-left text-[13px] text-muted hover:text-ink">
         {title}
-        <ChevronDown size={16} className="group-data-[state=open]:rotate-180" />
+        <MotionChevron
+          size={16}
+          className="shrink-0"
+          initial={false}
+          animate={{ rotate: open ? 180 : 0 }}
+        />
       </Collapsible.Trigger>
       <AnimatePresence initial={false}>
         {open ? (
           <Collapsible.Content forceMount asChild>
+            {/* Height and content fade share one element but not one timeline. */}
             <m.div
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.16 }}
-              className="pt-4 text-xs leading-7 text-muted"
+              className="overflow-hidden text-sm leading-7 text-ink *:first:mt-4"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{
+                height: "auto",
+                opacity: 1,
+                transition: {
+                  ...spring,
+                  opacity: { duration: 0.22, delay: 0.04 },
+                },
+              }}
+              exit={{
+                height: 0,
+                opacity: 0,
+                transition: { ...spring, opacity: { duration: 0.16 } },
+              }}
             >
               {children}
             </m.div>
