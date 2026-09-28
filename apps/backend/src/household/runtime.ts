@@ -1,5 +1,7 @@
+import type { HouseholdCollection } from "./collection";
+import type { FactInput } from "./observations";
 import { createActor, type EventFromLogic } from "xstate";
-import { produce } from "@home-agent/api/immutable";
+import { produce, freeze } from "@home-agent/api/immutable";
 import {
   directorySchema,
   entityKey,
@@ -21,6 +23,10 @@ import { HouseholdError } from "./errors";
 import { directoryFits, projectionBytes } from "./capacity";
 
 export class HouseholdRuntime {
+  private collection: HouseholdCollection | undefined;
+  private readonly factListeners = new Set<
+    (commit: ReturnType<HouseholdRuntime["factCommit"]>) => void
+  >();
   private readonly actor = createActor(householdMachine);
   private readonly listeners = new Set<() => void>();
   private readonly specs;
@@ -84,10 +90,13 @@ export class HouseholdRuntime {
     if (this.started || this.stopped) return;
     this.started = true;
     let published = this.version();
+    let priorProjection = this.projection;
     this.actor.subscribe(({ context }) => {
       if (context.input_sequence === this.handled) return;
       // Mark the commit before calling subscribers, including reentrant consumers.
       this.handled = context.input_sequence;
+      const beforeProjection = priorProjection;
+      priorProjection = context.projection;
       if (
         context.scope_epoch !== published.scope_epoch ||
         context.sequence !== published.sequence
@@ -104,6 +113,22 @@ export class HouseholdRuntime {
           }
         }
       }
+      if (
+        context.fact_result ||
+        context.changes.some((change) =>
+          ["device", "latest", "room"].includes(change.entity),
+        )
+      ) {
+        const commit = this.factCommit(beforeProjection);
+        for (const listener of this.factListeners) {
+          try {
+            listener(commit);
+          } catch {
+            console.warn("Household fact subscriber failed");
+          }
+        }
+      }
+      this.collection?.scheduleSync();
       for (const effect of context.effects) {
         try {
           if (effect.kind === "reset") this.resetResources();
@@ -125,6 +150,66 @@ export class HouseholdRuntime {
     );
     this.memoryTimer.unref();
   }
+  attachCollection(collection: HouseholdCollection) {
+    if (this.collection) throw new HouseholdError("invalid_state");
+    this.collection = collection;
+  }
+  private factCommit(before: Projection) {
+    return freeze({
+      state_version: this.version(),
+      changes: this.context.changes,
+      result: this.context.fact_result,
+      transitions: this.context.changes
+        .filter((change) =>
+          [
+            "latest",
+            "device",
+            "room",
+            "device_coverage",
+            "source_health",
+          ].includes(change.entity),
+        )
+        .map((change) => {
+          const previous: Record<string, unknown> = before[change.entity];
+          return { ...change, before: previous[change.key] ?? null };
+        }),
+    });
+  }
+  subscribeFacts(
+    listener: (commit: ReturnType<HouseholdRuntime["factCommit"]>) => void,
+  ) {
+    this.factListeners.add(listener);
+    return () => {
+      this.factListeners.delete(listener);
+    };
+  }
+  commitFacts(epoch: string, input: FactInput) {
+    this.assertEpoch(epoch);
+    this.actor.send({ type: "facts", scope_epoch: epoch, input });
+    return this.context.fact_result?.receipt;
+  }
+  factDeadline() {
+    return Math.min(...Object.values(this.context.fact_state.deadlines));
+  }
+  async readProperties(
+    epoch: string,
+    properties: Parameters<HouseholdCollection["read"]>[1],
+    signal: AbortSignal,
+  ) {
+    this.assertEpoch(epoch);
+    if (!this.collection || !this.ready)
+      throw new HouseholdError("invalid_state");
+    const items = await this.collection.read(epoch, properties, signal);
+    this.assertEpoch(epoch);
+    return { items, state_version: this.version() };
+  }
+  retryCollection(epoch: string) {
+    this.assertEpoch(epoch);
+    if (!this.collection || !this.ready)
+      throw new HouseholdError("invalid_state");
+    this.collection.retry();
+    return { state_version: this.version() };
+  }
   private sampleMemory() {
     this.memory = process.memoryUsage();
     this.memoryPeak = Math.max(this.memoryPeak, this.memory.heapUsed);
@@ -137,6 +222,7 @@ export class HouseholdRuntime {
         ...projectionBytes(this.projection),
         specifications: specificationBytes(this.specs.snapshot().specs),
       },
+      collection: this.collection?.diagnostics() ?? null,
       memory: {
         ...this.memory,
         peak_heap_used: this.memoryPeak,
@@ -568,6 +654,7 @@ export class HouseholdRuntime {
     }
   }
   private resetResources() {
+    this.collection?.reset();
     this.refreshTasks.clear();
     this.specs.clear();
   }
@@ -583,6 +670,7 @@ export class HouseholdRuntime {
       .finally(() => {
         this.actor.stop();
         this.listeners.clear();
+        this.factListeners.clear();
       });
     return this.closing;
   }

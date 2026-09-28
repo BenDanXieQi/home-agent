@@ -50,12 +50,17 @@ const { MiotSpecClient } = await import("./mijia/protocols/spec/client");
 const { householdLimits } = await import("./household/config");
 const { DevicePushLogs } = await import("./household/device-logs");
 const { createHouseholdRepository } = await import("./household/repository");
+const { loadCollectionPolicy } = await import("./household/collection-policy");
+const collectionPolicy = await loadCollectionPolicy(
+  resolvePath(import.meta.dir, "../../..", "config/collection.json"),
+);
 const household = createMijiaHousehold(
   mijiaService,
   database ? createHouseholdRepository(database.db) : undefined,
   createMijiaSpecificationLoader(
     new MiotSpecClient(householdLimits.specificationResponseBytes),
   ),
+  collectionPolicy,
 );
 household.start();
 const deviceLogs = new DevicePushLogs(

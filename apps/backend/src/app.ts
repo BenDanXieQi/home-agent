@@ -96,7 +96,7 @@ export function createApp({
     app.get("/*", serveStatic({ root: staticRoot }));
     app.on(
       "GET",
-      ["/", "/devices", "/cameras", "/settings", "/device-logs"],
+      ["/", "/devices", "/cameras", "/settings", "/device-logs", "/rooms"],
       serveStatic({ path: `${staticRoot}/index.html` }),
     );
   }

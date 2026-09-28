@@ -29,6 +29,7 @@ const AccountDialog = lazy(() => import("./features/mijia/AccountDialog"));
 const navigation = [
   { to: "/devices", label: "设备", icon: LayoutGrid },
   { to: "/cameras", label: "摄像头", icon: Video },
+  { to: "/rooms", label: "房间状态", icon: ScrollText },
   { to: "/device-logs", label: "设备日志", icon: ScrollText },
   { to: "/settings", label: "设置", icon: Settings2 },
 ] as const;

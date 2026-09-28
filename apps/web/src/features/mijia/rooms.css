@@ -1,0 +1,142 @@
+.rooms-view {
+  max-width: 1400px;
+  margin: 0 auto;
+}
+.rooms-subtitle {
+  margin-left: 16px;
+  color: var(--text-muted, #888);
+  font-size: 13px;
+}
+.rooms-overview {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 22px 0;
+  flex-wrap: wrap;
+}
+.rooms-overview label {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+}
+.rooms-overview select {
+  min-width: 180px;
+  padding: 9px 12px;
+  border: 1px solid #d8d8d4;
+  border-radius: 8px;
+  background: transparent;
+}
+.rooms-overview p,
+.rooms-help,
+.room-device header p {
+  color: #777;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.rooms-overview > button {
+  margin-left: auto;
+}
+.room-device {
+  margin: 22px 0;
+  border: 1px solid #deded8;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.room-device header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+}
+.room-device h2 {
+  font-size: 16px;
+  font-weight: 600;
+}
+.room-device .rooms-help {
+  padding: 0 20px 20px;
+}
+.room-table-scroll {
+  overflow-x: auto;
+}
+.room-device table {
+  width: 100%;
+  text-align: left;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.room-device th {
+  font-size: 11px;
+  font-weight: 500;
+  color: #888;
+  background: #f6f6f2;
+}
+.room-device td,
+.room-device th {
+  padding: 12px 20px;
+  border-top: 1px solid #eaeae5;
+}
+.room-device td {
+  vertical-align: top;
+}
+.room-device small {
+  display: block;
+  color: #888;
+  font-size: 11px;
+  margin-top: 5px;
+}
+.room-value {
+  max-width: 240px;
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.fact-quality {
+  font-size: 11px;
+  border-radius: 5px;
+  padding: 3px 6px;
+  background: #f0f0ea;
+  color: #666;
+}
+.fact-quality.valid {
+  background: #e8f0e6;
+  color: #476445;
+}
+.fact-quality.unavailable {
+  background: #f7e8e2;
+  color: #935442;
+}
+@media (max-width: 640px) {
+  .rooms-subtitle {
+    display: block;
+    margin: 4px 0 0;
+  }
+  .rooms-overview {
+    gap: 16px;
+  }
+  .room-device td,
+  .room-device th {
+    padding: 10px 12px;
+  }
+}
+
+.room-device table {
+  min-width: 690px;
+}
+.room-device th {
+  white-space: nowrap;
+}
+.rooms-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 16px 0;
+  color: #777;
+}
+.rooms-toggle input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin: 0;
+  padding: 0;
+}

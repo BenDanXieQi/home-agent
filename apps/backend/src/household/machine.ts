@@ -1,3 +1,10 @@
+import {
+  initialFactState,
+  reconcileFactScope,
+  reduceFacts,
+  type FactInput,
+} from "./observations";
+import { initialCollectionStatus } from "@home-agent/api/observations";
 import { assign, enqueueActions, setup } from "xstate";
 import { produce } from "@home-agent/api/immutable";
 import type {
@@ -19,6 +26,7 @@ type Effect =
   | { kind: "reset" };
 type Household = Projection["household"]["household"];
 type Input =
+  | { type: "facts"; scope_epoch: string; input: FactInput }
   | { type: "publish"; scope_epoch: string; projection: Projection }
   | { type: "source"; state: HouseholdSourceState }
   | {
@@ -64,6 +72,8 @@ function initialContext() {
     cached: false,
     accepted: true,
     effects: [] as Effect[],
+    fact_state: initialFactState(),
+    fact_result: null as ReturnType<typeof reduceFacts> | null,
     changes: [] as ReturnType<typeof prepareProjection>["changes"],
   };
 }
@@ -71,6 +81,10 @@ function clearRuntime(draft: Projection) {
   draft.home = {};
   draft.room = {};
   draft.device = {};
+  draft.latest = {};
+  draft.source_health = {};
+  draft.device_coverage = {};
+  draft.collection.collection = initialCollectionStatus();
 }
 function updateHousehold(projection: Projection, values: Partial<Household>) {
   return produce(projection, (draft) => {
@@ -87,6 +101,7 @@ function prepareCommit(
     cached?: boolean;
     accountInstance?: string | null;
     effects?: Effect[];
+    facts?: ReturnType<typeof reduceFacts>;
   } = {},
   lifecycle?: Household["status"],
 ) {
@@ -95,7 +110,10 @@ function prepareCommit(
     status: lifecycle ?? context.projection.household.household.status,
   });
   return {
-    prepared: prepareProjection(context, output),
+    prepared: prepareProjection(
+      context,
+      reconcileFactScope(context.projection, output),
+    ),
     accepted: true,
     options,
   };
@@ -111,6 +129,21 @@ function commit(
     input_sequence: context.input_sequence + 1,
     sequence: context.sequence + Number(prepared.changes.length > 0),
     effects: [],
+    fact_result: options.facts ?? null,
+    fact_state: options.newScope
+      ? initialFactState()
+      : (options.facts?.state ??
+        (prepared.projection.latest === context.projection.latest
+          ? context.fact_state
+          : {
+              deadlines: Object.fromEntries(
+                Object.entries(context.fact_state.deadlines).filter(
+                  ([key]) =>
+                    prepared.projection.latest[key]?.quality === "valid",
+                ),
+              ),
+              latest_bytes: jsonBytes(prepared.projection.latest),
+            })),
   };
   if (!accepted) return committed;
   return {
@@ -264,6 +297,16 @@ function prepareInput(
   if ("scope_epoch" in event && event.scope_epoch !== context.scope_epoch)
     return undefined;
   switch (event.type) {
+    case "facts": {
+      const facts = reduceFacts(
+        context.projection,
+        context.fact_state,
+        event.input,
+        context.input_sequence + 1,
+        { tick: performance.now(), at: new Date().toISOString() },
+      );
+      return prepareCommit(context, facts.projection, { facts });
+    }
     case "source":
       return sourceChanged(context, event.state, lifecycle);
     case "stop":
@@ -348,7 +391,12 @@ function prepareInput(
         status: event.home_id ? ("selected" as const) : ("unselected" as const),
       };
       const directory = directoryFits(event.directory)
-        ? event.directory
+        ? produce(event.directory, (draft) => {
+            for (const device of Object.values(draft.device)) {
+              device.availability = "unknown";
+              device.read_enabled_properties = [];
+            }
+          })
         : { home: {}, room: {}, device: {} };
       return prepareCommit(
         context,
@@ -554,6 +602,7 @@ export const householdMachine = setup({
       updateState,
     ],
     publish: updateState,
+    facts: updateState,
     failure: updateState,
     finished: updateState,
     bound: prepareTransition(
