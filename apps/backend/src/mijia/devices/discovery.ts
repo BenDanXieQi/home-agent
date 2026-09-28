@@ -102,6 +102,15 @@ export class DeviceDiscovery {
     if (!this.catalog.homes.some((home) => home.id === homeId))
       throw new MijiaError("home_unavailable");
   }
+  prepareHomeBinding() {
+    this.pause();
+    this.refreshAgain = false;
+    this.loadController?.abort();
+    this.deviceLoadTask = undefined;
+    this.pendingCatalog = undefined;
+    this.confirmed = false;
+    this.state = { status: "loading", items: [] };
+  }
   acceptHome(homeId: string | null) {
     if (homeId === this.accessHomeId) return;
     this.accessHomeId = homeId;

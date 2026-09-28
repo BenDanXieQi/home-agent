@@ -264,24 +264,31 @@ export class MijiaService {
       throw new MijiaError("stale_session");
     return this.discovery.homeSnapshot();
   }
-  async bindHome(homeId: string, assertCurrent: () => void) {
+  async bindHome(
+    homeId: string,
+    assertCurrent: () => void,
+    commitBinding: () => void,
+  ) {
     const account = this.accountClient;
     if (!account || !this.activeAccount(account))
       throw new MijiaError("not_bound");
     await this.serial(async () => {
       if (!this.activeAccount(account)) throw new MijiaError("stale_session");
       assertCurrent();
-      if (this.discovery.homeSnapshot().selectedHomeId !== null)
-        throw new MijiaError("binding_conflict");
+      const previousHomeId = this.discovery.homeSnapshot().selectedHomeId;
+      if (previousHomeId === homeId) throw new MijiaError("binding_conflict");
       this.discovery.validateSelection(homeId);
       this.chooseDefaultHome = false;
       await this.requireHomeStore().write(
         this.accountKey(account),
         homeId,
         assertCurrent,
+        previousHomeId,
       );
       assertCurrent();
       if (!this.activeAccount(account)) throw new MijiaError("stale_session");
+      commitBinding();
+      this.discovery.prepareHomeBinding();
       this.discovery.acceptHome(homeId);
     });
   }
