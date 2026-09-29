@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import {
   afterAll,
   afterEach,
@@ -33,7 +34,7 @@ const initialized = {
   kind: "initialized",
   metadata: {
     provider: "cpu",
-    workerThreadId: 1,
+    workerThreadIds: [1],
     modelPath: "/local/model.onnx",
     sha256: "a".repeat(64),
   },
@@ -103,6 +104,7 @@ const { createDetectionPool } =
   await import("../../src/perception/compute/pool");
 const frame = { width: 1, height: 1, rgb: new Uint8Array(3) };
 const options = {
+  cpuRatio: 1 / availableParallelism(),
   initializeTimeoutMs: 30,
   taskTimeoutMs: 30,
   closeTimeoutMs: 100,
@@ -272,14 +274,14 @@ describe("detection pool lifecycle", () => {
 
   test("successful recovery exposes the replacement metadata", async () => {
     const pool = await create();
-    expect(pool.metadata.workerThreadId).toBe(1);
+    expect(pool.metadata.workerThreadIds).toEqual([1]);
     initializeTask = async () => ({
       ...initialized,
-      metadata: { ...initialized.metadata, workerThreadId: 2 },
+      metadata: { ...initialized.metadata, workerThreadIds: [2] },
     });
     instances[0]!.emit("error", new Error("worker failed"));
     await waitForStatus(pool, "ready");
-    expect(pool.metadata.workerThreadId).toBe(2);
+    expect(pool.metadata.workerThreadIds).toEqual([2]);
   });
 
   test("status retains the failure cause when recovery is unavailable", async () => {

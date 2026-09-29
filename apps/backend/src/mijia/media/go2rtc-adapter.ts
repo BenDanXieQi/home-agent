@@ -189,6 +189,14 @@ export class Go2RtcAdapter {
     });
   }
 
+  analysisAccess(sourceId: string) {
+    return {
+      endpoint: `${this.url}/api/home-agent/mijia/analysis`,
+      sessionId: this.requireSession(),
+      sourceId,
+    };
+  }
+
   async offer(owner: PlaybackOwner, sdp: string, signal?: AbortSignal) {
     const sessionId = this.requireSession();
     const payload = await this.request(

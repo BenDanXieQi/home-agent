@@ -85,3 +85,5 @@ export * from "./errors";
 export * from "./operations";
 
 export * from "./chat";
+
+export { perceptionSnapshotSchema } from "./perception";

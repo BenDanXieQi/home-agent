@@ -1,13 +1,16 @@
+import { createVideoRuntime } from "../video/runtime";
+import { readAnalysisStream } from "../../mijia/media/analysis-stream";
 import { createInferencePool } from "./inference-pool";
 import {
   errorDetails,
   requestSchema,
   responseSchema,
-  taskSchema,
+  commandSchema,
 } from "./protocol";
 import type { z } from "zod";
 
 let pool: ReturnType<typeof createInferencePool> | undefined;
+let video: ReturnType<typeof createVideoRuntime> | undefined;
 let initialized = false;
 let closing = false;
 let failed = false;
@@ -20,13 +23,35 @@ function fail(error: unknown) {
   // Flush the fatal IPC message before leaving this isolated process.
   send({ kind: "fatal", ...details })
     .finally(() => process.exit(1))
-    .catch(() => {});
+    .catch((flushError: unknown) => {
+      console.error("Fatal IPC flush failed", flushError);
+    });
 }
-async function run(task: z.infer<typeof taskSchema>) {
+async function run(task: z.infer<typeof commandSchema>) {
   if (task.kind === "initialize") {
     if (pool) throw new Error("Inference pool is already created");
-    pool = createInferencePool(fail);
+    pool = createInferencePool(fail, task.budget);
     const result = await pool.submit(task);
+    video = createVideoRuntime({
+      compute: {
+        get available() {
+          return pool!.available;
+        },
+        subscribeAvailable: (listener, waiting) =>
+          pool!.subscribeAvailable(listener, waiting),
+        async detect(frame, onAdmitted) {
+          const detection = await pool!.submit(
+            { kind: "detect", frame },
+            onAdmitted,
+          );
+          if (detection.kind !== "detected")
+            throw new Error("Unexpected video detection response");
+          return detection;
+        },
+      },
+      emit: (payload) => send({ kind: "video", payload }),
+      fatal: fail,
+    });
     initialized = true;
     return result;
   }
@@ -34,7 +59,23 @@ async function run(task: z.infer<typeof taskSchema>) {
   if (closing) throw new Error("Inference pool is closing");
   if (task.kind === "close") {
     closing = true;
+    await video?.close();
     return await pool.close();
+  }
+  if (task.kind === "video_start") {
+    video!.start({
+      run: task.source.run,
+      config: task.source.config,
+      decoder: {
+        executable: task.source.executable,
+        read: (signal) => readAnalysisStream(task.source.access, signal),
+      },
+    });
+    return { kind: "video_ack" as const };
+  }
+  if (task.kind === "video_stop") {
+    await video!.stop(task.runId);
+    return { kind: "video_ack" as const };
   }
   return await pool.submit(task);
 }
@@ -77,5 +118,14 @@ process.on("message", (message: unknown) => {
     .catch(fail);
 });
 // No thread termination here; losing the parent ends this isolated process.
-process.on("disconnect", () => process.exit(failed ? 1 : 0));
+process.on("disconnect", () => {
+  const cleanup = video?.close() ?? Promise.resolve();
+  cleanup.then(
+    () => process.exit(failed ? 1 : 0),
+    (error) => {
+      console.error(error);
+      process.exit(1);
+    },
+  );
+});
 send({ kind: "ready" }).catch(fail);

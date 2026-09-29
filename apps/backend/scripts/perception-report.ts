@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { arch, availableParallelism, cpus, platform, release } from "node:os";
 import { z } from "zod";
-import { detectionComputeBudget } from "../src/perception/compute/budget";
+import {
+  detectionComputeBudget,
+  type computeBudgetSchema,
+} from "../src/perception/compute/budget";
 import type { createDetectionPool } from "../src/perception/compute/pool";
 import { frameLimits } from "../src/perception/detection/frame";
 import { imageLimits } from "../src/perception/detection/image-request";
@@ -21,6 +24,7 @@ async function dependencyVersion(name: string) {
 
 export async function createPerceptionReport(
   metadata: Awaited<ReturnType<typeof createDetectionPool>>["metadata"],
+  budget: z.infer<typeof computeBudgetSchema>,
 ) {
   const [ort, piscina, sharp] = await Promise.all([
     dependencyVersion("onnxruntime-node"),
@@ -39,7 +43,10 @@ export async function createPerceptionReport(
       cpuModel: cpus()[0]?.model ?? null,
     },
     dependencies: { "onnxruntime-node": ort, piscina, sharp },
-    computeBudget: { ...detectionComputeBudget },
+    computeBudget: {
+      ...detectionComputeBudget,
+      ...budget,
+    },
     frameLimits: { ...frameLimits },
     imageLimits: { ...imageLimits },
   };

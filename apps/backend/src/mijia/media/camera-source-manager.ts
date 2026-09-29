@@ -89,6 +89,13 @@ export class CameraSourceManager {
     return { adapter: this.adapter, sourceId };
   }
 
+  sourceSignal(deviceId: string, channel: 1 | 2, sourceId: string) {
+    const stream = this.streams.get(`${deviceId}:${channel}`);
+    if (!stream || stream.id !== sourceId || stream.retiring || this.closed)
+      throw new MijiaError("stale_session");
+    return stream.controller.signal;
+  }
+
   private async ensure(deviceId: string, channel: 1 | 2, retryFailed = false) {
     const device = this.validate(deviceId, channel);
     const key = `${deviceId}:${channel}`;
@@ -130,6 +137,7 @@ export class CameraSourceManager {
   private retry(key: string, stream: CameraSourceEntry) {
     if (this.paused || !this.current(key, stream)) return;
     // DELETE retires the previous ID even when the failed PUT response was lost.
+    stream.controller.abort();
     stream.id = crypto.randomUUID();
     stream.controller = new AbortController();
     stream.prepared = false;
