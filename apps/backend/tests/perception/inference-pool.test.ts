@@ -50,8 +50,8 @@ test("close drains native work and releases the model before closing idle thread
   native.run
     .mockImplementationOnce(() => work.promise)
     .mockImplementationOnce(() => release.promise);
-  const pool = createInferencePool("model.onnx", () => {});
-  const pending = pool.submit({ kind: "initialize", modelPath: "model.onnx" });
+  const pool = createInferencePool(() => {});
+  const pending = pool.submit({ kind: "initialize" });
   const closing = pool.close();
   expect(pool.close()).toBe(closing);
   await delay(1);
@@ -70,14 +70,14 @@ test("close drains native work and releases the model before closing idle thread
 
 test("release failure leaves thread teardown to the outer process boundary", async () => {
   native.run.mockRejectedValueOnce(new Error("release failed"));
-  const pool = createInferencePool("model.onnx", () => {});
+  const pool = createInferencePool(() => {});
   await expect(pool.close()).rejects.toThrow("release failed");
   expect(native.close).not.toHaveBeenCalled();
 });
 
 test("worker failure reports outward and prevents new native tasks", async () => {
   const onFailure = mock(() => {});
-  const pool = createInferencePool("model.onnx", onFailure);
+  const pool = createInferencePool(onFailure);
   const error = new Error("worker failed");
   native.emit("error", error);
   expect(onFailure).toHaveBeenCalledWith(error);
@@ -94,7 +94,7 @@ test("known image failures cross the worker boundary without losing their code",
     message: "Cannot decode image: unsupported format",
     stack: "ImageProcessingError: unsupported format",
   });
-  const pool = createInferencePool("model.onnx", () => {});
+  const pool = createInferencePool(() => {});
   await expect(
     pool.submit({ kind: "detect_image", image: { path: "/bad.png" } }),
   ).rejects.toMatchObject({
@@ -117,7 +117,7 @@ test("only the child-owned pixel buffer is transferred to Piscina", async () => 
     });
     return { kind: "closed" };
   });
-  const pool = createInferencePool("model.onnx", () => {});
+  const pool = createInferencePool(() => {});
   await pool.submit({
     kind: "detect",
     frame: { width: 1, height: 1, rgb: pixels },
@@ -130,7 +130,7 @@ test.each(["workersPerProcess", "tasksPerWorker"] as const)(
   "rejects %s changes that would break single-session ownership",
   (option) => {
     budget[option] = 2;
-    expect(() => createInferencePool("model.onnx", () => {})).toThrow(
+    expect(() => createInferencePool(() => {})).toThrow(
       "one worker and one task per worker",
     );
     expect(constructor).not.toHaveBeenCalled();
@@ -140,7 +140,7 @@ test.each(["workersPerProcess", "tasksPerWorker"] as const)(
 test("reports zero queue time for immediate dispatch and excludes worker duration", async () => {
   let now = 100;
   const clock = spyOn(performance, "now").mockImplementation(() => now);
-  const pool = createInferencePool("model.onnx", () => {});
+  const pool = createInferencePool(() => {});
   native.run.mockImplementationOnce(async () => {
     now = 150;
     return {
@@ -149,7 +149,6 @@ test("reports zero queue time for immediate dispatch and excludes worker duratio
       timing: {
         readMs: 0,
         decodeMs: 0,
-        annotationMs: 0,
         preprocessMs: 5,
         inferenceMs: 20,
         postprocessMs: 1,
@@ -174,7 +173,7 @@ test("reports zero queue time for immediate dispatch and excludes worker duratio
 test("reports actual queue residence separately from thread dispatch overhead", async () => {
   let now = 100;
   const clock = spyOn(performance, "now").mockImplementation(() => now);
-  const pool = createInferencePool("model.onnx", () => {});
+  const pool = createInferencePool(() => {});
   const queue = constructor.mock.calls[0]?.[0]?.taskQueue;
   if (!queue) throw new Error("Missing inference queue");
   native.run.mockImplementationOnce(async (task) => {
@@ -193,7 +192,6 @@ test("reports actual queue residence separately from thread dispatch overhead", 
       timing: {
         readMs: 0,
         decodeMs: 0,
-        annotationMs: 0,
         preprocessMs: 5,
         inferenceMs: 20,
         postprocessMs: 1,

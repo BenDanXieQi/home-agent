@@ -49,7 +49,7 @@ export function offerMijiaPlayback(
 
 export function releaseMijiaPlayback(id: string) {
   // Only the viewer is released. keepalive allows teardown during navigation.
-  void requestEmpty(
+  requestEmpty(
     (client, options) =>
       client.api.mijia.playback[":id"].$delete({ param: { id } }, options),
     { keepalive: true, timeoutMs: mijiaTimeouts.upstream },

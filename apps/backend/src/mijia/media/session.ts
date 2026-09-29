@@ -118,16 +118,26 @@ export class MediaSession {
       this.state.error.code === "mijia_cancelled";
     const refreshDevices =
       accountChanged && (this.state.status === "unbound" || cancelledBinding);
-    if (refreshDevices) void this.startBinding();
+    if (refreshDevices)
+      this.startBinding().catch((backgroundError: unknown) => {
+        console.error("session: startBinding failed", backgroundError);
+      });
     else if (this.bindingRecoveryError)
       this.bindingFailed(this.bindingRecoveryError);
-    else if (!accountChanged && cancelledBinding) void this.startBinding();
+    else if (!accountChanged && cancelledBinding)
+      this.startBinding().catch((backgroundError: unknown) => {
+        console.error("session: startBinding failed", backgroundError);
+      });
     this.cameraSources?.resume();
   }
 
   updateDevices(devices: MiCloudDevice[], retryFailed = false) {
     this.devices = devices;
-    void this.cameraSources?.update(devices, retryFailed);
+    this.cameraSources
+      ?.update(devices, retryFailed)
+      .catch((backgroundError: unknown) => {
+        console.error("session: cameraSources?.update failed", backgroundError);
+      });
   }
 
   revokeDevices(ids: readonly string[]) {
@@ -179,7 +189,7 @@ export class MediaSession {
     clearTimeout(this.configurationTimer);
     this.configurationTimer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
-        void this.reconcileConfiguration()
+        this.reconcileConfiguration()
           .catch(() => {})
           .finally(() => this.scheduleConfigurationCheck());
       }, 3_000),
@@ -224,10 +234,12 @@ export class MediaSession {
       this.mediaAdapter !== adapter
     )
       return;
-    void this.clearAdapter()
+    this.clearAdapter()
       .then(() => {
         if (this.state.status === "unbound" && !this.configurationUnavailable)
-          void this.startBinding();
+          this.startBinding().catch((backgroundError: unknown) => {
+            console.error("session: startBinding failed", backgroundError);
+          });
       })
       .catch(() => {});
   }
@@ -355,13 +367,22 @@ export class MediaSession {
       this.bindingRecoveryError
     ) {
       this.bindingRetry.schedule(() => {
-        void (this.bindingTask?.promise ?? Promise.resolve()).then(() => {
-          if (
-            this.dependencies.currentAccount() === account &&
-            this.state === failedState
-          )
-            void this.startBinding();
-        });
+        (this.bindingTask?.promise ?? Promise.resolve())
+          .then(() => {
+            if (
+              this.dependencies.currentAccount() === account &&
+              this.state === failedState
+            )
+              this.startBinding().catch((backgroundError: unknown) => {
+                console.error("session: startBinding failed", backgroundError);
+              });
+          })
+          .catch((backgroundError: unknown) => {
+            console.error(
+              "session: background operation failed",
+              backgroundError,
+            );
+          });
       });
     } else {
       this.bindingRetry.cancel();

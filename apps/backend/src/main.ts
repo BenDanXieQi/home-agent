@@ -63,7 +63,7 @@ const deviceLogs = new DevicePushLogs(
   resolvePath(import.meta.dir, "../../..", "data/mqtt-logs"),
   mijiaService,
 );
-void mijiaService.initialize().catch(() => {
+mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
 const shutdown = new AbortController();
@@ -88,7 +88,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
-    void (async () => {
+    (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const drained = await Promise.race([

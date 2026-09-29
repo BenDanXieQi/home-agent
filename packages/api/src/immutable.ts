@@ -11,7 +11,8 @@ export function produce<T extends object>(
 
 /** Freeze an owned value in place; no draft update or schema copy is needed. */
 export function freeze<T extends object>(value: T) {
-  void create(value, () => {}, { enableAutoFreeze: true });
+  // oxlint-disable-next-line typescript/no-floating-promises -- create freezes synchronously; generic T may itself be promise-like.
+  create(value, () => {}, { enableAutoFreeze: true });
   return value;
 }
 

@@ -11,20 +11,35 @@ export function useLogin() {
   return {
     ...view,
     refresh: () => {
-      if (material.isError) void material.refetch();
+      if (material.isError)
+        material.refetch().catch((backgroundError: unknown) => {
+          console.error("use-login: material.refetch failed", backgroundError);
+        });
       refresh();
     },
     startLogin: () => {
-      void perform({ type: "startLogin" });
+      perform({ type: "startLogin" }).catch((backgroundError: unknown) => {
+        console.error("use-login: perform failed", backgroundError);
+      });
     },
     cancelLogin: (loginId: string) => {
-      void perform({ type: "cancelLogin", loginId });
+      perform({ type: "cancelLogin", loginId }).catch(
+        (backgroundError: unknown) => {
+          console.error("use-login: perform failed", backgroundError);
+        },
+      );
     },
     verifyLogin: (loginId: string, ticket: string) => {
-      void perform({ type: "verifyLogin", loginId, ticket });
+      perform({ type: "verifyLogin", loginId, ticket }).catch(
+        (error: unknown) => {
+          console.error("use-login: perform failed", error);
+        },
+      );
     },
     logout: () => {
-      void perform({ type: "logout" });
+      perform({ type: "logout" }).catch((backgroundError: unknown) => {
+        console.error("use-login: perform failed", backgroundError);
+      });
     },
   };
 }

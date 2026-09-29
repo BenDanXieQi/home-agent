@@ -235,7 +235,14 @@ function stateFrames(response: Response) {
   let buffered = "";
   return {
     next: async () => {
-      const deadline = setTimeout(() => void reader.cancel(), 2_000);
+      const deadline = setTimeout(() => {
+        reader.cancel().catch((backgroundError: unknown) => {
+          console.error(
+            "Failed to cancel state stream reader",
+            backgroundError,
+          );
+        });
+      }, 2_000);
       try {
         while (!buffered.includes("\n\n")) {
           const chunk = await reader.read();
@@ -371,7 +378,7 @@ test("a stalled page is reclaimed while a healthy page follows inventory changes
     }
   })();
   // Attach a handler immediately; cleanup still awaits the actual consumer result.
-  void consume.catch(() => {});
+  consume.catch(() => {});
   try {
     for (let index = 0; index < 40; index++) {
       const catalog = householdCatalog();

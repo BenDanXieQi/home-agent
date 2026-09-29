@@ -33,7 +33,16 @@ export function RetryConnectionButton({
       status={status}
       type="button"
       disabled={disabled || !canRetry}
-      onClick={() => void perform({ type: "retryConnection" })}
+      onClick={() => {
+        perform({ type: "retryConnection" }).catch(
+          (backgroundError: unknown) => {
+            console.error(
+              "RetryConnectionButton: perform failed",
+              backgroundError,
+            );
+          },
+        );
+      }}
     >
       {busy ? "正在连接…" : children}
     </Button>

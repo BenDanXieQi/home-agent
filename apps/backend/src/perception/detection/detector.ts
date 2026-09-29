@@ -5,11 +5,12 @@ import type { frameSchema } from "./frame";
 import { detectionComputeBudget } from "../compute/budget";
 
 import { detectionLabels } from "./labels";
+import { detectionModelPath } from "./model";
 
-export async function createDetector(modelPath: string) {
+export async function createDetector() {
   // libvips has process-wide configuration; every detector uses the same budget.
   sharp.concurrency(detectionComputeBudget.sharpThreads);
-  const session = await InferenceSession.create(modelPath, {
+  const session = await InferenceSession.create(detectionModelPath, {
     executionProviders: ["cpu"],
     intraOpNumThreads: detectionComputeBudget.ortIntraOpThreads,
     executionMode: "sequential",
@@ -152,21 +153,23 @@ function decodeDetections(
   const candidates = [];
   for (let index = 0; index < count; index++) {
     let classId = 0;
-    let confidence = data[4 * count + index]!;
-    for (let category = 1; category < detectionLabels.length; category++) {
+    let confidence = -Infinity;
+    for (let category = 0; category < detectionLabels.length; category++) {
       const score = data[(4 + category) * count + index]!;
+      if (!Number.isFinite(score) || score < 0 || score > 1)
+        throw new Error("Invalid detection confidence");
       if (score > confidence) {
         confidence = score;
         classId = category;
       }
     }
-    if (!Number.isFinite(confidence) || confidence < 0.5) continue;
     const cx = data[index]!;
     const cy = data[count + index]!;
     const bw = data[2 * count + index]!;
     const bh = data[3 * count + index]!;
     if (![cx, cy, bw, bh].every(Number.isFinite))
       throw new Error("Non-finite detection box");
+    if (confidence < 0.5) continue;
     const left = clip((cx - bw / 2 - padX) / scale, width);
     const top = clip((cy - bh / 2 - padY) / scale, height);
     const right = clip((cx + bw / 2 - padX) / scale, width);

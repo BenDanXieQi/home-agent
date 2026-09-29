@@ -40,14 +40,14 @@ test("SIGKILL request is not exit confirmation; destroy is idempotent", async ()
   let done = false;
   const destruction = process.destroy();
   expect(process.destroy()).toBe(destruction);
-  void destruction.then(() => {
+  const observedDestruction = destruction.then(() => {
     done = true;
   });
   await delay(1);
   expect(done).toBe(false);
   expect(child.kills).toEqual(["SIGKILL"]);
   child.emit("exit", null, "SIGKILL");
-  await destruction;
+  await observedDestruction;
   expect(done).toBe(true);
 });
 
@@ -158,7 +158,7 @@ test.each(["starting", "idle"] as const)(
     process.events.on("error", (error: Error) => errors.push(error));
     if (state === "idle") child.emit("message", { kind: "ready" });
     const task = process
-      .submit({ kind: "initialize", modelPath: "model.onnx" })
+      .submit({ kind: "initialize" })
       .catch((error: unknown) => error);
     await delay(1);
     child.emit("message", {
@@ -255,7 +255,6 @@ test("IPC timing excludes child processing from the round trip", async () => {
         timing: {
           readMs: 0,
           decodeMs: 0,
-          annotationMs: 0,
           preprocessMs: 10,
           inferenceMs: 20,
           postprocessMs: 4,

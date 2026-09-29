@@ -48,7 +48,10 @@ function useAvatarMotion(
       !reduced && value.get() !== pose
         ? animate(value, pose, settle)
         : undefined;
-    if (arrival) void arrival.then(startCycle);
+    if (arrival)
+      arrival.then(startCycle).catch((backgroundError: unknown) => {
+        console.error("AgentAvatar: arrival.then failed", backgroundError);
+      });
     else {
       value.set(pose);
       startCycle();

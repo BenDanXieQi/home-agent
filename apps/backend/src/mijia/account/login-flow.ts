@@ -75,7 +75,9 @@ export class LoginFlow {
     };
     this.attempt = candidate;
     this.state = { status: "creating", id: candidate.id };
-    void this.prepareLogin(candidate);
+    this.prepareLogin(candidate).catch((backgroundError: unknown) => {
+      console.error("login-flow: prepareLogin failed", backgroundError);
+    });
   }
 
   isCurrent(candidate: LoginCandidate) {

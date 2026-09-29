@@ -88,8 +88,7 @@ export class MijiaService {
       onScopeChanged: () => {
         this.invalidateDeviceAccess();
         this.media.prepareRebind();
-        if (this.household?.ready())
-          void this.media.startBinding().catch(() => {});
+        if (this.household?.ready()) this.media.startBinding().catch(() => {});
       },
       onDevices: (devices, retryFailed) =>
         this.media.updateDevices(
@@ -241,7 +240,7 @@ export class MijiaService {
     this.revokeDevices(definitionChanges);
     this.syncDirectoryNotifications();
     if (this.household.ready() && this.media.binding.status === "unbound")
-      void this.media.startBinding().catch(() => {});
+      this.media.startBinding().catch(() => {});
     this.changed();
   }
   loginMaterial(id: string) {
@@ -359,7 +358,14 @@ export class MijiaService {
           this.accountKey(current) === accountKey &&
           this.observationScope.signal === scope
         )
-          void this.maintenance.rejectOAuth(current);
+          this.maintenance
+            .rejectOAuth(current)
+            .catch((backgroundError: unknown) => {
+              console.error(
+                "service: maintenance.rejectOAuth failed",
+                backgroundError,
+              );
+            });
       },
       () => {
         const current = this.accountClient;
@@ -370,7 +376,7 @@ export class MijiaService {
           this.observationScope.signal === scope
         ) {
           // A topic ACL refusal can revoke device access without invalidating the token.
-          void this.discovery.load(true).catch(() => {});
+          this.discovery.load(true).catch(() => {});
         }
       },
     ));
@@ -379,14 +385,18 @@ export class MijiaService {
     const account = this.accountClient;
     if (!account || !this.activeAccount(account) || !this.accountOAuth) return;
     const scope = this.observationScope.signal;
-    void this.mqttClosing.then(() => {
-      if (scope.aborted || !this.activeAccount(account)) return;
-      this.directoryNotifications.update(
-        this.accountObservations(account),
-        account.getCredentials().userId,
-        this.discovery.catalogSnapshot().devices.map((device) => device.did),
-      );
-    });
+    this.mqttClosing
+      .then(() => {
+        if (scope.aborted || !this.activeAccount(account)) return;
+        this.directoryNotifications.update(
+          this.accountObservations(account),
+          account.getCredentials().userId,
+          this.discovery.catalogSnapshot().devices.map((device) => device.did),
+        );
+      })
+      .catch((backgroundError: unknown) => {
+        console.error("service: mqttClosing.then failed", backgroundError);
+      });
   }
   directoryPushStatus() {
     return this.directoryNotifications.snapshot();
@@ -543,7 +553,10 @@ export class MijiaService {
     );
     // Restore the shared account through its existing owner; never replay a read
     // or discard successful observations from earlier batches.
-    if (rejected) void this.maintenance.renew(client);
+    if (rejected)
+      this.maintenance.renew(client).catch((backgroundError: unknown) => {
+        console.error("service: maintenance.renew failed", backgroundError);
+      });
     return observations;
   }
 
@@ -570,7 +583,7 @@ export class MijiaService {
     };
     this.state.connectionOperation = operation;
     this.changed();
-    void this.reconnect(operation.id)
+    this.reconnect(operation.id)
       .then((error) => {
         if (!this.isConnectionOperationCurrent(operation.id)) return;
         this.state.connectionOperation = error
@@ -684,7 +697,9 @@ export class MijiaService {
 
   private startAccountMaintenance(account: MiCloud) {
     this.discovery.pause();
-    void this.loadAccountProfile(account);
+    this.loadAccountProfile(account).catch((backgroundError: unknown) => {
+      console.error("service: loadAccountProfile failed", backgroundError);
+    });
     this.maintenance.scheduleRenewal(account);
     this.discovery.schedule(account);
     this.syncDirectoryNotifications();
@@ -871,7 +886,7 @@ export class MijiaService {
         this.startAccountMaintenance(this.accountClient);
         // The household revoked its public scope before durable logout. Rebuild
         // it through fresh, validated discovery when authorization remains valid.
-        void this.loadDevices().catch(() => {});
+        this.loadDevices().catch(() => {});
       }
       throw error;
     } finally {

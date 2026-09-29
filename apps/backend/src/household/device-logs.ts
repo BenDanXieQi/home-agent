@@ -227,7 +227,9 @@ export class DevicePushLogs {
         Date.now() >=
         Date.parse(run.started_at) + run.duration_seconds * 1000
       ) {
-        void stop(null, "complete");
+        stop(null, "complete").catch((backgroundError: unknown) => {
+          console.error("device-logs: stop failed", backgroundError);
+        });
         return;
       }
       const did =
@@ -340,16 +342,25 @@ export class DevicePushLogs {
       bytes += Buffer.byteLength(line);
       stream.write(line);
       if (bytes >= MAX_FILE_BYTES || stream.writableLength > MAX_BUFFER_BYTES)
-        void stop("日志容量已达上限，采集已停止", "error");
+        stop("日志容量已达上限，采集已停止", "error").catch(
+          (error: unknown) => {
+            console.error("device-logs: stop failed", error);
+          },
+        );
       if (event.kind === "subscription" && event.status === "cancelled")
-        void stop("设备范围已变化，请重新开始采集", "interrupted");
+        stop("设备范围已变化，请重新开始采集", "interrupted").catch(
+          (error: unknown) => {
+            console.error("device-logs: stop failed", error);
+          },
+        );
     };
-    const timer = setTimeout(
-      () => void stop(null, "complete"),
-      run.duration_seconds * 1000,
-    );
+    const timer = setTimeout(() => {
+      stop(null, "complete").catch((backgroundError: unknown) => {
+        console.error("device-logs: stop failed", backgroundError);
+      });
+    }, run.duration_seconds * 1000);
     const flush = setInterval(() => {
-      void this.persist().catch(() => stop("日志保存失败", "error"));
+      this.persist().catch(() => stop("日志保存失败", "error"));
     }, 5000);
     const detach = this.household.subscribe(() => {
       if (
@@ -357,10 +368,16 @@ export class DevicePushLogs {
         this.household.snapshot().projection.household.household.status ===
           "stopping"
       )
-        void stop("家庭作用域变化或后端停止", "interrupted");
+        stop("家庭作用域变化或后端停止", "interrupted").catch(
+          (error: unknown) => {
+            console.error("device-logs: stop failed", error);
+          },
+        );
     });
     stream.on("error", () => {
-      void stop("日志文件写入失败", "error");
+      stop("日志文件写入失败", "error").catch((backgroundError: unknown) => {
+        console.error("device-logs: stop failed", backgroundError);
+      });
     });
     return {
       controller,

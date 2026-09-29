@@ -411,7 +411,7 @@ describe("private media session boundary", () => {
     const closing = session.close();
     expect(session.close()).toBe(closing);
     let closed = false;
-    void closing.then(() => {
+    const observedClosing = closing.then(() => {
       closed = true;
     });
     try {
@@ -420,7 +420,7 @@ describe("private media session boundary", () => {
       expect(peer.calls).toEqual([]);
     } finally {
       url.resolve(peer.adapter.url);
-      await Promise.all([initializing, closing]);
+      await Promise.all([initializing, observedClosing]);
     }
     expect(closed).toBe(true);
     expect(peer.calls).toEqual([]);

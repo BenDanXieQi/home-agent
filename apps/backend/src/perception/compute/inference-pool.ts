@@ -7,10 +7,7 @@ import { restoreError } from "./protocol";
 
 // Lives exclusively inside the isolated compute process. Hard deadlines belong
 // to the parent, which kills this whole process, never an in-flight ORT thread.
-export function createInferencePool(
-  modelPath: string,
-  onFailure: (error: Error) => void,
-) {
+export function createInferencePool(onFailure: (error: Error) => void) {
   if (
     detectionComputeBudget.workersPerProcess !== 1 ||
     detectionComputeBudget.tasksPerWorker !== 1
@@ -31,7 +28,6 @@ export function createInferencePool(
         import.meta.url,
       ),
     ),
-    workerData: { modelPath },
     minThreads: 0,
     maxThreads: detectionComputeBudget.workersPerProcess,
     idleTimeout: Infinity,
@@ -79,7 +75,7 @@ export function createInferencePool(
         };
       });
     active.add(pending);
-    void pending.finally(() => active.delete(pending)).catch(() => {});
+    pending.finally(() => active.delete(pending)).catch(() => {});
     return pending;
   }
   function close() {

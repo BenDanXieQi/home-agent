@@ -35,9 +35,11 @@ export function AccountGate() {
     if (signedIn && path === "/") {
       const completedHere =
         login?.status === "completed" && login.id === observedLogin.current;
-      void navigate({
+      navigate({
         to: completedHere ? "/settings" : "/devices",
         replace: true,
+      }).catch((backgroundError: unknown) => {
+        console.error("AccountGate: navigate failed", backgroundError);
       });
     }
     if (!signedIn) {

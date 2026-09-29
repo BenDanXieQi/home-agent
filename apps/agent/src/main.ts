@@ -24,7 +24,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (stopping) return;
     stopping = true;
-    void (async () => {
+    (async () => {
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         const drained = await Promise.race([

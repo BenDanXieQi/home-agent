@@ -260,7 +260,7 @@ export class HouseholdRuntime {
     if (this.refreshTasks.get(target)?.epoch === epoch) return;
     const task = { epoch };
     this.refreshTasks.set(target, task);
-    void Promise.resolve()
+    Promise.resolve()
       .then(async () => {
         this.assertEpoch(epoch);
         if (target !== "specs") await this.source.refreshDirectory();

@@ -62,16 +62,14 @@ async function main() {
     allowPositionals: true,
     options: { seconds: { type: "string", default: "20" } },
   });
-  const [model, image] = positionals;
-  if (!model || !image)
-    throw new Error(
-      "Usage: benchmark-detection [--seconds 20] <model.onnx> <image>",
-    );
+  const [image] = positionals;
+  if (!image || positionals.length !== 1)
+    throw new Error("Usage: benchmark-detection [--seconds 20] <image>");
   const seconds = z.coerce.number().int().min(5).max(300).parse(values.seconds);
   if (process.platform !== "darwin" && process.platform !== "linux")
     throw new Error("RSS sampling requires macOS or Linux ps");
   const execute = promisify(execFile);
-  const pool = await createDetectionPool(resolve(model));
+  const pool = await createDetectionPool();
   let inputSha256: string | undefined;
   try {
     for (const [width, height, fps] of [
@@ -147,7 +145,14 @@ async function main() {
             },
           );
           pending.add(pendingTask);
-          void pendingTask.finally(() => pending.delete(pendingTask));
+          pendingTask
+            .finally(() => pending.delete(pendingTask))
+            .catch((backgroundError: unknown) => {
+              console.error(
+                "benchmark-detection: pendingTask.finally failed",
+                backgroundError,
+              );
+            });
         }
         const nextDelay = schedule.nextDelayMs(performance.now() - started);
         if (nextDelay !== undefined) producer = setTimeout(produce, nextDelay);
@@ -194,7 +199,6 @@ async function main() {
           workerDispatchMs: distribution(timing.map((t) => t.workerDispatchMs)),
           readMs: distribution(timing.map((t) => t.readMs)),
           decodeMs: distribution(timing.map((t) => t.decodeMs)),
-          annotationMs: distribution(timing.map((t) => t.annotationMs)),
           preprocessMs: distribution(timing.map((t) => t.preprocessMs)),
           inferenceMs: distribution(timing.map((t) => t.inferenceMs)),
           postprocessMs: distribution(timing.map((t) => t.postprocessMs)),

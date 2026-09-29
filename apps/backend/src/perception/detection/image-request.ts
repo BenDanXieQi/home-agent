@@ -13,7 +13,7 @@ const imagePathSchema = z
   .transform((path) => resolve(path))
   .pipe(z.string().max(4096));
 
-export const imageRequestSchema = z.object({
+export const imageRequestSchema = z.strictObject({
   path: imagePathSchema,
   resize: z
     .object({
@@ -24,16 +24,9 @@ export const imageRequestSchema = z.object({
       message: "Resized image exceeds the 3840x2160 pixel budget",
     })
     .optional(),
-  outputPath: imagePathSchema.optional(),
 });
 
 export class ImageProcessingError extends Error {
-  constructor(
-    readonly code: "invalid_image" | "output_failed",
-    message: string,
-    options?: ErrorOptions,
-  ) {
-    super(message, options);
-    this.name = "ImageProcessingError";
-  }
+  override name = "ImageProcessingError";
+  readonly code = "invalid_image" as const;
 }

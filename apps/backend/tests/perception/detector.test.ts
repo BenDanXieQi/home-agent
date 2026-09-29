@@ -62,7 +62,7 @@ async function withDetector(
     detector: Awaited<ReturnType<typeof createDetector>>,
   ) => Promise<void>,
 ) {
-  const detector = await createDetector("model.onnx");
+  const detector = await createDetector();
   try {
     await check(detector);
   } finally {
@@ -281,3 +281,23 @@ test("disposes the input tensor when native inference rejects", async () => {
     expect(() => input?.data).toThrow("disposed");
   });
 });
+
+// Invalid scores must not become valid negative observations.
+test.each([NaN, Infinity, -Infinity, -0.1, 1.1])(
+  "rejects invalid confidence %s even outside the winning class",
+  async (score) => {
+    for (const scores of [
+      [score, 0, 0, 0, 0],
+      [0.9, 0, 0, 0, score],
+    ]) {
+      run.mockResolvedValueOnce({
+        output0: modelOutput([[2, 2, 2, 2, ...scores]]),
+      });
+      await withDetector(async (detector) => {
+        await expect(detector.detect(frame())).rejects.toThrow(
+          "Invalid detection confidence",
+        );
+      });
+    }
+  },
+);
