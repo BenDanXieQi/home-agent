@@ -74,6 +74,23 @@ function frame(width = 4, height = 4) {
   return { width, height, rgb: new Uint8Array(width * height * 3).fill(100) };
 }
 
+test("evaluation can retain weak candidates without changing the default detection floor", async () => {
+  run.mockImplementation(async () => ({
+    output0: modelOutput([[2, 2, 2, 2, 0, 0.25, 0, 0, 0]]),
+  }));
+  const baseline = await createDetector();
+  const candidates = await createDetector(0.1);
+  try {
+    expect((await baseline.detect(frame())).detections).toHaveLength(0);
+    expect((await candidates.detect(frame())).detections).toMatchObject([
+      { className: "cat", confidence: 0.25 },
+    ]);
+  } finally {
+    await baseline.close();
+    await candidates.close();
+  }
+});
+
 test("reuses one session with the explicit CPU and image concurrency budget", async () => {
   sharp.concurrency(10);
   await withDetector(async (detector) => {

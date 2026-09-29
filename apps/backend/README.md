@@ -4,7 +4,7 @@
 
 当前设备清单与规格接入尚未形成家庭语义模型，也未实现属性集采、人物／宠物状态、空间覆盖、活动判断或生效要求管理。backend 提供上下文并接纳 Agent 候选判断的设计边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md#家庭情景上下文的生产接纳与消费)，持续情景、长期任务、统一执行及 Agent 提交接口见[协作实施计划](../../docs/plans/household-automation.md)，均尚未实现；设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和完成范围见[感知功能说明](../../docs/perception.md)；跟踪、音频、前置筛选和媒体候选尚未接入，其独立交付边界见[摄像头计划](../../docs/plans/media-perception.md#agent-暂缓时的交付边界)。
+本地检测的接口、配置和完成范围见[感知功能说明](../../docs/perception.md)；人体外观跟踪与猫狗位置跟踪已接入，音频、前置筛选和媒体候选尚未接入，其独立交付边界见[摄像头计划](../../docs/plans/media-perception.md#agent-暂缓时的交付边界)。
 
 ## 运行
 
@@ -27,7 +27,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `PUT /api/config`            | 校验并保存完整连接配置                   |
 | `GET /api/services/status`   | 检查 Agent 与 go2rtc 的接口是否可用      |
 | `POST /api/chat`             | 将 JSON 请求转发至 Agent，透传响应与 SSE |
-| `GET /api/perception`        | 本地检测的来源健康、计算状态与最新观测   |
+| `GET /api/perception`        | 本地检测与人宠跟踪的健康及最新观测       |
 | `GET /api/perception/stream` | 订阅本地检测当前状态，不传输媒体片段     |
 | `POST /api/perception/retry` | 显式重试感知计算，不重连物理摄像头       |
 
@@ -110,7 +110,7 @@ src/
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、SSE 与限时设备推送日志
-├── perception/            # 本地检测、计算子进程、视频解码/调度、当前观测与接口
+├── perception/            # 本地检测、人宠跟踪与人体外观模型、隔离计算、视频解码/调度、当前观测与接口
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验

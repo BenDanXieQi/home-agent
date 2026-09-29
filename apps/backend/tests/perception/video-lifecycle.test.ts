@@ -20,17 +20,19 @@ async function until(check: () => boolean, timeout = 12000) {
   while (!check() && performance.now() < end) await delay(20);
   expect(check()).toBe(true);
 }
-async function mediaServer(codec: "libx264" | "libx265" = "libx264") {
+async function mediaServer(
+  codec: "libx264" | "libx265" = "libx264",
+  image?: string,
+) {
   const directory = await mkdtemp(join(tmpdir(), "p1-video-"));
   const file = join(directory, "source.ts");
   await promisify(execFile)("ffmpeg", [
     "-hide_banner",
     "-loglevel",
     "error",
-    "-f",
-    "lavfi",
-    "-i",
-    "testsrc2=size=96x64:rate=10",
+    ...(image
+      ? ["-loop", "1", "-i", image]
+      : ["-f", "lavfi", "-i", "testsrc2=size=96x64:rate=10"]),
     "-t",
     "2",
     "-an",
@@ -462,6 +464,14 @@ test("video dispatch uses multiple slots but retains each source until its resul
     settled = 0;
   const listeners = new Set<() => void>();
   const runtime = createVideoRuntime({
+    tracking: {
+      start() {},
+      stop() {},
+      capture() {
+        return undefined;
+      },
+      async close() {},
+    },
     compute: {
       get available() {
         return active < 2;
@@ -538,3 +548,112 @@ test("video dispatch uses multiple slots but retains each source until its resul
     await media.close();
   }
 }, 10000);
+
+test.skipIf(!process.env.PERCEPTION_INDOOR_DATA_DIR)(
+  "P2 real detection and ReID publish independently on two video channels and survive appearance process failure",
+  async () => {
+    const media = await mediaServer(
+      "libx264",
+      join(process.env.PERCEPTION_INDOOR_DATA_DIR!, "images", "000000465549.jpg"),
+    );
+    const directory = await mkdtemp(join(tmpdir(), "p2-video-"));
+    const configPath = join(directory, "perception.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        sources: [selection, { ...selection, channel: 2 }],
+        sampleFps: 3,
+      }),
+    );
+    const service = createPerceptionService({
+      configPath,
+      executable: "ffmpeg",
+      sources: sources(media.endpoint),
+    });
+    let children: number[] = [];
+    try {
+      await service.start();
+      await until(
+        () =>
+          service.snapshot().sources.length === 2 &&
+          service
+            .snapshot()
+            .sources.every((s) =>
+              s.tracking?.tracks.some(
+                (t) => t.feature === "extracted" || t.feature === "reused",
+              ),
+            ),
+        15000,
+      );
+      const view = service.snapshot();
+      expect(view.compute!.budget.workersPerProcess).toBeGreaterThan(1);
+      for (const source of view.sources) {
+        expect(source.metrics.published).toBeGreaterThanOrEqual(2);
+        expect(
+          source.tracking!.tracks.filter((t) => t.state === "measured").length,
+        ).toBeGreaterThanOrEqual(2);
+        expect(source.tracking!.sequence).toBeLessThanOrEqual(
+          source.observation!.sequence,
+        );
+      }
+      const routes = createPerceptionRoutes(
+        service,
+        1810,
+        new AbortController().signal,
+      );
+      const response = await routes.request(
+        "http://localhost:1810/",
+        { headers: { Host: "localhost:1810" } },
+        {
+          requestIP: () => ({
+            address: "127.0.0.1",
+            family: "IPv4",
+            port: 12345,
+          }),
+        },
+      );
+      const publicView = perceptionSnapshotSchema.parse(await response.json());
+      expect(publicView.sources.every((s) => s.tracking?.tracks.length)).toBe(
+        true,
+      );
+      const pid = view.compute!.processId!;
+      const { stdout } = await promisify(execFile)("pgrep", [
+        "-P",
+        String(pid),
+      ]);
+      children = stdout.trim().split(/\s+/).map(Number);
+      let appearance: number | undefined;
+      for (const child of children) {
+        const { stdout: command } = await promisify(execFile)("ps", [
+          "-p",
+          String(child),
+          "-o",
+          "command=",
+        ]);
+        if (command.includes("reid-entry")) appearance = child;
+      }
+      expect(appearance).toBeDefined();
+      process.kill(appearance!, "SIGKILL");
+      await until(() =>
+        service
+          .snapshot()
+          .sources.every(
+            (s) =>
+              s.metrics.published >
+                view.sources.find(
+                  (old) => old.source.channel === s.source.channel,
+                )!.metrics.published +
+                  3 && s.tracking?.status === "degraded",
+          ),
+      );
+      expect(service.snapshot().compute?.processId).toBe(pid);
+      expect(service.snapshot().compute?.restarts).toBe(0);
+    } finally {
+      await service.close();
+      await media.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+    for (const pid of children) expect(() => process.kill(pid, 0)).toThrow();
+  },
+  25000,
+);

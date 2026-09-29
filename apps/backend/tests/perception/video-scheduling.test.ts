@@ -49,6 +49,14 @@ function harness() {
     for (const listener of listeners) listener();
   }
   const runtime = createVideoRuntime({
+    tracking: {
+      start() {},
+      stop() {},
+      capture() {
+        return undefined;
+      },
+      async close() {},
+    },
     compute: {
       get available() {
         return enabled && !busy;
@@ -152,7 +160,9 @@ test("after overload both cameras resume with their newest pixels, without repla
         .filter((event) => event.event === "settled")
         .map((event) => event.run.channel),
     ).toEqual([1, 2, 1]);
-    for (const { metrics } of h.events) {
+    for (const event of h.events) {
+      if (event.event === "tracking") continue;
+      const { metrics } = event;
       expect(metrics.pending).toBeLessThanOrEqual(1);
       expect(metrics.inFlight).toBeLessThanOrEqual(1);
       expect(metrics.sampled).toBe(

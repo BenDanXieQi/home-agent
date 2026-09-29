@@ -1,3 +1,5 @@
+import { createReidProcess } from "../tracking/reid-process";
+import { createTrackingRuntime } from "../tracking/runtime";
 import { createVideoRuntime } from "../video/runtime";
 import { readAnalysisStream } from "../../mijia/media/analysis-stream";
 import { createInferencePool } from "./inference-pool";
@@ -33,6 +35,18 @@ async function run(task: z.infer<typeof commandSchema>) {
     pool = createInferencePool(fail, task.budget);
     const result = await pool.submit(task);
     video = createVideoRuntime({
+      tracking: createTrackingRuntime({
+        model: createReidProcess(),
+        reserveCompute: () => pool!.reserveTracking(),
+        emit: (observation) =>
+          send({
+            kind: "video",
+            payload: { event: "tracking", run: observation.run, observation },
+          }),
+        failure: (error) => {
+          console.error("Tracking publication failed", error);
+        },
+      }),
       compute: {
         get available() {
           return pool!.available;

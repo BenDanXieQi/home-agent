@@ -28,6 +28,43 @@ const observation = z.object({
     }),
   ),
 });
+const trackingBox = z.object({
+  x: z.number(),
+  y: z.number(),
+  w: z.number().positive(),
+  h: z.number().positive(),
+});
+export const trackingObservationSchema = z.object({
+  run,
+  sequence: z.int().positive(),
+  receivedAt: z.number(),
+  sampledAt: z.number(),
+  mediaTime: z.null(),
+  ageMs: z.number().nonnegative(),
+  width: z.int().positive(),
+  height: z.int().positive(),
+  coordinateBasis: z.literal("decoded_rgb24"),
+  status: z.enum(["tracked", "degraded", "failed"]),
+  reason: z.string().max(4096).optional(),
+  skippedFrames: z.int().nonnegative(),
+  omittedHumans: z.int().nonnegative(),
+  omittedPets: z.int().nonnegative(),
+  tracks: z
+    .array(
+      z.object({
+        trackId: z.int().positive(),
+        className: z.enum(["human", "cat", "dog"]),
+        state: z.enum(["measured", "predicted"]),
+        measuredBox: trackingBox.nullable(),
+        predictedBox: trackingBox,
+        lastMeasuredAt: z.number(),
+        hits: z.int().positive(),
+        feature: z.enum(["extracted", "reused", "missing", "not_applicable"]),
+        featureAt: z.number().nullable(),
+      }),
+    )
+    .max(16),
+});
 export const perceptionSnapshotSchema = z.object({
   rejectedRetiredResults: z.int().nonnegative(),
   status: z.string(),
@@ -70,6 +107,8 @@ export const perceptionSnapshotSchema = z.object({
       error: z.string().optional(),
       validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       observation: observation.nullable(),
+      tracking: trackingObservationSchema.nullable(),
+      trackingValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       metrics: z.record(z.string(), z.number()),
     }),
   ),

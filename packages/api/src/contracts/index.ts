@@ -86,4 +86,7 @@ export * from "./operations";
 
 export * from "./chat";
 
-export { perceptionSnapshotSchema } from "./perception";
+export {
+  perceptionSnapshotSchema,
+  trackingObservationSchema,
+} from "./perception";

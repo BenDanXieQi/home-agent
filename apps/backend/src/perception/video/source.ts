@@ -100,6 +100,7 @@ export function createVideoSource(options: {
   });
   let closing: Promise<void> | undefined;
   return {
+    maxFrameAgeMs: options.config.maxFrameAgeMs,
     run: options.run,
     metrics,
     get health() {

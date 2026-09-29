@@ -1,3 +1,4 @@
+import type { createTrackingRuntime } from "../tracking/runtime";
 import type { z } from "zod";
 import type { videoEventSchema } from "./events";
 import type { frameSchema } from "../detection/frame";
@@ -7,6 +8,7 @@ import { createVideoScheduler } from "./scheduler";
 
 // Dependencies are composed by process-entry; video does not import a pool implementation.
 export function createVideoRuntime(dependencies: {
+  tracking: ReturnType<typeof createTrackingRuntime>;
   compute: {
     readonly available: boolean;
     detect: (
@@ -32,6 +34,12 @@ export function createVideoRuntime(dependencies: {
       const source = sources.get(id);
       const frame = source?.take();
       if (!source || !frame) return;
+      const tracking = dependencies.tracking.capture(
+        source.run,
+        frame,
+        source.maxFrameAgeMs,
+      );
+      let trackingStarted = false;
       const pending = (async () => {
         let success = false;
         try {
@@ -54,9 +62,14 @@ export function createVideoRuntime(dependencies: {
               ? { observation: source.observation(frame, result.detections) }
               : {}),
           });
+          if (sources.get(id) === source && source.health === "reading") {
+            tracking?.complete(result.detections);
+            trackingStarted = true;
+          }
         } catch (error) {
           dependencies.fatal(error);
         } finally {
+          if (!trackingStarted) tracking?.release();
           if (!success) source.settle(false, frame);
           source.release();
           scheduler.wake();
@@ -107,6 +120,7 @@ export function createVideoRuntime(dependencies: {
         ready: () => scheduler.ready(input.run.runId),
         failure: (error) => {
           scheduler.remove(input.run.runId);
+          dependencies.tracking.stop(input.run.runId);
           dependencies
             .emit({
               event: "health",
@@ -122,11 +136,13 @@ export function createVideoRuntime(dependencies: {
         },
       });
       sources.set(input.run.runId, source);
+      dependencies.tracking.start(input.run);
     },
     async stop(id: string) {
       const source = sources.get(id);
       if (!source) return;
       scheduler.remove(id);
+      dependencies.tracking.stop(id);
       await source.close();
       // Retiring instances still consume decoder capacity until exit is confirmed.
       if (sources.get(id) === source) sources.delete(id);
@@ -139,6 +155,7 @@ export function createVideoRuntime(dependencies: {
       sources.clear();
       await Promise.all(owned.map((source) => source.close()));
       await Promise.all(pendingDispatches);
+      await dependencies.tracking.close();
     },
   };
 }

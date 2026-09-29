@@ -17,6 +17,7 @@ export function createInferencePool(
   const active = new Set<Promise<unknown>>();
   let failure: Error | undefined;
   let initialized = false;
+  let reservedTracking = 0;
   let closing:
     | Promise<Extract<Awaited<ReturnType<typeof run>>, { kind: "closed" }>>
     | undefined;
@@ -57,7 +58,11 @@ export function createInferencePool(
       }
     | undefined;
   function dispatchQueued() {
-    const idle = workers.find((worker) => worker.active === 0);
+    const idle =
+      workers.reduce((sum, worker) => sum + worker.active, 0) <
+      workers.length - reservedTracking
+        ? workers.find((worker) => worker.active === 0)
+        : undefined;
     if (!failure && queued && idle) {
       const task = queued;
       queued = undefined;
@@ -132,11 +137,18 @@ export function createInferencePool(
       return Promise.reject(
         new ComputeBusyError("Compute turn reserved for ready video"),
       );
-    if (active.size >= workers.length + detectionComputeBudget.pendingTasks)
+    if (
+      active.size >=
+      workers.length - reservedTracking + detectionComputeBudget.pendingTasks
+    )
       return Promise.reject(
         new ComputeBusyError("Detection compute capacity busy"),
       );
-    const idle = workers.find((worker) => worker.active === 0);
+    const idle =
+      workers.reduce((sum, worker) => sum + worker.active, 0) <
+      workers.length - reservedTracking
+        ? workers.find((worker) => worker.active === 0)
+        : undefined;
     if (!idle && (queued || onAdmitted))
       return Promise.reject(new ComputeBusyError("No idle inference worker"));
     const submitted = performance.now();
@@ -208,12 +220,24 @@ export function createInferencePool(
   return {
     submit,
     close,
+    reserveTracking() {
+      if (closing || failure || !initialized || workers.length < 2)
+        return false;
+      // Stop refilling this slot immediately, but let admitted detections drain.
+      // A later request can start ReID as soon as the reserved CPU is free.
+      reservedTracking = 1;
+      return (
+        workers.reduce((sum, worker) => sum + worker.active, 0) <=
+        workers.length - reservedTracking
+      );
+    },
     get available() {
       return (
         !closing &&
         !failure &&
         initialized &&
-        workers.some((worker) => worker.active === 0)
+        workers.reduce((sum, worker) => sum + worker.active, 0) <
+          workers.length - reservedTracking
       );
     },
     subscribeAvailable(
