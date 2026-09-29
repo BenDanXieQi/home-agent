@@ -1,0 +1,144 @@
+import type { z } from "zod";
+import type { videoEventSchema } from "./events";
+import type { frameSchema } from "../detection/frame";
+import type { observationSchema } from "../observations";
+import { createVideoSource } from "./source";
+import { createVideoScheduler } from "./scheduler";
+
+// Dependencies are composed by process-entry; video does not import a pool implementation.
+export function createVideoRuntime(dependencies: {
+  compute: {
+    readonly available: boolean;
+    detect: (
+      frame: z.infer<typeof frameSchema>,
+      onAdmitted: () => Promise<void>,
+    ) => Promise<{
+      detections: z.infer<typeof observationSchema>["detections"];
+    }>;
+    subscribeAvailable: (
+      listener: () => void,
+      waiting: () => boolean,
+    ) => () => void;
+  };
+  emit: (event: z.infer<typeof videoEventSchema>) => Promise<void>;
+  fatal: (error: unknown) => void;
+}) {
+  const sources = new Map<string, ReturnType<typeof createVideoSource>>();
+  let closing = false;
+  const pendingDispatches = new Set<Promise<void>>();
+  const scheduler = createVideoScheduler(
+    () => !closing && dependencies.compute.available,
+    (id) => {
+      const source = sources.get(id);
+      const frame = source?.take();
+      if (!source || !frame) return;
+      const pending = (async () => {
+        let success = false;
+        try {
+          const result = await dependencies.compute.detect(frame, () =>
+            dependencies.emit({
+              event: "submitted",
+              metrics: source.metrics.snapshot(),
+              run: source.run,
+              sequence: frame.sequence,
+            }),
+          );
+          success = true;
+          source.settle(true, frame);
+          await dependencies.emit({
+            event: "settled",
+            metrics: source.metrics.snapshot(),
+            run: source.run,
+            sequence: frame.sequence,
+            ...(sources.get(id) === source && source.health === "reading"
+              ? { observation: source.observation(frame, result.detections) }
+              : {}),
+          });
+        } catch (error) {
+          dependencies.fatal(error);
+        } finally {
+          if (!success) source.settle(false, frame);
+          source.release();
+          scheduler.wake();
+        }
+      })().catch(dependencies.fatal);
+      pendingDispatches.add(pending);
+      pending.then(() => {
+        pendingDispatches.delete(pending);
+      }, dependencies.fatal);
+    },
+  );
+  const unsubscribe = dependencies.compute.subscribeAvailable(
+    scheduler.wake,
+    () => scheduler.pending,
+  );
+  let reporting = false;
+  const timer = setInterval(() => {
+    if (reporting || closing) return;
+    reporting = true;
+    Promise.all(
+      [...sources.values()].map((source) =>
+        dependencies.emit({
+          event: "health",
+          run: source.run,
+          status: source.health,
+          metrics: source.metrics.snapshot(),
+        }),
+      ),
+    )
+      .catch(dependencies.fatal)
+      .finally(() => {
+        reporting = false;
+      });
+  }, 1000);
+  return {
+    start(
+      input: Pick<
+        Parameters<typeof createVideoSource>[0],
+        "run" | "config" | "decoder"
+      >,
+    ) {
+      if (closing || sources.size >= 8 || sources.has(input.run.runId))
+        throw new Error("Video source capacity unavailable");
+      const source = createVideoSource({
+        run: input.run,
+        config: input.config,
+        decoder: input.decoder,
+        ready: () => scheduler.ready(input.run.runId),
+        failure: (error) => {
+          scheduler.remove(input.run.runId);
+          dependencies
+            .emit({
+              event: "health",
+              run: input.run,
+              status: "failed",
+              error: (error instanceof Error
+                ? error.message
+                : String(error)
+              ).slice(0, 4096),
+              metrics: source.metrics.snapshot(),
+            })
+            .catch(dependencies.fatal);
+        },
+      });
+      sources.set(input.run.runId, source);
+    },
+    async stop(id: string) {
+      const source = sources.get(id);
+      if (!source) return;
+      scheduler.remove(id);
+      await source.close();
+      // Retiring instances still consume decoder capacity until exit is confirmed.
+      if (sources.get(id) === source) sources.delete(id);
+    },
+    async close() {
+      closing = true;
+      clearInterval(timer);
+      unsubscribe();
+      const owned = [...sources.values()];
+      sources.clear();
+      await Promise.all(owned.map((source) => source.close()));
+      await Promise.all(pendingDispatches);
+    },
+  };
+}

@@ -26,6 +26,7 @@ The backend establishes a go2rtc runtime session identified by `sessionId`, then
 Within `overlay/internal/xiaomi/`:
 
 - `home_agent.go`: HTTP boundary, go2rtc runtime session and lease.
+- `home_agent_analysis.go`: request-owned, bounded MPEG-TS analysis consumers for H264/H265 video.
 - `home_agent_camera.go`: private camera-channel streams, resident consumers and capture recovery.
 - `home_agent_dual_camera.go`: dual-camera shared-connection ownership and per-channel private dialers.
 - `home_agent_playback.go`: viewer negotiation and retirement.
@@ -42,10 +43,13 @@ The base path is `/api/home-agent/mijia/`. Requests require `X-Home-Agent: mijia
 | `DELETE session`  | `reset: true`                                                                 | Backend startup cleanup of residual Home-Agent state                                  |
 | `POST heartbeat`  | `sessionId`                                                                   | Renew the 60-second session lease and return `playbackIds`                            |
 | `PUT camera`      | `sessionId`, `sourceId`, `did`, `channel`, `channelCount`, `model`, `localip` | Prepare a shared camera-channel stream and its resident consumer                      |
+| `POST analysis`   | `sessionId`, `sourceId`                                                       | Streaming `video/mp2t`; cancellation retires only this analysis consumer              |
 | `POST playback`   | `sessionId`, `sourceId`, `playbackId`, `offer`                                | Return `playbackId`, SDP `answer` and `telemetry`                                     |
 | `DELETE playback` | `sessionId`, `sourceId`, `playbackId`                                         | Close the owned subscription                                                          |
 
 `DELETE camera` accepts `sessionId` and `sourceId` to release a source removed from inventory. A successful `PUT camera` registers the stream and starts asynchronous capture; it does not wait for the first video packet. A successful `POST playback` completes SDP negotiation, not browser frame presentation. Runtime-session and camera mutations return HTTP 204; heartbeat and playback return JSON. Failures use static error codes. The backend coordinates session ownership and viewer reservations.
+
+Analysis consumers share the existing camera stream and session lease. They are removed when the request, camera, internal channel generation, or session ends. Each camera admits at most four analysis readers. A reader queues at most 32 media chunks or 4 MiB, copies muxer-owned output before queuing, and has a five-second HTTP write deadline. Overflow ends the reader without blocking preview or another lens. Streaming and consumer attachment never hold the global session lock. Backend FFmpeg performs decoding on its host; no new public URL, persistent analysis ID, heartbeat, or DELETE operation is introduced.
 
 Playback telemetry contains `stage`, `elapsedMs`, `sourceRecentlyActive` and `timings`. Stages are `queued` (waiting for the camera gate), `connecting` (validating the offer and attaching the source), `signaling` (creating the answer and gathering connection candidates), and `answer_ready` (answer preparation complete). This final stage does not assert that the browser's WebRTC transport is connected or a frame is visible. `elapsedMs` uses the process's monotonic clock, starts when go2rtc accepts the viewer, and stops when answer preparation completes or negotiation fails. `sourceRecentlyActive` records whether the current resident attachment had received a video packet in the preceding 30 seconds when this viewer started; registering a stream alone does not count as packet activity. Optional `timings.queueMs`, `sourceMs` and `answerMs` appear as the gate wait, source attachment, and answer preparation finish. A successful offer has all three timings. These measurements exclude browser setup, network transit and first-frame presentation; the backend and browser record those separately. Telemetry is returned with the offer response and written to negotiation diagnostics; there is no separate playback-status request.
 

@@ -16,7 +16,11 @@ if (!images.length)
   );
 const pool = await createDetectionPool();
 try {
-  console.log(JSON.stringify(await createPerceptionReport(pool.metadata)));
+  console.log(
+    JSON.stringify(
+      await createPerceptionReport(pool.metadata, pool.getStatus().budget),
+    ),
+  );
   for (const [index, image] of images.entries()) {
     const outputPath = values["output-dir"]
       ? resolve(values["output-dir"], `${index}-${basename(image)}.png`)

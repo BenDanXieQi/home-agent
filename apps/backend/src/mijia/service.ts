@@ -1057,6 +1057,22 @@ export class MijiaService {
     return this.snapshot();
   }
 
+  prepareAnalysis(
+    revision: string,
+    deviceId: string,
+    channel: 1 | 2,
+    signal: AbortSignal,
+  ) {
+    if (
+      !this.household?.ready() ||
+      this.stopped ||
+      this.loggingOut ||
+      this.committingCredentials
+    )
+      throw new MijiaError("stale_session");
+    return this.media.prepareAnalysis(revision, deviceId, channel, signal);
+  }
+
   reservePlayback(revision: string, deviceId: string, channel: 1 | 2) {
     if (!this.household?.ready()) throw new MijiaError("devices_failed");
     this.discovery.requireHome();

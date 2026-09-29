@@ -11,6 +11,7 @@ await mkdir(resolve(root, "config/go2rtc"), {
 
 for (const [source, destination] of [
   [".env.example", ".env"],
+  ["apps/backend/perception.example.json", "config/perception.json"],
   ["docker/go2rtc.yaml", "config/go2rtc/go2rtc.yaml"],
 ] as const) {
   try {
@@ -49,3 +50,8 @@ try {
   )
     throw error;
 }
+
+if (!Bun.which(process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg"))
+  console.warn(
+    "摄像头持续检测需要在 backend 宿主安装 FFmpeg，或设置 PERCEPTION_FFMPEG_PATH；未启用感知不受影响。见 docs/perception.md。",
+  );

@@ -1,7 +1,16 @@
+import { availableParallelism } from "node:os";
 import { expect, test } from "bun:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { createDetectionPool } from "../../src/perception/compute/pool";
-import { cp, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -16,6 +25,7 @@ const frame = {
   rgb: new Uint8Array(1920 * 1080 * 3).fill(114),
 };
 const options = {
+  cpuRatio: 1 / availableParallelism(),
   initializeTimeoutMs: 3000,
   closeTimeoutMs: 1000,
   recoveryDelayMs: 10,
@@ -145,7 +155,7 @@ async function recovered(
   const end = performance.now() + 4000;
   while (pool.getStatus().status === "recovering" && performance.now() < end)
     await delay(10);
-  expect(pool.getStatus().status).toBe("ready");
+  expect(pool.getStatus()).toMatchObject({ status: "ready" });
 }
 
 test("real model runs in a different process and shutdown confirms its exit", async () => {
@@ -164,7 +174,7 @@ test("real model runs in a different process and shutdown confirms its exit", as
       timing.preprocessMs + timing.inferenceMs + timing.postprocessMs,
     ).toBeLessThanOrEqual(timing.totalMs);
     expect(pool.metadata.sharpConcurrency).toBe(1);
-    expect(pool.metadata.workerThreadId).toBeGreaterThan(0);
+    expect(pool.metadata.workerThreadIds[0]).toBeGreaterThan(0);
   } finally {
     await pool.close();
   }
@@ -273,6 +283,11 @@ test("a deployment missing its fixed model fails with the asset path", async () 
       new URL("../../src/perception/", import.meta.url),
       join(directory, "src/perception"),
       { recursive: true },
+    );
+    await mkdir(join(directory, "src/mijia/media"), { recursive: true });
+    await cp(
+      new URL("../../src/mijia/media/analysis-stream.ts", import.meta.url),
+      join(directory, "src/mijia/media/analysis-stream.ts"),
     );
     await symlink(
       fileURLToPath(new URL("../../node_modules", import.meta.url)),

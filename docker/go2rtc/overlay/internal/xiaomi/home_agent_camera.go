@@ -25,6 +25,7 @@ type homeAgentCameraState struct {
 	cancel        context.CancelFunc
 	gate          chan struct{}
 	playbacks     map[string]*homeAgentPlaybackState
+	analyses      map[*homeAgentAnalysisConsumer]context.CancelFunc
 	activity      atomic.Pointer[homeAgentPacketActivity]
 	releaseSource func()
 }
@@ -98,6 +99,7 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		stream: stream, releaseSource: releaseSource,
 		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
 		playbacks: make(map[string]*homeAgentPlaybackState),
+		analyses:  make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
 	}
 	homeAgentCapture(session, session.cameras[body.SourceID])
 	w.WriteHeader(http.StatusNoContent)
@@ -177,6 +179,9 @@ func homeAgentRestartStalled(session *homeAgentSession, camera *homeAgentCameraS
 	if homeAgentCurrent.Load() != session || camera.ctx.Err() != nil {
 		homeAgentMu.Unlock()
 		return true
+	}
+	for _, cancel := range camera.analyses {
+		cancel()
 	}
 	for _, playback := range camera.playbacks {
 		homeAgentRetirePlayback(session, camera, playback)
