@@ -1,6 +1,6 @@
 # Step 5：展示房间上下文与活动
 
-**状态：账号、设备清单、媒体订阅与房间事实页面已交付；场景判断和活动界面待实施。** 当前行为见[家庭运行时](../../household.md)和[设备事实与房间快照](../../reference/device-facts.md)，本步随 03、04、06 的能力逐项接入。[返回总览](../backend-household-perception.md)
+**状态：账号、设备清单、媒体订阅、房间事实与 AI 总结页面已接入；活动、画像和控制条件待实施。** 当前行为见[家庭运行时](../../household.md)、[设备事实与房间快照](../../reference/device-facts.md)和[房间 AI 上下文](../../reference/room-analysis.md)，本步随 03、04、06 的能力逐项接入。[返回总览](../backend-household-perception.md)
 
 ## 展示范围
 
