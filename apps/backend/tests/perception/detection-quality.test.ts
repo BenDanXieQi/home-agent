@@ -1,10 +1,9 @@
 import { expect, test } from "bun:test";
 import { createDetectionPool } from "../../src/perception/compute/pool";
 
-const modelPath = process.env.PERCEPTION_MODEL_PATH;
 const imagePath = process.env.PERCEPTION_BUS_IMAGE_PATH;
 
-test.skipIf(!modelPath || !imagePath)(
+test.skipIf(!imagePath)(
   "detects both fully visible people in the street image before and after resizing",
   async () => {
     // Manually marked on the 810 × 1080 source image, not copied from model output.
@@ -13,7 +12,7 @@ test.skipIf(!modelPath || !imagePath)(
       { x: 45, y: 395, w: 205, h: 515 },
       { x: 215, y: 400, w: 135, h: 465 },
     ];
-    const pool = await createDetectionPool(modelPath!);
+    const pool = await createDetectionPool();
     try {
       for (const resize of [undefined, { width: 405, height: 540 }]) {
         const result = await pool.detectImage({ path: imagePath!, resize });

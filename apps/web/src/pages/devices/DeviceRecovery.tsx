@@ -36,7 +36,7 @@ export function DeviceRecovery() {
           }
           status={retrying ? "pending" : "idle"}
           onClick={() =>
-            void perform({
+            perform({
               type: "refreshDevices",
               target: directoryFailed ? "all" : "specs",
             })

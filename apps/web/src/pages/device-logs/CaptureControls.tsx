@@ -157,7 +157,16 @@ export function CaptureControls({
                     )
                   }
                   disabled={pending || !connected || (!capturing && !ready)}
-                  onClick={() => void capture(capturing ? "stop" : "start")}
+                  onClick={() => {
+                    capture(capturing ? "stop" : "start").catch(
+                      (backgroundError: unknown) => {
+                        console.error(
+                          "CaptureControls: capture failed",
+                          backgroundError,
+                        );
+                      },
+                    );
+                  }}
                 >
                   {pending
                     ? confirming

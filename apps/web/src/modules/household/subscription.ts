@@ -33,7 +33,9 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
       Date.now() + delay + Math.random() * 250,
     );
     delay = Math.min(delay * 2, 30_000);
-    void connect();
+    connect().catch((backgroundError: unknown) => {
+      console.error("subscription: connect failed", backgroundError);
+    });
   }
   async function connect() {
     if (stopped) return;
@@ -41,7 +43,14 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
     const wait = nextAllowedAt - Date.now();
     if (wait > 0) {
       // Longer server deadlines need multiple waits within the browser timer limit.
-      timer = setTimeout(() => void connect(), Math.min(wait, 2_147_483_647));
+      timer = setTimeout(
+        () => {
+          connect().catch((backgroundError: unknown) => {
+            console.error("subscription: connect failed", backgroundError);
+          });
+        },
+        Math.min(wait, 2_147_483_647),
+      );
       return;
     }
     const current = new AbortController();
@@ -192,7 +201,10 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
     previous?.abort();
     store.set(householdSyncedAtom, false);
     if (previous) scheduleReconnect();
-    else void connect();
+    else
+      connect().catch((backgroundError: unknown) => {
+        console.error("subscription: connect failed", backgroundError);
+      });
   };
   const visibility = () => {
     if (
@@ -204,7 +216,9 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
   };
   document.addEventListener("visibilitychange", visibility);
   store.set(householdReconnectAtom, () => reconnect);
-  void connect();
+  connect().catch((backgroundError: unknown) => {
+    console.error("subscription: connect failed", backgroundError);
+  });
   return () => {
     stopped = true;
     controller?.abort();

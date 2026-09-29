@@ -261,12 +261,16 @@ export class HouseholdSpecifications {
       if (source.running || source.done) continue;
       source.running = true;
       this.active++;
-      void this.load(key, source).finally(() => {
-        source.running = false;
-        this.active--;
-        this.pump();
-        this.finishBatch();
-      });
+      this.load(key, source)
+        .finally(() => {
+          source.running = false;
+          this.active--;
+          this.pump();
+          this.finishBatch();
+        })
+        .catch((backgroundError: unknown) => {
+          console.error("specifications: load failed", backgroundError);
+        });
     }
   }
 

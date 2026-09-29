@@ -9,12 +9,11 @@ import {
 
 // These schemas validate the real parent/child IPC boundary, not just TS types.
 export const taskSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("initialize"), modelPath: z.string().min(1) }),
+  z.object({ kind: z.literal("initialize") }),
   z.object({ kind: z.literal("detect"), frame: frameSchema }),
   z.object({
     kind: z.literal("detect_image"),
     image: imageRequestSchema,
-    stagingPath: z.string().min(1).optional(),
   }),
   z.object({ kind: z.literal("close") }),
 ]);
@@ -40,7 +39,6 @@ const detectionResultSchema = z.object({
   timing: z.object({
     readMs: z.number().nonnegative(),
     decodeMs: z.number().nonnegative(),
-    annotationMs: z.number().nonnegative(),
     preprocessMs: z.number().nonnegative(),
     inferenceMs: z.number().nonnegative(),
     postprocessMs: z.number().nonnegative(),
@@ -69,7 +67,6 @@ export const resultSchema = z.discriminatedUnion("kind", [
     inputSha256: sha256Schema,
     width: z.int().positive(),
     height: z.int().positive(),
-    stagedImage: z.string().min(1).optional(),
   }),
   z.object({ kind: z.literal("closed") }),
 ]);
@@ -80,7 +77,7 @@ export const requestSchema = z.object({
 const errorSchema = z.object({
   message: z.string().max(4096),
   stack: z.string().max(16_384).optional(),
-  code: z.enum(["invalid_image", "output_failed"]).optional(),
+  code: z.literal("invalid_image").optional(),
 });
 
 export function errorDetails(error: unknown) {
@@ -109,7 +106,7 @@ export function errorDetails(error: unknown) {
 
 export function restoreError(details: z.infer<typeof errorSchema>) {
   const error = details.code
-    ? new ImageProcessingError(details.code, details.message)
+    ? new ImageProcessingError(details.message)
     : new Error(details.message);
   if (details.stack) error.stack = details.stack;
   return error;

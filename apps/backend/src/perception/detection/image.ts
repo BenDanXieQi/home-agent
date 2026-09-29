@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, unlink } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { open } from "node:fs/promises";
+import { resolve } from "node:path";
 import sharp from "sharp";
 import type { z } from "zod";
 import type { createDetector } from "./detector";
@@ -41,30 +41,8 @@ async function readImage(path: string) {
   }
 }
 
-async function removeStaging(path: string) {
-  try {
-    await unlink(path);
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      "code" in error &&
-      (error.code === "ENOENT" || error.code === "ENOTDIR")
-    )
-      return;
-    // An owned file remains: the parent must retire the process before retrying
-    // cleanup. Keep this distinct from an ordinary input/output error.
-    throw new Error(`Cannot remove image staging file: ${path}`, {
-      cause: error,
-    });
-  }
-}
-
-// All file bytes, decoded pixels and native image operations stay in the worker.
-export async function detectImage(
-  detector: Pick<Awaited<ReturnType<typeof createDetector>>, "detect">,
-  input: z.infer<typeof imageRequestSchema>,
-  stagingPath?: string,
-) {
+// Shared bounded decoding for the inference worker and the standalone debug exporter.
+export async function loadImage(input: z.infer<typeof imageRequestSchema>) {
   const imagePath = resolve(input.path);
   const readStarted = performance.now();
   let bytes;
@@ -73,13 +51,9 @@ export async function detectImage(
     bytes = await readImage(imagePath);
     inputSha256 = createHash("sha256").update(bytes).digest("hex");
   } catch (cause) {
-    throw new ImageProcessingError(
-      "invalid_image",
-      `Cannot read image: ${imagePath}`,
-      {
-        cause,
-      },
-    );
+    throw new ImageProcessingError(`Cannot read image: ${imagePath}`, {
+      cause,
+    });
   }
   const readMs = performance.now() - readStarted;
 
@@ -107,85 +81,37 @@ export async function detectImage(
       .raw()
       .toBuffer({ resolveWithObject: true });
   } catch (cause) {
-    throw new ImageProcessingError(
-      "invalid_image",
-      `Cannot decode image: ${imagePath}`,
-      {
-        cause,
-      },
-    );
+    throw new ImageProcessingError(`Cannot decode image: ${imagePath}`, {
+      cause,
+    });
   }
   const decodeMs = performance.now() - decodeStarted;
   const { data, info } = decoded;
-  // Inference errors retain their identity so the compute pool can recover.
-  const result = await detector.detect({
-    width: info.width,
-    height: info.height,
-    rgb: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
-  });
-
-  let stagedImage;
-  let annotationMs = 0;
-  if (input.outputPath) {
-    const annotationStarted = performance.now();
-    const outputPath = resolve(input.outputPath);
-    const staging = stagingPath ? resolve(stagingPath) : undefined;
-    if (
-      !staging ||
-      staging === outputPath ||
-      dirname(staging) !== dirname(outputPath)
-    )
-      throw new ImageProcessingError(
-        "output_failed",
-        "Image output requires a separate staging file in the output directory",
-      );
-    let stageCreated = false;
-    try {
-      try {
-        await mkdir(dirname(outputPath), { recursive: true });
-        const stagedFile = await open(staging, "wx", 0o600);
-        stageCreated = true;
-        await stagedFile.close();
-        const boxes = result.detections
-          .map(
-            (box) =>
-              `<rect x="${box.x}" y="${box.y}" width="${box.w}" height="${box.h}" fill="none" stroke="${box.classId === 0 ? "#00ff88" : "#ffcc00"}" stroke-width="3"/><text x="${box.x}" y="${Math.max(18, box.y - 5)}" font-size="18" fill="#00ff88" stroke="#000" stroke-width="0.4">${box.className} ${box.confidence.toFixed(3)}</text>`,
-          )
-          .join("");
-        await sharp(data, {
-          raw: { width: info.width, height: info.height, channels: 3 },
-        })
-          .composite([
-            {
-              input: Buffer.from(
-                `<svg width="${info.width}" height="${info.height}">${boxes}</svg>`,
-              ),
-            },
-          ])
-          .png()
-          .toFile(staging);
-        // The parent must accept this completed staging file before publication.
-        stagedImage = staging;
-        stageCreated = false;
-      } catch (cause) {
-        throw new ImageProcessingError(
-          "output_failed",
-          `Cannot prepare annotated image: ${outputPath}`,
-          { cause },
-        );
-      }
-    } finally {
-      if (stageCreated) await removeStaging(staging);
-    }
-    annotationMs = performance.now() - annotationStarted;
-  }
   return {
     imagePath,
     inputSha256,
-    width: info.width,
-    height: info.height,
-    stagedImage,
+    frame: {
+      width: info.width,
+      height: info.height,
+      rgb: new Uint8Array(data.buffer, data.byteOffset, data.byteLength),
+    },
+    timing: { readMs, decodeMs },
+  };
+}
+
+export async function detectImage(
+  detector: Pick<Awaited<ReturnType<typeof createDetector>>, "detect">,
+  input: z.infer<typeof imageRequestSchema>,
+) {
+  const image = await loadImage(input);
+  // Native inference failures keep their identity for process recovery.
+  const result = await detector.detect(image.frame);
+  return {
+    imagePath: image.imagePath,
+    inputSha256: image.inputSha256,
+    width: image.frame.width,
+    height: image.frame.height,
     detections: result.detections,
-    timing: { ...result.timing, readMs, decodeMs, annotationMs },
+    timing: { ...image.timing, ...result.timing },
   };
 }

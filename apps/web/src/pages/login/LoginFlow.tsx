@@ -21,7 +21,10 @@ export function LoginFlow() {
   const startAutomatically = useSetAtom(startMijiaLoginAutomaticallyAtom);
 
   useEffect(() => {
-    if (shouldStartLogin) void startAutomatically();
+    if (shouldStartLogin)
+      startAutomatically().catch((backgroundError: unknown) => {
+        console.error("LoginFlow: startAutomatically failed", backgroundError);
+      });
   }, [shouldStartLogin, startAutomatically]);
   return (
     <>

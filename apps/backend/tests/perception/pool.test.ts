@@ -5,16 +5,15 @@ import {
   describe,
   expect,
   mock,
+  spyOn,
   test,
 } from "bun:test";
 import { EventEmitter } from "node:events";
+import pTimeout from "p-timeout";
 import { setTimeout as delay } from "node:timers/promises";
 import type { z } from "zod";
 import type { taskSchema } from "../../src/perception/compute/protocol";
 import { ImageProcessingError } from "../../src/perception/detection/image-request";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
 
 const result = {
   kind: "detected",
@@ -22,7 +21,6 @@ const result = {
   timing: {
     readMs: 0,
     decodeMs: 0,
-    annotationMs: 0,
     preprocessMs: 1,
     inferenceMs: 1,
     postprocessMs: 1,
@@ -53,7 +51,12 @@ let destroyPool: () => Promise<void>;
 
 class FakeProcess extends EventEmitter {
   readonly events = this;
-  readonly failure = new AbortController();
+  private readonly failure = new AbortController();
+  readonly signal = this.failure.signal;
+  abort(reason: unknown) {
+    if (!this.signal.aborted) this.failure.abort(reason);
+    return this.destroy();
+  }
   destroyed = 0;
   private destruction: Promise<void> | undefined;
   released = 0;
@@ -61,7 +64,14 @@ class FakeProcess extends EventEmitter {
     super();
     instances.push(this);
   }
-  submit(task: z.infer<typeof taskSchema>) {
+  async submit(task: z.infer<typeof taskSchema>) {
+    this.signal.throwIfAborted();
+    return pTimeout(this.run(task), {
+      milliseconds: Infinity,
+      signal: this.signal,
+    });
+  }
+  private run(task: z.infer<typeof taskSchema>) {
     if (task.kind === "initialize") return initializeTask();
     if (task.kind === "close") {
       this.released++;
@@ -97,11 +107,12 @@ const options = {
   taskTimeoutMs: 30,
   closeTimeoutMs: 100,
   recoveryDelayMs: 0,
+  recoveryResetMs: 60_000,
   maxRestarts: 2,
 };
 const pools: Awaited<ReturnType<typeof createDetectionPool>>[] = [];
 async function create(overrides: Partial<typeof options> = {}) {
-  const pool = await createDetectionPool("/local/model.onnx", {
+  const pool = await createDetectionPool({
     ...options,
     ...overrides,
   });
@@ -213,115 +224,34 @@ describe("detection pool lifecycle", () => {
     });
   });
 
-  test.each(["invalid_image", "output_failed"] as const)(
-    "%s releases capacity without restarting the model and the next request succeeds",
-    async (code) => {
-      detectTask = async () => {
-        throw new ImageProcessingError(code, "invalid image or output");
-      };
-      const pool = await create();
-      await expect(
-        pool.detectImage({ path: "/local/image.png" }),
-      ).rejects.toMatchObject({ code });
-      expect(pool.getStatus()).toMatchObject({
-        status: "ready",
-        restarts: 0,
-        activeImageRequests: 0,
-        activeRequests: 0,
-      });
-      detectTask = async () => result;
-      expect((await pool.detect(frame)).kind).toBe("detected");
-      expect(instances).toHaveLength(1);
-    },
-  );
-
-  test("image timeout removes staging only after confirmed process exit", async () => {
-    const directory = await mkdtemp(
-      join(tmpdir(), "perception-image-timeout-"),
-    );
-    const started = Promise.withResolvers<string>();
-    const exited = Promise.withResolvers<void>();
-    destroyPool = () => exited.promise;
-    detectTask = async (task) => {
-      if (task.kind !== "detect_image" || !task.stagingPath)
-        throw new Error("Expected staged image request");
-      await writeFile(task.stagingPath, "writer still owns this file");
-      started.resolve(task.stagingPath);
-      return await new Promise(() => {});
+  test("invalid images do not consume model recovery attempts", async () => {
+    detectTask = async () => {
+      throw new ImageProcessingError("Cannot decode image");
     };
-    try {
-      const pool = await create({ closeTimeoutMs: 500, maxRestarts: 0 });
-      const detection = pool.detectImage({
-        path: "/local/image.png",
-        outputPath: join(directory, "output.png"),
-      });
-      const stagingPath = await started.promise;
-      await expect(detection).rejects.toMatchObject({ code: "timeout" });
-      expect(await readFile(stagingPath, "utf8")).toBe(
-        "writer still owns this file",
-      );
-      expect(instances[0]!.destroyed).toBe(1);
-      exited.resolve();
-      await waitForStatus(pool, "unavailable");
-      await expect(readFile(stagingPath)).rejects.toMatchObject({
-        code: "ENOENT",
-      });
-    } finally {
-      exited.resolve();
-      await rm(directory, { recursive: true, force: true });
-    }
+    const pool = await create();
+    await expect(pool.detectImage({ path: "/bad.png" })).rejects.toMatchObject({
+      code: "invalid_image",
+    });
+    expect(pool.getStatus()).toMatchObject({
+      status: "ready",
+      restarts: 0,
+      activeRequests: 0,
+    });
+    detectTask = async () => result;
+    expect((await pool.detect(frame)).kind).toBe("detected");
+    expect(instances).toHaveLength(1);
   });
 
-  test("failed staging cleanup stops admission instead of accumulating output files", async () => {
-    const files = { ...(await import("node:fs/promises")) };
-    const directory = await mkdtemp(
-      join(tmpdir(), "perception-image-cleanup-"),
-    );
-    let stagingPath = "";
-    let denyCleanup = true;
-    detectTask = async (task) => {
-      if (task.kind !== "detect_image" || !task.stagingPath)
-        throw new Error("Expected staged image request");
-      stagingPath = task.stagingPath;
-      await writeFile(stagingPath, "unremoved output");
-      // A raw result cannot confirm completion of this image writer.
-      return result;
-    };
-    await mock.module("node:fs/promises", () => ({
-      ...files,
-      unlink: async (...args: Parameters<typeof files.unlink>) => {
-        if (denyCleanup && args[0] === stagingPath)
-          throw new Error("Permission denied removing staged output");
-        return await files.unlink(...args);
-      },
-    }));
-    try {
-      const pool = await create();
-      await expect(
-        pool.detectImage({
-          path: "/local/image.png",
-          outputPath: join(directory, "output.png"),
-        }),
-      ).rejects.toMatchObject({ code: "worker_failed" });
-      await waitForStatus(pool, "unavailable");
-      await expect(
-        pool.detectImage({
-          path: "/local/next.png",
-          outputPath: join(directory, "next.png"),
-        }),
-      ).rejects.toMatchObject({ code: "unavailable" });
-      expect(await files.readdir(directory)).toHaveLength(1);
-      expect(pool.getStatus().lastError).toContain(
-        "Unable to remove staged image",
-      );
-      denyCleanup = false;
-      await pool.close();
-      expect(await files.readdir(directory)).toHaveLength(0);
-    } finally {
-      denyCleanup = false;
-      await mock.module("node:fs/promises", () => files);
-      await files.rm(directory, { recursive: true, force: true });
-    }
+  test("the pool rejects file export options before consuming computation capacity", async () => {
+    const pool = await create();
+    const request = { path: "/image.png", outputPath: "/output.png" };
+    await expect(pool.detectImage(request)).rejects.toThrow();
+    expect(pool.getStatus()).toMatchObject({
+      status: "ready",
+      activeRequests: 0,
+      restarts: 0,
+    });
+    expect((await pool.detect(frame)).kind).toBe("detected");
   });
 
   test("a task timeout rejects the old result and rebuilds without replaying it", async () => {
@@ -384,6 +314,61 @@ describe("detection pool lifecycle", () => {
       code: "unavailable",
     });
     expect(instances.length).toBe(2);
+  });
+
+  test("successful detections across a healthy interval replenish recovery attempts", async () => {
+    const pool = await create({ maxRestarts: 1, recoveryResetMs: 60 });
+    instances[0]!.emit("error", new Error("first failure"));
+    await waitForStatus(pool, "ready");
+    expect(pool.getStatus().consecutiveRestarts).toBe(1);
+    let now = performance.now();
+    const clock = spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      await pool.detect(frame);
+      now += 61;
+      await pool.detect(frame);
+      expect(pool.getStatus().consecutiveRestarts).toBe(0);
+    } finally {
+      clock.mockRestore();
+    }
+    instances[1]!.emit("error", new Error("later independent failure"));
+    await waitForStatus(pool, "ready");
+    expect(pool.getStatus()).toMatchObject({
+      restarts: 2,
+      consecutiveRestarts: 1,
+    });
+  });
+
+  test("explicit retry coalesces callers and can resume a paused pool", async () => {
+    const pool = await create({ maxRestarts: 0 });
+    instances[0]!.emit("error", new Error("paused failure"));
+    await waitForStatus(pool, "unavailable");
+    const loaded = Promise.withResolvers<unknown>();
+    initializeTask = () => loaded.promise;
+    const attempts = [pool.retry(), pool.retry()];
+    const end = performance.now() + 1000;
+    while (instances.length < 2 && performance.now() < end) await delay(1);
+    expect(instances).toHaveLength(2);
+    loaded.resolve(initialized);
+    await Promise.all(attempts);
+    expect(pool.getStatus().status).toBe("ready");
+    expect((await pool.detect(frame)).kind).toBe("detected");
+    await pool.close();
+    await expect(pool.retry()).rejects.toMatchObject({ code: "closed" });
+  });
+
+  test("explicit retry still waits for confirmation of the old process exit", async () => {
+    const exited = Promise.withResolvers<void>();
+    destroyPool = () => exited.promise;
+    const pool = await create({ closeTimeoutMs: 100 });
+    instances[0]!.emit("error", new Error("unconfirmed exit"));
+    await waitForStatus(pool, "unavailable");
+    const retried = pool.retry();
+    await delay(1);
+    expect(instances).toHaveLength(1);
+    exited.resolve();
+    await retried;
+    expect(instances).toHaveLength(2);
   });
 
   test("task errors are reported and failed replacement initialization consumes the budget", async () => {

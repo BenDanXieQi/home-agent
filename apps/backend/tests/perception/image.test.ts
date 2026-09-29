@@ -1,21 +1,11 @@
-import { afterEach, beforeEach, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, expect, mock, test } from "bun:test";
 import { createHash } from "node:crypto";
-import * as files from "node:fs/promises";
-import {
-  mkdtemp,
-  mkdir,
-  open,
-  readFile,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, mkdir, open, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import sharp from "sharp";
 import { detectImage } from "../../src/perception/detection/image";
 import {
-  ImageProcessingError,
   imageLimits,
   imageRequestSchema,
 } from "../../src/perception/detection/image-request";
@@ -57,23 +47,6 @@ async function imageFile() {
   return { path, bytes };
 }
 
-function rejectStagingClose(stagingPath: string) {
-  const nativeOpen = files.open;
-  return spyOn(files, "open").mockImplementation(
-    async (...args: Parameters<typeof open>) => {
-      const file = await nativeOpen(...args);
-      if (args[0] === stagingPath) {
-        const close = file.close.bind(file);
-        file.close = async () => {
-          await close();
-          throw new Error("Staged file close failed");
-        };
-      }
-      return file;
-    },
-  );
-}
-
 test("checks resize dimensions and pixel count at the lightweight request boundary", () => {
   expect(imageRequestSchema.parse({ path: "image.png" })).toEqual({
     path: resolve("image.png"),
@@ -102,12 +75,10 @@ test("hashes the exact encoded bytes and decodes packed RGB without alpha", asyn
     inputSha256: createHash("sha256").update(bytes).digest("hex"),
     width: 2,
     height: 1,
-    stagedImage: undefined,
     timing: {
       preprocessMs: 2,
       inferenceMs: 3,
       postprocessMs: 4,
-      annotationMs: 0,
     },
   });
   expect(detect.mock.calls[0]?.[0]).toEqual({
@@ -119,47 +90,24 @@ test("hashes the exact encoded bytes and decodes packed RGB without alpha", asyn
   expect(result.timing.decodeMs).toBeGreaterThanOrEqual(0);
 });
 
-test("resizes in the worker and prepares a PNG without replacing the destination", async () => {
+test("resizes the decoded snapshot and keeps its hash if the source later changes", async () => {
   const { path, bytes } = await imageFile();
-  const outputPath = join(directory, "output", "annotated.png");
-  const stagingPath = join(directory, "output", ".annotated.stage.png");
-  await mkdir(dirname(outputPath));
-  await writeFile(outputPath, "previous output");
   detect.mockImplementationOnce(async () => {
     await writeFile(path, "source changed after decoding");
     return {
       detections: [],
-      timing: {
-        preprocessMs: 2,
-        inferenceMs: 3,
-        postprocessMs: 4,
-      },
+      timing: { preprocessMs: 2, inferenceMs: 3, postprocessMs: 4 },
     };
   });
-  const result = await detectImage(
-    detector,
-    { path, resize: { width: 4, height: 3 }, outputPath },
-    stagingPath,
-  );
+  const result = await detectImage(detector, {
+    path,
+    resize: { width: 4, height: 3 },
+  });
   expect(result.inputSha256).toBe(
     createHash("sha256").update(bytes).digest("hex"),
   );
-  expect(result.stagedImage).toBe(stagingPath);
-  expect(await readFile(outputPath, "utf8")).toBe("previous output");
-  expect(result.width).toBe(4);
-  expect(result.height).toBe(3);
+  expect([result.width, result.height]).toEqual([4, 3]);
   expect(detect.mock.calls[0]?.[0].rgb.length).toBe(4 * 3 * 3);
-  expect(await sharp(stagingPath).metadata()).toMatchObject({
-    format: "png",
-    width: 4,
-    height: 3,
-  });
-  const output = await sharp(stagingPath).removeAlpha().raw().toBuffer();
-  expect(output).toEqual(Buffer.from(detect.mock.calls[0]![0].rgb));
-  expect((await readdir(join(directory, "output"))).toSorted()).toEqual([
-    ".annotated.stage.png",
-    "annotated.png",
-  ]);
 });
 
 test.each(["missing", "directory", "invalid"] as const)(
@@ -216,132 +164,4 @@ test("retains inference errors so the pool can recover the native runtime", asyn
   const failure = new Error("native inference failed");
   detect.mockRejectedValueOnce(failure);
   await expect(detectImage(detector, { path })).rejects.toBe(failure);
-});
-
-test("cleans staging after output failure without replacing the destination", async () => {
-  const { path } = await imageFile();
-  const outputPath = join(directory, "existing-directory");
-  const stagingPath = join(directory, ".output.stage.png");
-  await mkdir(outputPath);
-  await writeFile(join(outputPath, "preserved.txt"), "preserve me");
-  const opening = rejectStagingClose(stagingPath);
-  try {
-    await expect(
-      detectImage(detector, { path, outputPath }, stagingPath),
-    ).rejects.toMatchObject({ code: "output_failed" });
-  } finally {
-    opening.mockRestore();
-  }
-  expect(await readFile(join(outputPath, "preserved.txt"), "utf8")).toBe(
-    "preserve me",
-  );
-  expect(await readdir(directory)).not.toContain(".output.stage.png");
-});
-
-test("requires a separate tracked staging path before writing output", async () => {
-  const { path } = await imageFile();
-  const outputPath = join(directory, "previous.png");
-  await writeFile(outputPath, "preserve previous output");
-  await expect(
-    detectImage(detector, { path, outputPath }),
-  ).rejects.toBeInstanceOf(ImageProcessingError);
-  await expect(
-    detectImage(detector, { path, outputPath }, outputPath),
-  ).rejects.toMatchObject({ code: "output_failed" });
-  expect(await readFile(outputPath, "utf8")).toBe("preserve previous output");
-});
-
-test("retains the output directory failure when its parent is a regular file", async () => {
-  const { path } = await imageFile();
-  const parent = join(directory, "regular-file");
-  await writeFile(parent, "preserve me");
-  const unlink = spyOn(files, "unlink").mockRejectedValue(
-    new Error("unlink must not run"),
-  );
-  try {
-    await expect(
-      detectImage(
-        detector,
-        { path, outputPath: join(parent, "output.png") },
-        join(parent, ".output.stage.png"),
-      ),
-    ).rejects.toMatchObject({
-      code: "output_failed",
-      cause: expect.objectContaining({ syscall: "mkdir" }),
-    });
-    expect(unlink).not.toHaveBeenCalled();
-  } finally {
-    unlink.mockRestore();
-  }
-  expect(await readFile(parent, "utf8")).toBe("preserve me");
-});
-
-test("does not overwrite or unlink an existing staging file when exclusive creation fails", async () => {
-  const { path } = await imageFile();
-  const outputPath = join(directory, "output.png");
-  const stagingPath = join(directory, ".output.stage.png");
-  await writeFile(stagingPath, "not owned by this request");
-  const unlink = spyOn(files, "unlink").mockRejectedValue(
-    new Error("unlink must not run"),
-  );
-  try {
-    await expect(
-      detectImage(detector, { path, outputPath }, stagingPath),
-    ).rejects.toMatchObject({
-      code: "output_failed",
-      cause: expect.objectContaining({ code: "EEXIST" }),
-    });
-    expect(unlink).not.toHaveBeenCalled();
-  } finally {
-    unlink.mockRestore();
-  }
-  expect(await readFile(stagingPath, "utf8")).toBe("not owned by this request");
-});
-
-test("hands completed staging to the parent without unlinking it", async () => {
-  const { path } = await imageFile();
-  const outputPath = join(directory, "output.png");
-  const stagingPath = join(directory, ".output.stage.png");
-  const unlink = spyOn(files, "unlink").mockRejectedValue(
-    new Error("unlink must not run"),
-  );
-  try {
-    const result = await detectImage(
-      detector,
-      { path, outputPath },
-      stagingPath,
-    );
-    expect(result.stagedImage).toBe(stagingPath);
-    expect(unlink).not.toHaveBeenCalled();
-  } finally {
-    unlink.mockRestore();
-  }
-  expect(await readdir(directory)).toContain(".output.stage.png");
-  await expect(readFile(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
-});
-
-test("reports failed staging cleanup as a resource failure instead of an image error", async () => {
-  const { path } = await imageFile();
-  const outputPath = join(directory, "existing-directory");
-  const stagingPath = join(directory, ".output.stage.png");
-  await mkdir(outputPath);
-  const failure = Object.assign(new Error("staging cleanup denied"), {
-    code: "EACCES",
-  });
-  const unlink = spyOn(files, "unlink").mockRejectedValue(failure);
-  const opening = rejectStagingClose(stagingPath);
-  try {
-    const result = detectImage(detector, { path, outputPath }, stagingPath);
-    await expect(result).rejects.toMatchObject({
-      name: "Error",
-      message: `Cannot remove image staging file: ${stagingPath}`,
-      cause: failure,
-    });
-    await expect(result).rejects.not.toBeInstanceOf(ImageProcessingError);
-    expect(unlink).toHaveBeenCalledWith(stagingPath);
-  } finally {
-    unlink.mockRestore();
-    opening.mockRestore();
-  }
-  expect(await readdir(directory)).toContain(".output.stage.png");
 });

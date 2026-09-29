@@ -127,7 +127,9 @@ export class PlaybackSession {
       startedAt: performance.now(),
       historyContext: beginPlaybackHistory(this.target),
     });
-    void this.connect();
+    this.connect().catch((backgroundError: unknown) => {
+      console.error("session: connect failed", backgroundError);
+    });
   }
 
   stop = () => {
@@ -292,7 +294,7 @@ export class PlaybackSession {
             },
           );
           this.video.srcObject = stream;
-          void this.video.play().catch(() => this.fail("autoplay_failed"));
+          this.video.play().catch(() => this.fail("autoplay_failed"));
         },
         { signal },
       );

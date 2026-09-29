@@ -191,7 +191,14 @@ export function ServiceConnections() {
             variant="secondary"
             disabled={refreshing || saving}
             status={checkStatus}
-            onClick={() => void refresh()}
+            onClick={() => {
+              refresh().catch((backgroundError: unknown) => {
+                console.error(
+                  "ServiceConnections: refresh failed",
+                  backgroundError,
+                );
+              });
+            }}
           >
             {checkStatus === "pending" ? "检查中…" : "重新检查"}
           </Button>

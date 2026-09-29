@@ -1,6 +1,6 @@
-import { resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
+import pTimeout from "p-timeout";
 import { frameSchema } from "../detection/frame";
 import { createDetectionProcess } from "./process";
 import { detectionComputeBudget } from "./budget";
@@ -9,18 +9,17 @@ import {
   ImageProcessingError,
   imageRequestSchema,
 } from "../detection/image-request";
-import { createAnnotationOutputs } from "../detection/annotation-output";
 
 const optionsSchema = z.object({
   initializeTimeoutMs: z.int().positive().max(300_000).default(30_000),
   taskTimeoutMs: z.int().positive().max(300_000).default(10_000),
   closeTimeoutMs: z.int().min(100).max(300_000).default(10_000),
   recoveryDelayMs: z.int().nonnegative().max(30_000).default(250),
+  recoveryResetMs: z.int().positive().max(3_600_000).default(60_000),
   maxRestarts: z.int().nonnegative().max(3).default(2),
 });
 
 export class DetectionPoolError extends Error {
-  readonly outputPath: string | undefined;
   constructor(
     readonly code:
       | "timeout"
@@ -28,48 +27,38 @@ export class DetectionPoolError extends Error {
       | "busy"
       | "unavailable"
       | "worker_failed"
-      | "output_commit_unknown"
       | ImageProcessingError["code"],
     message: string,
-    options?: ErrorOptions & { outputPath?: string | undefined },
+    options?: ErrorOptions,
   ) {
     super(message, options);
     this.name = "DetectionPoolError";
-    this.outputPath = options?.outputPath;
   }
 }
 
 // A deadline bounds the caller's wait. Native termination is confirmed separately.
-async function within<T>(
+function within<T>(
   operation: Promise<T>,
   milliseconds: number,
   label: string,
   signal?: AbortSignal,
 ) {
-  const interrupted = Promise.withResolvers<never>();
-  const onAbort = () => interrupted.reject(signal?.reason);
-  if (signal?.aborted) onAbort();
-  else signal?.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(
-    () =>
-      interrupted.reject(
-        new DetectionPoolError(
-          "timeout",
-          `${label} exceeded ${milliseconds}ms`,
-        ),
-      ),
-    milliseconds,
-  );
-  try {
-    return await Promise.race([operation, interrupted.promise]);
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", onAbort);
+  if (signal?.aborted) {
+    // The operation has already started, so its later rejection still needs an observer.
+    return Promise.race([Promise.reject<T>(signal.reason), operation]);
   }
+  return pTimeout(operation, {
+    // Like setTimeout(0), an exhausted budget expires on the next timer turn.
+    milliseconds: Math.max(1, milliseconds),
+    message: new DetectionPoolError(
+      "timeout",
+      `${label} exceeded ${milliseconds}ms`,
+    ),
+    ...(signal ? { signal } : {}),
+  });
 }
 
 export async function createDetectionPool(
-  modelPath: string,
   input: z.input<typeof optionsSchema> = {},
 ) {
   const options = optionsSchema.parse(input);
@@ -78,7 +67,6 @@ export async function createDetectionPool(
       detectionComputeBudget.workersPerProcess *
       detectionComputeBudget.tasksPerWorker +
     detectionComputeBudget.pendingTasks;
-  const absoluteModelPath = resolve(modelPath);
   let current: ReturnType<typeof createDetectionProcess> | undefined;
   let status:
     | "starting"
@@ -89,13 +77,12 @@ export async function createDetectionPool(
     | "closed" = "starting";
   let lastError: Error | undefined;
   let restarts = 0;
+  let consecutiveRestarts = 0;
+  let healthySince: number | undefined;
   let recovery: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
   const stopping = new AbortController();
-  const endingWaits = new AbortController();
   const active = new Set<Promise<unknown>>();
-  const outputs = createAnnotationOutputs();
-  let outputFailure: Error | undefined;
   let activeRgbBytes = 0;
   let activeImageRequests = 0;
 
@@ -103,16 +90,7 @@ export async function createDetectionPool(
     generation: ReturnType<typeof createDetectionProcess>,
     milliseconds = options.closeTimeoutMs,
   ) {
-    await within(
-      (async () => {
-        await generation.destroy();
-        // A native image writer may outlive its task deadline. Remove its files
-        // only after the OS confirms that this generation can no longer write.
-        await outputs.retire(generation);
-      })(),
-      milliseconds,
-      "Process termination and staged image cleanup",
-    );
+    await within(generation.destroy(), milliseconds, "Process termination");
   }
 
   async function initialize() {
@@ -128,18 +106,17 @@ export async function createDetectionPool(
     });
     try {
       const result = await within(
-        generation.submit({ kind: "initialize", modelPath: absoluteModelPath }),
+        generation.submit({ kind: "initialize" }),
         options.initializeTimeoutMs,
         "Model initialization",
-        AbortSignal.any([generation.failure.signal, stopping.signal]),
+        stopping.signal,
       );
       if (result.kind !== "initialized")
         throw new Error("Unexpected initialization response");
-      if (generation.failure.signal.aborted)
-        throw generation.failure.signal.reason;
+      if (generation.signal.aborted) throw generation.signal.reason;
       return result.metadata;
     } catch (error) {
-      generation.failure.abort(error);
+      generation.abort(error);
       // Never overlap a replacement with a process whose termination is unconfirmed.
       await retire(generation);
       throw error;
@@ -150,30 +127,33 @@ export async function createDetectionPool(
     generation: ReturnType<typeof createDetectionProcess>,
     cause: Error,
   ) {
-    if (generation.failure.signal.aborted) return;
-    generation.failure.abort(cause);
-    if (current !== generation) return;
+    generation.abort(cause);
+    if (current !== generation || status !== "ready") return;
     lastError = cause;
-    if (status === "ready") {
-      status = "recovering";
-      recovery = recover(generation);
-    }
+    healthySince = undefined;
+    status = "recovering";
+    recovery = recover(generation);
   }
 
   async function recover(
     generation: ReturnType<typeof createDetectionProcess>,
+    limit = options.maxRestarts,
   ) {
     try {
       await retire(generation);
-      while (!stopping.signal.aborted && restarts < options.maxRestarts) {
+      while (!stopping.signal.aborted && consecutiveRestarts < limit) {
         restarts++;
-        await delay(options.recoveryDelayMs * 2 ** (restarts - 1), undefined, {
-          signal: stopping.signal,
-        });
+        consecutiveRestarts++;
+        await delay(
+          options.recoveryDelayMs * 2 ** (consecutiveRestarts - 1),
+          undefined,
+          {
+            signal: stopping.signal,
+          },
+        );
         try {
           metadata = await initialize();
-          if (!stopping.signal.aborted)
-            status = outputFailure ? "unavailable" : "ready";
+          if (!stopping.signal.aborted) status = "ready";
           return;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
@@ -189,6 +169,25 @@ export async function createDetectionPool(
         status = "unavailable";
       }
     }
+  }
+
+  async function retry() {
+    if (stopping.signal.aborted)
+      throw new DetectionPoolError("closed", "Detection pool is closed");
+    if (status === "ready") return;
+    if (status === "unavailable" && current) {
+      consecutiveRestarts = 0;
+      healthySince = undefined;
+      status = "recovering";
+      recovery = recover(current, Math.max(1, options.maxRestarts));
+    }
+    await recovery;
+    if (stopping.signal.aborted)
+      throw new DetectionPoolError("closed", "Detection pool is closed");
+    if (getStatus().status !== "ready")
+      throw new DetectionPoolError("unavailable", "Detection recovery failed", {
+        cause: lastError,
+      });
   }
 
   let metadata = await initialize();
@@ -222,34 +221,13 @@ export async function createDetectionPool(
     const rgbBytes =
       request.kind === "detect" ? request.frame.rgb.byteLength : 0;
     const imageRequest = request.kind === "detect_image";
-    const outputPath = imageRequest ? request.image.outputPath : undefined;
-    const output = outputPath
-      ? outputs.reserve(generation, outputPath)
-      : undefined;
-    if (outputPath && !output)
-      return Promise.reject(
-        new DetectionPoolError(
-          "busy",
-          `Annotated image output is already reserved: ${outputPath}`,
-          { outputPath },
-        ),
-      );
-    const computation = imageRequest
-      ? { ...request, stagingPath: output?.stagingPath }
-      : request;
     const deadline = submitted + options.taskTimeoutMs;
     const task = (async () => {
       try {
         const result = await within(
-          generation.submit(computation).then(undefined, (error: unknown) => {
-            // The worker reports a known image failure only after cleanup, or
-            // before creating output. Unknown failures keep the exit cleanup.
-            if (error instanceof ImageProcessingError) output?.writerFailed();
-            throw error;
-          }),
+          generation.submit(request),
           Math.max(0, deadline - performance.now()),
           "Detection including queue wait",
-          generation.failure.signal,
         );
         if (
           !("timing" in result) ||
@@ -258,72 +236,40 @@ export async function createDetectionPool(
             : result.kind !== "detected")
         )
           throw new Error("Unexpected detection response");
-        if (
-          result.kind === "image_detected" &&
-          result.stagedImage !== output?.stagingPath
-        )
-          throw new Error("Unexpected annotated image staging path");
         const acceptedAt = performance.now();
         if (acceptedAt >= deadline)
           throw new DetectionPoolError(
             "timeout",
             "Detection deadline elapsed before result acceptance",
           );
-        if (current !== generation || generation.failure.signal.aborted)
+        if (current !== generation || generation.signal.aborted)
           throw new DetectionPoolError(
             "unavailable",
             "Result belongs to a retired process",
           );
-        // There is no await between the acceptance checks and commit(). From
-        // this point a generation failure cannot revoke publication or its slot.
-        const commitMs = output ? await output.commit() : 0;
-        const completedAt = output ? performance.now() : acceptedAt;
-        if (output && completedAt >= deadline)
-          throw new DetectionPoolError(
-            "output_commit_unknown",
-            `Annotated image publication was not confirmed within the task deadline: ${outputPath}`,
-            { outputPath },
-          );
-        const totalMs = completedAt - submitted;
-        const annotationMs = result.timing.annotationMs + commitMs;
+        healthySince ??= acceptedAt;
+        if (acceptedAt - healthySince >= options.recoveryResetMs)
+          consecutiveRestarts = 0;
+        const totalMs = acceptedAt - submitted;
         const processingMs =
           result.timing.readMs +
           result.timing.decodeMs +
-          annotationMs +
           result.timing.preprocessMs +
           result.timing.inferenceMs +
           result.timing.postprocessMs;
         return {
           ...result,
-          annotatedImage: output?.outputPath,
           timing: {
             ...result.timing,
-            annotationMs,
             totalMs,
             dispatchMs: Math.max(0, totalMs - processingMs),
           },
         };
       } catch (error) {
-        if (
-          error instanceof DetectionPoolError &&
-          error.code === "output_commit_unknown"
-        )
-          throw error;
         if (error instanceof ImageProcessingError)
           throw new DetectionPoolError(error.code, error.message, {
             cause: error,
-            outputPath,
           });
-        if (output?.accepted) {
-          outputFailure = new DetectionPoolError(
-            "unavailable",
-            "Annotation output cleanup failed",
-            { cause: error, outputPath },
-          );
-          lastError = outputFailure;
-          if (!stopping.signal.aborted) status = "unavailable";
-          throw outputFailure;
-        }
         const failure =
           error instanceof DetectionPoolError
             ? error
@@ -337,44 +283,13 @@ export async function createDetectionPool(
     active.add(task);
     activeRgbBytes += rgbBytes;
     if (imageRequest) activeImageRequests++;
-    void task
-      .finally(() => {
-        active.delete(task);
-        activeRgbBytes -= rgbBytes;
-        if (imageRequest) activeImageRequests--;
-      })
-      .catch(() => {});
-    // The actual task keeps its admission slot and output reservation until an
-    // accepted rename settles, even after its caller's deadline has expired.
-    return within(
-      task,
-      Math.max(0, deadline - performance.now()),
-      "Complete detection task",
-      endingWaits.signal,
-    ).catch((error: unknown) => {
-      if (
-        output?.accepted &&
-        error instanceof DetectionPoolError &&
-        (error.code === "timeout" ||
-          error.code === "closed" ||
-          error.code === "output_commit_unknown")
-      ) {
-        if (output.publicationError)
-          throw new DetectionPoolError(
-            "output_failed",
-            output.publicationError.message,
-            { cause: output.publicationError, outputPath },
-          );
-        throw new DetectionPoolError(
-          "output_commit_unknown",
-          `Annotated image publication was not confirmed within the task deadline: ${outputPath}`,
-          { cause: error, outputPath },
-        );
-      }
-      if (error instanceof DetectionPoolError && error.code === "timeout")
-        fail(generation, error);
-      throw error;
-    });
+    function releaseRequest() {
+      active.delete(task);
+      activeRgbBytes -= rgbBytes;
+      if (imageRequest) activeImageRequests--;
+    }
+    task.then(releaseRequest, releaseRequest);
+    return task;
   }
 
   async function detect(inputFrame: z.infer<typeof frameSchema>) {
@@ -384,8 +299,7 @@ export async function createDetectionPool(
     const result = await submitDetection({ kind: "detect", frame }, submitted);
     if (result.kind !== "detected")
       throw new Error("Unexpected detection response");
-    const { annotatedImage: _annotatedImage, ...detected } = result;
-    return detected;
+    return result;
   }
 
   async function detectImage(imageInput: z.input<typeof imageRequestSchema>) {
@@ -400,8 +314,7 @@ export async function createDetectionPool(
     );
     if (result.kind !== "image_detected")
       throw new Error("Unexpected image detection response");
-    const { stagedImage: _stagedImage, ...detectedImage } = result;
-    return detectedImage;
+    return result;
   }
 
   function close() {
@@ -420,7 +333,7 @@ export async function createDetectionPool(
           (async () => {
             await Promise.allSettled(active);
             await recovery;
-            if (current && !current.failure.signal.aborted) {
+            if (current && !current.signal.aborted) {
               await current.submit({ kind: "close" });
             }
           })(),
@@ -431,7 +344,7 @@ export async function createDetectionPool(
         shutdownError = error;
       } finally {
         if (current) {
-          current.failure.abort(
+          current.abort(
             new DetectionPoolError("closed", "Detection pool is closed"),
           );
           try {
@@ -445,25 +358,11 @@ export async function createDetectionPool(
           await within(
             Promise.allSettled(active),
             Math.max(0, deadline - performance.now()),
-            "Accepted annotation commits",
+            "Detection request cleanup",
           );
-          if (terminated)
-            await within(
-              outputs.discardStoppedOutputs(),
-              Math.max(0, deadline - performance.now()),
-              "Annotation output cleanup",
-            );
         } catch (error) {
+          shutdownError = error;
           terminated = false;
-          const committing = outputs.committingPaths();
-          shutdownError = committing.length
-            ? new DetectionPoolError(
-                "output_commit_unknown",
-                `Shutdown could not confirm annotated image publication: ${committing.join(", ")}`,
-                { cause: error, outputPath: committing[0] },
-              )
-            : error;
-          endingWaits.abort(shutdownError);
         }
         status = terminated ? "closed" : "unavailable";
       }
@@ -482,12 +381,12 @@ export async function createDetectionPool(
     return {
       status,
       restarts,
+      consecutiveRestarts,
       lastError: lastError ? errorDetails(lastError).message : undefined,
       processId: current?.pid,
       activeRequests: active.size,
       activeRgbBytes,
       activeImageRequests,
-      committingOutputs: outputs.committingPaths(),
     };
   }
   return {
@@ -497,6 +396,7 @@ export async function createDetectionPool(
     detect,
     detectImage,
     close,
+    retry,
     getStatus,
   };
 }

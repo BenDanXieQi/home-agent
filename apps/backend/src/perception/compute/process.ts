@@ -50,24 +50,34 @@ export function createDetectionProcess() {
     ReturnType<typeof Promise.withResolvers<ReceivedResult>>
   >();
   let nextId = 0;
-  let destroying = false;
   let stopped = false;
   let stderr = "";
   // Startup can fail before initialize() submits its first request.
-  void ready.promise.catch(() => {});
+  ready.promise.catch(() => {});
   child.stderr?.on("data", (data: Buffer) => {
     stderr = (stderr + data.toString()).slice(-4096);
   });
 
-  function report(error: Error) {
-    ready.reject(error);
-    for (const request of pending.values()) request.reject(error);
+  // Failure owns both request rejection and termination. Exit confirmation
+  // remains separate so callers cannot reuse the process budget too early.
+  function abort(reason: unknown) {
+    if (failure.signal.aborted) return;
+    failure.abort(reason);
+    ready.reject(reason);
+    for (const request of pending.values()) request.reject(reason);
     pending.clear();
-    if (!destroying) events.emit("error", error);
+    // Kill the isolated OS process, never a thread hosting an active N-API call.
+    if (!stopped && child.pid !== undefined) child.kill("SIGKILL");
+  }
+
+  function report(error: Error) {
+    if (failure.signal.aborted) return;
+    abort(error);
+    events.emit("error", error);
   }
   child.on("message", (message: unknown) => {
     const receivedAt = performance.now();
-    if (destroying || stopped) return;
+    if (failure.signal.aborted || stopped) return;
     const parsed = responseSchema.safeParse(message);
     if (!parsed.success) {
       report(
@@ -113,13 +123,14 @@ export function createDetectionProcess() {
     );
   });
   child.on("disconnect", () => {
-    if (!stopped && !destroying)
+    if (!stopped && !failure.signal.aborted)
       report(new Error("Detection process IPC disconnected"));
   });
 
   async function submit(task: z.infer<typeof taskSchema>) {
+    failure.signal.throwIfAborted();
     await ready.promise;
-    if (destroying || stopped) throw new Error("Detection process has stopped");
+    failure.signal.throwIfAborted();
     // IPC may serialize the whole backing buffer. Copy oversized views explicitly;
     // Buffer.slice() would preserve the oversized backing allocation.
     if (
@@ -162,13 +173,15 @@ export function createDetectionProcess() {
     };
   }
   function destroy() {
-    if (!destroying) {
-      destroying = true;
-      report(new Error("Detection process terminated"));
-      // Kill the isolated OS process, never a thread hosting an active N-API call.
-      if (!stopped && child.pid !== undefined) child.kill("SIGKILL");
-    }
+    abort(new Error("Detection process terminated"));
     return exited.promise;
   }
-  return { events, failure, submit, destroy, pid: child.pid };
+  return {
+    events,
+    signal: failure.signal,
+    abort,
+    submit,
+    destroy,
+    pid: child.pid,
+  };
 }

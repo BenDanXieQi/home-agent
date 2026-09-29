@@ -130,7 +130,11 @@ export function HomeSelection() {
               status={action === "selectHome" ? "pending" : "idle"}
               onClick={() => {
                 if (canAct && target)
-                  void perform({ type: "selectHome", homeId: target.id });
+                  perform({ type: "selectHome", homeId: target.id }).catch(
+                    (error: unknown) => {
+                      console.error("HomeSelection: perform failed", error);
+                    },
+                  );
               }}
             >
               {action === "selectHome"
@@ -166,7 +170,14 @@ export function HomeSelection() {
                 ? "error"
                 : "success"
           }
-          onClick={() => void choices.refetch()}
+          onClick={() => {
+            choices.refetch().catch((backgroundError: unknown) => {
+              console.error(
+                "HomeSelection: choices.refetch failed",
+                backgroundError,
+              );
+            });
+          }}
         >
           重试读取家庭列表
         </Button>
@@ -179,7 +190,14 @@ export function HomeSelection() {
           <Button
             disabled={!canAct || choices.isFetching}
             status={choices.isFetching ? "pending" : "idle"}
-            onClick={() => void choices.refetch()}
+            onClick={() => {
+              choices.refetch().catch((backgroundError: unknown) => {
+                console.error(
+                  "HomeSelection: choices.refetch failed",
+                  backgroundError,
+                );
+              });
+            }}
           >
             重新读取家庭列表
           </Button>
@@ -207,7 +225,13 @@ export function HomeSelection() {
         <Button
           disabled={!canAct}
           status={refreshStatus}
-          onClick={() => void perform({ type: "refreshDevices" })}
+          onClick={() => {
+            perform({ type: "refreshDevices" }).catch(
+              (backgroundError: unknown) => {
+                console.error("HomeSelection: perform failed", backgroundError);
+              },
+            );
+          }}
         >
           {action === "refreshDevices" ? "正在获取…" : "刷新设备清单"}
         </Button>

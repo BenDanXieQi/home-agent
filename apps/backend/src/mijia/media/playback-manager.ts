@@ -65,7 +65,9 @@ export class PlaybackManager {
       throw new MijiaError("playback_failed");
     const id = crypto.randomUUID();
     const timer = context.with(ROOT_CONTEXT, () =>
-      setTimeout(() => void this.release(id).catch(() => {}), 30_000),
+      setTimeout(() => {
+        this.release(id).catch(() => {});
+      }, 30_000),
     );
     timer.unref();
     this.entries.set(id, {
@@ -110,22 +112,20 @@ export class PlaybackManager {
   /** A successful heartbeat supplies the next opportunity to retry revoked viewers. */
   retryReleases(adapter: Go2RtcAdapter) {
     for (const [id, release] of this.releases) {
-      if (release.target.adapter === adapter)
-        void this.release(id).catch(() => {});
+      if (release.target.adapter === adapter) this.release(id).catch(() => {});
     }
   }
 
   invalidate() {
     for (const id of this.entries.keys()) {
-      void this.release(id).catch(() => {});
+      this.release(id).catch(() => {});
     }
   }
 
   releaseForDevices(ids: readonly string[]) {
     const revoked = new Set(ids);
     for (const entry of this.entries.values())
-      if (revoked.has(entry.deviceId))
-        void this.release(entry.id).catch(() => {});
+      if (revoked.has(entry.deviceId)) this.release(entry.id).catch(() => {});
   }
 
   releaseForSource(adapter: Go2RtcAdapter, sourceId: string) {
@@ -135,7 +135,7 @@ export class PlaybackManager {
         entry.target?.adapter === adapter &&
         entry.target.sourceId === sourceId
       )
-        void this.release(entry.id).catch(() => {});
+        this.release(entry.id).catch(() => {});
     }
   }
 
@@ -162,10 +162,9 @@ export class PlaybackManager {
     // DELETE and this deadline own cancellation. A transport disconnect permits
     // another request to recover the accepted offer with the same SDP.
     const timer = context.with(ROOT_CONTEXT, () =>
-      setTimeout(
-        () => void this.release(id).catch(() => {}),
-        mijiaTimeouts.playback,
-      ),
+      setTimeout(() => {
+        this.release(id).catch(() => {});
+      }, mijiaTimeouts.playback),
     );
     timer.unref();
     const playback: Negotiating = {
@@ -234,8 +233,7 @@ export class PlaybackManager {
         },
       );
     } catch (error) {
-      if (this.entries.get(id) === playback)
-        void this.release(id).catch(() => {});
+      if (this.entries.get(id) === playback) this.release(id).catch(() => {});
       throw error;
     } finally {
       clearTimeout(playback.timer);

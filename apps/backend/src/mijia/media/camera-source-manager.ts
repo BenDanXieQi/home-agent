@@ -49,7 +49,9 @@ export class CameraSourceManager {
       if (stream.error && isRecoverableMijiaError(stream.error))
         stream.retry.schedule(() => this.retry(key, stream));
     }
-    void this.reconcile();
+    this.reconcile().catch((backgroundError: unknown) => {
+      console.error("camera-source-manager: reconcile failed", backgroundError);
+    });
   }
 
   /** Fence local work; the session owner closes the adapter and its remote streams. */

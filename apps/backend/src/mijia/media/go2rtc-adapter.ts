@@ -151,12 +151,12 @@ export class Go2RtcAdapter {
     if (!this.ready) throw new Go2RtcError("request_timeout");
     this.heartbeatTimer = context.with(ROOT_CONTEXT, () =>
       setInterval(() => {
-        void this.renewSessionLease().catch(() => {});
+        this.renewSessionLease().catch(() => {});
       }, HEARTBEAT_INTERVAL_MS),
     );
     this.heartbeatTimer.unref();
     // Token installation can consume most of the conservative initial lease.
-    void this.renewSessionLease().catch(() => {});
+    this.renewSessionLease().catch(() => {});
   }
 
   async prepareCamera(
@@ -240,7 +240,7 @@ export class Go2RtcAdapter {
       };
       this.heartbeatPending = pending;
       const current = pending;
-      void pending.promise
+      pending.promise
         .finally(() => {
           if (this.heartbeatPending === current)
             this.heartbeatPending = undefined;
@@ -254,7 +254,7 @@ export class Go2RtcAdapter {
       const onAbort = () => reject(new Go2RtcError("request_cancelled"));
       signal.addEventListener("abort", onAbort, { once: true });
       if (signal.aborted) onAbort();
-      void promise
+      promise
         .then(resolve, reject)
         .finally(() => signal.removeEventListener("abort", onAbort));
     });

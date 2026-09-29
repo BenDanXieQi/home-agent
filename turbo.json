@@ -87,11 +87,7 @@
     },
     "@home-agent/backend#test": {
       "cache": false,
-      "passThroughEnv": [
-        "PERCEPTION_MODEL_PATH",
-        "PERCEPTION_BUS_IMAGE_PATH",
-        "ORT_DISABLE_TELEMETRY"
-      ]
+      "passThroughEnv": ["PERCEPTION_BUS_IMAGE_PATH", "ORT_DISABLE_TELEMETRY"]
     }
   },
   "globalPassThroughEnv": [

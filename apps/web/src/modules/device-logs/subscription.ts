@@ -82,7 +82,9 @@ export function subscribeDeviceLogs(
     if (!stopped) {
       if (restartRequested) {
         restartRequested = false;
-        void connect();
+        connect().catch((backgroundError: unknown) => {
+          console.error("subscription: connect failed", backgroundError);
+        });
         return;
       }
       store.set(deviceLogStateAtom, (previous) => ({
@@ -90,7 +92,9 @@ export function subscribeDeviceLogs(
         connected: false,
       }));
       retryTimer = setTimeout(() => {
-        void connect();
+        connect().catch((backgroundError: unknown) => {
+          console.error("subscription: connect failed", backgroundError);
+        });
       }, delay);
       delay = Math.min(delay * 2, 30_000);
     }
@@ -101,10 +105,15 @@ export function subscribeDeviceLogs(
     if (controller) {
       restartRequested = true;
       controller.abort();
-    } else void connect();
+    } else
+      connect().catch((backgroundError: unknown) => {
+        console.error("subscription: connect failed", backgroundError);
+      });
   };
   store.set(deviceLogReconnectAtom, () => reconnect);
-  void connect();
+  connect().catch((backgroundError: unknown) => {
+    console.error("subscription: connect failed", backgroundError);
+  });
   return () => {
     stopped = true;
     store.set(deviceLogReconnectAtom, null);

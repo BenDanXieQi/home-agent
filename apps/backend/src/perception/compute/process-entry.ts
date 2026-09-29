@@ -18,14 +18,14 @@ function fail(error: unknown) {
   const details = errorDetails(error);
   console.error(details.stack ?? details.message);
   // Flush the fatal IPC message before leaving this isolated process.
-  void send({ kind: "fatal", ...details })
+  send({ kind: "fatal", ...details })
     .finally(() => process.exit(1))
     .catch(() => {});
 }
 async function run(task: z.infer<typeof taskSchema>) {
   if (task.kind === "initialize") {
     if (pool) throw new Error("Inference pool is already created");
-    pool = createInferencePool(task.modelPath, fail);
+    pool = createInferencePool(fail);
     const result = await pool.submit(task);
     initialized = true;
     return result;
@@ -58,7 +58,7 @@ process.on("message", (message: unknown) => {
     fail(request.error);
     return;
   }
-  void run(request.data.task)
+  run(request.data.task)
     .then(
       (result) =>
         send({
@@ -78,4 +78,4 @@ process.on("message", (message: unknown) => {
 });
 // No thread termination here; losing the parent ends this isolated process.
 process.on("disconnect", () => process.exit(failed ? 1 : 0));
-void send({ kind: "ready" }).catch(fail);
+send({ kind: "ready" }).catch(fail);

@@ -1,16 +1,13 @@
-import { threadId, workerData } from "node:worker_threads";
-import { z } from "zod";
+import { threadId } from "node:worker_threads";
+import type { z } from "zod";
 import { createDetector } from "../detection/detector";
 import { errorDetails, taskSchema } from "./protocol";
 import { detectImage } from "../detection/image";
 import { ImageProcessingError } from "../detection/image-request";
 import { fingerprintModel } from "../detection/model";
 
-const { modelPath } = z
-  .object({ modelPath: z.string().min(1) })
-  .parse(workerData);
-const asset = await fingerprintModel(modelPath);
-const detector = await createDetector(asset.modelPath);
+const asset = await fingerprintModel();
+const detector = await createDetector();
 // Requests are validated by the IPC receiver before thread dispatch.
 export default async function run(task: z.infer<typeof taskSchema>) {
   const started = performance.now();
@@ -29,18 +26,13 @@ export default async function run(task: z.infer<typeof taskSchema>) {
           ...result.timing,
           readMs: 0,
           decodeMs: 0,
-          annotationMs: 0,
           workerMs: performance.now() - started,
         },
       };
     }
     case "detect_image": {
       try {
-        const result = await detectImage(
-          detector,
-          task.image,
-          task.stagingPath,
-        );
+        const result = await detectImage(detector, task.image);
         return {
           kind: "image_detected" as const,
           ...result,

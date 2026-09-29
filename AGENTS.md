@@ -8,6 +8,7 @@
 5. Do not hand-write function or method return types; let TypeScript infer them from the implementation. Preserve discriminated unions through actual values and narrow literals. Do not replace inference with `any`, double assertions, or casts that conceal a type mismatch.
 6. Follow domain-driven design (DDD): organize modules around domain concepts, responsibilities, and ownership. Keep domain rules and invariants independent of HTTP, persistence, and vendor protocols; application orchestration coordinates domain work, while adapters handle external systems and boundary conversion. Give each domain state a single owner, and name modules in domain terms. Introduce abstractions and layers only when actual domain responsibilities require them.
 7. Place code shared across projects in the repository-root `packages/` directory, and reuse it from there instead of duplicating it in individual projects.
+8. Do not prefix function calls or Promise expressions with the `void` operator to discard their results or silence lint warnings. Await or return a Promise when the caller owns its completion; for intentionally unawaited work, call it directly and ensure its failure is handled by the owning operation or an explicit rejection handler. Use block-bodied callbacks when they must return no value. Do not add empty `catch` handlers merely to suppress errors. This rule does not prohibit the TypeScript `void` type.
 
 ## Local environment
 
