@@ -274,3 +274,78 @@ test("the shared pending task goes to the next idle worker instead of waiting be
   await a;
   await pool.close();
 });
+
+test("appearance reserves one CPU only when video admission still has capacity", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  const inFlight = pool.submit({ kind: "detect", frame });
+  first.resolve(detected);
+  await inFlight;
+  expect(pool.reserveTracking()).toBe(true);
+  const next = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => next.promise);
+  const video = pool.submit({ kind: "detect", frame }, async () => {});
+  expect(pool.available).toBe(false);
+  await expect(
+    pool.submit({ kind: "detect", frame }, async () => {}),
+  ).rejects.toMatchObject({ code: "busy" });
+  next.resolve(detected);
+  await video;
+  expect(pool.available).toBe(true);
+  await pool.close();
+  const small = make(1);
+  await small.submit({ kind: "initialize" });
+  expect(small.reserveTracking()).toBe(false);
+  expect(small.available).toBe(true);
+  await small.close();
+});
+
+test("appearance can start with one idle slot while a detector remains active", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const detection = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => detection.promise);
+  const pending = pool.submit({ kind: "detect", frame });
+  try {
+    // A continuously occupied detector must not prevent the other CPU slot
+    // from being assigned to appearance. No admitted detection is displaced.
+    expect(pool.reserveTracking()).toBe(true);
+    expect(pool.available).toBe(false);
+  } finally {
+    detection.resolve(detected);
+    await pending;
+    await pool.close();
+  }
+});
+
+test("pending appearance reservation drains saturated detectors before admitting queued work", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>();
+  const second = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  workers[1]!.run.mockImplementationOnce(() => second.promise);
+  const a = pool.submit({ kind: "detect", frame });
+  const b = pool.submit({ kind: "detect", frame });
+  const queued = pool.submit({ kind: "detect", frame });
+  try {
+    expect(pool.reserveTracking()).toBe(false);
+    expect(pool.reserveTracking()).toBe(false);
+    first.resolve(detected);
+    await a;
+    expect(pool.reserveTracking()).toBe(true);
+    expect(pool.available).toBe(false);
+    expect(workers[0]!.run).toHaveBeenCalledTimes(2);
+    second.resolve(detected);
+    await b;
+    await queued;
+    expect(pool.available).toBe(true);
+  } finally {
+    first.resolve(detected);
+    second.resolve(detected);
+    await Promise.all([a, b, queued]);
+    await pool.close();
+  }
+});

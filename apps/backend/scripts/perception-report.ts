@@ -22,17 +22,13 @@ async function dependencyVersion(name: string) {
   return packageMetadata.parse(JSON.parse(source)).version;
 }
 
-export async function createPerceptionReport(
-  metadata: Awaited<ReturnType<typeof createDetectionPool>>["metadata"],
-  budget: z.infer<typeof computeBudgetSchema>,
-) {
+export async function createPerceptionEnvironment() {
   const [ort, piscina, sharp] = await Promise.all([
     dependencyVersion("onnxruntime-node"),
     dependencyVersion("piscina"),
     dependencyVersion("sharp"),
   ]);
   return {
-    metadata,
     environment: {
       runtime: process.version,
       bun: Bun.version,
@@ -43,6 +39,16 @@ export async function createPerceptionReport(
       cpuModel: cpus()[0]?.model ?? null,
     },
     dependencies: { "onnxruntime-node": ort, piscina, sharp },
+  };
+}
+
+export async function createPerceptionReport(
+  metadata: Awaited<ReturnType<typeof createDetectionPool>>["metadata"],
+  budget: z.infer<typeof computeBudgetSchema>,
+) {
+  return {
+    metadata,
+    ...(await createPerceptionEnvironment()),
     computeBudget: {
       ...detectionComputeBudget,
       ...budget,

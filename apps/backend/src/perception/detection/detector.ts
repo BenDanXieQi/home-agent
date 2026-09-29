@@ -1,13 +1,14 @@
 import sharp from "sharp";
 import { InferenceSession, Tensor } from "onnxruntime-node";
-import type { z } from "zod";
+import { z } from "zod";
 import type { frameSchema } from "./frame";
 import { detectionComputeBudget } from "../compute/budget";
 
 import { detectionLabels } from "./labels";
 import { detectionModelPath } from "./model";
 
-export async function createDetector() {
+export async function createDetector(minimumConfidence = 0.5) {
+  const threshold = z.number().min(0.1).max(1).parse(minimumConfidence);
   // libvips has process-wide configuration; every detector uses the same budget.
   sharp.concurrency(detectionComputeBudget.sharpThreads);
   const session = await InferenceSession.create(detectionModelPath, {
@@ -120,6 +121,7 @@ export async function createDetector() {
           scale,
           padX,
           padY,
+          threshold,
         );
         return {
           detections,
@@ -149,6 +151,7 @@ function decodeDetections(
   scale: number,
   padX: number,
   padY: number,
+  minimumConfidence: number,
 ) {
   const candidates = [];
   for (let index = 0; index < count; index++) {
@@ -169,7 +172,7 @@ function decodeDetections(
     const bh = data[3 * count + index]!;
     if (![cx, cy, bw, bh].every(Number.isFinite))
       throw new Error("Non-finite detection box");
-    if (confidence < 0.5) continue;
+    if (confidence < minimumConfidence) continue;
     const left = clip((cx - bw / 2 - padX) / scale, width);
     const top = clip((cy - bh / 2 - padY) / scale, height);
     const right = clip((cx + bw / 2 - padX) / scale, width);

@@ -1,8 +1,14 @@
+import { trackingObservationSchema } from "@home-agent/api/contracts";
 import { z } from "zod";
 import { runSchema, observationSchema } from "../observations";
 import { videoMetricsSchema } from "./metrics";
 
 export const videoEventSchema = z.discriminatedUnion("event", [
+  z.object({
+    event: z.literal("tracking"),
+    run: runSchema,
+    observation: trackingObservationSchema,
+  }),
   z.object({
     event: z.literal("submitted"),
     metrics: videoMetricsSchema,

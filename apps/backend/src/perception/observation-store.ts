@@ -1,3 +1,4 @@
+import type { trackingObservationSchema } from "@home-agent/api/contracts";
 import type { z } from "zod";
 import {
   acceptsObservation,
@@ -18,6 +19,10 @@ function initial(source: z.infer<typeof sourceSelectionSchema>) {
     error: undefined as string | undefined,
     observation: null as z.infer<typeof observationSchema> | null,
     validity: "no_data",
+    tracking: null as z.infer<typeof trackingObservationSchema> | null,
+    trackingValidity: "no_data",
+    trackingSequence: 0,
+    trackingExpiresAt: 0,
     sequence: 0,
     expiresAt: 0,
     lastPublishedAt: 0,
@@ -39,11 +44,19 @@ export function createObservationStore(maxAgeMs: number) {
   }
   const timer = setInterval(() => {
     let expired = false;
-    for (const entry of sources.values())
+    for (const entry of sources.values()) {
+      if (
+        entry.trackingValidity === "valid" &&
+        performance.now() >= entry.trackingExpiresAt
+      ) {
+        entry.trackingValidity = "expired";
+        expired = true;
+      }
       if (entry.validity === "valid" && performance.now() >= entry.expiresAt) {
         entry.validity = "expired";
         expired = true;
       }
+    }
     if (expired) changed();
   }, 50);
   return {
@@ -81,6 +94,8 @@ export function createObservationStore(maxAgeMs: number) {
       entry.error = reason;
       entry.granted = false;
       entry.observation = null;
+      entry.tracking = null;
+      entry.trackingValidity = "unavailable";
       changed();
     },
     receive(event: z.infer<typeof videoEventSchema>) {
@@ -91,15 +106,36 @@ export function createObservationStore(maxAgeMs: number) {
         !entry.run ||
         !isCurrentRun(entry.run, event.run)
       ) {
-        if (event.event === "settled") {
+        if (event.event === "settled" || event.event === "tracking") {
           rejectedRetiredResults++;
           changed();
         }
         return;
       }
+      if (event.event === "tracking") {
+        const result = event.observation;
+        const elapsed = Date.now() - result.receivedAt;
+        const age = Math.max(elapsed, result.ageMs);
+        if (
+          entry.status !== "failed" &&
+          isCurrentRun(entry.run, result.run) &&
+          result.sequence > entry.trackingSequence &&
+          elapsed >= 0 &&
+          age < maxAgeMs
+        ) {
+          entry.tracking = { ...result, ageMs: age };
+          entry.trackingSequence = result.sequence;
+          entry.trackingExpiresAt = performance.now() + maxAgeMs - age;
+          entry.trackingValidity =
+            result.status === "failed" ? "unavailable" : "valid";
+        }
+        changed();
+        return;
+      }
       entry.metrics = event.metrics;
       if (event.event === "health") {
         entry.status = event.status;
+        if (event.status === "failed") entry.trackingValidity = "unavailable";
         entry.error = event.error;
         entry.metrics = event.metrics;
       }
@@ -152,6 +188,11 @@ export function createObservationStore(maxAgeMs: number) {
             ? "expired"
             : entry.validity,
         observation: entry.observation,
+        tracking: entry.tracking,
+        trackingValidity:
+          entry.trackingValidity === "valid" && now >= entry.trackingExpiresAt
+            ? "expired"
+            : entry.trackingValidity,
         metrics: {
           ...entry.metrics,
           published: entry.published,
