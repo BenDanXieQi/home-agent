@@ -8,6 +8,8 @@ import type { Config } from "../config";
 import { createHomeAgent } from "../graph/home-agent";
 import { createChatRoutes } from "./chat";
 import type { AgentDatabase } from "../db";
+import { createRoomAnalysisAgent } from "../graph/room-analysis";
+import { createRoomAnalysisRoutes } from "./room-analysis";
 
 export function createApp(config: Config, database?: AgentDatabase) {
   const agent = createHomeAgent(config, database?.checkpointer);
@@ -29,6 +31,13 @@ export function createApp(config: Config, database?: AgentDatabase) {
   app.route(
     "/api/chat",
     createChatRoutes(agent, config.AGENT_RUN_TIMEOUT_MS, database),
+  );
+  app.route(
+    "/api/room-analysis",
+    createRoomAnalysisRoutes(
+      createRoomAnalysisAgent(config),
+      config.AGENT_RUN_TIMEOUT_MS,
+    ),
   );
   app.notFound((c) => errorResponse(c, new AppError("not_found")));
   app.onError(handleHttpError);

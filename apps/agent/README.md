@@ -1,8 +1,8 @@
 # Agent
 
-当前为独立运行的模型对话服务，提供流式响应、会话持久化和执行追踪，通过 backend 转发请求。尚未接入家庭状态、语义事件或设备工具，也未实现长期记忆；模型不能据此声称知道家中情况或已执行设备操作。
+当前为独立运行的模型服务，提供流式对话、会话持久化、房间上下文分析和执行追踪，通过 backend 转发请求。房间分析只解释 backend 本次提交的有界设备证据；普通聊天尚无家庭查询或设备工具，长期记忆和设备控制未接入。
 
-家庭模型与 Agent 的职责边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备级接入见 [Step 6 计划](../../docs/plans/household-steps/06-agent.md)。这些规划不属于当前服务已实现能力。下述 checkpoint 保存对话与执行状态，不承担 backend 家庭状态或跨任务长期记忆的职责。
+当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/reference/room-analysis.md)。后续家庭能力见[家庭语义目标与领域模型](../../docs/plans/household-model.md)与 [Step 6 计划](../../docs/plans/household-steps/06-agent.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；单次房间分析不写对话检查点。
 
 Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连接 PostgreSQL。默认复用根目录 `DATABASE_URL`；可用 `AGENT_DATABASE_URL` 指定独立账号或数据库。状态表位于固定的 `agent_state` schema，使用普通 PostgreSQL 表，由 checkpointer 管理，不属于 backend 的 Drizzle schema，也不转换为 TimescaleDB hypertable。
 

@@ -72,6 +72,15 @@ void mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
 const shutdown = new AbortController();
+const { RoomAnalysisService } = await import("./room-analysis/service");
+const { createRoomAnalysisClient } =
+  await import("./room-analysis/agent-client");
+const roomAnalysis = new RoomAnalysisService(
+  household,
+  createRoomAnalysisClient(
+    async () => (await connectionStore.read()).services.agent.url,
+  ),
+);
 const app = createApp({
   staticRoot: join(import.meta.dir, "public"),
   environment,
@@ -79,6 +88,7 @@ const app = createApp({
   household,
   mijiaService,
   deviceLogs,
+  roomAnalysis,
   shutdownSignal: shutdown.signal,
   readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
 });
@@ -93,6 +103,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
+    roomAnalysis.close();
     void (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {

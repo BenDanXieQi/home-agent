@@ -14,6 +14,8 @@ import { createMijiaRoutes } from "./mijia/routes";
 import type { HouseholdRuntime } from "./household/runtime";
 import type { MijiaService } from "./mijia/service";
 import type { DevicePushLogs } from "./household/device-logs";
+import type { RoomAnalysisService } from "./room-analysis/service";
+import { createRoomAnalysisRoutes } from "./room-analysis/routes";
 
 type AppDependencies = {
   staticRoot?: string;
@@ -22,6 +24,7 @@ type AppDependencies = {
   household: HouseholdRuntime;
   mijiaService: MijiaService;
   deviceLogs: DevicePushLogs;
+  roomAnalysis: RoomAnalysisService;
   shutdownSignal: AbortSignal;
   readAgentUrl: () => Promise<string>;
 };
@@ -33,6 +36,7 @@ export function createApp({
   household,
   mijiaService,
   deviceLogs,
+  roomAnalysis,
   shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
@@ -89,6 +93,10 @@ export function createApp({
         mijiaService,
         shutdownSignal,
       ),
+    )
+    .route(
+      "/api/rooms/analysis",
+      createRoomAnalysisRoutes(environment.BACKEND_PORT, roomAnalysis),
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));

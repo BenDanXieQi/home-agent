@@ -12,6 +12,7 @@ import {
 } from "../features/mijia/household-state";
 import { requestJson } from "../lib/api";
 import { Button } from "../components/Button";
+import { RoomAnalysisPanel } from "../features/mijia/RoomAnalysisPanel";
 import "../features/mijia/rooms.css";
 
 const qualityLabels = {
@@ -253,6 +254,11 @@ function RoomFactsView({
       <p className="rooms-help">
         初始化会自动分批读取设备状态，再由上报持续更新。云端缓存标为待确认；只有确认来源与有效期的属性会标为有效。
       </p>
+      <RoomAnalysisPanel
+        scope={snapshot.scope_epoch}
+        roomId={roomId}
+        synced={synced}
+      />
       <label className="rooms-toggle">
         <input
           type="checkbox"
