@@ -21,7 +21,7 @@ bun run --cwd apps/backend build:perception
 ORT_DISABLE_TELEMETRY=1 bun apps/backend/dist/detect-image.js /path/to/image.jpg
 ```
 
-backend 的 `build` 同时构建计算子进程入口与图片命令，并生成 source map（将构建后的报错位置映射回源码）。图片命令不要求数据库、摄像头、go2rtc 或 LLM。本模块尚未接入摄像头持续采集和家庭上下文，也没有检测结果的 HTTP/前端入口；后续范围见[实施计划](plans/miloco-perception-alignment.md)。
+backend 的 `build` 同时构建计算子进程入口与图片命令，并生成 source map（将构建后的报错位置映射回源码）。图片命令不要求数据库、摄像头、go2rtc 或 LLM。本模块尚未接入摄像头持续采集和家庭上下文，也没有检测结果的 HTTP/前端入口；摄像头持续检测的接入范围见[实施计划](plans/miloco-perception-alignment.md)。
 
 ## 模型与参考
 
