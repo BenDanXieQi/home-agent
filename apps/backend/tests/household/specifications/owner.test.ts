@@ -196,7 +196,7 @@ describe("active household specifications", () => {
     );
     const accepted = owner.snapshot().specs[specUrn]!;
     expect(owner.isApplicable("a", device("a").model)).toBe(true);
-    void owner.refresh();
+    await owner.refresh();
     await eventually(() =>
       [...owner.snapshot().references.values()].some(
         (reference) => reference.spec_status === "error",
@@ -346,7 +346,7 @@ describe("active household specifications", () => {
     const stable = owner.snapshot().specs[stableUrn]!;
 
     currentUrn = nextUrn;
-    void owner.refresh();
+    await owner.refresh();
     await eventually(
       () =>
         [...owner.snapshot().references.values()].some(
@@ -375,7 +375,7 @@ describe("active household specifications", () => {
     expect(rejected.specs[nextUrn]).toBeUndefined();
 
     capacityBytes = 16_384;
-    void owner.refresh();
+    await owner.refresh();
     await eventually(
       () =>
         owner.snapshot().references.get("changing")?.spec_status === "ready",

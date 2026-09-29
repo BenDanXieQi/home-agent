@@ -290,8 +290,6 @@ export class HouseholdRuntime {
     };
   }
   setupHomes() {
-    if (this.projection.household.household.home_id !== null)
-      return { items: [] };
     const source = this.source.snapshot();
     if (source.account.status !== "authenticated")
       throw new HouseholdError("not_bound");
@@ -309,13 +307,22 @@ export class HouseholdRuntime {
     if (this.bindingHome || this.context.operation)
       throw new HouseholdError("invalid_state");
     const bound = this.projection.household.household.home_id;
-    if (bound !== null) throw new HouseholdError("binding_conflict");
+    if (bound === home) throw new HouseholdError("binding_conflict");
     this.bindingHome = true;
+    let bindingEpoch = epoch;
     try {
-      await this.source.bindHome(home, () => this.assertEpoch(epoch));
-      this.assertEpoch(epoch);
-      this.actor.send({ type: "bound", scope_epoch: epoch, home_id: home });
-      this.refresh("directory", epoch);
+      await this.source.bindHome(
+        home,
+        () => this.assertEpoch(epoch),
+        () => {
+          this.assertEpoch(epoch);
+          this.actor.send({ type: "bound", scope_epoch: epoch, home_id: home });
+          bindingEpoch = this.epoch;
+        },
+      );
+      this.assertEpoch(bindingEpoch);
+      this.syncSource();
+      this.refresh("directory", bindingEpoch);
       return { state_version: this.version() };
     } finally {
       this.bindingHome = false;
@@ -339,7 +346,7 @@ export class HouseholdRuntime {
     if (this.refreshTasks.get(target)?.epoch === epoch) return;
     const task = { epoch };
     this.refreshTasks.set(target, task);
-    void Promise.resolve()
+    Promise.resolve()
       .then(async () => {
         this.assertEpoch(epoch);
         if (target !== "specs") await this.source.refreshDirectory();

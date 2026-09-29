@@ -54,7 +54,9 @@ export class AccountObservations {
     this.timer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
         this.timer = undefined;
-        void this.connect();
+        this.connect().catch((backgroundError: unknown) => {
+          console.error("observations: connect failed", backgroundError);
+        });
       }, delay),
     );
     this.timer.unref();
@@ -196,7 +198,12 @@ export class AccountObservations {
     if (!this.watches.size) {
       clearTimeout(this.timer);
       this.timer = undefined;
-      void this.connection?.close("cancelled");
+      this.connection?.close("cancelled").catch((backgroundError: unknown) => {
+        console.error(
+          "observations: connection?.close failed",
+          backgroundError,
+        );
+      });
     }
   }
 
@@ -218,7 +225,10 @@ export class AccountObservations {
     signal.addEventListener("abort", cancel, { once: true });
     if (this.connection && !this.connection.closed)
       this.bind(watch, this.connection);
-    else if (!this.timer && !this.authenticationFailed) void this.connect();
+    else if (!this.timer && !this.authenticationFailed)
+      this.connect().catch((backgroundError: unknown) => {
+        console.error("observations: connect failed", backgroundError);
+      });
     return {
       cancel,
       snapshot: () => ({
@@ -241,7 +251,14 @@ export class AccountObservations {
     this.failure = null;
     this.rejectedTopics.clear();
     if (!this.watches.size) return;
-    void this.connection?.close("credentials_updated");
+    this.connection
+      ?.close("credentials_updated")
+      .catch((backgroundError: unknown) => {
+        console.error(
+          "observations: connection?.close failed",
+          backgroundError,
+        );
+      });
     this.schedule();
   }
 

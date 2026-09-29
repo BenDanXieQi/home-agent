@@ -1,3 +1,4 @@
+import { createHouseholdReset } from "../household-reset";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -11,6 +12,7 @@ import type { createRoomAnalysisAgent } from "../graph/room-analysis";
 export function createRoomAnalysisRoutes(
   agent: ReturnType<typeof createRoomAnalysisAgent>,
   timeoutMs: number,
+  reset = createHouseholdReset(),
 ) {
   const app = new Hono();
   let active = 0;
@@ -31,6 +33,7 @@ export function createRoomAnalysisRoutes(
         Math.min(timeoutMs, roomAnalysisLimits.timeoutMs - 1000),
       );
       const signal = AbortSignal.any([c.req.raw.signal, timeout]);
+      const leave = reset.enter();
       active++;
       try {
         const result = await agent.graph.invoke({ input }, { signal });
@@ -53,6 +56,7 @@ export function createRoomAnalysisRoutes(
         );
       } finally {
         active--;
+        leave();
       }
     },
   );

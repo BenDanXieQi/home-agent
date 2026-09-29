@@ -96,13 +96,3 @@ export function withDevices(...devices: ReturnType<typeof device>[]) {
 export function commandResult(scope_epoch = epoch, sequence = 1) {
   return { state_version: { scope_epoch, sequence } };
 }
-
-/** Fresh private command atoms and the production appStore; no React renderer. */
-export async function loadMijiaState() {
-  const [{ appStore }, atoms, state] = await Promise.all([
-    import("../../src/lib/store"),
-    import("../../src/features/mijia/household-state"),
-    import("../../src/features/mijia/state"),
-  ]);
-  return { appStore, ...atoms, ...state };
-}

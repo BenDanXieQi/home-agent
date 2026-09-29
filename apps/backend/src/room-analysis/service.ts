@@ -322,7 +322,9 @@ export class RoomAnalysisService {
       this.reconcile(entry, this.dirty.has(roomId));
       if (entry.queuedAt && !entry.controller) {
         if (entry.dueAt <= now && this.running < roomAnalysisLimits.concurrent)
-          void this.run(entry);
+          this.run(entry).catch((error: unknown) => {
+            console.error("Room analysis task failed", error);
+          });
         else if (entry.dueAt > now) next = Math.min(next, entry.dueAt);
       }
       const latest = entry.state.latest;

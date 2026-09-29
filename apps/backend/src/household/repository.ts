@@ -7,7 +7,7 @@ import {
 } from "@home-agent/api/household";
 import { z } from "zod";
 import type { Database } from "../db";
-import { householdDirectories } from "../db/schema";
+import { householdDirectories, mijiaHomeSelections } from "../db/schema";
 import { HouseholdError } from "./errors";
 import { householdLimits, jsonBytes } from "./config";
 import {
@@ -31,9 +31,7 @@ const storedDirectorySchema = directorySchema.extend({
     }),
   ),
 });
-function directoryLockKey(accountId: string, homeId: string) {
-  return JSON.stringify(["household_directory", accountId, homeId]);
-}
+const directoryLockKey = "household_binding";
 function directoryIdentity(accountId: string, homeId: string) {
   return and(
     eq(householdDirectories.accountId, accountId),
@@ -63,17 +61,9 @@ export function createHouseholdRepository(db: Database) {
       : undefined;
   }
   const write = createConfirmedWriter(transaction);
-  // Only confirmed durable contents may bypass another database transaction.
-  let acknowledged:
-    | {
-        key: string;
-        data: z.infer<typeof storedDirectorySchema>;
-        savedAt: string;
-      }
-    | undefined;
   return {
     async read(accountId: string, homeId: string) {
-      const row = await transaction(directoryLockKey(accountId, homeId), (tx) =>
+      const row = await transaction(directoryLockKey, (tx) =>
         readStored(tx, accountId, homeId),
       ).catch(() => {
         throw new HouseholdError("home_storage");
@@ -119,19 +109,17 @@ export function createHouseholdRepository(db: Database) {
       if (jsonBytes(data) > householdLimits.directoryBytes)
         throw new HouseholdError("capacity_exceeded");
       assertCurrent();
-      const key = directoryLockKey(accountId, homeId);
-      if (
-        acknowledged?.key === key &&
-        isDeepStrictEqual(acknowledged.data, data)
-      )
-        return acknowledged.savedAt;
-      // A failed or unconfirmed candidate must never reuse an earlier acknowledgement.
-      acknowledged = undefined;
       try {
         const savedAt = await write(
-          directoryLockKey(accountId, homeId),
+          directoryLockKey,
           async (tx, beforeWrite) => {
             assertCurrent();
+            const [binding] = await tx
+              .select()
+              .from(mijiaHomeSelections)
+              .limit(1);
+            if (binding?.accountKey !== accountId || binding.homeId !== homeId)
+              throw new HouseholdError("stale_session");
             const row = await readStored(tx, accountId, homeId);
             assertCurrent();
             if (row && isDeepStrictEqual(row.directory, data))
@@ -180,7 +168,6 @@ export function createHouseholdRepository(db: Database) {
           },
         );
         assertCurrent();
-        acknowledged = { key, data, savedAt };
         return savedAt;
       } catch (error) {
         if (

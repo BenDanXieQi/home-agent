@@ -7,6 +7,7 @@
     "./immutable": "./src/immutable.ts",
     "./local-access": "./src/http/local-access.ts",
     "./mijia": "./src/contracts/mijia.ts",
+    "./playback": "./src/domain/playback.ts",
     "./contracts": "./src/contracts/index.ts",
     "./errors": "./src/errors/index.ts",
     "./errors/hono": "./src/errors/hono.ts",
@@ -15,12 +16,14 @@
     "./household": "./src/contracts/household.ts",
     "./device-logs": "./src/contracts/device-logs.ts",
     "./observations": "./src/contracts/observations.ts",
+    "./household-reset": "./src/contracts/household-reset.ts",
     "./room-analysis": "./src/contracts/room-analysis.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "test": "bun test"
   },
   "dependencies": {
     "@home-agent/observability": "workspace:*",

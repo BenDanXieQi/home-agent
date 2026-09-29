@@ -20,7 +20,7 @@ const MAX_BUFFER_BYTES = 8 * 1024 * 1024;
 export class DevicePushLogs {
   private data: DeviceLogSnapshot = { run: null, entries: [] };
   readonly ready;
-  private starting = false;
+  private starting: { cancelled: boolean } | undefined;
   private stopping = false;
   private capture: ReturnType<DevicePushLogs["createCapture"]> | undefined;
   private persistence = Promise.resolve();
@@ -106,7 +106,8 @@ export class DevicePushLogs {
     if (this.starting || this.stopping || this.capture)
       throw new MijiaError("invalid_state");
     if (!this.household.ready) throw new MijiaError("devices_failed");
-    this.starting = true;
+    const starting = { cancelled: false };
+    this.starting = starting;
     try {
       const snapshot = this.household.snapshot();
       const scope = snapshot.projection.household.household;
@@ -123,6 +124,12 @@ export class DevicePushLogs {
         JSON.stringify(snapshot),
         { mode: 0o600 },
       );
+      if (starting.cancelled) throw new MijiaError("invalid_state");
+      if (
+        this.household.epoch !== snapshot.scope_epoch ||
+        !this.household.ready
+      )
+        throw new MijiaError("stale_session");
       const started = new Date().toISOString();
       this.data = {
         run: {
@@ -175,6 +182,14 @@ export class DevicePushLogs {
       this.capture = capture;
       try {
         await this.persist();
+        if (this.capture !== capture) return this.snapshot();
+        if (
+          this.household.epoch !== snapshot.scope_epoch ||
+          !this.household.ready
+        ) {
+          await this.stop("家庭作用域变化或后端停止", "interrupted");
+          return this.snapshot();
+        }
         const watch = await this.source.observeDevices(
           devices.map((device) => device.id),
           capture.receive,
@@ -186,12 +201,16 @@ export class DevicePushLogs {
       }
       return this.snapshot();
     } finally {
-      this.starting = false;
+      this.starting = undefined;
     }
   }
 
   private createCapture(run: NonNullable<DeviceLogSnapshot["run"]>) {
     const controller = new AbortController();
+    const stop = (...args: Parameters<DevicePushLogs["stop"]>) =>
+      this.capture?.controller === controller
+        ? this.stop(...args)
+        : Promise.resolve(this.snapshot());
     const stream = createWriteStream(join(this.directory, `${run.id}.jsonl`), {
       flags: "wx",
       mode: 0o600,
@@ -208,7 +227,9 @@ export class DevicePushLogs {
         Date.now() >=
         Date.parse(run.started_at) + run.duration_seconds * 1000
       ) {
-        void this.stop(null, "complete");
+        stop(null, "complete").catch((backgroundError: unknown) => {
+          console.error("device-logs: stop failed", backgroundError);
+        });
         return;
       }
       const did =
@@ -321,16 +342,25 @@ export class DevicePushLogs {
       bytes += Buffer.byteLength(line);
       stream.write(line);
       if (bytes >= MAX_FILE_BYTES || stream.writableLength > MAX_BUFFER_BYTES)
-        void this.stop("日志容量已达上限，采集已停止", "error");
+        stop("日志容量已达上限，采集已停止", "error").catch(
+          (error: unknown) => {
+            console.error("device-logs: stop failed", error);
+          },
+        );
       if (event.kind === "subscription" && event.status === "cancelled")
-        void this.stop("设备范围已变化，请重新开始采集", "interrupted");
+        stop("设备范围已变化，请重新开始采集", "interrupted").catch(
+          (error: unknown) => {
+            console.error("device-logs: stop failed", error);
+          },
+        );
     };
-    const timer = setTimeout(
-      () => void this.stop(null, "complete"),
-      run.duration_seconds * 1000,
-    );
+    const timer = setTimeout(() => {
+      stop(null, "complete").catch((backgroundError: unknown) => {
+        console.error("device-logs: stop failed", backgroundError);
+      });
+    }, run.duration_seconds * 1000);
     const flush = setInterval(() => {
-      void this.persist().catch(() => this.stop("日志保存失败", "error"));
+      this.persist().catch(() => stop("日志保存失败", "error"));
     }, 5000);
     const detach = this.household.subscribe(() => {
       if (
@@ -338,10 +368,16 @@ export class DevicePushLogs {
         this.household.snapshot().projection.household.household.status ===
           "stopping"
       )
-        void this.stop("家庭作用域变化或后端停止", "interrupted");
+        stop("家庭作用域变化或后端停止", "interrupted").catch(
+          (error: unknown) => {
+            console.error("device-logs: stop failed", error);
+          },
+        );
     });
     stream.on("error", () => {
-      void this.stop("日志文件写入失败", "error");
+      stop("日志文件写入失败", "error").catch((backgroundError: unknown) => {
+        console.error("device-logs: stop failed", backgroundError);
+      });
     });
     return {
       controller,
@@ -365,6 +401,8 @@ export class DevicePushLogs {
     reason: string | null = "手动停止",
     status: NonNullable<DeviceLogSnapshot["run"]>["status"] = "stopped",
   ) {
+    await this.ready;
+    if (this.starting) this.starting.cancelled = true;
     const capture = this.capture;
     if (!capture) return this.snapshot();
     this.capture = undefined;

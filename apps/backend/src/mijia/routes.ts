@@ -96,13 +96,13 @@ export function createMijiaRoutes(
         return c.json(reservation, 201);
       },
     )
-    .get("/playback/:id", (c) =>
-      c.json(
+    .get("/playback/:id", (c) => {
+      return c.json(
         mijiaPlaybackStateSchema.parse(
           service.playbackSnapshot(c.req.param("id")),
         ),
-      ),
-    )
+      );
+    })
     .put("/playback/:id", validateJson(mijiaPlaybackInputSchema), async (c) => {
       const input = c.req.valid("json");
       // The request signal rejects pre-aborted work; accepted offers belong to the viewer resource.

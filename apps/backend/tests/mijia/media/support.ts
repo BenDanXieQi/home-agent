@@ -1,6 +1,15 @@
 import { z } from "zod";
 import { Go2RtcAdapter } from "../../../src/mijia/media/go2rtc-adapter";
 
+export const playbackTelemetry = {
+  stage: "answer_ready",
+  elapsedMs: 1,
+  sourceRecentlyActive: true,
+  timings: { queueMs: 0, sourceMs: 0, answerMs: 1 },
+} satisfies NonNullable<
+  Awaited<ReturnType<Go2RtcAdapter["offer"]>>["observation"]
+>;
+
 const requestBody = z
   .object({
     sessionId: z.string().optional(),
@@ -17,7 +26,7 @@ const requestBody = z
 async function readCall(request: Request) {
   return {
     method: request.method,
-    path: new URL(request.url).pathname.split("/").at(-1),
+    path: new URL(request.url).pathname.replace("/api/home-agent/mijia/", ""),
     application: request.headers.get("x-home-agent"),
     body: requestBody.parse(await request.json()),
   };
@@ -45,6 +54,7 @@ export function mediaPeer(
         return Response.json({
           playbackId: call.body.playbackId,
           answer: "v=0\r\nfixture-answer",
+          telemetry: playbackTelemetry,
         });
       return new Response(null, { status: 204 });
     },

@@ -4,6 +4,10 @@ export {
   type MijiaCapability,
 } from "./mijia-spec";
 import { z } from "zod";
+import {
+  playbackConnectionSummarySchema,
+  playbackTargetSchema,
+} from "../domain/playback";
 import { operationSchema } from "./operations";
 import { apiErrorSchema } from "./errors";
 import { mijiaErrorCodes } from "./mijia-errors";
@@ -139,22 +143,24 @@ export const mijiaPlaybackInputSchema = z.strictObject({
   revision: z.string().uuid(),
   sdp: z.string().min(16).max(65_536),
 });
-export const mijiaPlaybackReservationInputSchema = z.strictObject({
-  scope_epoch: z.uuid(),
-  revision: z.string().uuid(),
-  deviceId: z.string().min(1).max(128),
-  channel: z.union([z.literal(1), z.literal(2)]),
-});
+export const mijiaPlaybackReservationInputSchema =
+  playbackTargetSchema.safeExtend({
+    scope_epoch: z.uuid(),
+  });
 export const mijiaPlaybackReservationResponseSchema = z.object({
   id: z.string().uuid(),
 });
 export const mijiaPlaybackResponseSchema = z.object({
   id: z.string().uuid(),
   sdp: z.string(),
+  connection: playbackConnectionSummarySchema,
 });
 export type MijiaPlaybackResponse = z.infer<typeof mijiaPlaybackResponseSchema>;
 export const mijiaPlaybackStateSchema = z.discriminatedUnion("phase", [
-  z.object({ id: z.uuid(), phase: z.enum(["reserved", "negotiating"]) }),
+  z.object({
+    id: z.uuid(),
+    phase: z.enum(["reserved", "negotiating"]),
+  }),
   z.object({
     id: z.uuid(),
     phase: z.literal("active"),

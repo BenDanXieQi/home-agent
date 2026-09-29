@@ -1,32 +1,27 @@
+import { Notice } from "./Notice";
 import { Button } from "./Button";
 
-/** Fetch failures and rejected actions have separate recovery semantics. */
+/** Synchronization progress and rejected actions have distinct semantics. */
 export function RequestFeedback({
-  fetchError,
+  syncMessage,
   error,
   refresh,
-  retryLabel = "重试",
-  errorClassName = "notice notice-error",
+  reconnectLabel = "重新连接状态",
 }: {
-  fetchError?: string | null;
-  error?: string | null | undefined;
+  syncMessage?: string | null;
+  error?: string | null;
   refresh?: () => void;
-  retryLabel?: string;
-  errorClassName?: string;
+  reconnectLabel?: string;
 }) {
   return (
     <>
-      {fetchError ? (
-        <div className="notice notice-error" role="alert">
-          {fetchError}
-          {refresh ? <Button onClick={refresh}>{retryLabel}</Button> : null}
-        </div>
+      {syncMessage ? (
+        <Notice>
+          {syncMessage}
+          {refresh ? <Button onClick={refresh}>{reconnectLabel}</Button> : null}
+        </Notice>
       ) : null}
-      {error ? (
-        <p className={errorClassName} role="alert">
-          {error}
-        </p>
-      ) : null}
+      {error ? <Notice tone="error">{error}</Notice> : null}
     </>
   );
 }

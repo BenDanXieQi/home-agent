@@ -225,7 +225,7 @@ test("first binding rechecks membership after a queued cloud refresh", async () 
     expect(
       fixture.service.homes().items.some((home) => home.id === "home-b"),
     ).toBe(true);
-    void fixture.runtime.bindHome(fixture.runtime.epoch, "home-b").then(
+    fixture.runtime.bindHome(fixture.runtime.epoch, "home-b").then(
       (value) => binding.resolve({ status: "fulfilled", value }),
       (reason: unknown) => binding.resolve({ status: "rejected", reason }),
     );

@@ -69,7 +69,7 @@ export class AccountMaintenance {
 
   private track(promise: Promise<void>) {
     this.pending.add(promise);
-    void promise.then(
+    promise.then(
       () => this.pending.delete(promise),
       () => this.pending.delete(promise),
     );
@@ -154,7 +154,9 @@ export class AccountMaintenance {
                 !this.deps.currentAccount() &&
                 !this.deps.isLoginActive()
               )
-                void this.restore();
+                this.restore().catch((backgroundError: unknown) => {
+                  console.error("maintenance: restore failed", backgroundError);
+                });
             }, this.restoreRetryAfterAt);
           } else {
             this.restoreRetry.cancel();
@@ -194,7 +196,10 @@ export class AccountMaintenance {
       Date.now() < this.renewalRetryAfterAt
     ) {
       this.renewalRetry.schedule(() => {
-        if (this.activeAccount(account)) void this.renew(account);
+        if (this.activeAccount(account))
+          this.renew(account).catch((backgroundError: unknown) => {
+            console.error("maintenance: renew failed", backgroundError);
+          });
       }, this.renewalRetryAfterAt);
       return;
     }
@@ -214,7 +219,10 @@ export class AccountMaintenance {
       setTimeout(
         () => {
           this.renewalTimer = undefined;
-          if (this.activeAccount(account)) void this.renew(account);
+          if (this.activeAccount(account))
+            this.renew(account).catch((backgroundError: unknown) => {
+              console.error("maintenance: renew failed", backgroundError);
+            });
         },
         Math.min(delay, 2_147_483_647),
       ),
@@ -291,7 +299,10 @@ export class AccountMaintenance {
           if (!this.currentRenewal(task)) return;
           if (isRecoverableMijiaError(error))
             this.renewalRetry.schedule(() => {
-              if (this.activeAccount(account)) void this.renew(account);
+              if (this.activeAccount(account))
+                this.renew(account).catch((backgroundError: unknown) => {
+                  console.error("maintenance: renew failed", backgroundError);
+                });
             }, this.renewalRetryAfterAt);
           else this.renewalRetry.cancel();
         })
@@ -305,7 +316,9 @@ export class AccountMaintenance {
               this.deps.currentOAuth()?.accessToken ===
               this.rejectedOAuth?.accessToken
             )
-              void this.renew(candidate.client);
+              this.renew(candidate.client).catch((backgroundError: unknown) => {
+                console.error("maintenance: renew failed", backgroundError);
+              });
             else this.rejectedOAuth = undefined;
           }
         }),

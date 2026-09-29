@@ -8,7 +8,7 @@
 
 ### 1.1 阅读范围
 
-完整覆盖 `apps/backend/src/mijia/`、`apps/backend/src/household/`、`apps/web/src/features/mijia/` 和 `docker/go2rtc/overlay/` 中的代码文件；另外说明直接支撑它们的共享契约、HTTP 工具、凭据仓库、数据库、应用装配和页面入口。构造器、getter/setter、私有方法、返回对象方法及有独立生命周期的嵌套函数均列出。普通 map/filter、Promise finally 等回调的责任归所属函数；HTTP、MQTT、SSE 回调按入口单列。
+完整覆盖 `apps/backend/src/mijia/`、`apps/backend/src/household/`、`apps/web/src/modules/`、`apps/web/src/pages/`、`apps/web/src/app/`、`apps/web/src/api/` 和 `docker/go2rtc/overlay/` 中的代码文件；另外说明直接支撑它们的共享契约、HTTP 工具、凭据仓库、数据库、应用装配和页面入口。构造器、getter/setter、私有方法、返回对象方法及有独立生命周期的嵌套函数均列出。普通 map/filter、Promise finally 等回调的责任归所属函数；HTTP、MQTT、SSE 回调按入口单列。
 
 通用配置编辑、聊天、Agent、UI 基础组件、遥测导出器、第三方库内部实现不展开。go2rtc 上游只解释仓库 `runtime.patch` 改动的责任；MiLoCo 作为协议参考，不是本项目运行模块。
 
@@ -35,29 +35,29 @@
 
 下面 `mijia/`、`household/` 均相对 `apps/backend/src/`；`overlay/` 相对 `docker/go2rtc/`。
 
-| 代码目录                                              | 负责的资源／职责                                                               | 协作边界                                                                                          |
-| ----------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `mijia/`                                              | 当前完整账号、凭据接纳、跨模块生命周期、HTTP 边界。                            | 家庭公共状态交 household；供应商原始秘密不进入公共状态。                                          |
-| `mijia/account/`                                      | 待接纳的扫码会话、恢复／续期任务、账号共享 MQTT 观察。                         | 待接纳会话由 service 保存并启用；不另存 token。                                                   |
-| `mijia/homes/`                                        | 账号家庭选择的存储适配。                                                       | 部署级锁下保存唯一绑定；拒绝异账号或不同家庭覆盖。                                                |
-| `mijia/devices/`                                      | 云端设备清单请求、原始接入资料、已接纳访问索引、待接纳数据转换、设备清单通知。 | 完整设备清单交 household 校验并尝试保存；确认撤销先取消资格，缓存保存失败不阻挡当前有效清单接纳。 |
-| `mijia/properties/`                                   | 同步 readable 预检、全服务串行读取、来源配置。                                 | 只输出指定属性观测，不维护 latest、availability 或自动采集集合。                                  |
-| `mijia/protocols/micloud/`                            | 扫码、Cookie、RC4、云端设备清单和属性请求。                                    | 原始供应商字段转换为家庭模块待校验的设备清单，MiCloud 不拥有家庭规格缓存。                        |
-| `mijia/protocols/spec/`                               | 公开型号／URN 解析与能力编解码。                                               | 无账号秘密，在途 URL 请求按等待者合并；已接纳资料属于家庭规格管理模块。                           |
-| `mijia/protocols/oauth/`                              | 同次扫码的后台 OAuth 授权与 token 交换。                                       | 不创建第二个用户登录入口。                                                                        |
-| `mijia/protocols/miot/`                               | 单代 MQTT 连接、topic 对账、消息规范化。                                       | 跨代 watches 和重连由 AccountObservations 持有。                                                  |
-| `mijia/media/`                                        | 媒体绑定、共享镜头源、独立观看和远端清理。                                     | 从统一账号取得凭据；只有家庭可运行才新绑定；清理不等待家庭恢复运行。                              |
-| `household/`                                          | 已提交公共设备清单／规格、scope_epoch、版本、状态提交和 SSE。                  | actor 同步决策，网络／数据库在 runtime 的异步后续操作中执行。                                     |
-| `credentials/`、`db/`、`apps/backend/drizzle/`        | 加密授权、密钥读取、数据库连接、表与迁移。                                     | 不决定是否启用待接纳账号。                                                                        |
-| `packages/api/src/contracts/`                         | 共享 schema、命令／快照／增量协议、错误、消息大小上限和心跳期限。              | 不拥有运行状态或供应商连接。                                                                      |
-| `packages/api/src/http/`、`errors/`                   | 本机访问限制、响应大小、Retry-After、安全错误和校验。                          | 不决定账号、家庭及观看资源由哪个模块负责。                                                        |
-| `apps/web/src/features/mijia/`                        | 每标签页单 SSE、公共状态、命令、扫码材料、设备／播放 UI。                      | 命令响应不写公共快照；属性 MQTT 不直连浏览器。                                                    |
-| `apps/web/src/pages/`、`components/StateProvider.tsx` | 页面装配和应用级订阅生命周期。                                                 | 页面切换不重复创建家庭订阅。                                                                      |
-| `docker/go2rtc/`                                      | 固定上游构建、补丁、overlay、来源和许可。                                      | 内存媒体会话不替代 backend 保存到数据库的账号授权。                                               |
-| `overlay/internal/xiaomi/`                            | 私有会话、镜头源、viewer、双镜头共享连接的引用计数。                           | 源不进入全局 streams 注册表或 YAML。                                                              |
-| `overlay/internal/streams/`、`internal/webrtc/`       | 私有 dialer、重连观察、只读 WebRTC 协商。                                      | 不接纳业务家庭或保存凭据。                                                                        |
-| `overlay/pkg/webrtc/`                                 | 可取消的完整 ICE answer。                                                      | 不实现管理 HTTP 接口。                                                                            |
-| `overlay/pkg/xiaomi/`、`miss/`、`diagnostic/`         | 媒体 token 登录、双镜头物理连接与分流、安全诊断。                              | 不从型号名称猜双摄，不打印原始供应商报文。                                                        |
+| 代码目录                                        | 负责的资源／职责                                                                                       | 协作边界                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `mijia/`                                        | 当前完整账号、凭据接纳、跨模块生命周期、HTTP 边界。                                                    | 家庭公共状态交 household；供应商原始秘密不进入公共状态。                                          |
+| `mijia/account/`                                | 待接纳的扫码会话、恢复／续期任务、账号共享 MQTT 观察。                                                 | 待接纳会话由 service 保存并启用；不另存 token。                                                   |
+| `mijia/homes/`                                  | 账号家庭选择的存储适配。                                                                               | 部署级锁下保存唯一绑定；拒绝异账号或不同家庭覆盖。                                                |
+| `mijia/devices/`                                | 云端设备清单请求、原始接入资料、已接纳访问索引、待接纳数据转换、设备清单通知。                         | 完整设备清单交 household 校验并尝试保存；确认撤销先取消资格，缓存保存失败不阻挡当前有效清单接纳。 |
+| `mijia/properties/`                             | 同步 readable 预检、全服务串行读取、来源配置。                                                         | 只输出指定属性观测，不维护 latest、availability 或自动采集集合。                                  |
+| `mijia/protocols/micloud/`                      | 扫码、Cookie、RC4、云端设备清单和属性请求。                                                            | 原始供应商字段转换为家庭模块待校验的设备清单，MiCloud 不拥有家庭规格缓存。                        |
+| `mijia/protocols/spec/`                         | 公开型号／URN 解析与能力编解码。                                                                       | 无账号秘密，在途 URL 请求按等待者合并；已接纳资料属于家庭规格管理模块。                           |
+| `mijia/protocols/oauth/`                        | 同次扫码的后台 OAuth 授权与 token 交换。                                                               | 不创建第二个用户登录入口。                                                                        |
+| `mijia/protocols/miot/`                         | 单代 MQTT 连接、topic 对账、消息规范化。                                                               | 跨代 watches 和重连由 AccountObservations 持有。                                                  |
+| `mijia/media/`                                  | 媒体绑定、共享镜头源、独立观看和远端清理。                                                             | 从统一账号取得凭据；只有家庭可运行才新绑定；清理不等待家庭恢复运行。                              |
+| `household/`                                    | 已提交公共设备清单／规格、scope_epoch、版本、状态提交和 SSE。                                          | actor 同步决策，网络／数据库在 runtime 的异步后续操作中执行。                                     |
+| `credentials/`、`db/`、`apps/backend/drizzle/`  | 加密授权、密钥读取、数据库连接、表与迁移。                                                             | 不决定是否启用待接纳账号。                                                                        |
+| `packages/api/src/contracts/`                   | 共享 schema、命令／快照／增量协议、错误、消息大小上限和心跳期限。                                      | 不拥有运行状态或供应商连接。                                                                      |
+| `packages/api/src/http/`、`errors/`             | 本机访问限制、响应大小、Retry-After、安全错误和校验。                                                  | 不决定账号、家庭及观看资源由哪个模块负责。                                                        |
+| `apps/web/src/modules/`、`apps/web/src/app/`    | modules 按领域组织状态、操作、适配代码和共享业务组件，app 装配生命周期，pages 持有页面私有交互与组合。 | 命令响应不写公共快照；属性 MQTT 不直连浏览器。                                                    |
+| `apps/web/src/pages/`、`app/StateProvider.tsx`  | 页面装配和应用级订阅生命周期。                                                                         | 页面切换不重复创建家庭订阅。                                                                      |
+| `docker/go2rtc/`                                | 固定上游构建、补丁、overlay、来源和许可。                                                              | 内存媒体会话不替代 backend 保存到数据库的账号授权。                                               |
+| `overlay/internal/xiaomi/`                      | 私有会话、镜头源、viewer、双镜头共享连接的引用计数。                                                   | 源不进入全局 streams 注册表或 YAML。                                                              |
+| `overlay/internal/streams/`、`internal/webrtc/` | 私有 dialer、重连观察、只读 WebRTC 协商。                                                              | 不接纳业务家庭或保存凭据。                                                                        |
+| `overlay/pkg/webrtc/`                           | 可取消的完整 ICE answer。                                                                              | 不实现管理 HTTP 接口。                                                                            |
+| `overlay/pkg/xiaomi/`、`miss/`、`diagnostic/`   | 媒体 token 登录、双镜头物理连接与分流、安全诊断。                                                      | 不从型号名称猜双摄，不打印原始供应商报文。                                                        |
 
 ### 1.3 状态与身份
 
@@ -105,7 +105,7 @@ flowchart TD
 
 ## 2. 家庭运行时
 
-完整行为见[家庭运行时](../household.md)，实机覆盖与限制见[验证范围](../household.md#验证范围)。一个部署固定绑定一个家庭；首次设置后禁止在线换家，纠错停机修改绑定再启动。
+完整行为见[家庭运行时](../household.md)，实机覆盖与限制见[验证范围](../household.md#验证范围)。一个部署同时只服务一个家庭；设置页允许确认重新绑定同账号其他家庭。
 
 | 模块                                                                    | 责任与入口                                                                                                                                                                                                                                                               |
 | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -775,146 +775,88 @@ homeAgentSession保存私有cloud alias、id、region、原子期限、camera/re
 
 ### 9.5 进程装配、RPC和依赖
 
-| 文件／函数                                                                                                                           | 范围内责任                                                                                                                                                                                                     |
-| ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [backend/main.ts](../../apps/backend/src/main.ts) 顶层                                                                               | 初始化配置、遥测、数据库、密钥和存储，创建唯一 MijiaService 与规格加载接口，再注入 createMijiaHousehold；先 household.start，再后台 service.initialize，最后启动 HTTP。读取配置 URL 和密钥的回调保持动态边界。 |
-| 同文件SIGINT/SIGTERM回调                                                                                                             | 单次停止HTTP与household.close，排空至shutdown deadline后强停；finally关DB和遥测；远端清理失败仅提示租约兜底。                                                                                                  |
-| [backend/app.ts](../../apps/backend/src/app.ts) / `createApp`                                                                        | Hono tracing／静态访问日志／安全headers，注入runtime挂/api/mijia，未知API404，已知页面SPA；邻接chat/config/services不归本领域。                                                                                |
-| [backend/client.ts](../../apps/backend/src/client.ts) / `createBackendClient`                                                        | 从createApp返回类型生成hc，类型导入不在浏览器加载服务实例。                                                                                                                                                    |
-| [web/lib/api.ts](../../apps/web/src/lib/api.ts) / `RequestError.constructor`、`transportError`                                       | 安全服务器／客户端错误，按signal区分取消与超时、JSON无效与网络。                                                                                                                                               |
-| `createApiClient`／内部`transport`、`execute`                                                                                        | 注入no-store RPC，每次尝试的超时及贯穿重试的caller signal，非2xx验证错误schema，仅按显式policy重试。SSE使用独立长连接入口。                                                                                    |
-| `requestJsonResponse`、`requestJson`、`requestEmpty`                                                                                 | schema解码附Retry-After；取data；只接受204。                                                                                                                                                                   |
-| `describeError`、`requestErrorMessage`                                                                                               | UI安全错误映射与中文code提示。                                                                                                                                                                                 |
-| [backend/package.json](../../apps/backend/package.json)、[web/package.json](../../apps/web/package.json)、[bun.lock](../../bun.lock) | backend锁MQTT.js5.16.0、XState5.33.2；Web eventsource-parser4.1.1；backend client导出生成RPC声明，build:rpc/dev:rpc负责声明产物。不把依赖能力当业务已接入。                                                    |
+| 文件／函数                                                                                                                                          | 范围内责任                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [backend/main.ts](../../apps/backend/src/main.ts) 顶层                                                                                              | 初始化配置、遥测、数据库、密钥和存储，创建唯一 MijiaService 与规格加载接口，再注入 createMijiaHousehold；先 household.start，再后台 service.initialize，最后启动 HTTP。读取配置 URL 和密钥的回调保持动态边界。 |
+| 同文件SIGINT/SIGTERM回调                                                                                                                            | 单次停止HTTP与household.close，排空至shutdown deadline后强停；finally关DB和遥测；远端清理失败仅提示租约兜底。                                                                                                  |
+| [backend/app.ts](../../apps/backend/src/app.ts) / `createApp`                                                                                       | Hono tracing／静态访问日志／安全headers，注入runtime挂/api/mijia，未知API404，已知页面SPA；邻接chat/config/services不归本领域。                                                                                |
+| [backend/client.ts](../../apps/backend/src/client.ts) / `createBackendClient`                                                                       | 从createApp返回类型生成hc，类型导入不在浏览器加载服务实例。                                                                                                                                                    |
+| [api/client.ts](../../apps/web/src/api/client.ts)、[api/errors.ts](../../apps/web/src/api/errors.ts) / `RequestError.constructor`、`transportError` | 安全服务器／客户端错误，按signal区分取消与超时、JSON无效与网络。                                                                                                                                               |
+| `createApiClient`／内部`transport`、`execute`                                                                                                       | 注入no-store RPC，每次尝试的超时及贯穿重试的caller signal，非2xx验证错误schema，仅按显式policy重试。SSE使用独立长连接入口。                                                                                    |
+| `requestJsonResponse`、`requestJson`、`requestEmpty`                                                                                                | schema解码附Retry-After；取data；只接受204。                                                                                                                                                                   |
+| `describeError`、`requestErrorMessage`                                                                                                              | UI安全错误映射与中文code提示。                                                                                                                                                                                 |
+| [backend/package.json](../../apps/backend/package.json)、[web/package.json](../../apps/web/package.json)、[bun.lock](../../bun.lock)                | backend锁MQTT.js5.16.0、XState5.33.2；Web eventsource-parser4.1.1；backend client导出生成RPC声明，build:rpc/dev:rpc负责声明产物。不把依赖能力当业务已接入。                                                    |
 
 ## 10. 浏览器状态与界面
 
-### 10.1 [household-state.ts](../../apps/web/src/features/mijia/household-state.ts)
+### 10.1 应用装配与状态所有权
 
-`householdSnapshotAtom` 保存经共享 schema 验证的快照或 undefined；`householdSyncedAtom` 表示当前流有效同步；`householdUpdatedAtom` 记录最近有效消息时刻；`householdSnapshotReceivedAtom` 只累计完整快照的接收次数，增量与心跳不递增；`householdReconnectAtom` 保存应用级重连闭包。它们是 SSE 接收状态，不发云请求，HTTP 命令响应不写公共快照。
+[StateProvider.tsx](../../apps/web/src/app/StateProvider.tsx) 的 `AppStateEffects` 通过 `subscribeHousehold(appStore)` 启动应用级状态流，卸载时清理；配置保存的观察者保持存活。[store.ts](../../apps/web/src/app/store.ts) 与 [query-client.ts](../../apps/web/src/app/query-client.ts) 创建共用的 Store 和查询缓存。
 
-### 10.2 [subscription.ts](../../apps/web/src/features/mijia/subscription.ts)
+[household/state.ts](../../apps/web/src/modules/household/state.ts) 持有唯一公共快照、同步标记、连接失败标记、最近消息时间、完整快照计数和重连回调。`reconnectHouseholdAtom` 只重连状态订阅，不触发云端设备刷新。[sync.ts](../../apps/web/src/modules/household/sync.ts) 将同步状态分为 `connecting`、`confirming`、`synced`，另派生提示文字和显示可靠性，状态判断不依赖文案。
 
-| 函数／回调            | 责任                                                                                                                                                                  |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `subscribeHousehold`  | 每应用／标签页一个 RPC SSE 生命周期；保存 controller、timer、nextAllowedAt、指数退避和最近消息，注册恢复可见／手动入口，返回完整清理闭包。                            |
-| `connect`             | 先等待 nextAllowedAt，超长等待按浏览器计时上限分段；新 controller 的响应头期限 10 秒、首快照 30 秒，解析 event-stream；旧连接迟到响应不更新重连期限。                 |
-| `scheduleReconnect`   | 将服务器期限与 1—30 秒指数退避＋0—250ms 抖动取较晚值，计算 nextAllowedAt，再由 connect 统一调度。重复等待不会推迟既定期限。                                           |
-| `active`              | 未stopped、controller仍当前且未abort。                                                                                                                                |
-| `resetDeadline`       | 重新设置当前连接的失联timer。                                                                                                                                         |
-| parser `onError`      | abort当前连接，含超缓冲／格式错误；parser buffer上限快照大小上限＋1MiB。                                                                                              |
-| parser `onEvent`      | 单event data≤8MiB、JSON和对应schema验证；只有成功接纳后更新时间／synced并重设45秒无有效消息期限。                                                                     |
-| snapshot分支          | 完整替换公共快照，递增完整快照接收计数，标本连接已取得基线；稳定同步60秒后才把退避重置1秒。                                                                           |
-| state_change分支      | 先用 stateChangeSchema.parse 完整校验整批；要求已有快照、同 epoch，忽略重复／旧 sequence；连续下一版本由 applyChanges 不可变应用并一次写 atom，非法批次或缺口 abort。 |
-| heartbeat分支         | 已有基线、epoch与sequence均匹配，否则重连；不更新业务实体。                                                                                                           |
-| resync_required分支   | 保留retry提示；scope_changed/stopping清旧快照，其余可保留显示；abort转新完整同步。                                                                                    |
-| `connect` finally重试 | 只有仍为当前 controller 才清除当前连接引用、标未同步并 scheduleReconnect；旧 finally 不干扰新连接。                                                                   |
-| `reconnect`           | 摘除并取消旧 controller，标未同步；存在活动连接则安排退避，已在等待时复用同一 deadline；手动和恢复可见均不能提前结束等待。                                            |
-| `visibility`          | 回到可见且未同步／超过45秒无消息时重连。                                                                                                                              |
-| 返回清理闭包          | stopped、abort、清timer、移除visibility、清reconnect atom，标未同步。                                                                                                 |
+### 10.2 家庭状态订阅
 
-短暂断流保留旧显示并标未同步；跨scope、停止或非法跨域消息清快照。没有页面状态轮询，也没有MQTT属性经SSE自动写latest。
+[subscription.ts](../../apps/web/src/modules/household/subscription.ts) 接收应用注入的 Store，使用公共 RPC 客户端读取状态流。`connect` 管理请求、解析器、读流和失联期限；首个事件须为完整快照。增量须匹配作用域与连续序号，心跳须匹配当前版本。作用域变化清除旧快照，普通断线可保留已知内容。`resync_required` 与 HTTP 503 的 `Retry-After` 共同限制最早重连时间。
 
-### 10.3 [api.ts](../../apps/web/src/features/mijia/api.ts)
+`scheduleReconnect` 采用有上限的退避；稳定连接后恢复初始间隔。`reconnect` 取消旧请求并遵守同一重连期限。页面恢复可见时检查同步情况和最近消息时间。清理函数终止请求、清除定时器与可见性监听，卸载重连回调。只有完整快照增加 `householdSnapshotReceivedAtom`，心跳和增量不确认新的作用域。
 
-| 函数                   | 责任                                                                                                                                                                                                                   |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `getLoginMaterial`     | GET当前尝试材料、loginMaterialSchema校验、取消信号；独立于SSE。                                                                                                                                                        |
-| `executeMijiaCommand`  | 选择／刷新必须有已取得的 scope_epoch，缺失时不发请求；刷新默认 directory，支持 specs/all。取消／验证登录须指定尝试 ID；其他账号命令不需要 epoch。验证120s，其余control15s；统一返回commandResultSchema，不取公共快照。 |
-| `reserveMijiaPlayback` | 从appStore取得当前epoch，与revision/device/channel一起POST；15s，schema校验UUID。                                                                                                                                      |
-| `offerMijiaPlayback`   | 复制SDP/revision PUT同ID；70s/attempt、仅网络／超时额外重试一次，依赖后端同SDP幂等。                                                                                                                                   |
-| `releaseMijiaPlayback` | keepalive DELETE，只释放viewer；10s，fire-and-forget错误吞掉，不能据此声称远端成功。                                                                                                                                   |
+### 10.3 HTTP 边界
 
-### 10.4 [state.ts](../../apps/web/src/features/mijia/state.ts)
+| 文件／函数                                                                                         | 职责                                                                                              |
+| -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| [api/client.ts](../../apps/web/src/api/client.ts) / `createApiClient`、`execute`                   | 注入传输，统一取消、期限、结构化错误、响应校验与有限重试；不读取应用状态。                        |
+| 同文件 / `requestJsonResponse`、`requestJson`、`requestEmpty`                                      | 校验 JSON 与 `Retry-After`，或验证 204；同时保留 RPC 与 schema 类型约束。                         |
+| [mijia/api.ts](../../apps/web/src/modules/mijia/api.ts) / `executeMijiaCommand`                    | 转换账号、登录尝试、家庭选择及清单刷新命令；验证和取消须有尝试 ID，家庭选择及清单刷新须有作用域。 |
+| 同文件 / `getSetupHomes`、`getLoginMaterial`                                                       | 读取候选家庭与指定尝试的短期登录材料。                                                            |
+| [playback/api.ts](../../apps/web/src/modules/playback/api.ts) / `reserveMijiaPlayback`             | 接收包含 `scope_epoch`、`revision`、设备和通道的完整目标；不读取全局 Store，也不填充空作用域。    |
+| 同文件 / `offerMijiaPlayback`                                                                      | 复制当前 SDP 参数，允许一次同参数传输失败重试；父级取消信号限制总期限。                           |
+| 同文件 / `releaseMijiaPlayback`                                                                    | 使用 keepalive 释放观看预约，清理失败不改变页面状态。                                             |
+| [device-logs/api.ts](../../apps/web/src/modules/device-logs/api.ts) / `executeCaptureCommand`      | 启动 600 秒采集或停止采集，返回校验后的快照供命令确认使用。                                       |
+| [messages/zh-CN.ts](../../apps/web/src/messages/zh-CN.ts) / `describeError`、`requestErrorMessage` | 将结构化错误转换为界面文案；传输层不反向依赖文案。                                                |
 
-这些atom的read/write回调是对应可执行入口，不是第二套后端状态机。
+### 10.4 账号、命令和领域派生
 
-| atom／函数                                                       | 责任                                                                                                                                                                                   |
-| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `confirmed`                                                      | 当前快照与回执同 epoch 且 sequence 足够，或取得确认标记之后的完整快照；仅心跳时间更新不能满足后一个条件。                                                                              |
-| `deviceSearchAtom`、`deviceFilterAtom`                           | 本页搜索及 all/online/offline/unknown/camera 筛选，不改变后台范围。                                                                                                                    |
-| `scopedDeviceFiltersAtom`、`deviceFiltersAtom`                   | 房间／分类／能力选项与当前 epoch 绑定，运行标识变化后重置；不写公共快照。                                                                                                              |
-| `deviceRecordsAtom`、`deviceFilterOptionsAtom`、`byName`         | 从已提交设备记录派生可选房间、分类和能力，保留未分配房间／未分类，按标签排序；未变设备记录不因其他公共消息重算。                                                                       |
-| `commandStateAtom`、`commandControllerAtom`                      | 当前 HTTP 命令的 pending/requestId/type/安全错误、独立状态确认信息与取消控制器，不保存验证码。                                                                                         |
-| `mediaConfirmationAtom`                                          | 仅退出设置的播放确认条件：具体回执版本或 HTTP 结算后重新订阅取得的完整快照；结果不确定时须取得新完整快照。                                                                             |
-| `mijiaPendingCommandAtom`                                        | HTTP 请求 pending 才返回 type，不把等待 SSE 追上算作命令执行中。                                                                                                                       |
-| `mijiaCommandSyncPendingAtom`                                    | 独立派生已接受命令的回执是否尚未被公共状态确认，不改变命令成功结果，也不占用命令锁。                                                                                                   |
-| `mijiaActionErrorAtom`                                           | 恢复正常不再展示历史failed连接操作；传输错误可由更新消息解除，业务拒绝不无条件抹掉。                                                                                                   |
-| `mijiaStateAtom`                                                 | 从唯一householdSnapshot派生账号／公共扫码／媒体／家庭／设备UI形状；devices.status由sync_status映射，不复制维护一份query cache。                                                        |
-| `mijiaLoginAttemptAtom`、`mijiaAccountAtom`、`mijiaBindingAtom`  | 读取对应的状态片段。                                                                                                                                                                   |
-| `mijiaAccountLabelAtom`                                          | 流未同步先“状态不可用”，否则按authenticated/restoring/restore_error/reauth/idle返回准确标签，缓存账号不硬写已登录。                                                                    |
-| `mijiaAuthenticatedAtom`、`mijiaConnectionPendingAtom`           | 账号authenticated与连接operation running。                                                                                                                                             |
-| `mijiaFetchingAtom`、`mijiaFetchErrorAtom`、`mijiaUpdatedAtAtom` | 从 SSE 同步标记／最近消息派生；已接受命令未确认时提示“操作已接收，正在等待状态同步…”，不算命令失败或轮询请求。                                                                         |
-| `mijiaCanStartPlaybackAtom`                                      | 已认证、媒体 ready、家庭 selected/running，非 logout/selectHome 请求中；存在控制命令确认条件时须满足它，旧快照／旧心跳不足以解除。没有通用 SSE 连接门槛，普通短断不拆已有 viewer。     |
-| `mijiaReliableAtom`                                              | 有可确认的同步快照、非退出，用于可靠展示，不是通用 HTTP 命令门槛。                                                                                                                     |
-| `mijiaDeviceCountAtom`、`devicesAtom`                            | ready才给count，设备取projection；无值复用emptyDevices。                                                                                                                               |
-| `filteredDevicesAtom`                                            | 组合 availability、camera、房间、category 和能力标签筛选；名称／alias／model 统一搜索，所有条件只作用于本页显示。                                                                      |
-| `performMijiaAtom`                                               | HTTP 请求串行，取消／重启可打断 verify。保存 requestId 并 abort 旧请求，按命令传递已知 epoch 或尝试 ID；不要求 SSE 已同步。HTTP 结束即结算当前命令，另存状态确认信息，不把响应写快照。 |
-| `performMijiaAtom.current`                                       | requestId是否仍当前，挡迟到回包。                                                                                                                                                      |
-| `performMijiaAtom.confirmationFor`                               | 先检查当前快照是否已覆盖回执；否则经统一入口重新订阅，并记录完整快照计数以辨认 HTTP 结算后的当前状态。没有独立五秒命令等待器；确认不表示后台清单刷新已完成。                           |
-| `mijiaCanStartLoginAutomaticallyAtom`                            | 同步且无命令／startLogin失败，账号idle/reauth、无待清理媒体，扫码idle/expired才允许。                                                                                                  |
-| `startMijiaLoginAutomaticallyAtom`                               | 派发前再次检查共享状态，防多组件／StrictMode重复创建。                                                                                                                                 |
-| `refreshMijiaAtom`                                               | 调householdReconnectAtom，只重建状态订阅，不触发设备清单云刷新。                                                                                                                       |
-| `mijiaActiveLoginIdAtom`                                         | 仅活动扫码返回非null ID。                                                                                                                                                              |
-| `mijiaConnectionBusyAtom`、`mijiaCanRetryConnectionAtom`         | 统一 running/restoring/installing 忙态及可重试条件；本地 HTTP pending 阻止重复请求，断流后的陈旧服务端忙态不阻止手动重试。                                                             |
+| 文件／入口                                                                                                                               | 责任                                                                                                                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [mijia/account.ts](../../apps/web/src/modules/mijia/account.ts)                                                                          | 从公共快照直接读取账号、扫码尝试、授权状态与活跃尝试 ID。                                                                                                     |
+| [mijia/commands.ts](../../apps/web/src/modules/mijia/commands.ts) / `performMijiaAtom`                                                   | 持有唯一命令锁、请求序号和取消控制器；允许取消／重新扫码打断验证码等待，旧回调不能覆盖新请求。不保存验证码，不写公共快照。                                    |
+| 同文件 / 命令反馈与作用域确认                                                                                                            | HTTP 结算释放请求锁，独立等待回执版本或随后新建订阅的完整快照；退出和切换家庭期间禁止新播放，结果不确定时等待完整快照。业务错误保留，传输错误可随新状态恢复。 |
+| [household/confirmation.ts](../../apps/web/src/modules/household/confirmation.ts) / `isHouseholdConfirmed`                               | 纯版本比较：同作用域序号达到回执，或收到指定基线之后的完整快照。                                                                                              |
+| [mijia/login.ts](../../apps/web/src/modules/mijia/login.ts)                                                                              | 按尝试 ID 与材料版本查询登录材料，核对后生成登录展示；派生自动登录资格并在派发前再次检查。读取共享命令状态防止 StrictMode 重复取码。                          |
+| [mijia/use-login.ts](../../apps/web/src/modules/mijia/use-login.ts)                                                                      | 提供开始、取消、验证、退出和重新读取入口；验证码只存在于表单与请求执行期间。                                                                                  |
+| [mijia/connection.ts](../../apps/web/src/modules/mijia/connection.ts)                                                                    | 组合当前命令反馈与已同步的账号／媒体状态，统一连接忙态和重试资格。                                                                                            |
+| [devices/state.ts](../../apps/web/src/modules/devices/state.ts)                                                                          | 从快照派生设备数组、同步状态、设备与摄像头数量、能力失败数；不复制公共状态。                                                                                  |
+| [playback/access.ts](../../apps/web/src/modules/playback/access.ts)                                                                      | 组合授权、家庭运行状态、媒体绑定和命令作用域确认，派生播放资格；短暂 SSE 断流不单独拆除观看。                                                                 |
+| [household/selection.ts](../../apps/web/src/modules/household/selection.ts)                                                              | 按作用域启用家庭候选查询，编辑结束或作用域变化后停止使用旧编辑选择。                                                                                          |
+| [connections/state.ts](../../apps/web/src/modules/connections/state.ts)、[queries.ts](../../apps/web/src/modules/connections/queries.ts) | 服务配置、健康检查、连接查询、保存与连接提示；所有本机请求使用 `networkMode: "always"`。                                                                      |
 
-### 10.5 [use-login.ts](../../apps/web/src/features/mijia/use-login.ts)、[use-mijia.ts](../../apps/web/src/features/mijia/use-mijia.ts)
+### 10.5 播放资源
 
-`useLogin` 读取公共扫码状态，以尝试ID＋material_version作为TanStack Query key；仅pending/security_required请求材料，staleTime=Infinity、gcTime=0、不自动重试／焦点重取。`queryFn`传取消signal；显示前再核对id和版本，旧材料不覆盖新尝试。聚合命令／材料／账号／清理错误，返回以下操作：`refresh`在材料失败时refetch并重连状态流；`startLogin`、`cancelLogin`、`verifyLogin`、`logout`分别派发共享命令。验证码只在请求执行中传递。
+[use-mijia-playback.ts](../../apps/web/src/modules/playback/use-mijia-playback.ts) 将显式家庭作用域和播放目标传入 [PlaybackSession](../../apps/web/src/modules/playback/session.ts)，订阅快照并在挂载期间注册播放阶段。媒体对象始终由该会话持有，只有阶段汇总进入共享状态。
 
-`useMijia` 组合state/reliable/canPlay/confirming/fetching/errors/action/perform/refresh；不在页面挂载时启动轮询或云发现。实际scope／媒体revision变化负责撤销旧观看。
+`gatherIce` 等待候选收集完成、取消或期限；`connect` 并行取得预约和准备本地 offer，再交换 SDP、应用回答和启动画面检查。总协商期限为 85 秒。首帧和持续画面由视频帧回调确认，连接协商成功不等于已经出帧。
 
-### 10.6 [use-mijia-playback.ts](../../apps/web/src/features/mijia/use-mijia-playback.ts)
+`updateVisibility` 维护实际可见性；预热范围内但尚未进入视口时不计算可见画面期限。`onFrame` 更新出帧状态和停帧期限，watchdog 仅在可见时判断超时。`stop` 幂等清理控制器、定时器、监听、观察器、帧回调、浏览器连接、媒体轨道和观看预约；已停止后才收到预约 ID，也立即释放。
 
-每revision/device/channel的effect拥有独立peer、MediaStream、viewer ID、controller、frame callback、visibility observer和timer。
+[estimates.ts](../../apps/web/src/modules/playback/estimates.ts) 保存纯样本规则与剩余时间估算；[history.ts](../../apps/web/src/modules/playback/history.ts) 保存有界本地历史；[environment.ts](../../apps/web/src/modules/playback/environment.ts) 观察浏览器网络环境。历史存储失败不影响播放。样本处理不引入额外后端进度请求。
 
-| 函数／回调                                | 责任                                                                                                                                      |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `gatherIce`                               | 已complete直接返回，否则等状态变化／abort／10秒期限。                                                                                     |
-| `gatherIce.finish`、`onChange`、`onAbort` | 清timer/监听；完成resolve，取消reject AbortError，期限reject ice_gathering_timeout。                                                      |
-| `useMijiaPlayback`                        | 暴露videoRef/status，effect依赖变化清旧重建。                                                                                             |
-| `stop`                                    | 幂等stopped、abort、清全部timer/observer/frame回调，关peer/轨道，清video并DELETE已知viewer。                                              |
-| `fail`                                    | 保存错误展示再stop。                                                                                                                      |
-| `waitForFrame`                            | 首帧20秒，已经出帧后的恢复可见／停帧8秒，设waiting。                                                                                      |
-| `updateVisibility`                        | 文档可见且在viewport才检测；隐藏停画面deadline但保留连接；恢复可见重新等帧。                                                              |
-| `onFrame`                                 | 实际可见呈现帧才playing，推进8秒deadline并注册下一帧回调。                                                                                |
-| `connect`                                 | 检查WebRTC和帧API；85秒总协商期限，recvonly video、空ICE server；并行预约ID与本地offer/ICE，PUT SDP、setRemoteDescription，启动watchdog。 |
-| IntersectionObserver回调                  | 维护inViewport并更新可见性。                                                                                                              |
-| peer track／track ended／play失败回调     | 绑定MediaStream播放；轨道结束／播放失败停止。                                                                                             |
-| connectionstatechange回调                 | failed即报错释放。                                                                                                                        |
-| 预约Promise回调                           | stopped后才收到ID也立即释放；否则保存ID，让DELETE可先于SDP响应。                                                                          |
-| watchdog回调                              | 只在可见时检查首帧／连续停帧，过期fail；隐藏标签页不误判源断流。                                                                          |
+### 10.6 页面与复用边界
 
-### 10.7 所有界面文件
-
-| 文件／函数                                                                                                         | 职责与重要回调                                                                                                                                                                      |
-| ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [AccountAvatar.tsx](../../apps/web/src/features/mijia/AccountAvatar.tsx) / `AccountAvatar`                         | authenticated profile头像、no-referrer、图标fallback，不直取供应商。                                                                                                                |
-| [AccountDialog.tsx](../../apps/web/src/features/mijia/AccountDialog.tsx) / `AccountDialog`                         | 账号名、共享accountLabel、设备数、退出与反馈。                                                                                                                                      |
-| [AccountGate.tsx](../../apps/web/src/features/mijia/AccountGate.tsx) / `AccountLoading`、`AccountGate`             | 无状态占位，未登录进入扫码；同账号恢复中/恢复错误且有已保存的设备清单时可显示 App 缓存；effect跟踪扫码ID决定根路径去settings或devices，并管理弹窗/title。展示缓存不授予读取或播放。 |
-| [LoginFlow.tsx](../../apps/web/src/features/mijia/LoginFlow.tsx) / `LoginFlow`                                     | 自动登录 effect 使用同步状态派生的共享条件；恢复／QR／验证码／取消／刷新／清理重试。首次状态不可用时提供显式登录和清除授权，已知尝试可在断流时取消；材料实际存在才显示。            |
-| [MijiaVerification.tsx](../../apps/web/src/features/mijia/MijiaVerification.tsx) / `MijiaVerification`             | 小米验证页链接、4—10数字表单；submit检查disabled、onVerify、reset。                                                                                                                 |
-| [HomeSelection.tsx](../../apps/web/src/features/mijia/HomeSelection.tsx) / `HomeSelection`                         | 未绑定时按需读取候选并首次保存；已有绑定只显示名称，提供清单和规格刷新、容量及缓存降级提示。                                                                                        |
-| [MijiaView.tsx](../../apps/web/src/features/mijia/MijiaView.tsx) / `MijiaView`                                     | 设备／摄像头工具条、初始化／缓存提示、错误与清单刷新；已有 scope 的刷新和手动连接重试不被 SSE 断流单独禁用。CameraWall 以 scope_epoch 为 key，运行失效清观看偏好。                  |
-| [DeviceGrid.tsx](../../apps/web/src/features/mijia/DeviceGrid.tsx) / `DeviceGrid`                                  | memo 列表、名称／别名／型号搜索，在线／离线／未知／摄像头及房间／分类／能力联合筛选；使用 availability 展示，流不可靠时待确认；不执行采集或修改家庭。                               |
-| [CameraWall.tsx](../../apps/web/src/features/mijia/CameraWall.tsx) / `CameraTile`                                  | 单镜头标题、ready时播放器、否则等待；仍可显示设备清单online=false的提示，但该提示不控制资格。                                                                                       |
-| 同文件 / `CameraWall`、`changeEnabled`                                                                             | 名称自然排序，所有camera.channels显示；paused Set复制增删did:channel，跨媒体revision保留、随scope key重建。实际是否可播放由ready和媒体结果决定。                                    |
-| [MijiaPlayer.tsx](../../apps/web/src/features/mijia/MijiaPlayer.tsx) / `CameraPlayback`                            | hook与video绑定、真实帧playing与错误/hidden/waiting展示。                                                                                                                           |
-| 同文件 / `MijiaPlayer`                                                                                             | enabled开关与attempt重试key；重新播放先卸载旧hook并释放viewer。                                                                                                                     |
-| [RetryConnectionButton.tsx](../../apps/web/src/features/mijia/RetryConnectionButton.tsx) / `RetryConnectionButton` | 共享busy/可重试条件，派发retryConnection。                                                                                                                                          |
-| [mijia.css](../../apps/web/src/features/mijia/mijia.css)                                                           | 设备表／筛选、媒体画布／占位、扫码／验证、账号、家庭选择及移动端样式。选择器存在不表示相应运行状态已启用；无JS函数。                                                                |
-
-### 10.8 应用生命周期与页面
-
-| 文件／函数                                                                                           | 范围内责任                                                                                 |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| [components/StateProvider.tsx](../../apps/web/src/components/StateProvider.tsx) / `MutationLifetime` | useEffect(subscribeHousehold,[])创建应用级状态流，effect清理关闭；配置保存订阅另保持独立。 |
-| 同文件 / `StateProvider`                                                                             | 注入同appStore与QueryClientProvider，不按页面重复连接。                                    |
-| [App.tsx](../../apps/web/src/App.tsx) / `App`                                                        | 页面壳、账号入口、共享accountLabel、路由title effect和导航开关；不直接持有SSE。            |
-| [pages/DevicesPage.tsx](../../apps/web/src/pages/DevicesPage.tsx) / `DevicesPage`                    | MijiaView devices装配。                                                                    |
-| [pages/CamerasPage.tsx](../../apps/web/src/pages/CamerasPage.tsx) / `CamerasPage`                    | MijiaView cameras装配。                                                                    |
-| [pages/LoginPage.tsx](../../apps/web/src/pages/LoginPage.tsx) / `LoginPage`                          | 登录页壳与LoginFlow。                                                                      |
-| [pages/SettingsPage.tsx](../../apps/web/src/pages/SettingsPage.tsx) / `SettingsPage`                 | 家庭选择、服务配置入口、媒体状态与统一重试；“连接就绪”不表示已经收到视频帧。               |
+| 文件／组件                                                                                                                                                                                                                                        | 职责                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [AccountGate.tsx](../../apps/web/src/pages/workspace/AccountGate.tsx)                                                                                                                                                                             | 首个账号快照、登录界面与恢复缓存门控；记录本页扫码尝试，决定根路径登录后进入设置还是设备页，保留深链。                                                  |
+| [WorkspaceFrame.tsx](../../apps/web/src/pages/workspace/WorkspaceFrame.tsx)、[WorkspaceNavigation.tsx](../../apps/web/src/pages/workspace/WorkspaceNavigation.tsx)、[WorkspaceHeader.tsx](../../apps/web/src/pages/workspace/WorkspaceHeader.tsx) | 加载态与正式态共用工作台几何布局、导航和页头；加载态导航不可激活。                                                                                      |
+| [workspace/index.tsx](../../apps/web/src/pages/workspace/index.tsx)、[activity.ts](../../apps/web/src/pages/workspace/activity.ts)                                                                                                                | 装配路由内容、账号弹窗和页头插槽，派生当前页面活动提示。                                                                                                |
+| [HouseholdAccess.tsx](../../apps/web/src/modules/household/HouseholdAccess.tsx)                                                                                                                                                                   | 家庭初始化、访问与同步提示；通过 children 接收内容，不识别具体页面。                                                                                    |
+| [devices/index.tsx](../../apps/web/src/pages/devices/index.tsx)、[DeviceRecovery.tsx](../../apps/web/src/pages/devices/DeviceRecovery.tsx)                                                                                                        | 组合数量、清单错误、能力错误及重试；设备规则决定刷新清单与能力或只重试能力。                                                                            |
+| [DeviceBrowser.tsx](../../apps/web/src/pages/devices/DeviceBrowser.tsx)、[filters.ts](../../apps/web/src/pages/devices/filters.ts)                                                                                                                | 页面搜索和筛选、虚拟列表、焦点与行动画；运行时 availability 决定在线显示，同步不可靠时显示待确认。                                                      |
+| [cameras/index.tsx](../../apps/web/src/pages/cameras/index.tsx)、[CameraWall.tsx](../../apps/web/src/pages/cameras/CameraWall.tsx)                                                                                                                | 页面提供明确作用域和媒体版本；按名称排序全部镜头，在视口上下 240 像素范围内挂载播放。暂停选择在媒体版本与可见性变化时保留，家庭作用域变化或离页后清空。 |
+| [MijiaPlayer.tsx](../../apps/web/src/pages/cameras/MijiaPlayer.tsx)                                                                                                                                                                               | enabled 表示播放意愿，active 表示可见性准入；两者满足时挂载会话，attempt key 触发单路重新播放。                                                         |
+| [HomeSelection.tsx](../../apps/web/src/pages/settings/HomeSelection.tsx)                                                                                                                                                                          | 首次绑定、重新选择家庭及影响确认；按需读取所属领域状态。                                                                                                |
+| [device-logs/state.ts](../../apps/web/src/modules/device-logs/state.ts)、[subscription.ts](../../apps/web/src/modules/device-logs/subscription.ts)                                                                                                | 应用日志快照与增量，协调采集命令确认；页内订阅断线自动重连，离页不停止后台采集。                                                                        |
+| [log-data.ts](../../apps/web/src/pages/device-logs/log-data.ts)、[use-device-selection.ts](../../apps/web/src/pages/device-logs/use-device-selection.ts)、[use-log-comparison.ts](../../apps/web/src/pages/device-logs/use-log-comparison.ts)     | 日志展示的筛选、最近值、时间分组与设备选择；纯数据转换不依赖 React，选择状态属于页面。                                                                  |
+| [Notice.tsx](../../apps/web/src/components/Notice.tsx)、[RequestFeedback.tsx](../../apps/web/src/components/RequestFeedback.tsx)                                                                                                                  | 统一提示布局与语义，区分同步进展和操作失败；不读取业务状态。                                                                                            |
 
 ## 11. 关键调用链与失败范围
 
@@ -928,7 +870,7 @@ homeAgentSession保存私有cloud alias、id、region、原子期限、camera/re
 
 ### 11.2 首次绑定与设备清单错误
 
-首次选择携带 epoch，runtime 等待绑定可靠保存后提交 bound，随后异步初始化设备清单。保存失败可重新选择；保存后设备清单同步失败只重新同步设备清单。正常运行拒绝换家，退出及权限丢失仍保留绑定。退出时凭据删除失败且账号仍有效，runtime 立即重新获取云端完整设备清单，通过完整性和当前运行校验后恢复运行。已确认的云端清单不因缓存写入失败失去运行资格；新设备和定义变化仍生效，后续刷新重试缓存。规格完整资料留在后端，摘要经公共状态发布。
+首次选择携带 epoch，runtime 等待绑定可靠保存后提交 bound，随后异步初始化设备清单。保存失败可重新选择；保存后设备清单同步失败只重新同步设备清单。设置页允许重新绑定同账号其他家庭；可靠保存后更换运行标识、取消旧设备访问与媒体资源，再初始化新家庭。退出及权限丢失仍保留绑定。退出时凭据删除失败且账号仍有效，runtime 立即重新获取云端完整设备清单，通过完整性和当前运行校验后恢复运行。已确认的云端清单不因缓存写入失败失去运行资格；新设备和定义变化仍生效，后续刷新重试缓存。规格完整资料留在后端，摘要经公共状态发布。
 
 ### 11.3 规格与属性
 

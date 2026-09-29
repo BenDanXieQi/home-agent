@@ -16,6 +16,10 @@ Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连�
 
 ## 对话
 
+切换家庭时 backend 调用本机访问范围内的 `POST /api/household-reset`，先清空 `agent_state.checkpoints`、`checkpoint_blobs` 和 `checkpoint_writes`，保留迁移记录。运行账号需要这三张表的 `TRUNCATE` 权限。Agent 有进行中的聊天或房间分析时返回 409；清理到切换完成之间暂停新任务，后台异常断开时暂停最多一分钟，尚未结束的数据库清理仍阻止新任务。该保护与聊天并发约束一样限于单 Agent 进程，同一数据库不能同时由多个 Agent 实例写入。
+
+两个服务的数据库清理不是一个事务，后续绑定保存失败不会恢复已经删除的对话。清理范围、保留项与操作入口见[切换家庭与清理数据](../../docs/household.md#切换家庭与清理数据)。
+
 向 backend 的 `POST /api/chat` 发送：
 
 ```json

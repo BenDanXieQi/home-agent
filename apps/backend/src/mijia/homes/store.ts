@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "../../db";
-import { mijiaHomeSelections } from "../../db/schema";
+import { mijiaHomeSelections, householdDirectories } from "../../db/schema";
 import { householdLimits } from "../../household/config";
 import { MijiaError } from "../errors";
 import {
@@ -32,7 +32,12 @@ export function createHomeSelectionStore(db: Database) {
         throw new MijiaError("home_storage");
       }
     },
-    async write(accountKey: string, homeId: string, assertCurrent: () => void) {
+    async write(
+      accountKey: string,
+      homeId: string,
+      assertCurrent: () => void,
+      previousHomeId: string | null = null,
+    ) {
       try {
         await write(
           bindingLockKey,
@@ -43,12 +48,15 @@ export function createHomeSelectionStore(db: Database) {
             const row = rows[0];
             if (
               rows.length > 1 ||
-              (row && (row.accountKey !== accountKey || row.homeId !== homeId))
+              (row && row.accountKey !== accountKey) ||
+              (row?.homeId !== homeId &&
+                (row?.homeId ?? null) !== previousHomeId)
             )
               throw new MijiaError("binding_conflict");
-            if (row) return true;
+            if (row?.homeId === homeId) return true;
             const data = { accountKey, homeId, updatedAt: new Date() };
             beforeWrite();
+            if (previousHomeId !== null) await tx.delete(householdDirectories);
             await tx
               .insert(mijiaHomeSelections)
               .values(data)

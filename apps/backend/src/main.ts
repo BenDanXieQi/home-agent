@@ -1,3 +1,4 @@
+import { createAgentHouseholdReset } from "./household/reset-agent";
 import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
@@ -40,6 +41,9 @@ const credentialStore = database
 const mijiaService = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
+  resetHomeData: createAgentHouseholdReset(
+    async () => (await connectionStore.read()).services.agent.url,
+  ),
   homeSelectionStore: database
     ? createHomeSelectionStore(database.db)
     : undefined,
@@ -68,7 +72,7 @@ const deviceLogs = new DevicePushLogs(
   resolvePath(import.meta.dir, "../../..", "data/mqtt-logs"),
   mijiaService,
 );
-void mijiaService.initialize().catch(() => {
+mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
 const shutdown = new AbortController();
@@ -104,7 +108,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
     roomAnalysis.close();
-    void (async () => {
+    (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const drained = await Promise.race([

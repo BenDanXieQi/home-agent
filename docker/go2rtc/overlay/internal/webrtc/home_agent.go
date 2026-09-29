@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
@@ -13,7 +14,7 @@ import (
 
 // HomeAgentOffer has a read-only media contract and returns the owned connection
 // so the caller can explicitly release it. Neither SDP nor source URLs are logged.
-func HomeAgentOffer(ctx context.Context, stream *streams.Stream, offer string, cleanup func(*webrtc.Conn)) (string, *webrtc.Conn, error) {
+func HomeAgentOffer(ctx context.Context, stream *streams.Stream, offer string, cleanup func(*webrtc.Conn), observe func(string, time.Duration, error)) (string, *webrtc.Conn, error) {
 	if ctx.Err() != nil {
 		return "", nil, errors.New("signaling_failed")
 	}
@@ -58,14 +59,22 @@ func HomeAgentOffer(ctx context.Context, stream *streams.Stream, offer string, c
 	if ctx.Err() != nil {
 		return "", nil, errors.New("signaling_failed")
 	}
-	if err = stream.AddConsumer(conn); err != nil {
+	started := time.Now()
+	err = stream.AddConsumer(conn)
+	observe("source", time.Since(started), err)
+	if err != nil {
 		if strings.Contains(err.Error(), "codecs not matched") {
 			return "", nil, errors.New("unsupported_codec")
 		}
 		return "", nil, errors.New("camera_connection_failed")
 	}
+	started = time.Now()
 	answer, err := conn.HomeAgentCompleteAnswer(ctx, GetCandidates(), FilterCandidate)
-	if err != nil || ctx.Err() != nil {
+	if err == nil {
+		err = ctx.Err()
+	}
+	observe("answer", time.Since(started), err)
+	if err != nil {
 		return "", nil, errors.New("signaling_failed")
 	}
 	success = true
