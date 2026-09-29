@@ -1,8 +1,8 @@
 # Agent
 
-当前为独立运行的模型对话服务，提供流式响应、会话持久化和执行追踪，通过 backend 转发请求。尚未接入家庭状态、语义事件或设备工具，也未实现长期记忆；模型不能据此声称知道家中情况或已执行设备操作。
+当前为本项目自有、独立运行的第一方模型对话服务，提供流式响应、会话持久化和执行追踪，通过 backend 转发请求。尚未接入家庭状态、摄像头候选证据、音视频理解、语义事件或设备工具，也未实现家庭后台任务的统一准入与调用预算、长期记忆；模型不能据此声称知道家中情况或已执行设备操作。backend 的本地检测不依赖本服务在线。
 
-家庭模型与 Agent 的职责边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备级接入见 [Step 6 计划](../../docs/plans/household-steps/06-agent.md)。这些规划不属于当前服务已实现能力。下述 checkpoint 保存对话与执行状态，不承担 backend 家庭状态或跨任务长期记忆的职责。
+家庭任务尚未实现。其状态归属和即时响应边界见[家庭模型](../../docs/plans/household-model.md)，设备事件、媒体候选、定期情景综合及其工具、预算与交付顺序统一见[第一方 Agent 协作计划](../../docs/plans/household-automation.md)。下述 checkpoint 保存对话与执行状态，不代替 backend 家庭情景或跨任务长期记忆，保存成功也不表示判断已接纳或设备动作已执行。
 
 Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连接 PostgreSQL。默认复用根目录 `DATABASE_URL`；可用 `AGENT_DATABASE_URL` 指定独立账号或数据库。状态表位于固定的 `agent_state` schema，使用普通 PostgreSQL 表，由 checkpointer 管理，不属于 backend 的 Drizzle schema，也不转换为 TimescaleDB hypertable。
 

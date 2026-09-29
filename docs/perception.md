@@ -25,7 +25,9 @@ backend 的 `build` 同时构建计算子进程入口与图片命令，并生成
 
 ## 摄像头持续检测
 
-当前摄像头检测仅调用本地 ONNX 模型，不向 LLM 发送帧或视频，也不产生 LLM token 用量。音视频前置筛选和语义模型调用尚未接入，后续边界见[摄像头感知与推理接入计划](plans/miloco-perception-alignment.md)。
+当前摄像头检测仅调用本地 ONNX 模型，不向 LLM 发送帧或视频，也不产生 LLM token 用量。音视频前置筛选和语义模型调用尚未接入，后续边界见[摄像头感知与推理接入计划](plans/media-perception.md)。
+
+当前检测不依赖 Agent 进程、模型凭据或 checkpoint 数据库。Agent 服务不可达不影响检测启停与查询；仍需满足摄像头授权、backend 数据库、go2rtc、FFmpeg 与检测模型等实际依赖。单独运行见[本地运行](running.md#单独启动与检查)。现有查询/订阅只提供检测观测与健康信息，不提供片段窗口、候选媒体或 Agent 判断。
 
 启动前在 backend 宿主安装 FFmpeg（macOS 可用 `brew install ffmpeg`，Linux 使用系统软件包）；`PERCEPTION_FFMPEG_PATH` 默认 `ffmpeg`，可指定宿主可执行文件。只在 go2rtc 容器安装 FFmpeg 不满足此要求。`bun run setup` 将禁用示例复制为 Git 忽略的 `config/perception.json`，不覆盖已有配置。缺文件或 `sources: []` 表示禁用，不自动打开全部摄像头。
 
@@ -80,7 +82,7 @@ P1 摄像头持续检测已完成，已通过当前 macOS arm64 双摄范围的�
 
 macOS arm64 已通过正式后台入口读取真实双摄并持续检测，源码和构建入口共享相同资源布局。针对 P1 的检查覆盖任意分块拼帧、最新帧所有权、轮转调度、过期通知、旧运行/乱序拒收、合成 H264/H265 媒体、单路断流恢复、持续过载、反复启停、SSE 连接上限、推理硬期限后的整组回收，以及初始化失败与显式重试。真实双摄另已核对解码器单路终止后恢复、计算任务超时后重建、慢订阅及预览共存。合成媒体故障不代表已覆盖所有真实设备和固件故障。
 
-长期运行、其他平台和更大规模负载属于尚未覆盖的部署验证范围，不作为 P1 未完成项；完成条件与范围见[实施计划](plans/miloco-perception-alignment.md#6-p1-交付与验收)。原始验收记录放在 Git 忽略的 `data/perception/`。当前不提供跟踪、音频分析、语义推理、人物身份、历史回放或媒体保存。
+长期运行、其他平台和更大规模负载属于尚未覆盖的部署验证范围，不作为 P1 未完成项。原始验收记录放在 Git 忽略的 `data/perception/`。当前不提供跟踪、音频分析、语义推理、人物身份、历史回放或媒体保存。
 
 ## 模型与参考
 
@@ -192,14 +194,6 @@ Piscina 负责线程和任务队列；子进程负责隔离原生崩溃。父子
 - [Node Worker 文档](https://nodejs.org/api/worker_threads.html)说明 `terminate()` 可在任意执行点停止线程；它不是 ONNX 推理的协作取消接口。
 - [官方子进程接口](https://nodejs.org/api/child_process.html)提供独立进程和 IPC。发送终止信号不等于进程已经退出，资源回收以 `exit` 为准。
 - [Bun IPC](https://bun.com/docs/runtime/child-process)支持父子 Bun 进程的高级序列化。本实现显式使用相同可执行文件，保持像素类型；进程传输会复制数据，应计入后续视频吞吐评估。
-
-## MiLoCo 的处理方式
-
-参考提交的 `perception/inference_worker.py` 使用 Python 独立线程和 asyncio 事件循环，`runner.stop()` 调用 `shutdown(wait=False)`。它请求停止循环，不强制中断正在执行的 ONNX 调用；旧线程等原生调用自然结束，新一代可以先启动。因此没有这里强制终止 JavaScript worker、销毁 N-API 环境的同一触发路径，但不能据此认为原生推理不会崩溃。
-
-其源码明确允许旧代尚未退出就启动新代。由此可推断：原生调用长时间不返回时，旧代资源可能继续占用；这是取消和回收保证的差异，并非本项目已实测出 MiLoCo 泄漏。当前实现要求实际计算子进程退出后才重建。
-
-MiLoCo 的[官方发布记录](https://github.com/XiaoMi/xiaomi-miloco/releases)记载过推理线程泄漏、CoreML 临时模型文件泄漏，以及通过升级 ONNX Runtime 1.27 修复 KleidiAI 卷积工作区内存泄漏；[2026.9.11 发布说明](https://github.com/XiaoMi/xiaomi-miloco/releases/tag/v2026.9.11)还记录过摄像头原生库导致进程 SIGSEGV（非法内存访问）的故障。这些证明原生资源和崩溃问题确实需要处理，但不是上述 N-API 故障的相同复现。上述结论来自源码和发布记录，未对 MiLoCo 运行故障注入。
 
 ## 针对性验证入口
 
