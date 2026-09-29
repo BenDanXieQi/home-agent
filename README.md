@@ -14,11 +14,13 @@ Home Agent 是一个通过家庭情景推断驱动全屋自动化的 Agent 项�
 
 1. **逐步建立家庭资料。** 家庭成员与宠物、房间布局、设备位置和覆盖范围，既可以由用户提供，也可以由 AI 结合设备清单、日常观察和交互逐步识别、整理与更新，减少手动配置；拿不准的信息再向用户询问。
 2. **从观察推断情景，并持续跟进。** 结合多种信号及事件顺序，推断设备没有直接上报的活动与房间状态。每个人、宠物和空间分别保留当前判断与依据；后续观察用于确认、修正或结束相关判断，缺失的消息不能直接解释为人员离开或活动结束。
-3. **让 Agent 根据全屋情景决定动作。** 音视频先经本地画面变化与声音筛选，通过筛选及调用预算准入的片段才进入感知层 LLM，不逐帧或无条件逐窗调用大模型。基础观测和语义结果进入家庭情景上下文。独立 Agent 消费这些信息，结合相关成员、相邻空间和有效要求决定灯光、空调、音箱等操作，再通过 backend 设备命令通路执行；执行结果成为后续判断的输入。
+3. **第一方 Agent 异步理解，backend 及时响应。** backend 负责本地小模型、画面变化与声音筛选，把候选证据和有限期媒体引用交给项目自有 Agent。Agent 在统一 harness（任务、上下文、工具与模型调用的运行框架）中结合画面、声音、设备状态和用户要求决定是否进一步分析、形成什么判断及是否请求设备动作；不逐帧或无条件逐窗调用大模型。
 
-家庭状态由 backend 维护；感知模块与独立 Agent 都可生产语义候选，Agent 同时负责上下文消费、任务推理与动作决策。长期记忆另行提炼偏好与经验，不代替当前状态。
+第一方 Agent 既是 backend 家庭情景上下文的消费者，也是部分情景判断的产出者：读取证据与已有判断，按任务需要生成带依据的新判断，交回 backend 接纳后成为可继续消费的上下文。家庭状态、证据与设备执行由 backend 维护，LLM 语义理解、任务推理及需要推理的新决策归 Agent；规划中已明确条件的即时响应由 backend 按已启用策略和提前维护的情景执行，不等待模型；开放语义事件则在 Agent 识别后进入同一处置通路。Agent 的模型、提示词、工具与上下文策略共同演进。长期记忆另行提炼偏好与经验，不代替当前状态。
 
-详细设计与实施边界见[家庭语义目标与领域模型](docs/plans/household-model.md)。
+详细设计与实施边界见[家庭语义目标与领域模型](docs/plans/household-model.md)。下一阶段按[第一方 Agent 协作计划](docs/plans/household-automation.md)交付：持续维护身份、位置和活动供任务直接读取；自然语言需求保存为长期任务，backend 自有规则运行器消费已有情景。条件判断与动作决策均优先使用普通代码和已有有效情景，只有仍需语义理解或开放推理的部分才调用第一方 Agent，最终共用动作执行与结果管理；按位置选音箱等可明确描述的步骤不调用 LLM。设备事件、媒体候选和定期情景综合共用第一方 Agent 执行设施；观察请求用于提供证据，不代替长期任务。上述接口、人物位置与执行能力均待实现。
+
+分阶段交付时可暂缓 Agent 家庭任务：先完成 backend 的跟踪、音频与前置筛选，停在可查询的候选证据和有限期媒体，不调用 LLM。Agent 接入和判断提交属于后续 P5/P6；具体依赖与无 Agent 验收见[摄像头计划](docs/plans/media-perception.md#agent-暂缓时的交付边界)。
 
 ## 当前能力
 
@@ -32,14 +34,16 @@ backend 还提供[本地图片检测与摄像头持续检测](docs/perception.md
 
 技术栈：Bun、TypeScript、React、Hono、LangGraph、PostgreSQL 和 go2rtc。
 
-| 模块           | 已实现职责                                                        |
-| -------------- | ----------------------------------------------------------------- |
-| `apps/backend` | 米家接入、授权与设备清单、摄像头播放管理、聊天转发及 Web 静态托管 |
-| `apps/agent`   | 独立模型调用服务、流式对话、会话执行记录（checkpoint）与调用追踪  |
-| `apps/web`     | 登录、设备列表、摄像头预览和服务设置                              |
-| go2rtc         | 摄像头取流与浏览器 WebRTC 媒体连接                                |
+| 模块           | 已实现职责                                                                       |
+| -------------- | -------------------------------------------------------------------------------- |
+| `apps/backend` | 米家接入、授权与设备清单、摄像头播放、本地图片/持续检测、聊天转发及 Web 静态托管 |
+| `apps/agent`   | 独立模型调用服务、流式对话、会话执行记录（checkpoint）与调用追踪                 |
+| `apps/web`     | 登录、设备列表、摄像头预览、设备日志和服务设置                                   |
+| go2rtc         | 摄像头取流与浏览器 WebRTC 媒体连接                                               |
 
-backend 与 Agent 运行在独立进程中，通过 HTTP 通信，由项目启动命令统一管理。
+backend 与项目自有的第一方 Agent 运行在独立进程中，通过 HTTP 通信，由项目启动命令统一管理。
+
+当前本地检测不依赖 Agent 进程或模型凭据；只运行 backend 与 Web 的方式见[单独启动与检查](docs/running.md#单独启动与检查)。
 
 ## 快速开始
 
@@ -64,14 +68,8 @@ bun run dev
 
 ## 文档
 
-- [家庭语义目标与领域模型（规划）](docs/plans/household-model.md)：项目目标、backend 与 Agent 边界、语义模型及场景验收
-- [设备感知实施计划（规划）](docs/plans/backend-household-perception.md)：固定家庭运行与按场景接入的采集、历史、Web 和 Agent 能力
-- [本地运行](docs/running.md)：运行模式、Docker 网络、服务连接配置与开发命令
-- [米家与摄像头](docs/mijia.md)：登录、预览、授权保存与支持范围
-- [本地目标检测](docs/perception.md)：模型准备、图片检测命令、计算池和运行限制
-- [家庭运行时](docs/household.md)：设备清单、规格、家庭绑定与公共状态订阅
-- [米家来源契约](docs/reference/mijia-source-contract.md) · [设备接入代码参考](docs/reference/device-access-code-reference.md)
-- [Agent 与对话 API](apps/agent/README.md)
-- [后端与数据库](apps/backend/README.md) · [前端](apps/web/README.md)
-- [go2rtc 构建](docker/go2rtc/README.md)
-- [调用追踪](packages/observability/README.md) · [共享契约与错误处理](packages/api/README.md)
+- [文档导航与编码任务入口](docs/README.md)：按任务选择当前功能、业务契约与代码位置。
+- [本地运行](docs/running.md)：启动、配置与部署限制。
+- [实施计划](docs/plans/README.md)：未交付能力及主交付顺序。
+- [Backend](apps/backend/README.md) · [Agent](apps/agent/README.md) · [Web](apps/web/README.md)：应用边界与开发说明。
+- [共享契约](packages/api/README.md) · [追踪](packages/observability/README.md) · [go2rtc](docker/go2rtc/README.md)：跨应用能力与媒体适配。

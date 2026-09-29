@@ -10,6 +10,10 @@
 7. Place code shared across projects in the repository-root `packages/` directory, and reuse it from there instead of duplicating it in individual projects.
 8. Do not prefix function calls or Promise expressions with the `void` operator to discard their results or silence lint warnings. Await or return a Promise when the caller owns its completion; for intentionally unawaited work, call it directly and ensure its failure is handled by the owning operation or an explicit rejection handler. Use block-bodied callbacks when they must return no value. Do not add empty `catch` handlers merely to suppress errors. This rule does not prohibit the TypeScript `void` type.
 
+## Documentation navigation
+
+Start with [docs/README.md](docs/README.md) to select documents and existing code entry points for the task. Current feature documentation, implementation plans, and technical references have different roles; planned interfaces and modules are not implemented capabilities. Follow the document ownership boundaries there and update affected references when moving a document.
+
 ## Local environment
 
 Read `AGENTS.local.md` at the repository root if present. This optional, Git-ignored file holds machine-specific paths and tool setup. Contributors can create it to specify their MiLoCo checkout path and any local CodeGraph configuration. Keep personal absolute paths out of shared documentation.

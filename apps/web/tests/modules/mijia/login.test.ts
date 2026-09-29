@@ -49,7 +49,7 @@ describe("Automatic login coordination", () => {
   });
 
   it("waits for old media cleanup before automatically starting reauthentication", async () => {
-    // device-access-code-reference.md §10.4 requires no pending media cleanup.
+    // docs/mijia.md requires completed media cleanup before automatic login.
     // A failed session DELETE retains its upstream unavailable code during cleanup.
     const expired = householdSnapshot();
     const error = {
