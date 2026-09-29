@@ -70,7 +70,7 @@ export class DirectoryNotifications {
         this.timer = undefined;
         if (this.controller !== controller || controller?.signal.aborted)
           return;
-        void this.refresh().catch(() => {});
+        this.refresh().catch(() => {});
       }, DIRECTORY_DEBOUNCE_MS),
     );
     this.timer.unref();

@@ -14,6 +14,8 @@ export default defineConfig({
     suspicious: "warn",
   },
   rules: {
+    "no-void": "error",
+    "typescript/no-floating-promises": ["error", { ignoreVoid: false }],
     "turbo/no-undeclared-env-vars": "error",
   },
   env: {

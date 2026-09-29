@@ -6,12 +6,18 @@ import (
 	"io"
 	"net"
 	"syscall"
+	"time"
 )
 
 // Report emits only implementation-owned stage/reason labels. Do not print the
 // underlying error: network errors and camera responses can contain secrets.
 func Report(stage string, err error) {
 	fmt.Printf("[home-agent] stage=%s reason=%s\n", stage, failureReason(err))
+}
+
+// ReportDuration uses implementation-owned labels and numeric durations only.
+func ReportDuration(stage string, elapsed time.Duration, err error) {
+	fmt.Printf("[home-agent] stage=%s reason=%s elapsed_ms=%d\n", stage, failureReason(err), max(0, elapsed.Milliseconds()))
 }
 
 // ReportHTTP never renders the request URL, response body, headers or underlying error.

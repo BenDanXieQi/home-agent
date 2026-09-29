@@ -102,6 +102,15 @@ export class DeviceDiscovery {
     if (!this.catalog.homes.some((home) => home.id === homeId))
       throw new MijiaError("home_unavailable");
   }
+  prepareHomeBinding() {
+    this.pause();
+    this.refreshAgain = false;
+    this.loadController?.abort();
+    this.deviceLoadTask = undefined;
+    this.pendingCatalog = undefined;
+    this.confirmed = false;
+    this.state = { status: "loading", items: [] };
+  }
   acceptHome(homeId: string | null) {
     if (homeId === this.accessHomeId) return;
     this.accessHomeId = homeId;
@@ -217,7 +226,9 @@ export class DeviceDiscovery {
         this.dependencies.activeAccount(current) &&
         this.retryScope(current) === id
       )
-        void this.load(true, true);
+        this.load(true, true).catch((backgroundError: unknown) => {
+          console.error("discovery: load failed", backgroundError);
+        });
     }, this.retryAfterAt);
   }
   reset() {
@@ -265,7 +276,7 @@ export class DeviceDiscovery {
           this.dependencies.renewalFailed(account)
         )
           return;
-        void this.load(true)
+        this.load(true)
           .catch(() => {})
           .finally(() => {
             if (this.dependencies.activeAccount(account))
@@ -406,7 +417,9 @@ export class DeviceDiscovery {
       this.schedule(account);
       if (this.refreshAgain) {
         this.refreshAgain = false;
-        void this.load(true);
+        this.load(true).catch((backgroundError: unknown) => {
+          console.error("discovery: load failed", backgroundError);
+        });
       }
     }
     return this.state;

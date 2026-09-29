@@ -1,0 +1,21 @@
+diff --git a/dist/task_queue/index.d.ts b/dist/task_queue/index.d.ts
+index 9075f187d99aad75838ee6e8773223a05420d2b3..fc4f12d9fd9aaf58e8b305331e77dfc8402abf13 100644
+--- a/dist/task_queue/index.d.ts
++++ b/dist/task_queue/index.d.ts
+@@ -1,4 +1,4 @@
+-import type { MessagePort } from 'node:worker_threads';
++import type { StructuredSerializeOptions } from 'node:worker_threads';
+ import { AsyncResource } from 'node:async_hooks';
+ import type { WorkerInfo } from '../worker_pool';
+ import type { Task, TaskQueue, PiscinaTask } from './common';
+@@ -7,9 +7,7 @@ import { kQueueOptions } from '../symbols';
+ export { ArrayTaskQueue } from './array_queue';
+ export { FixedQueue } from './fixed_queue';
+ export type TaskCallback = (err: Error, result: any) => void;
+-export type TransferList = MessagePort extends {
+-    postMessage: (value: any, transferList: infer T) => any;
+-} ? T : never;
++export type TransferList = NonNullable<StructuredSerializeOptions['transfer']>;
+ export type TransferListItem = TransferList extends Array<infer T> ? T : never;
+ type TaskInfoParameters = {
+     task: any;

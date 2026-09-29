@@ -91,7 +91,9 @@ export class MiotMqtt {
       this.stats.received++;
       if (payload.length > 256 * 1024) {
         this.stats.discarded++;
-        void this.close("payload_too_large");
+        this.close("payload_too_large").catch(() => {
+          console.warn("MQTT close failed after an oversized payload");
+        });
         return;
       }
       const events = pushObservations(
@@ -129,16 +131,28 @@ export class MiotMqtt {
         packet.reasonCode &&
         packet.reasonCode >= 128
       )
-        void this.close(`connack_${packet.reasonCode}`);
+        this.close(`connack_${packet.reasonCode}`).catch(
+          (backgroundError: unknown) => {
+            console.error("mqtt: close failed", backgroundError);
+          },
+        );
     });
     this.client.on("disconnect", (packet) => {
-      void this.close(`server_disconnect_${packet.reasonCode ?? 0}`);
+      this.close(`server_disconnect_${packet.reasonCode ?? 0}`).catch(
+        (error: unknown) => {
+          console.error("mqtt: close failed", error);
+        },
+      );
     });
     this.client.on("error", () => {
-      void this.close("connection_failed");
+      this.close("connection_failed").catch((backgroundError: unknown) => {
+        console.error("mqtt: close failed", backgroundError);
+      });
     });
     this.client.on("close", () => {
-      void this.close("connection_closed");
+      this.close("connection_closed").catch((backgroundError: unknown) => {
+        console.error("mqtt: close failed", backgroundError);
+      });
     });
     this.client.connect();
   }
@@ -337,7 +351,9 @@ export class MiotMqtt {
         this.report(item, "failed", reason, code);
         // MQTT.js retains unanswered requests until their ACK or connection shutdown.
         if (!subscribe || reason === "ack_timeout") {
-          void this.close(reason);
+          this.close(reason).catch((backgroundError: unknown) => {
+            console.error("mqtt: close failed", backgroundError);
+          });
           return;
         }
       } else {

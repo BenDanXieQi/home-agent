@@ -4,7 +4,7 @@ import { CameraSourceManager } from "../../../src/mijia/media/camera-source-mana
 import { MediaSession } from "../../../src/mijia/media/session";
 import { accountClient } from "../../support/protocol-fixtures";
 import { deferred, nextTurn } from "../../support/async";
-import { camera, mediaPeer, sourceId } from "./support";
+import { camera, mediaPeer, playbackTelemetry, sourceId } from "./support";
 
 const peers: ReturnType<typeof mediaPeer>[] = [];
 const playbacks: PlaybackManager[] = [];
@@ -52,25 +52,51 @@ describe("independent viewers and bounded cleanup", () => {
   });
   test("reservation is local, same SDP is idempotent, conflicting SDP and stale revisions are rejected", async () => {
     const { playback, calls } = await setup();
-    const { id } = playback.reserve("revision", camera.did, 1);
+    const revision = crypto.randomUUID();
+    const { id } = playback.reserve(revision, camera.did, 1);
     expect(calls.filter((call) => call.path === "playback")).toHaveLength(0);
-    expect(playback.snapshot(id)).toEqual({ id, phase: "reserved" });
+    expect(playback.snapshot(id)).toEqual({
+      id,
+      phase: "reserved",
+    });
     await expect(
       playback.offer("old-revision", id, "offer", signal()),
     ).rejects.toMatchObject({ reason: "stale_session" });
     const [first, repeated] = await Promise.all([
-      playback.offer("revision", id, "offer", signal()),
-      playback.offer("revision", id, "offer", signal()),
+      playback.offer(revision, id, "offer", signal()),
+      playback.offer(revision, id, "offer", signal()),
     ]);
     expect(first).toEqual(repeated);
+    expect(playback.snapshot(id)).toEqual({
+      id,
+      phase: "active",
+      answer: first,
+    });
+    expect(first.connection).toEqual({
+      sourceRecentlyActive: playbackTelemetry.sourceRecentlyActive,
+      timings: {
+        ...playbackTelemetry.timings,
+        prepareMs: expect.any(Number),
+        negotiationMs: expect.any(Number),
+      },
+    });
+    expect(first.connection.timings.negotiationMs).toBeGreaterThanOrEqual(
+      first.connection.timings.prepareMs,
+    );
+    expect(first.connection).not.toHaveProperty("sdp");
     expect(
       calls.filter(
         (call) => call.path === "playback" && call.method === "POST",
       ),
     ).toHaveLength(1);
     await expect(
-      playback.offer("revision", id, "different-offer", signal()),
+      playback.offer(revision, id, "different-offer", signal()),
     ).rejects.toMatchObject({ reason: "playback_conflict" });
+    expect(playback.snapshot(id)).toEqual({
+      id,
+      phase: "active",
+      answer: first,
+    });
   });
 
   test("releasing one viewer immediately revokes it; failed DELETE remains retryable without stopping its peer or source", async () => {
@@ -122,7 +148,7 @@ describe("independent viewers and bounded cleanup", () => {
     expect(playback.reserve("revision", camera.did, 1).id).toBeString();
   });
 
-  test("DELETE during slow SDP negotiation prevents a late answer from restoring access", async () => {
+  test("DELETE prevents a late answer from restoring access", async () => {
     const { playback, handlers, calls } = await setup();
     const entered = deferred();
     const response = deferred<Response>();
@@ -137,7 +163,13 @@ describe("independent viewers and bounded cleanup", () => {
     );
     await entered.promise;
     await playback.release(id);
-    response.resolve(Response.json({ playbackId: id, answer: "late-answer" }));
+    response.resolve(
+      Response.json({
+        playbackId: id,
+        answer: "late-answer",
+        telemetry: playbackTelemetry,
+      }),
+    );
     expect(await outcome).toBe("cancelled");
     expect(() => playback.snapshot(id)).toThrow();
     expect(
@@ -147,7 +179,7 @@ describe("independent viewers and bounded cleanup", () => {
     ).toBe(true);
   });
 
-  test("accepted negotiation survives caller transport disconnect and can be recovered by retry", async () => {
+  test("accepted negotiation survives caller transport disconnect and invalid telemetry, and can be recovered by retry", async () => {
     const { playback, handlers } = await setup();
     const entered = deferred();
     const response = deferred<Response>();
@@ -160,12 +192,29 @@ describe("independent viewers and bounded cleanup", () => {
     const offer = playback.offer("revision", id, "offer", caller.signal);
     await entered.promise;
     caller.abort();
-    response.resolve(Response.json({ playbackId: id, answer: "answer" }));
-    expect(await offer).toEqual({ id, sdp: "answer" });
-    expect(await playback.offer("revision", id, "offer", signal())).toEqual({
+    response.resolve(
+      Response.json({
+        playbackId: id,
+        answer: "answer",
+        telemetry: {
+          ...playbackTelemetry,
+          timings: { queueMs: 0, sourceMs: 0 },
+        },
+      }),
+    );
+    const accepted = await offer;
+    expect(accepted).toMatchObject({
       id,
       sdp: "answer",
+      connection: { sourceRecentlyActive: null },
     });
+    expect(accepted.connection.timings.negotiationMs).toBeGreaterThanOrEqual(
+      accepted.connection.timings.prepareMs,
+    );
+    expect(await playback.offer("revision", id, "offer", signal())).toEqual(
+      accepted,
+    );
+    expect(playback.snapshot(id).phase).toBe("active");
   });
 });
 
@@ -362,7 +411,7 @@ describe("private media session boundary", () => {
     const closing = session.close();
     expect(session.close()).toBe(closing);
     let closed = false;
-    void closing.then(() => {
+    const observedClosing = closing.then(() => {
       closed = true;
     });
     try {
@@ -371,7 +420,7 @@ describe("private media session boundary", () => {
       expect(peer.calls).toEqual([]);
     } finally {
       url.resolve(peer.adapter.url);
-      await Promise.all([initializing, closing]);
+      await Promise.all([initializing, observedClosing]);
     }
     expect(closed).toBe(true);
     expect(peer.calls).toEqual([]);
@@ -534,7 +583,11 @@ describe("private media session boundary", () => {
   test("unrelated playback identity in a successful HTTP response is never accepted", async () => {
     const { playback, handlers } = await setup();
     handlers.set("POST playback", () =>
-      Response.json({ playbackId: crypto.randomUUID(), answer: "answer" }),
+      Response.json({
+        playbackId: crypto.randomUUID(),
+        answer: "answer",
+        telemetry: playbackTelemetry,
+      }),
     );
     const { id } = playback.reserve("revision", camera.did, 1);
     await expect(

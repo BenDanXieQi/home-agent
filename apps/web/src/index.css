@@ -1,50 +1,132 @@
 @import "tailwindcss";
-@import "./styles/components.css";
-@import "./styles/workspace.css";
-@import "./features/mijia/mijia.css";
-@import "./features/connections/connections.css";
+
+@keyframes camera-outline-trace {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+@keyframes camera-wait-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes connection-notice-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-3px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@font-face {
+  font-family: "Geist Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@fontsource-variable/geist/files/geist-latin-wght-normal.woff2")
+    format("woff2");
+}
+
+@font-face {
+  font-family: "Geist Mono Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2")
+    format("woff2");
+}
 
 @theme {
+  /* Skeletons stay invisible for fast loads and only fade in when loading is slow. */
+  --animate-skeleton:
+    skeleton-in 160ms ease-out 200ms both,
+    pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 360ms infinite;
+  @keyframes skeleton-in {
+    from {
+      opacity: 0;
+    }
+  }
   --font-sans:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
-  --font-mono: "SFMono-Regular", Consolas, monospace;
+    "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Geist Mono Variable", "SFMono-Regular", Consolas, monospace;
   --color-paper: #ffffff;
-  --color-sidebar: #f6f7f8;
-  --color-linen: #f3f4f6;
-  --color-ink: #202329;
-  --color-muted: #737982;
-  --color-line: #e7e9ec;
-  --color-accent: #303c52;
-  --color-sage: #398168;
-  --color-danger: #bb4949;
+  --color-surface: #f7f7f7;
+  --shadow-surface: 0 2px 8px #00000005, 0 1px 2px #00000008;
+  --shadow-panel: 0 8px 32px #00000006, 0 1px 4px #0000000a;
+  --color-sidebar: #eeeeee;
+  --color-linen: #f2f2f2;
+  --color-ink: #171717;
+  --color-muted: #666666;
+  --color-line: #e5e5e5;
+  --color-accent: #171717;
+  --color-sage: #18794e;
+  --color-warning: #95610e;
+  --color-danger: #c13838;
 }
+
+@utility status-ping {
+  @apply relative;
+  &::before {
+    content: "";
+    @apply pointer-events-none absolute inset-0 rounded-full bg-inherit opacity-75 motion-safe:animate-ping motion-reduce:hidden;
+  }
+}
+
 @layer base {
   :root {
     font-synthesis: none;
     text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
     color-scheme: light;
+    scrollbar-gutter: stable;
   }
   body {
-    @apply m-0 min-w-80 bg-paper font-sans text-[13px] text-ink;
+    @apply m-0 min-w-0 bg-paper font-sans text-[13px] text-ink;
   }
+  /* The root gutter already reserves scrollbar space. Radix's scroll lock
+     must not reserve it again through react-remove-scroll's body margin. */
+  body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+  /* Quiet, native scrollbars shared by pages, panels and popover lists. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #b8b8b8 transparent;
+  }
+  *:hover,
+  *:focus-within {
+    scrollbar-color: #707070 transparent;
+  }
+  /* Controls are handled, not read: no text selection or native drag ghosts. */
   button,
   summary {
-    cursor: pointer;
+    @apply cursor-pointer select-none;
+  }
+  a[href] {
+    -webkit-user-drag: none;
   }
   button:disabled {
     @apply cursor-not-allowed opacity-40;
   }
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-accent/60;
+    @apply outline-1 outline-offset-2 outline-accent/50;
   }
   input,
   select {
-    @apply w-full rounded-md border border-line bg-white px-3 py-2 text-[13px] text-ink;
+    @apply w-full rounded-lg border border-transparent bg-surface px-3 py-2.5 text-sm text-ink;
   }
   input:focus-visible {
-    @apply border-accent/50 outline-2 outline-offset-0 outline-accent/10;
+    @apply outline-1 outline-offset-0 outline-accent/50;
   }
   input:disabled,
   input:read-only {
@@ -68,5 +150,41 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+@keyframes heading-icon-enter {
+  from {
+    transform: translateY(5px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+@keyframes nav-attention {
+  0%,
+  12%,
+  100% {
+    transform: rotate(0deg);
+  }
+  3% {
+    transform: rotate(-9deg);
+  }
+  6% {
+    transform: rotate(6deg);
+  }
+  9% {
+    transform: rotate(-3deg);
+  }
+}
+
+@keyframes report-arrival {
+  0%,
+  20% {
+    background-color: var(--color-sidebar);
+  }
+  100% {
+    background-color: var(--color-paper);
   }
 }

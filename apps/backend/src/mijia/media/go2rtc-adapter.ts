@@ -1,5 +1,7 @@
 import type { CameraSourceSpec } from "./camera-source-spec";
+import { createHash } from "node:crypto";
 import { mijiaTimeouts } from "@home-agent/api/mijia";
+import { playbackConnectionObservationSchema } from "@home-agent/api/playback";
 import type { MiCloudCredentials } from "../protocols/micloud";
 import {
   context,
@@ -7,6 +9,7 @@ import {
   SpanKind,
   recordFailure,
   withSpan,
+  currentTraceId,
 } from "@home-agent/observability";
 import { z } from "zod";
 import {
@@ -20,10 +23,26 @@ const responseSchema = z.object({
     .string()
     .min(1)
     .max(96 * 1024),
+  // Missing or invalid observation data cannot invalidate the media answer.
+  telemetry: z.unknown().optional(),
 });
 const heartbeatSchema = z.object({ playbackIds: z.array(z.uuid()).max(32) });
 const HEARTBEAT_INTERVAL_MS = 15_000;
 const SESSION_LEASE_MS = 60_000;
+
+function readPlaybackObservation(payload: unknown, id: string) {
+  const result = playbackConnectionObservationSchema.safeParse(payload);
+  if (result.success) return result.data;
+  console.warn(
+    JSON.stringify({
+      message: "Camera playback observation unavailable",
+      code: "invalid_playback_observation",
+      attempt_id: createHash("sha256").update(id).digest("hex").slice(0, 16),
+      trace_id: currentTraceId(),
+    }),
+  );
+  return null;
+}
 const errorCodeSchema = z.enum([
   "invalid_request",
   "local_access_required",
@@ -132,12 +151,12 @@ export class Go2RtcAdapter {
     if (!this.ready) throw new Go2RtcError("request_timeout");
     this.heartbeatTimer = context.with(ROOT_CONTEXT, () =>
       setInterval(() => {
-        void this.renewSessionLease().catch(() => {});
+        this.renewSessionLease().catch(() => {});
       }, HEARTBEAT_INTERVAL_MS),
     );
     this.heartbeatTimer.unref();
     // Token installation can consume most of the conservative initial lease.
-    void this.renewSessionLease().catch(() => {});
+    this.renewSessionLease().catch(() => {});
   }
 
   async prepareCamera(
@@ -187,7 +206,11 @@ export class Go2RtcAdapter {
     const result = responseSchema.safeParse(payload);
     if (!result.success || result.data.playbackId !== owner.id)
       throw new Go2RtcError("invalid_response");
-    return { id: result.data.playbackId, sdp: result.data.answer };
+    return {
+      id: result.data.playbackId,
+      sdp: result.data.answer,
+      observation: readPlaybackObservation(result.data.telemetry, owner.id),
+    };
   }
 
   async release(owner: PlaybackOwner) {
@@ -217,7 +240,7 @@ export class Go2RtcAdapter {
       };
       this.heartbeatPending = pending;
       const current = pending;
-      void pending.promise
+      pending.promise
         .finally(() => {
           if (this.heartbeatPending === current)
             this.heartbeatPending = undefined;
@@ -231,7 +254,7 @@ export class Go2RtcAdapter {
       const onAbort = () => reject(new Go2RtcError("request_cancelled"));
       signal.addEventListener("abort", onAbort, { once: true });
       if (signal.aborted) onAbort();
-      void promise
+      promise
         .then(resolve, reject)
         .finally(() => signal.removeEventListener("abort", onAbort));
     });

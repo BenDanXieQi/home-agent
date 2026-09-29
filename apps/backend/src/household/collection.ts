@@ -187,7 +187,9 @@ export class HouseholdCollection {
             failures: 0,
           };
           this.watches.set(device.id, binding);
-          void this.observe(device.id, binding);
+          this.observe(device.id, binding).catch(() =>
+            this.sample("observe", "observe_failed"),
+          );
         }
         // Specifications can finish after the initial subscription confirmation.
         for (const id of this.watches.keys()) this.seedRead(id);
@@ -268,7 +270,9 @@ export class HouseholdCollection {
       });
       if (binding.failures <= 2) {
         binding.timer = setTimeout(() => {
-          void this.observe(id, binding);
+          this.observe(id, binding).catch(() =>
+            this.sample("observe", "observe_failed"),
+          );
         }, binding.failures * 2000);
         binding.timer.unref();
       }
@@ -580,21 +584,26 @@ export class HouseholdCollection {
     if (!pending.length) return;
     this.seeding = true;
     const epoch = this.scope;
-    void Promise.allSettled(
+    Promise.allSettled(
       pending.map(({ property, signal }) =>
         this.readOne(epoch, property, signal),
       ),
-    ).then((results) => {
-      if (epoch === this.scope)
-        for (const result of results)
-          if (
-            result.status === "fulfilled" &&
-            result.value.outcome === "failed"
-          )
-            this.sample("initial_read", result.value.reason ?? "read_failed");
-      this.seeding = false;
-      this.scheduleSeedReads();
-    });
+    )
+      .then((results) => {
+        if (epoch === this.scope)
+          for (const result of results)
+            if (
+              result.status === "fulfilled" &&
+              result.value.outcome === "failed"
+            )
+              this.sample("initial_read", result.value.reason ?? "read_failed");
+        this.seeding = false;
+        this.scheduleSeedReads();
+      })
+      .catch(() => {
+        this.seeding = false;
+        this.sample("initial_read", "read_failed");
+      });
   }
   async read(epoch: string, properties: Address[], signal: AbortSignal) {
     signal.throwIfAborted();
@@ -638,12 +647,12 @@ export class HouseholdCollection {
       task = this.startRead(epoch, property, deviceKey, this.signature(device));
       this.inFlight.set(key, task);
       const active = task;
-      void task.promise
+      task.promise
         .finally(() => {
           if (this.inFlight.get(key) === active) this.inFlight.delete(key);
           this.scheduleSeedReads();
         })
-        .catch(() => {});
+        .catch(() => this.sample("property_read", "read_failed"));
     }
     const active = task;
     const consumer = {};
@@ -690,7 +699,9 @@ export class HouseholdCollection {
       );
     };
     signal.addEventListener("abort", abort, { once: true });
-    void promise.finally(() => signal.removeEventListener("abort", abort));
+    promise
+      .finally(() => signal.removeEventListener("abort", abort))
+      .catch(() => this.sample("property_read", "read_failed"));
     this.readQueue.push(task);
     queueMicrotask(() => this.pumpReads());
     return task;
@@ -795,11 +806,13 @@ export class HouseholdCollection {
     ) {
       const tasks = this.readQueue.splice(0, collectionLimits.readBatch);
       this.reading++;
-      void this.readBatch(tasks).finally(() => {
-        this.reading--;
-        this.pumpReads();
-        this.scheduleSeedReads();
-      });
+      this.readBatch(tasks)
+        .finally(() => {
+          this.reading--;
+          this.pumpReads();
+          this.scheduleSeedReads();
+        })
+        .catch(() => this.sample("property_read", "read_failed"));
     }
   }
   retry() {

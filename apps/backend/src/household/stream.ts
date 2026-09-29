@@ -152,7 +152,9 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
           queuedChanges++;
         }
         queue.push(item);
-        void pump();
+        pump().catch((backgroundError: unknown) => {
+          console.error("stream: pump failed", backgroundError);
+        });
       }
       try {
         stream.onAbort(close);

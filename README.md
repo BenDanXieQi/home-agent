@@ -28,6 +28,8 @@ backend 已提供持续 MQTT 采集、带来源和有效性的设备当前属性
 
 ## 当前服务分工
 
+backend 另提供[本地图片检测命令](docs/perception.md)，返回目标框并保存标注图片，尚未接入摄像头持续采集或家庭上下文。每个实例同时运行一个家庭；设置页可切换同账号家庭，保留登录凭据并清空业务数据库内容，具体范围见[家庭运行时](docs/household.md)。
+
 技术栈：Bun、TypeScript、React、Hono、LangGraph、PostgreSQL 和 go2rtc。
 
 | 模块           | 已实现职责                                                        |

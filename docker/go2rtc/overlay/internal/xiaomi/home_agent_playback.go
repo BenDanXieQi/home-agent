@@ -15,6 +15,7 @@ import (
 type homeAgentPlaybackState struct {
 	id     string
 	cancel context.CancelFunc
+	timing *homeAgentPlaybackTiming
 }
 
 type homeAgentPlaybackOwner struct {
@@ -69,8 +70,16 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ownerCtx, ownerCancel := context.WithCancel(camera.ctx)
+	started := time.Now()
+	sourceRecentlyActive := false
+	if activity := camera.activity.Load(); activity != nil {
+		last := activity.last.Load()
+		age := started.Sub(time.Unix(0, last))
+		sourceRecentlyActive = last > 0 && age >= 0 && age < homeAgentPacketSilence
+	}
 	playback := &homeAgentPlaybackState{
 		id: body.PlaybackID, cancel: ownerCancel,
+		timing: homeAgentNewPlaybackTiming(body.PlaybackID, started, sourceRecentlyActive),
 	}
 	camera.playbacks[body.PlaybackID] = playback
 	homeAgentMu.Unlock()
@@ -81,23 +90,29 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 	stopRequestCancellation := context.AfterFunc(r.Context(), cancel)
 	defer stopRequestCancellation()
 	success := false
+	failureCode := "stale_playback"
 	defer func() {
 		if success {
+			playback.timing.report("ready")
 			return
 		}
 		homeAgentMu.Lock()
 		homeAgentRetirePlayback(session, camera, playback)
 		homeAgentMu.Unlock()
+		playback.timing.report(failureCode)
 	}()
 	select {
 	case camera.gate <- struct{}{}:
 	case <-ctx.Done():
+		playback.timing.observe("queue", time.Since(started), ctx.Err())
 		homeAgentError(w, "stale_playback", http.StatusConflict)
 		return
 	}
+	playback.timing.observe("queue", time.Since(started), ctx.Err())
 	releaseGate := sync.OnceFunc(func() { <-camera.gate })
 	defer releaseGate()
 	if ctx.Err() != nil {
+		playback.timing.finish()
 		releaseGate()
 		homeAgentError(w, "stale_playback", http.StatusConflict)
 		return
@@ -115,9 +130,11 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 			}()
 		})
 	}
-	answer, conn, err := internalwebrtc.HomeAgentOffer(ctx, camera.stream, body.Offer, cleanup)
+	answer, conn, err := internalwebrtc.HomeAgentOffer(ctx, camera.stream, body.Offer, cleanup, playback.timing.observe)
 	releaseGate()
 	if err != nil {
+		playback.timing.finish()
+		failureCode = err.Error()
 		homeAgentError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -137,7 +154,8 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 	homeAgentMu.Unlock()
 	// A slow HTTP writer never blocks a newer offer or cancellation.
 	w.Header().Set("Content-Type", "application/json")
-	success = json.NewEncoder(w).Encode(map[string]string{"playbackId": playback.id, "answer": answer}) == nil
+	failureCode = "response_failed"
+	success = json.NewEncoder(w).Encode(map[string]any{"playbackId": playback.id, "answer": answer, "telemetry": playback.timing.snapshot()}) == nil
 }
 
 func homeAgentRelease(w http.ResponseWriter, r *http.Request) {

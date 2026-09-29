@@ -26,10 +26,11 @@ export type HouseholdSourceState = {
 export type HouseholdSource = {
   snapshot: () => HouseholdSourceState;
   subscribe: (listener: () => void) => () => void;
-  /** Validate, save and install the fixed binding before acquiring devices or media. */
+  /** Save the binding, commit its lifecycle, then install its access scope. */
   bindHome: (
     homeId: z.infer<typeof selectHomeSchema>["home_id"],
     assertCurrent: () => void,
+    commitBinding: () => void,
   ) => Promise<unknown>;
   refreshDirectory: () => Promise<unknown>;
   logout: () => Promise<unknown>;
