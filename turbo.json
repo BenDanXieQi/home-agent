@@ -87,7 +87,12 @@
     },
     "@home-agent/backend#test": {
       "cache": false,
-      "passThroughEnv": ["PERCEPTION_BUS_IMAGE_PATH", "ORT_DISABLE_TELEMETRY"]
+      "passThroughEnv": [
+        "PERCEPTION_INDOOR_DATA_DIR",
+        "PERCEPTION_TUD_VIDEO_PATH",
+        "PERCEPTION_TUD_LABELS_PATH",
+        "ORT_DISABLE_TELEMETRY"
+      ]
     }
   },
   "globalPassThroughEnv": [
@@ -105,6 +110,7 @@
     "LANGCHAIN_TRACING_V2",
     "LANGCHAIN_TRACING",
     "AGENT_RUN_TIMEOUT_MS",
+    "PERCEPTION_FFMPEG_PATH",
     "BACKEND_HOST",
     "BACKEND_PORT",
     "BACKEND_REQUEST_TIMEOUT_MS",

@@ -12,10 +12,12 @@ Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agen
 
 完整规格由后端按 URN 共享，不进入公共状态。设备记录仅包含 `spec_id/spec_status/spec_error`、分类和能力标签；初始准备值由 `initialSpecification` 提供。候选家庭只由设置专用接口返回，当前协议不包含 `latest/source_health/rule_status` 空占位字段。
 
+`src/contracts/perception.ts` 定义本地检测的健康与观测快照，通过 `@home-agent/api/contracts` 导出 `perceptionSnapshotSchema`；它不包含音视频窗口、候选媒体读取或 Agent 判断提交。当前聊天契约也只承载文本对话，不接收媒体字节。持续观察、长期任务、事件及动作提交的拟实施 API 见[第一方协作计划](../../docs/plans/household-automation.md#6-具体接口与工具)。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
+
 `@home-agent/api/immutable` 集中配置 Mutative，更新时只复制变化部分、复用未变化对象，称为“结构共享”：
 
 - `produce` 同步构造待校验数据，不冻结调用方持有的对象。
-- `update` 更新模块已持有的数据并冻结结果，即禁止修改结果及其内部对象。
+- `freeze` 原地冻结模块已持有的数据，即禁止修改结果及其内部对象；不生成经过 schema 校验的副本。
 - `parseImmutable` 先经公共 schema 解析，得到与输入分离的数据，再冻结并登记，供后续缓存校验与编码结果。
 - `isImmutable` 检查这份登记。只冻结最外层的对象，其内部数据仍可能变化，不能作为安全缓存输入。
 

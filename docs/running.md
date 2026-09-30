@@ -34,6 +34,8 @@ Docker 数据库通过 `.env` 的 `POSTGRES_PORT` 映射到本机，容器内端
 
 backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
 
+统一启动是开发便利，不表示 backend 依赖 Agent 在线。当前摄像头预览与本地检测不调用 Agent，也不要求 `AGENT_MODEL` 或 `OPENAI_API_KEY`；Agent 不在线时聊天不可用、服务检查显示该项不可达，不阻止已配置的本地检测。
+
 backend 首次启动在仓库根目录创建 `config/config.yaml` 与相邻的 `config.schema.json`，已有 YAML 不覆盖。默认路径不受启动工作目录影响，源码与构建入口使用同一文件；整个 `/config/` 忽略 Git。
 
 ```yaml
@@ -82,5 +84,7 @@ bun run build
 ```
 
 单独启动应用不会管理依赖，也不纳入 `bun run stop` 的进程管理。
+
+仅开发 backend 感知、暂不启动 Agent 时，先准备已配置模式的 go2rtc、backend 数据库及迁移、米家授权，以及检测需要的 FFmpeg 和 `config/perception.json`，再分别运行 `bun run dev:backend`，需要页面时运行 `bun run dev:web`。不要使用会统一启动 Agent 的根目录 `dev`/`start` 代替此方式。根目录 `db:migrate`/`db:check` 也包含 Agent checkpoint；仅准备 backend 可使用 `bun run --cwd apps/backend db:migrate` 和 `bun run --cwd apps/backend db:check`。当前未提供自动准备依赖的“仅感知”启动模式。
 
 `bun run check` 执行格式、lint 和类型检查，覆盖各 workspace 及根目录 `scripts/`。共享 lint 与 TypeScript 配置分别由 `@home-agent/oxlint-config` 和 `@home-agent/typescript-config` 提供，各包通过 workspace 依赖引用；Turbo 负责检查任务和构建依赖，前端构建先完成类型检查。

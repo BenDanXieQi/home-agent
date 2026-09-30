@@ -1,0 +1,1148 @@
+{
+  "source": "COCO val2017",
+  "annotationSha256": "e8c7f7908f1d7278341fae127d0da654f102f11bd7b21d8aeefa635b8c810b6f",
+  "review": "Manual review of contact sheets excluded outdoor, commercial/ambiguous food close-ups and depiction-only positive examples. This is a photographic COCO validation subset, not household camera footage.",
+  "images": [
+    {
+      "id": 333772,
+      "file_name": "000000333772.jpg",
+      "sha256": "45abc24e5d525f4da47cafca857b5db9b08e8b4ee7fe03bcd3d6b2683ebfbcc7",
+      "width": 500,
+      "height": 375,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000333772.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [171.34, 152.53, 224.46, 199.39],
+          "iscrowd": 0
+        },
+        {
+          "className": "cat",
+          "bbox": [67.42, 123.03, 376.68, 167.7],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 176778,
+      "file_name": "000000176778.jpg",
+      "sha256": "c699cc33ed505813a0caf29c5c37540a17eb2021b2b5c434324fa9e18efe3e59",
+      "width": 427,
+      "height": 640,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000176778.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [264.39, 397.8, 73.4, 242.2],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 494634,
+      "file_name": "000000494634.jpg",
+      "sha256": "ed95442934c1c0b0d585992e8efbdfa94dd28d664187fb35be5f1d95b7486aa9",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000494634.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [1.04, 111.71, 478.96, 361.81],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 139684,
+      "file_name": "000000139684.jpg",
+      "sha256": "f667a657676aa38ef258dc184c33c1ed36a1b27f3e96b8eb49d9fb5599f1e103",
+      "width": 500,
+      "height": 333,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000139684.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [190.49, 236.32, 140.36, 58.73],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 202445,
+      "file_name": "000000202445.jpg",
+      "sha256": "28d22190749fdef7e7a9802c68db456f852f49ccb7a2cad3862de85f6edbad8d",
+      "width": 612,
+      "height": 612,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000202445.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [141.64, 264.58, 446.31, 267.25],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 327769,
+      "file_name": "000000327769.jpg",
+      "sha256": "507768eae1bb4085285fd57940138be6419169d751148666363d4f10bf7800d7",
+      "width": 640,
+      "height": 424,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000327769.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [201.47, 116.07, 250.92, 143.78],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 14007,
+      "file_name": "000000014007.jpg",
+      "sha256": "4fa388665548f563e50c107089669a589812c4a14cb1dd3b87860fb25bdd4b45",
+      "width": 640,
+      "height": 426,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000014007.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [340.25, 153.38, 76.63, 145.04],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 179392,
+      "file_name": "000000179392.jpg",
+      "sha256": "aee6cea5432994df19687acca9a15157a02200658e62bed5dc641564b54ef422",
+      "width": 480,
+      "height": 640,
+      "group": "cat",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000179392.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [112.48, 49.13, 365.9, 497.78],
+          "iscrowd": 0
+        },
+        {
+          "className": "cat",
+          "bbox": [117.23, 42.37, 362.77, 550.68],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 134096,
+      "file_name": "000000134096.jpg",
+      "sha256": "7b159434fb11b28309ef41b473984ed088f9d4a05f78ca7edaeaa61b60ef0e90",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000134096.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [214.71, 106.01, 425.29, 367.48],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 574315,
+      "file_name": "000000574315.jpg",
+      "sha256": "b4f4f99c9f1231ed99efa94744f4ae8ef9657ff69ce14a8d0ca60c7f5974dc13",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000574315.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [181.78, 105.3, 251.74, 235.66],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [333.3, 0, 306.7, 412.04],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 71226,
+      "file_name": "000000071226.jpg",
+      "sha256": "11b4d1efa0a566d092e3e9ec1706bbbaa38d89229d987e4b444c4151fd4208a8",
+      "width": 640,
+      "height": 426,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000071226.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [187.13, 147.4, 341.49, 269.06],
+          "iscrowd": 0
+        },
+        {
+          "className": "dog",
+          "bbox": [67.13, 53.57, 160.07, 163.52],
+          "iscrowd": 0
+        },
+        {
+          "className": "cat",
+          "bbox": [313.37, 58.66, 152.23, 71.28],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 78426,
+      "file_name": "000000078426.jpg",
+      "sha256": "475db6e34f57f03cf611cc4c359d8707df49628491adc27d6b5209607284778b",
+      "width": 500,
+      "height": 334,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000078426.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [0, 64.42, 275.69, 254.82],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 47121,
+      "file_name": "000000047121.jpg",
+      "sha256": "ff6c860fbb42455a29074dece1073bf8edb5f5e7fa862784e00129822a8ad89c",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000047121.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [325.16, 71.23, 314.84, 322.06],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 533536,
+      "file_name": "000000533536.jpg",
+      "sha256": "e82539d08d262c529b315859d0f9df44b72f728085b11cc27f36267ebd73598f",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000533536.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [89.92, 282.1, 311.33, 197.9],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 22892,
+      "file_name": "000000022892.jpg",
+      "sha256": "feafcf6539422208c296d7e15151a9bb0a19fb14db57d93a3ebf733a21fb7843",
+      "width": 500,
+      "height": 334,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000022892.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [35.62, 76, 253.35, 219.76],
+          "iscrowd": 0
+        },
+        {
+          "className": "cat",
+          "bbox": [237.75, 23.48, 261.45, 230.57],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 300913,
+      "file_name": "000000300913.jpg",
+      "sha256": "455e08c4155f529b1a20bfeba5e7d8a20a547d1abb0ba7ff5bb8e1e2919add18",
+      "width": 500,
+      "height": 375,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000300913.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [8.06, 4.84, 491.94, 366.13],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 494913,
+      "file_name": "000000494913.jpg",
+      "sha256": "7868756811455c2f96aeff017674b9c3a3c50778333c664452740a795f4ff687",
+      "width": 640,
+      "height": 428,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000494913.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [499.92, 255.71, 37.05, 20.92],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [521.65, 230.67, 105.42, 107.43],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 134882,
+      "file_name": "000000134882.jpg",
+      "sha256": "d2a42fe606563d125e105246e6cd473f098338364b51f085da8a97d5943876c5",
+      "width": 640,
+      "height": 639,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000134882.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [272.61, 328.52, 151.71, 64.61],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 316015,
+      "file_name": "000000316015.jpg",
+      "sha256": "c7fec132440e63917a4346a16d5f48cd280f0f497d221b1a54c545a398a8aba9",
+      "width": 500,
+      "height": 400,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000316015.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [306.01, 164.66, 155.83, 203.52],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 416330,
+      "file_name": "000000416330.jpg",
+      "sha256": "202dc7d94ac8aa768de9484752b693149c893fcc5b6aaec9158cec926a475398",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000416330.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [35.17, 0, 604.83, 454.66],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 284623,
+      "file_name": "000000284623.jpg",
+      "sha256": "b7d443c3ac4cd71881259a33c8d85aa8dc2036de7a70de6d05b25a5aaec51698",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000284623.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [36.62, 0, 427.91, 412.58],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 245576,
+      "file_name": "000000245576.jpg",
+      "sha256": "06a29c981a65c55c1ec621ca326937f7207890f2d062806c2d093b0e9e5a66be",
+      "width": 640,
+      "height": 472,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000245576.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [205.17, 5.15, 366.89, 390.13],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 491216,
+      "file_name": "000000491216.jpg",
+      "sha256": "9b038c0a6b1e704fa9f1a9b2682dea4a762fe6ca1ff95ff53c0fc583b6e02af4",
+      "width": 480,
+      "height": 640,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000491216.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [179.73, 423.32, 91.19, 92.69],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 15497,
+      "file_name": "000000015497.jpg",
+      "sha256": "fc0fff04645dfadedbc34e23860dc62c45a213ac22d18b8194d269b66774d745",
+      "width": 640,
+      "height": 480,
+      "group": "cat",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000015497.jpg",
+      "annotations": [
+        {
+          "className": "cat",
+          "bbox": [32.36, 20.49, 451.95, 433.62],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 367082,
+      "file_name": "000000367082.jpg",
+      "sha256": "702c8e331093d9d391420d2cd60dfe167b176aec182f3b743dcd9aee7fe75ab3",
+      "width": 488,
+      "height": 500,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000367082.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [100.82, 74.68, 375.79, 346.1],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 446522,
+      "file_name": "000000446522.jpg",
+      "sha256": "5be429c41a46270ced8ea13212b6f02302e00158d9a1040ea336ec5630237ed3",
+      "width": 480,
+      "height": 640,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000446522.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [151.95, 336.22, 212.48, 172.56],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 64868,
+      "file_name": "000000064868.jpg",
+      "sha256": "b3cde4030154cacc17d93aa0a01344ec749f96faab680016e0f680458410cb52",
+      "width": 500,
+      "height": 375,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000064868.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [179.21, 170.5, 164.03, 87.6],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [9.83, 8.82, 286.44, 322.84],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 482917,
+      "file_name": "000000482917.jpg",
+      "sha256": "83114ac1e41a745094b0c4f1dc8307bba1f1fe7fcfcdae1a3f9d5c63b3befb92",
+      "width": 500,
+      "height": 375,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000482917.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [15.09, 76.5, 256.74, 283.16],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [0.84, 139.04, 445.79, 231.75],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 159458,
+      "file_name": "000000159458.jpg",
+      "sha256": "04b7ce54c0d1ec0a231fe79e542b08b0cc973273f3a91ae479be546825ce4a95",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000159458.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [220.02, 217.2, 91.1, 35.23],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 367195,
+      "file_name": "000000367195.jpg",
+      "sha256": "04d1a6b409e54377a3be143fad6ae1ffd27dbdb55ffc8f1f2374afb3f416fecc",
+      "width": 500,
+      "height": 312,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000367195.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [130.74, 64.46, 181.16, 125.15],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [0, 66.89, 90.9, 70.88],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 222317,
+      "file_name": "000000222317.jpg",
+      "sha256": "578a6e929caa3bb20a211d0b0fcb8a7b018d2532e0695fcdb046155c48dc8c40",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000222317.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [223.03, 197.82, 227.88, 89.21],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 329219,
+      "file_name": "000000329219.jpg",
+      "sha256": "10dc6cd39da78d787f01a4221d6f6765d30021799f332965de18faae501587d6",
+      "width": 640,
+      "height": 427,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000329219.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [297.73, 252.34, 60.21, 108.45],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [175.2, 1.91, 148.4, 330.31],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 22192,
+      "file_name": "000000022192.jpg",
+      "sha256": "3e9ffc06c76b3b856c1f6911aaeefac685ebe80a3bbd72d4d3c6254825ab159b",
+      "width": 640,
+      "height": 426,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000022192.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [71.57, 120.67, 144.02, 255.26],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 267300,
+      "file_name": "000000267300.jpg",
+      "sha256": "d527da3ddf25ec519b01fddd4eee2c417eed7b40f61db689b76aa07ad005fab6",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000267300.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [1.19, 28.19, 638.81, 396.4],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 72813,
+      "file_name": "000000072813.jpg",
+      "sha256": "77a7ce827879f9283ea40f942a687f89d3f9ed411734ce831896be88f9f685ba",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000072813.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [228.8, 133.65, 267.82, 187],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 236784,
+      "file_name": "000000236784.jpg",
+      "sha256": "cdd94432188f912462ec36a51f6e17efe537e472ef427654d37f26cf76bea4e7",
+      "width": 500,
+      "height": 400,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000236784.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [230.3, 193, 266.67, 131.71],
+          "iscrowd": 0
+        },
+        {
+          "className": "dog",
+          "bbox": [1.79, 194.26, 241.26, 154.26],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 251572,
+      "file_name": "000000251572.jpg",
+      "sha256": "359ddd62f3bd41d46d67a469e2401d53ed2742d165ec235d5e9c22f0c26c0af6",
+      "width": 640,
+      "height": 426,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000251572.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [190.29, 128.33, 449.71, 296.57],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [40.21, 7.66, 599.27, 412.6],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 170278,
+      "file_name": "000000170278.jpg",
+      "sha256": "5de7f5b7b981875fd86c5497811da825118e52c58dfed8a2658e80131c99e5f1",
+      "width": 640,
+      "height": 504,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000170278.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [122.18, 143.56, 476.51, 336],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 366884,
+      "file_name": "000000366884.jpg",
+      "sha256": "7d41c97dc524e33c5005651a44c75e6629d9f7b05b48b9b430b76db77765e0a8",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000366884.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [297.7, 399.52, 106.66, 80.48],
+          "iscrowd": 0
+        },
+        {
+          "className": "dog",
+          "bbox": [89.29, 445.56, 92.86, 34.44],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [418.34, 177.32, 76.47, 109.31],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 61471,
+      "file_name": "000000061471.jpg",
+      "sha256": "45b86dd04506ea6e6c2d96a6dcf389150a95922146ff41b858ab40c3edb8ed1d",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000061471.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [272.1, 200.23, 151.97, 279.77],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 283412,
+      "file_name": "000000283412.jpg",
+      "sha256": "ecff06907a7898f62175cdebf1108b752e085d9b53a4806869c6b4df508d6602",
+      "width": 640,
+      "height": 427,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000283412.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [1.73, 2.44, 439.07, 415.69],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 564280,
+      "file_name": "000000564280.jpg",
+      "sha256": "bfad97b18eb41c70bb27194ed5ae46787b67d8a15278c1210c6ea3752775e4c0",
+      "width": 640,
+      "height": 425,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000564280.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [86.54, 8.57, 517.54, 406.15],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 236592,
+      "file_name": "000000236592.jpg",
+      "sha256": "57c0d2e822895cc40b3ef2949b29f33622662ce386d62f0da8bdf61cabd3bb30",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000236592.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [1.94, 167.46, 241.45, 305.46],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 389933,
+      "file_name": "000000389933.jpg",
+      "sha256": "27ccfbb2aec33b2e4ff4e03168119ddcbd3aadb021516bb7316d1c9468cca30e",
+      "width": 640,
+      "height": 480,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000389933.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [3.87, 82.26, 529.36, 391.93],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 134112,
+      "file_name": "000000134112.jpg",
+      "sha256": "feda9168f8087b6c6b39871be82181e82e46db4a54b768ab761f78c2df84abec",
+      "width": 500,
+      "height": 357,
+      "group": "dog",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000134112.jpg",
+      "annotations": [
+        {
+          "className": "dog",
+          "bbox": [193.28, 65.51, 294.26, 206.27],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 270883,
+      "file_name": "000000270883.jpg",
+      "sha256": "aac2f2b24c16458fcdc83a288b9724c95bd386025c8c4ad0cab31fb3ff7c3e23",
+      "width": 640,
+      "height": 393,
+      "group": "person",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000270883.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [65.35, 96.26, 481.32, 219.02],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 140640,
+      "file_name": "000000140640.jpg",
+      "sha256": "55d003ebb3d7e36f02a4b4ef36ed08aaf85cef55fc72edd2c2dbffb853419549",
+      "width": 640,
+      "height": 426,
+      "group": "person",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000140640.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [111.3, 54.21, 189.01, 367.47],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [435.59, 88.75, 167.91, 287.84],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [273.46, 52.05, 210.43, 373.63],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 144003,
+      "file_name": "000000144003.jpg",
+      "sha256": "bcdd827d0e53e5bd79e175f9d72383984cc32e2def568091ead5b72ffd8b9c61",
+      "width": 500,
+      "height": 375,
+      "group": "person",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000144003.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [18.58, 89.1, 226.35, 281.25],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [181.61, 15.93, 230.39, 352.3],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [330.04, 0.31, 169.96, 339.64],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [276.91, 0.51, 174.65, 188.78],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [193.29, 0.15, 192.94, 180.97],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [108.22, 1.5, 107.47, 160.94],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 84674,
+      "file_name": "000000084674.jpg",
+      "sha256": "f372ed75b9d9bc565a5be2b76b9fe41ca1f916bf91b0e5869e2b40c367d7d372",
+      "width": 480,
+      "height": 640,
+      "group": "person",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000084674.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [144.61, 171.95, 333.6, 458.17],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [0, 158.2, 195.6, 471.73],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [195.7, 285.78, 200.34, 348.85],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 554266,
+      "file_name": "000000554266.jpg",
+      "sha256": "dbf8686ed7c2deb65ffa4f5f4839ffea16b29051ce23b50a846e7aaafeb53612",
+      "width": 640,
+      "height": 253,
+      "group": "person",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000554266.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [274.92, 130.69, 133.02, 103.46],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [376.99, 130.88, 251.06, 102.78],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 465549,
+      "file_name": "000000465549.jpg",
+      "sha256": "a34124e68622135a4b6c590cd2a6c43ed1be20dfbd05c392314841a0100551ce",
+      "width": 640,
+      "height": 428,
+      "group": "person",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000465549.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [79.29, 95.22, 215.02, 327.97],
+          "iscrowd": 0
+        },
+        {
+          "className": "human",
+          "bbox": [277.67, 111.16, 290.12, 316.06],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 383606,
+      "file_name": "000000383606.jpg",
+      "sha256": "3b755e15853488585d9a59c2803c7cd064612d3f29ea88c1c5d7715edb15be87",
+      "width": 640,
+      "height": 480,
+      "group": "person",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000383606.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [302.94, 125.16, 46.13, 156.32],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 93437,
+      "file_name": "000000093437.jpg",
+      "sha256": "7c9c2698d8cb9f2d424196cd29bed724d7f9aa9fb0e46dc152b598c94861a4ea",
+      "width": 640,
+      "height": 361,
+      "group": "person",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000093437.jpg",
+      "annotations": [
+        {
+          "className": "human",
+          "bbox": [78.69, 8.92, 351.27, 346.4],
+          "iscrowd": 0
+        }
+      ]
+    },
+    {
+      "id": 632,
+      "file_name": "000000000632.jpg",
+      "sha256": "a4cd7f45ac1ce27eaafb254b23af7c0b18a064be08870ceaaf03b2147f2ce550",
+      "width": 640,
+      "height": 483,
+      "group": "negative",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000000632.jpg",
+      "annotations": []
+    },
+    {
+      "id": 241319,
+      "file_name": "000000241319.jpg",
+      "sha256": "86e9949e3dbaa94b1543f585375f1d8ef1b05aa8411fca298bc4c13e53d29c1d",
+      "width": 640,
+      "height": 476,
+      "group": "negative",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000241319.jpg",
+      "annotations": []
+    },
+    {
+      "id": 234413,
+      "file_name": "000000234413.jpg",
+      "sha256": "7e6408c5a240b6680703c2439d9a31eb23083bf46f10a4195d7abd857de9452b",
+      "width": 640,
+      "height": 480,
+      "group": "negative",
+      "split": "tune",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000234413.jpg",
+      "annotations": []
+    },
+    {
+      "id": 111951,
+      "file_name": "000000111951.jpg",
+      "sha256": "f9a0a25e3bb5cff37a1a76d78374dd2831b544990aeaa629fe55d5ed889ae6ae",
+      "width": 640,
+      "height": 425,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000111951.jpg",
+      "annotations": []
+    },
+    {
+      "id": 127987,
+      "file_name": "000000127987.jpg",
+      "sha256": "16e49845f6cd3312c828045385cd41a929b02bcdd351b4b6331acfcb791c63f9",
+      "width": 640,
+      "height": 426,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000127987.jpg",
+      "annotations": []
+    },
+    {
+      "id": 190236,
+      "file_name": "000000190236.jpg",
+      "sha256": "703b3b3f8d8ee32af794427e6271765f22e120387d6c2f994606b120f7cb3e6a",
+      "width": 640,
+      "height": 393,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000190236.jpg",
+      "annotations": []
+    },
+    {
+      "id": 10092,
+      "file_name": "000000010092.jpg",
+      "sha256": "70eae5520682d2ad23ff01df57fc4f29cb3f5d4c1d63753d3b7f120f6a0d939b",
+      "width": 640,
+      "height": 426,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000010092.jpg",
+      "annotations": []
+    },
+    {
+      "id": 442323,
+      "file_name": "000000442323.jpg",
+      "sha256": "87c61ceffcecc9d3ecd9be2bb7dc605ed2a1c8c522b745f5867ac24f82c19d95",
+      "width": 640,
+      "height": 480,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000442323.jpg",
+      "annotations": []
+    },
+    {
+      "id": 27982,
+      "file_name": "000000027982.jpg",
+      "sha256": "ef3fd6c41531be0ac195cf5efa67c803ca8630c066ef5c046d802ff8ea4ba440",
+      "width": 500,
+      "height": 334,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000027982.jpg",
+      "annotations": []
+    },
+    {
+      "id": 415741,
+      "file_name": "000000415741.jpg",
+      "sha256": "f3dc76875460b05e6d348a4867e3e44bad554f819f2e4cf25b9b66615d72302c",
+      "width": 640,
+      "height": 360,
+      "group": "negative",
+      "split": "holdout",
+      "source": "https://s3.amazonaws.com/images.cocodataset.org/val2017/000000415741.jpg",
+      "annotations": []
+    }
+  ]
+}

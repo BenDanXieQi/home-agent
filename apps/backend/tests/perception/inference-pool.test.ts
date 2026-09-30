@@ -1,182 +1,239 @@
 import { afterAll, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
-import { setTimeout as delay } from "node:timers/promises";
 import { queueOptionsSymbol, type Piscina } from "piscina";
-import { detectionComputeBudget } from "../../src/perception/compute/budget";
 import type run from "../../src/perception/compute/inference-worker";
+import { resolveComputeBudget } from "../../src/perception/compute/budget";
 
-const originalBudget = detectionComputeBudget;
-const budget = {
-  ...detectionComputeBudget,
-  workersPerProcess: 1,
-  tasksPerWorker: 1,
+const detected = {
+  kind: "detected" as const,
+  detections: [],
+  timing: {
+    readMs: 0,
+    decodeMs: 0,
+    preprocessMs: 1,
+    inferenceMs: 2,
+    postprocessMs: 1,
+    workerMs: 4,
+  },
 };
-await mock.module("../../src/perception/compute/budget", () => ({
-  detectionComputeBudget: budget,
-}));
-
-class Pool extends EventEmitter {
+function metadata(id: number) {
+  return {
+    input: {
+      name: "images",
+      isTensor: true as const,
+      type: "float32" as const,
+      shape: [1, 3, 416, 416],
+    },
+    output: {
+      name: "output0",
+      isTensor: true as const,
+      type: "float32" as const,
+      shape: [1, 9, 3549],
+    },
+    provider: "cpu" as const,
+    sharpConcurrency: 1,
+    intraOpNumThreads: 1 as const,
+    workerThreadId: id,
+    modelPath: "/model",
+    sha256: "a".repeat(64),
+  };
+}
+class WorkerPool extends EventEmitter {
+  constructor(readonly id: number) {
+    super();
+  }
   run = mock<
     Piscina<Parameters<typeof run>[0], Awaited<ReturnType<typeof run>>>["run"]
-  >(async () => ({ kind: "closed" }));
+  >(async (task) => {
+    if (task.kind === "initialize")
+      return { kind: "initialized", metadata: metadata(this.id) };
+    if (task.kind === "close") return { kind: "closed" };
+    return detected;
+  });
   close = mock(async () => {});
 }
-let native: Pool;
 const original = { ...(await import("piscina")) };
+const workers: WorkerPool[] = [];
 const constructor = mock(function (
   _options: ConstructorParameters<typeof original.Piscina>[0],
 ) {
-  return native;
+  const worker = new WorkerPool(workers.length + 1);
+  workers.push(worker);
+  return worker;
 });
 await mock.module("piscina", () => ({ ...original, Piscina: constructor }));
-const { createInferencePool } =
-  await import("../../src/perception/compute/inference-pool");
 afterAll(async () => {
   await mock.module("piscina", () => original);
-  await mock.module("../../src/perception/compute/budget", () => ({
-    detectionComputeBudget: originalBudget,
-  }));
 });
 beforeEach(() => {
-  native = new Pool();
+  workers.length = 0;
   constructor.mockClear();
-  budget.workersPerProcess = 1;
-  budget.tasksPerWorker = 1;
 });
+const { createInferencePool } =
+  await import("../../src/perception/compute/inference-pool");
+const frame = { width: 1, height: 1, rgb: new Uint8Array(3) };
+function make(count = 2) {
+  return createInferencePool(
+    (error) => {
+      throw error;
+    },
+    resolveComputeBudget(1, count),
+  );
+}
 
-test("close drains native work and releases the model before closing idle threads", async () => {
-  const work = Promise.withResolvers<{ kind: "closed" }>();
-  const release = Promise.withResolvers<{ kind: "closed" }>();
-  native.run
-    .mockImplementationOnce(() => work.promise)
-    .mockImplementationOnce(() => release.promise);
-  const pool = createInferencePool(() => {});
-  const pending = pool.submit({ kind: "initialize" });
-  const closing = pool.close();
-  expect(pool.close()).toBe(closing);
-  await delay(1);
-  expect(native.run).toHaveBeenCalledTimes(1);
-  expect(native.close).not.toHaveBeenCalled();
-  await expect(pool.submit({ kind: "close" })).rejects.toThrow("closing");
-  work.resolve({ kind: "closed" });
-  await pending;
-  await delay(1);
-  expect(native.run).toHaveBeenLastCalledWith({ kind: "close" });
-  expect(native.close).not.toHaveBeenCalled();
-  release.resolve({ kind: "closed" });
-  await closing;
-  expect(native.close).toHaveBeenCalledTimes(1);
-});
-
-test("release failure leaves thread teardown to the outer process boundary", async () => {
-  native.run.mockRejectedValueOnce(new Error("release failed"));
-  const pool = createInferencePool(() => {});
-  await expect(pool.close()).rejects.toThrow("release failed");
-  expect(native.close).not.toHaveBeenCalled();
-});
-
-test("worker failure reports outward and prevents new native tasks", async () => {
-  const onFailure = mock(() => {});
-  const pool = createInferencePool(onFailure);
-  const error = new Error("worker failed");
-  native.emit("error", error);
-  expect(onFailure).toHaveBeenCalledWith(error);
-  await expect(pool.submit({ kind: "close" })).rejects.toThrow("worker failed");
-  await expect(pool.close()).rejects.toThrow("worker failed");
-  expect(native.run).not.toHaveBeenCalled();
-  expect(native.close).not.toHaveBeenCalled();
-});
-
-test("known image failures cross the worker boundary without losing their code", async () => {
-  native.run.mockResolvedValueOnce({
-    kind: "image_failed",
-    code: "invalid_image",
-    message: "Cannot decode image: unsupported format",
-    stack: "ImageProcessingError: unsupported format",
-  });
-  const pool = createInferencePool(() => {});
-  await expect(
-    pool.submit({ kind: "detect_image", image: { path: "/bad.png" } }),
-  ).rejects.toMatchObject({
-    code: "invalid_image",
-    message: "Cannot decode image: unsupported format",
+test("initializes and releases every distinct model owner", async () => {
+  const pool = make(3);
+  const result = await pool.submit({ kind: "initialize" });
+  expect(result).toMatchObject({
+    kind: "initialized",
+    metadata: { workerThreadIds: [1, 2, 3] },
   });
   await pool.close();
-});
-
-test("only the child-owned pixel buffer is transferred to Piscina", async () => {
-  const pixels = new Uint8Array([10, 20, 30]);
-  native.run.mockImplementationOnce(async (task, options) => {
-    expect(options?.transferList).toEqual([pixels.buffer]);
-    const received = structuredClone(task, {
-      transfer: options?.transferList ?? [],
-    });
-    expect(received).toMatchObject({
-      kind: "detect",
-      frame: { rgb: new Uint8Array([10, 20, 30]) },
-    });
-    return { kind: "closed" };
-  });
-  const pool = createInferencePool(() => {});
-  await pool.submit({
-    kind: "detect",
-    frame: { width: 1, height: 1, rgb: pixels },
-  });
-  expect(pixels.byteLength).toBe(0);
-  await pool.close();
-});
-
-test.each(["workersPerProcess", "tasksPerWorker"] as const)(
-  "rejects %s changes that would break single-session ownership",
-  (option) => {
-    budget[option] = 2;
-    expect(() => createInferencePool(() => {})).toThrow(
-      "one worker and one task per worker",
-    );
-    expect(constructor).not.toHaveBeenCalled();
-  },
-);
-
-test("reports zero queue time for immediate dispatch and excludes worker duration", async () => {
-  let now = 100;
-  const clock = spyOn(performance, "now").mockImplementation(() => now);
-  const pool = createInferencePool(() => {});
-  native.run.mockImplementationOnce(async () => {
-    now = 150;
-    return {
-      kind: "detected",
-      detections: [],
-      timing: {
-        readMs: 0,
-        decodeMs: 0,
-        preprocessMs: 5,
-        inferenceMs: 20,
-        postprocessMs: 1,
-        workerMs: 30,
-      },
-    };
-  });
-  try {
-    const result = await pool.submit({
-      kind: "detect",
-      frame: { width: 1, height: 1, rgb: new Uint8Array(3) },
-    });
-    expect(result).toMatchObject({
-      timing: { queueMs: 0, workerDispatchMs: 20 },
-    });
-  } finally {
-    clock.mockRestore();
-    await pool.close();
+  for (const worker of workers) {
+    expect(worker.run.mock.calls.map(([task]) => task.kind)).toEqual([
+      "initialize",
+      "close",
+    ]);
+    expect(worker.close).toHaveBeenCalledTimes(1);
   }
 });
+test("two workers admit overlapping tasks with one globally bounded pending image", async () => {
+  const pool = make();
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>(),
+    second = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  workers[1]!.run.mockImplementationOnce(() => second.promise);
+  const a = pool.submit({ kind: "detect", frame });
+  const b = pool.submit({ kind: "detect", frame });
+  expect(pool.available).toBe(false);
+  const queued = pool.submit({
+    kind: "detect_image",
+    image: { path: "/image" },
+  });
+  await expect(pool.submit({ kind: "detect", frame })).rejects.toMatchObject({
+    code: "busy",
+  });
+  first.resolve(detected);
+  second.resolve(detected);
+  await Promise.all([a, b, queued]);
+  expect(pool.available).toBe(true);
+  await pool.close();
+});
+test("close drains all workers before any native session release", async () => {
+  const pool = make();
+  await pool.submit({ kind: "initialize" });
+  const pending = Promise.withResolvers<typeof detected>();
+  workers[1]!.run.mockImplementationOnce(() => pending.promise);
+  const a = pool.submit({ kind: "detect", frame });
+  const b = pool.submit({ kind: "detect", frame });
+  const closing = pool.close();
+  try {
+    expect(pool.close()).toBe(closing);
+    await a;
+    // Give an incorrectly early release a chance to reach the worker boundary.
+    await new Promise((resolve) => setImmediate(resolve));
+    for (const worker of workers) {
+      expect(
+        worker.run.mock.calls.some(([task]) => task.kind === "close"),
+      ).toBe(false);
+      expect(worker.close).not.toHaveBeenCalled();
+    }
+    pending.resolve(detected);
+    await b;
+    await closing;
+    for (const worker of workers) {
+      expect(
+        worker.run.mock.calls.filter(([task]) => task.kind === "close"),
+      ).toHaveLength(1);
+      expect(worker.close).toHaveBeenCalledTimes(1);
+    }
+  } finally {
+    pending.resolve(detected);
+    await Promise.all([a, b, closing]);
+  }
+});
+test("one failed initialization prevents readiness and preserves its cause", async () => {
+  const pool = make();
+  workers[1]!.run.mockRejectedValueOnce(new Error("second model failed"));
+  await expect(pool.submit({ kind: "initialize" })).rejects.toThrow(
+    "second model failed",
+  );
+  await expect(pool.submit({ kind: "detect", frame })).rejects.toThrow(
+    "second model failed",
+  );
+});
+test("release failure never forcibly terminates a native worker thread", async () => {
+  const pool = make();
+  await pool.submit({ kind: "initialize" });
+  workers[0]!.run.mockRejectedValueOnce(new Error("release failed"));
+  await expect(pool.close()).rejects.toThrow("release failed");
+  expect(workers[0]!.close).not.toHaveBeenCalled();
+});
+test("ready cameras reserve free slots and pixel transfer waits for admission notification", async () => {
+  const pool = make();
+  await pool.submit({ kind: "initialize" });
+  const unsubscribe = pool.subscribeAvailable(
+    () => {},
+    () => true,
+  );
+  await expect(pool.submit({ kind: "detect", frame })).rejects.toMatchObject({
+    code: "busy",
+  });
+  let admitted = false;
+  const pixels = new Uint8Array([1, 2, 3]);
+  workers[0]!.run.mockImplementationOnce(async (task, options) => {
+    expect(admitted).toBe(true);
+    expect(options?.transferList).toEqual([pixels.buffer]);
+    structuredClone(task, { transfer: options?.transferList ?? [] });
+    return detected;
+  });
+  await pool.submit(
+    { kind: "detect", frame: { ...frame, rgb: pixels } },
+    async () => {
+      admitted = true;
+    },
+  );
+  expect(pixels.byteLength).toBe(0);
+  unsubscribe();
+  await pool.close();
+});
+test("image errors retain their code and do not poison the shared pool", async () => {
+  const pool = make();
+  await pool.submit({ kind: "initialize" });
+  workers[0]!.run.mockResolvedValueOnce({
+    kind: "image_failed",
+    code: "invalid_image",
+    message: "bad image",
+    stack: undefined,
+  });
+  await expect(
+    pool.submit({ kind: "detect_image", image: { path: "/bad" } }),
+  ).rejects.toMatchObject({ code: "invalid_image" });
+  expect(pool.available).toBe(true);
+  await pool.close();
+});
 
-test("reports actual queue residence separately from thread dispatch overhead", async () => {
+test("a worker error invalidates the shared admission gate", async () => {
+  const failure = mock(() => {});
+  const pool = createInferencePool(failure, resolveComputeBudget(1, 2));
+  await pool.submit({ kind: "initialize" });
+  const error = new Error("native worker failed");
+  workers[1]!.emit("error", error);
+  expect(failure).toHaveBeenCalledWith(error);
+  expect(pool.available).toBe(false);
+  await expect(pool.submit({ kind: "detect", frame })).rejects.toBe(error);
+  await expect(pool.close()).rejects.toBe(error);
+});
+
+test("worker-local queue time remains separate from worker dispatch overhead", async () => {
+  const pool = make(1);
+  await pool.submit({ kind: "initialize" });
   let now = 100;
   const clock = spyOn(performance, "now").mockImplementation(() => now);
-  const pool = createInferencePool(() => {});
   const queue = constructor.mock.calls[0]?.[0]?.taskQueue;
-  if (!queue) throw new Error("Missing inference queue");
-  native.run.mockImplementationOnce(async (task) => {
+  if (!queue) throw new Error("Missing queue");
+  workers[0]!.run.mockImplementationOnce(async (task) => {
     if (!(queueOptionsSymbol in task)) throw new Error("Missing queue key");
     const key = task[queueOptionsSymbol];
     if (typeof key !== "object" || !key) throw new Error("Invalid queue key");
@@ -184,31 +241,111 @@ test("reports actual queue residence separately from thread dispatch overhead", 
     now = 105;
     queue.push(queued);
     now = 125;
-    expect(queue.shift()).toBe(queued);
+    queue.shift();
     now = 175;
-    return {
-      kind: "detected",
-      detections: [],
-      timing: {
-        readMs: 0,
-        decodeMs: 0,
-        preprocessMs: 5,
-        inferenceMs: 20,
-        postprocessMs: 1,
-        workerMs: 40,
-      },
-    };
+    return { ...detected, timing: { ...detected.timing, workerMs: 40 } };
   });
   try {
-    const result = await pool.submit({
-      kind: "detect",
-      frame: { width: 1, height: 1, rgb: new Uint8Array(3) },
-    });
-    expect(result).toMatchObject({
+    expect(await pool.submit({ kind: "detect", frame })).toMatchObject({
       timing: { queueMs: 20, workerDispatchMs: 15 },
     });
   } finally {
     clock.mockRestore();
+    await pool.close();
+  }
+});
+
+test("the shared pending task goes to the next idle worker instead of waiting behind a slower one", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const slow = Promise.withResolvers<typeof detected>(),
+    fast = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => slow.promise);
+  workers[1]!.run.mockImplementationOnce(() => fast.promise);
+  const a = pool.submit({ kind: "detect", frame }),
+    b = pool.submit({ kind: "detect", frame });
+  const pending = pool.submit({ kind: "detect", frame });
+  fast.resolve(detected);
+  await b;
+  await pending;
+  expect(workers[0]!.run).toHaveBeenCalledTimes(2);
+  expect(workers[1]!.run).toHaveBeenCalledTimes(3);
+  slow.resolve(detected);
+  await a;
+  await pool.close();
+});
+
+test("appearance reserves one CPU only when video admission still has capacity", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  const inFlight = pool.submit({ kind: "detect", frame });
+  first.resolve(detected);
+  await inFlight;
+  expect(pool.reserveTracking()).toBe(true);
+  const next = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => next.promise);
+  const video = pool.submit({ kind: "detect", frame }, async () => {});
+  expect(pool.available).toBe(false);
+  await expect(
+    pool.submit({ kind: "detect", frame }, async () => {}),
+  ).rejects.toMatchObject({ code: "busy" });
+  next.resolve(detected);
+  await video;
+  expect(pool.available).toBe(true);
+  await pool.close();
+  const small = make(1);
+  await small.submit({ kind: "initialize" });
+  expect(small.reserveTracking()).toBe(false);
+  expect(small.available).toBe(true);
+  await small.close();
+});
+
+test("appearance can start with one idle slot while a detector remains active", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const detection = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => detection.promise);
+  const pending = pool.submit({ kind: "detect", frame });
+  try {
+    // A continuously occupied detector must not prevent the other CPU slot
+    // from being assigned to appearance. No admitted detection is displaced.
+    expect(pool.reserveTracking()).toBe(true);
+    expect(pool.available).toBe(false);
+  } finally {
+    detection.resolve(detected);
+    await pending;
+    await pool.close();
+  }
+});
+
+test("pending appearance reservation drains saturated detectors before admitting queued work", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>();
+  const second = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  workers[1]!.run.mockImplementationOnce(() => second.promise);
+  const a = pool.submit({ kind: "detect", frame });
+  const b = pool.submit({ kind: "detect", frame });
+  const queued = pool.submit({ kind: "detect", frame });
+  try {
+    expect(pool.reserveTracking()).toBe(false);
+    expect(pool.reserveTracking()).toBe(false);
+    first.resolve(detected);
+    await a;
+    expect(pool.reserveTracking()).toBe(true);
+    expect(pool.available).toBe(false);
+    expect(workers[0]!.run).toHaveBeenCalledTimes(2);
+    second.resolve(detected);
+    await b;
+    await queued;
+    expect(pool.available).toBe(true);
+  } finally {
+    first.resolve(detected);
+    second.resolve(detected);
+    await Promise.all([a, b, queued]);
     await pool.close();
   }
 });

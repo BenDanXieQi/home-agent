@@ -1,8 +1,10 @@
 # Backend
 
-基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放和聊天转发。聊天模型执行与对话会话持久化由独立 [Agent](../agent/README.md) 负责。
+基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
 
-当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/backend-household-perception.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪与猫狗位置跟踪已接入；身份确认、音视频语义理解和媒体候选交付仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -18,13 +20,16 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 ## 接口
 
-| 接口                       | 职责                                     |
-| -------------------------- | ---------------------------------------- |
-| `GET /api/health`          | backend 存活状态，不检查外围服务或数据库 |
-| `GET /api/config`          | 读取连接配置及可写状态                   |
-| `PUT /api/config`          | 校验并保存完整连接配置                   |
-| `GET /api/services/status` | 检查 Agent 与 go2rtc 的接口是否可用      |
-| `POST /api/chat`           | 将 JSON 请求转发至 Agent，透传响应与 SSE |
+| 接口                         | 职责                                     |
+| ---------------------------- | ---------------------------------------- |
+| `GET /api/health`            | backend 存活状态，不检查外围服务或数据库 |
+| `GET /api/config`            | 读取连接配置及可写状态                   |
+| `PUT /api/config`            | 校验并保存完整连接配置                   |
+| `GET /api/services/status`   | 检查 Agent 与 go2rtc 的接口是否可用      |
+| `POST /api/chat`             | 将 JSON 请求转发至 Agent，透传响应与 SSE |
+| `GET /api/perception`        | 本地检测与人宠跟踪的健康及最新观测       |
+| `GET /api/perception/stream` | 订阅本地检测当前状态，不传输媒体片段     |
+| `POST /api/perception/retry` | 显式重试感知计算，不重连物理摄像头       |
 
 连接地址来自根目录 `config/config.yaml`，每次请求重新读取文件，内容未变时复用解析结果。配置生成、编辑和 `--config` 用法见[本地运行](../../docs/running.md#服务连接)。
 
@@ -36,9 +41,9 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 `MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、所选家庭归属及读取运行标识；该标识用于排除会话更新前的旧读取结果。`properties/read-request.ts` 按设备分组检查 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。应用层通过 `POST /api/mijia/properties/read` 提供一次性读取，不做周期属性轮询。
 
-`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。家庭采集模块和[限时上报日志](../../docs/household.md#设备上报日志)分别消费该入口；只有家庭运行时提交 `latest` 与有效在线状态。采集范围、必要补读与房间查询见[设备事实与房间快照](../../docs/reference/device-facts.md)。独立设备事件尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/reference/mijia-source-contract.md)。
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。家庭采集模块和[限时上报日志](../../docs/household-runtime.md#设备上报日志)分别消费该入口；只有家庭运行时提交 `latest` 与有效在线状态。采集范围、必要补读与房间查询见[设备事实与房间快照](../../docs/contracts/device-facts.md)。独立设备事件尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/contracts/mijia.md)。
 
-`CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。backend 不接收或中转视频包。官方能力列表声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道能力列表生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
+`CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。浏览器预览视频不经过 backend；本地感知另从 go2rtc 私有分析出口读取视频，在 backend 的计算子进程内解码。官方能力列表声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道能力列表生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 
 `AccountMaintenance` 调度完整账号会话的恢复续期，通过回调交由 `MijiaService` 保存并启用新会话。`DeviceDiscovery` 维护设备快照、合并并发刷新与周期设备发现，`MediaSession` 维护 go2rtc 地址巡检、绑定重试、媒体运行标识和相机／观看资源；`Go2RtcAdapter` 维护独立的 go2rtc 运行时会话和心跳租约。米家会话续期与 go2rtc 租约续期是两种不同操作。媒体运行标识 `revision` 在媒体失效或重新绑定时更换，用于拒绝旧播放请求；它不用于配置并发修改检测。源注册失败的重试由 `CameraSourceManager` 管理，媒体收包监测和取流恢复由 go2rtc 管理，网页出帧检测由浏览器管理。
 
@@ -105,6 +110,7 @@ src/
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、SSE 与限时设备推送日志
+├── perception/            # 本地检测、人宠跟踪与人体外观模型、隔离计算、视频解码/调度、当前观测与接口
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验
@@ -119,7 +125,7 @@ src/
 
 业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../packages/api/README.md#错误响应)。
 
-`main.ts` 是应用级依赖的唯一装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务和家庭运行时，并负责启动与关闭。`createApp({ environment, connectionStore, household, mijiaService, deviceLogs, readAgentUrl, staticRoot })` 只组装 HTTP 应用，不读取环境或隐式创建资源。路由工厂通过参数接收这些模块，调用其业务方法，不负责应用级初始化与关闭。
+`main.ts` 是应用级依赖的唯一装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数和静态资源位置，只组装 HTTP 应用，不读取环境或隐式创建资源。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭。本地感知服务不接收 Agent 客户端或模型凭据。
 
 聊天路由只接收 Agent 地址读取函数、端口与超时；米家服务接收 go2rtc 地址读取函数、凭据仓库和家庭选择存储模块。地址函数由启动入口连接到配置仓库，调用时读取当前配置，业务模块不依赖 YAML 存储结构。数据库连接由存储模块使用，不放入 HTTP 请求上下文。`environment.ts` 负责读取和校验进程环境变量。
 

@@ -1,3 +1,8 @@
+import { computeBudgetSchema } from "./budget";
+import { perceptionConfigSchema } from "../config";
+import { runSchema } from "../observations";
+import { videoEventSchema } from "../video/events";
+import { analysisAccessSchema } from "../../mijia/media/analysis-stream";
 import { z } from "zod";
 import { inspect } from "node:util";
 import { frameSchema } from "../detection/frame";
@@ -6,6 +11,10 @@ import {
   ImageProcessingError,
   imageRequestSchema,
 } from "../detection/image-request";
+
+export class ComputeBusyError extends Error {
+  readonly code = "busy" as const;
+}
 
 // These schemas validate the real parent/child IPC boundary, not just TS types.
 export const taskSchema = z.discriminatedUnion("kind", [
@@ -16,6 +25,20 @@ export const taskSchema = z.discriminatedUnion("kind", [
     image: imageRequestSchema,
   }),
   z.object({ kind: z.literal("close") }),
+]);
+export const videoStartSchema = z.object({
+  run: runSchema,
+  access: analysisAccessSchema,
+  config: perceptionConfigSchema,
+  executable: z.string().min(1),
+});
+export const commandSchema = z.discriminatedUnion("kind", [
+  taskSchema.options[0].extend({ budget: computeBudgetSchema }),
+  taskSchema.options[1],
+  taskSchema.options[2],
+  taskSchema.options[3],
+  z.object({ kind: z.literal("video_start"), source: videoStartSchema }),
+  z.object({ kind: z.literal("video_stop"), runId: z.uuid() }),
 ]);
 const tensorMetadata = z.object({
   name: z.string(),
@@ -54,7 +77,7 @@ export const resultSchema = z.discriminatedUnion("kind", [
       output: tensorMetadata,
       provider: z.literal("cpu"),
       sharpConcurrency: z.int().positive(),
-      workerThreadId: z.int().positive(),
+      workerThreadIds: z.array(z.int().positive()).min(1),
       intraOpNumThreads: z.int().positive(),
       modelPath: z.string().min(1),
       sha256: sha256Schema,
@@ -69,15 +92,16 @@ export const resultSchema = z.discriminatedUnion("kind", [
     height: z.int().positive(),
   }),
   z.object({ kind: z.literal("closed") }),
+  z.object({ kind: z.literal("video_ack") }),
 ]);
 export const requestSchema = z.object({
   id: z.int().positive(),
-  task: taskSchema,
+  task: commandSchema,
 });
 const errorSchema = z.object({
   message: z.string().max(4096),
   stack: z.string().max(16_384).optional(),
-  code: z.literal("invalid_image").optional(),
+  code: z.enum(["invalid_image", "busy"]).optional(),
 });
 
 export function errorDetails(error: unknown) {
@@ -100,14 +124,20 @@ export function errorDetails(error: unknown) {
   return {
     message: messages.join(": ").slice(0, 4096),
     stack: error instanceof Error ? error.stack?.slice(0, 16_384) : undefined,
-    code: error instanceof ImageProcessingError ? error.code : undefined,
+    code:
+      error instanceof ImageProcessingError || error instanceof ComputeBusyError
+        ? error.code
+        : undefined,
   };
 }
 
 export function restoreError(details: z.infer<typeof errorSchema>) {
-  const error = details.code
-    ? new ImageProcessingError(details.message)
-    : new Error(details.message);
+  const error =
+    details.code === "busy"
+      ? new ComputeBusyError(details.message)
+      : details.code === "invalid_image"
+        ? new ImageProcessingError(details.message)
+        : new Error(details.message);
   if (details.stack) error.stack = details.stack;
   return error;
 }
@@ -121,6 +151,7 @@ export const resultResponseSchema = z.object({
 
 export const responseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ready") }),
+  z.object({ kind: z.literal("video"), payload: videoEventSchema }),
   resultResponseSchema,
   errorSchema.extend({
     kind: z.literal("error"),

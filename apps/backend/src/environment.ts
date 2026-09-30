@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const environmentSchema = z.object({
+  PERCEPTION_FFMPEG_PATH: z.string().default("ffmpeg"),
   CREDENTIAL_KEY_FILE: z.string().trim().min(1).optional(),
   DATABASE_URL: z
     .url()

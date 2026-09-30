@@ -1,16 +1,27 @@
+import type { videoEventSchema } from "../video/events";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import pTimeout from "p-timeout";
 import { frameSchema } from "../detection/frame";
 import { createDetectionProcess } from "./process";
-import { detectionComputeBudget } from "./budget";
-import { errorDetails, taskSchema } from "./protocol";
+import {
+  detectionComputeBudget,
+  cpuRatioSchema,
+  resolveComputeBudget,
+} from "./budget";
+import {
+  ComputeBusyError,
+  errorDetails,
+  commandSchema,
+  videoStartSchema,
+} from "./protocol";
 import {
   ImageProcessingError,
   imageRequestSchema,
 } from "../detection/image-request";
 
 const optionsSchema = z.object({
+  cpuRatio: cpuRatioSchema,
   initializeTimeoutMs: z.int().positive().max(300_000).default(30_000),
   taskTimeoutMs: z.int().positive().max(300_000).default(10_000),
   closeTimeoutMs: z.int().min(100).max(300_000).default(10_000),
@@ -60,11 +71,13 @@ function within<T>(
 
 export async function createDetectionPool(
   input: z.input<typeof optionsSchema> = {},
+  shutdownSignal?: AbortSignal,
 ) {
   const options = optionsSchema.parse(input);
+  const budget = resolveComputeBudget(options.cpuRatio);
   const capacity =
     detectionComputeBudget.processes *
-      detectionComputeBudget.workersPerProcess *
+      budget.workersPerProcess *
       detectionComputeBudget.tasksPerWorker +
     detectionComputeBudget.pendingTasks;
   let current: ReturnType<typeof createDetectionProcess> | undefined;
@@ -82,9 +95,20 @@ export async function createDetectionPool(
   let recovery: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
   const stopping = new AbortController();
+  const onShutdown = () => stopping.abort(new Error("Perception stopping"));
+  shutdownSignal?.addEventListener("abort", onShutdown, { once: true });
+  if (shutdownSignal?.aborted) onShutdown();
+  const videoListeners = new Set<
+    (event: z.infer<typeof videoEventSchema>) => void
+  >();
+  const statusListeners = new Set<() => void>();
+  const notifyStatus = () => {
+    for (const listener of statusListeners) listener();
+  };
   const active = new Set<Promise<unknown>>();
   let activeRgbBytes = 0;
   let activeImageRequests = 0;
+  let activeControls = 0;
 
   async function retire(
     generation: ReturnType<typeof createDetectionProcess>,
@@ -94,7 +118,17 @@ export async function createDetectionPool(
   }
 
   async function initialize() {
-    const generation = createDetectionProcess();
+    const generation = createDetectionProcess(options.taskTimeoutMs);
+    generation.events.on("video", (event: z.infer<typeof videoEventSchema>) => {
+      if (current === generation && status === "ready") {
+        if (event.event === "settled") {
+          healthySince ??= performance.now();
+          if (performance.now() - healthySince >= options.recoveryResetMs)
+            consecutiveRestarts = 0;
+        }
+        for (const listener of videoListeners) listener(event);
+      }
+    });
     current = generation;
     generation.events.on("error", (cause: Error) => {
       fail(
@@ -106,7 +140,7 @@ export async function createDetectionPool(
     });
     try {
       const result = await within(
-        generation.submit({ kind: "initialize" }),
+        generation.submit({ kind: "initialize", budget }),
         options.initializeTimeoutMs,
         "Model initialization",
         stopping.signal,
@@ -132,6 +166,7 @@ export async function createDetectionPool(
     lastError = cause;
     healthySince = undefined;
     status = "recovering";
+    notifyStatus();
     recovery = recover(generation);
   }
 
@@ -153,7 +188,10 @@ export async function createDetectionPool(
         );
         try {
           metadata = await initialize();
-          if (!stopping.signal.aborted) status = "ready";
+          if (!stopping.signal.aborted) {
+            status = "ready";
+            notifyStatus();
+          }
           return;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
@@ -162,11 +200,15 @@ export async function createDetectionPool(
           if (current) await retire(current);
         }
       }
-      if (!stopping.signal.aborted) status = "unavailable";
+      if (!stopping.signal.aborted) {
+        status = "unavailable";
+        notifyStatus();
+      }
     } catch (error) {
       if (!stopping.signal.aborted) {
         lastError = error instanceof Error ? error : new Error(String(error));
         status = "unavailable";
+        notifyStatus();
       }
     }
   }
@@ -179,6 +221,7 @@ export async function createDetectionPool(
       consecutiveRestarts = 0;
       healthySince = undefined;
       status = "recovering";
+      notifyStatus();
       recovery = recover(current, Math.max(1, options.maxRestarts));
     }
     await recovery;
@@ -190,12 +233,15 @@ export async function createDetectionPool(
       });
   }
 
-  let metadata = await initialize();
+  let metadata = await initialize().catch((cause: unknown) => {
+    shutdownSignal?.removeEventListener("abort", onShutdown);
+    throw cause;
+  });
   status = "ready";
 
   function submitDetection(
     request: Extract<
-      z.infer<typeof taskSchema>,
+      z.infer<typeof commandSchema>,
       { kind: "detect" | "detect_image" }
     >,
     submitted: number,
@@ -215,7 +261,7 @@ export async function createDetectionPool(
       return Promise.reject(
         new DetectionPoolError(
           "busy",
-          "Detection pool has one running and one pending task",
+          "Detection IPC request capacity exhausted",
         ),
       );
     const rgbBytes =
@@ -266,7 +312,10 @@ export async function createDetectionPool(
           },
         };
       } catch (error) {
-        if (error instanceof ImageProcessingError)
+        if (
+          error instanceof ImageProcessingError ||
+          error instanceof ComputeBusyError
+        )
           throw new DetectionPoolError(error.code, error.message, {
             cause: error,
           });
@@ -320,6 +369,8 @@ export async function createDetectionPool(
   function close() {
     if (closing) return closing;
     status = "closing";
+    notifyStatus();
+    shutdownSignal?.removeEventListener("abort", onShutdown);
     stopping.abort(
       new DetectionPoolError("closed", "Detection pool is closing"),
     );
@@ -377,9 +428,41 @@ export async function createDetectionPool(
     return closing;
   }
 
+  async function videoControl(
+    task: Extract<
+      z.infer<typeof commandSchema>,
+      { kind: "video_start" | "video_stop" }
+    >,
+  ) {
+    const generation = current;
+    if (status !== "ready" || !generation)
+      throw new DetectionPoolError("unavailable", "Video compute unavailable");
+    if (activeControls >= 16)
+      throw new DetectionPoolError(
+        "busy",
+        "Video IPC control capacity exhausted",
+      );
+    activeControls++;
+    try {
+      const result = await within(
+        generation.submit(task),
+        options.closeTimeoutMs,
+        "Video control",
+        stopping.signal,
+      );
+      if (result.kind !== "video_ack")
+        throw new Error("Unexpected video control response");
+    } catch (error) {
+      fail(generation, new Error("Video control failed", { cause: error }));
+      throw error;
+    } finally {
+      activeControls--;
+    }
+  }
   function getStatus() {
     return {
       status,
+      budget,
       restarts,
       consecutiveRestarts,
       lastError: lastError ? errorDetails(lastError).message : undefined,
@@ -398,5 +481,28 @@ export async function createDetectionPool(
     close,
     retry,
     getStatus,
+    subscribeStatus(listener: () => void) {
+      statusListeners.add(listener);
+      return () => {
+        statusListeners.delete(listener);
+      };
+    },
+    startVideo(source: z.infer<typeof videoStartSchema>) {
+      return videoControl({
+        kind: "video_start",
+        source: videoStartSchema.parse(source),
+      });
+    },
+    stopVideo(runId: string) {
+      return videoControl({ kind: "video_stop", runId });
+    },
+    subscribeVideo(
+      listener: (event: z.infer<typeof videoEventSchema>) => void,
+    ) {
+      videoListeners.add(listener);
+      return () => {
+        videoListeners.delete(listener);
+      };
+    },
   };
 }

@@ -1,3 +1,4 @@
+import { resolveComputeBudget } from "../../src/perception/compute/budget";
 import { expect, test } from "bun:test";
 import { createFrameSchedule } from "../../scripts/benchmark-detection";
 import { createPerceptionReport } from "../../scripts/perception-report";
@@ -50,9 +51,12 @@ test("report uses worker model metadata without opening the model file", async (
     },
     provider: "cpu",
     sharpConcurrency: 1,
-    workerThreadId: 1,
+    workerThreadIds: [1],
     intraOpNumThreads: 1,
   } satisfies Parameters<typeof createPerceptionReport>[0];
-  const report = await createPerceptionReport(metadata);
+  const report = await createPerceptionReport(
+    metadata,
+    resolveComputeBudget(1, 1),
+  );
   expect(report.metadata).toEqual(metadata);
 });

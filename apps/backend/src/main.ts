@@ -1,3 +1,5 @@
+import { createPerceptionService } from "./perception/service";
+import { createPerceptionSources } from "./mijia/perception-source";
 import { createAgentHouseholdReset } from "./household/reset-agent";
 import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
@@ -75,6 +77,18 @@ const deviceLogs = new DevicePushLogs(
 mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
+const perception = createPerceptionService({
+  configPath: resolvePath(
+    import.meta.dir,
+    "../../..",
+    "config/perception.json",
+  ),
+  executable: environment.PERCEPTION_FFMPEG_PATH,
+  sources: createPerceptionSources(household, mijiaService),
+});
+perception.start().catch((error: unknown) => {
+  console.error("Perception startup failed", error);
+});
 const shutdown = new AbortController();
 const { RoomAnalysisService } = await import("./room-analysis/service");
 const { createRoomAnalysisClient } =
@@ -86,6 +100,7 @@ const roomAnalysis = new RoomAnalysisService(
   ),
 );
 const app = createApp({
+  perception,
   staticRoot: join(import.meta.dir, "public"),
   environment,
   connectionStore,
@@ -114,6 +129,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         const drained = await Promise.race([
           Promise.all([
             server.stop(),
+            perception.close(),
             deviceLogs.stop("后端停止", "interrupted"),
             household.close().catch(() => {
               console.warn(

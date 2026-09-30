@@ -174,7 +174,10 @@ async function main() {
         Math.max(1, rows.length);
       console.log(
         JSON.stringify({
-          ...(await createPerceptionReport(pool.metadata)),
+          ...(await createPerceptionReport(
+            pool.metadata,
+            pool.getStatus().budget,
+          )),
           workload: {
             kind: "image-file",
             width,

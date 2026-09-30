@@ -1,8 +1,8 @@
 # Agent
 
-当前为独立运行的模型服务，提供流式对话、会话持久化、房间上下文分析和执行追踪，通过 backend 转发请求。房间分析只解释 backend 本次提交的有界设备证据；普通聊天尚无家庭查询或设备工具，长期记忆和设备控制未接入。
+当前为本项目自有、独立运行的第一方模型服务，提供流式对话、会话持久化、房间上下文分析和执行追踪，通过 backend 转发请求。房间分析只解释 backend 本次提交的有界设备证据；普通聊天尚无家庭查询或设备工具，长期记忆和设备控制未接入。
 
-当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/reference/room-analysis.md)。后续家庭能力见[家庭语义目标与领域模型](../../docs/plans/household-model.md)与 [Step 6 计划](../../docs/plans/household-steps/06-agent.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；单次房间分析不写对话检查点。
+当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。后续家庭能力见[家庭语义目标与领域模型](../../docs/plans/household-model.md)与 [第一方 Agent 协作计划](../../docs/plans/household-automation.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；单次房间分析不写对话检查点。
 
 Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连接 PostgreSQL。默认复用根目录 `DATABASE_URL`；可用 `AGENT_DATABASE_URL` 指定独立账号或数据库。状态表位于固定的 `agent_state` schema，使用普通 PostgreSQL 表，由 checkpointer 管理，不属于 backend 的 Drizzle schema，也不转换为 TimescaleDB hypertable。
 
@@ -18,7 +18,7 @@ Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连�
 
 切换家庭时 backend 调用本机访问范围内的 `POST /api/household-reset`，先清空 `agent_state.checkpoints`、`checkpoint_blobs` 和 `checkpoint_writes`，保留迁移记录。运行账号需要这三张表的 `TRUNCATE` 权限。Agent 有进行中的聊天或房间分析时返回 409；清理到切换完成之间暂停新任务，后台异常断开时暂停最多一分钟，尚未结束的数据库清理仍阻止新任务。该保护与聊天并发约束一样限于单 Agent 进程，同一数据库不能同时由多个 Agent 实例写入。
 
-两个服务的数据库清理不是一个事务，后续绑定保存失败不会恢复已经删除的对话。清理范围、保留项与操作入口见[切换家庭与清理数据](../../docs/household.md#切换家庭与清理数据)。
+两个服务的数据库清理不是一个事务，后续绑定保存失败不会恢复已经删除的对话。清理范围、保留项与操作入口见[切换家庭与清理数据](../../docs/household-runtime.md#切换家庭与清理数据)。
 
 向 backend 的 `POST /api/chat` 发送：
 

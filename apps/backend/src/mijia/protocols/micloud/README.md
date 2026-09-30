@@ -39,7 +39,7 @@ passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://githu
 
 `getCatalog()` 通过 `getHomes()` 查询 `/v2/homeroom/gethome` 与归属分页 `/v2/homeroom/get_dev_room_page`，汇总自有及共享家庭、房间中的设备 ID，再分批调用 `/v2/home/device_list_page` 获取设备详情。每批最多 150 个 ID，并检查详情分页游标，按设备 ID 去重，只接纳本批请求的设备；清单为空时不发送设备详情请求。协议参数参考[小米官方集成](https://github.com/XiaoMi/ha_xiaomi_home/blob/main/custom_components/xiaomi_home/miot/miot_cloud.py)的设备详情读取，沿用现有 RC4 会话。详情接口返回的 `localip` 原样保留，供摄像头局域网连接使用。设备详情与家庭清单请求使用同一 RC4 签名传输，未找到归属时返回空值，不推测安装位置。`homes.ts` 负责设备清单响应校验、分页和归属映射。
 
-`getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/reference/mijia-source-contract.md)。
+`getProperties()` 通过同一已登录 MiCloud 实例的 RC4 请求调用 `/miotspec/prop/get`，沿用当前 userId、serviceToken、ssecurity 和 Cookie。它复用既有扫码会话，不发起额外 OAuth 或另存属性授权。`datasource=1` 为缓存优先，缺失时可能触发设备 RPC，不保证最新值；批次调度、readable 规格预检、取消与逐项观测由业务 `properties/` 模块负责，完整语义见[米家来源契约](../../../../../../docs/contracts/mijia.md)。
 
 家庭和房间成员列表用于映射归属，不保证当前账号能取得每个成员的详情。`getCatalog()` 只有在全部详情请求和分页完成后才返回；成功响应未返回的设备不进入可访问清单，原始成员引用仍保留。响应结构非法、请求失败和分页异常继续使整次获取失败。小米官方集成的 `get_devices_async()` 同样排除详情结果中不存在的成员；业务层不得把这种情况当作整个家庭响应无法解析。
 

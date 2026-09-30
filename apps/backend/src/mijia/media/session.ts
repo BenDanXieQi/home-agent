@@ -465,6 +465,28 @@ export class MediaSession {
     return { adapter: this.mediaAdapter, cameras: this.cameraSources };
   }
 
+  async prepareAnalysis(
+    revision: string,
+    deviceId: string,
+    channel: 1 | 2,
+    signal: AbortSignal,
+  ) {
+    const camera = await this.preparePlaybackCamera(
+      revision,
+      deviceId,
+      channel,
+      signal,
+    );
+    return {
+      access: camera.adapter.analysisAccess(camera.sourceId),
+      signal: this.requireReady(revision).cameras.sourceSignal(
+        deviceId,
+        channel,
+        camera.sourceId,
+      ),
+    };
+  }
+
   reservePlayback(revision: string, deviceId: string, channel: 1 | 2) {
     this.requireReady(revision).cameras.validate(deviceId, channel);
     return this.playback.reserve(revision, deviceId, channel);
