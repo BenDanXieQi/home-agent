@@ -1,8 +1,16 @@
+import { resolveComputeBudget } from "../../src/perception/compute/budget";
 import { afterAll, beforeEach, expect, mock, spyOn, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { setTimeout as delay } from "node:timers/promises";
 
 class Child extends EventEmitter {
+  groupAlive = true;
+  constructor() {
+    super();
+    this.once("exit", () => {
+      this.groupAlive = false;
+    });
+  }
   pid: number | undefined = 12345;
   stderr = new EventEmitter();
   messages: unknown[] = [];
@@ -19,10 +27,20 @@ class Child extends EventEmitter {
 let child: Child;
 const original = { ...(await import("node:child_process")) };
 const fork = mock(() => child);
+const killGroup = spyOn(globalThis.process, "kill").mockImplementation(
+  (pid, signal) => {
+    expect(pid).toBe(-12345);
+    if (!child.groupAlive)
+      throw Object.assign(new Error("Group exited"), { code: "ESRCH" });
+    if (signal !== 0) child.kills.push(String(signal));
+    return true;
+  },
+);
 await mock.module("node:child_process", () => ({ ...original, fork }));
 const { createDetectionProcess } =
   await import("../../src/perception/compute/process");
 afterAll(async () => {
+  killGroup.mockRestore();
   await mock.module("node:child_process", () => original);
 });
 beforeEach(() => {
@@ -158,7 +176,7 @@ test.each(["starting", "idle"] as const)(
     process.events.on("error", (error: Error) => errors.push(error));
     if (state === "idle") child.emit("message", { kind: "ready" });
     const task = process
-      .submit({ kind: "initialize" })
+      .submit({ kind: "initialize", budget: resolveComputeBudget(0.5, 2) })
       .catch((error: unknown) => error);
     await delay(1);
     child.emit("message", {

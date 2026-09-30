@@ -1,0 +1,8 @@
+{
+  "cpuRatio": 0.5,
+  "sources": [],
+  "sampleFps": 3,
+  "firstFrameTimeoutMs": 90000,
+  "silenceTimeoutMs": 30000,
+  "maxFrameAgeMs": 2000
+}

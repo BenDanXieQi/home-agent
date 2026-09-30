@@ -1,3 +1,5 @@
+import { createPerceptionRoutes } from "./perception/routes";
+import type { createPerceptionService } from "./perception/service";
 import { healthSchema } from "@home-agent/api/contracts";
 import { currentTraceId, httpTracing } from "@home-agent/observability";
 import { Hono } from "hono";
@@ -18,6 +20,7 @@ import type { RoomAnalysisService } from "./room-analysis/service";
 import { createRoomAnalysisRoutes } from "./room-analysis/routes";
 
 type AppDependencies = {
+  perception: ReturnType<typeof createPerceptionService>;
   staticRoot?: string;
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
   connectionStore: ConnectionStore;
@@ -30,6 +33,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  perception,
   staticRoot,
   environment,
   connectionStore,
@@ -69,6 +73,14 @@ export function createApp({
       ),
     )
     .route(
+      "/api/perception",
+      createPerceptionRoutes(
+        perception,
+        environment.BACKEND_PORT,
+        shutdownSignal,
+      ),
+    )
+    .route(
       "/api/config",
       createConnectionRoutes(environment.BACKEND_PORT, connectionStore),
     )
@@ -105,7 +117,7 @@ export function createApp({
     app.on(
       "GET",
       ["/", "/devices", "/cameras", "/settings", "/device-logs", "/rooms"],
-      serveStatic({ path: `${staticRoot}/index.html` }),
+      serveStatic({ root: staticRoot, path: "index.html" }),
     );
   }
   app.notFound((c) => errorResponse(c, new AppError("not_found")));
