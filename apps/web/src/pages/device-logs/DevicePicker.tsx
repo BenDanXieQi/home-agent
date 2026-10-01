@@ -129,7 +129,10 @@ export const DevicePicker = memo(function DevicePicker({
           onClick={() => onOpenChange(!devicesOpen)}
         >
           {devicesOpen ? "收起列表" : "选择设备"}
-          <ChevronDown size={14} className={`shrink-0 ${devicesOpen ? "rotate-180" : ""}`} />
+          <ChevronDown
+            size={14}
+            className={`shrink-0 ${devicesOpen ? "rotate-180" : ""}`}
+          />
         </button>
         {loaded ? (
           <span

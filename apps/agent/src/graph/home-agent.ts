@@ -23,6 +23,9 @@ export function createHomeAgent(
     streamUsage: true,
     maxRetries: 1,
     timeout: 60_000,
+    ...(config.AGENT_THINKING
+      ? { modelKwargs: { thinking: { type: config.AGENT_THINKING } } }
+      : {}),
     ...(config.OPENAI_BASE_URL
       ? { configuration: { baseURL: config.OPENAI_BASE_URL } }
       : {}),

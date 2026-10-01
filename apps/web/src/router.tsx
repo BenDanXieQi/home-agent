@@ -69,6 +69,11 @@ const deviceLogsRoute = createRoute({
   path: "/device-logs",
   component: lazyRouteComponent(() => import("./pages/device-logs/index")),
 });
+const dataRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/data",
+  component: lazyRouteComponent(() => import("./pages/database/index")),
+});
 export const router = createRouter({
   routeTree: rootRoute.addChildren([
     accountRoute.addChildren([
@@ -76,6 +81,7 @@ export const router = createRouter({
       devicesRoute,
       camerasRoute.addChildren([camerasIndexRoute, cameraDetailRoute]),
       deviceLogsRoute,
+      dataRoute,
       settingsRoute,
     ]),
   ]),

@@ -29,6 +29,12 @@ const byName = ([, left]: [string, string], [, right]: [string, string]) =>
   left.localeCompare(right, "zh-CN");
 export const deviceFilterOptionsAtom = atom((get) => {
   const rooms = new Map<string, string>();
+  for (const room of Object.values(
+    get(householdSnapshotAtom)?.projection.room ?? {},
+  )) {
+    if (!room.archived)
+      rooms.set(JSON.stringify([room.home_id, room.room_id]), room.name);
+  }
   const categories = new Map<string, string>();
   const capabilities = new Set<string>();
   for (const device of get(devicesAtom)) {

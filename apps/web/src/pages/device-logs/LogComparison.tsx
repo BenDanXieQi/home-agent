@@ -112,7 +112,11 @@ export function ComparisonSelection({
                   }}
                   {...contentSwap}
                 >
-                  <RotateCcw size={13} className="shrink-0" aria-hidden="true" />
+                  <RotateCcw
+                    size={13}
+                    className="shrink-0"
+                    aria-hidden="true"
+                  />
                   清空选择
                 </m.button>
               )}

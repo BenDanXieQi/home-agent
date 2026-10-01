@@ -1,9 +1,11 @@
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
+import { createAgentHouseholdReset } from "./household/reset-agent";
 import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
 import { createDatabase } from "./db";
+import { createContextRepository } from "./household-context/repository";
 import { createCredentialStore } from "./credentials/store";
 import { createHomeSelectionStore } from "./mijia/homes/store";
 import { readCredentialKey } from "./credentials/key";
@@ -42,6 +44,9 @@ const credentialStore = database
 const mijiaService = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
+  resetHomeData: createAgentHouseholdReset(
+    async () => (await connectionStore.read()).services.agent.url,
+  ),
   homeSelectionStore: database
     ? createHomeSelectionStore(database.db)
     : undefined,
@@ -52,12 +57,17 @@ const { MiotSpecClient } = await import("./mijia/protocols/spec/client");
 const { householdLimits } = await import("./household/config");
 const { DevicePushLogs } = await import("./household/device-logs");
 const { createHouseholdRepository } = await import("./household/repository");
+const { loadCollectionPolicy } = await import("./household/collection-policy");
+const collectionPolicy = await loadCollectionPolicy(
+  resolvePath(import.meta.dir, "../../..", "config/collection.json"),
+);
 const household = createMijiaHousehold(
   mijiaService,
   database ? createHouseholdRepository(database.db) : undefined,
   createMijiaSpecificationLoader(
     new MiotSpecClient(householdLimits.specificationResponseBytes),
   ),
+  collectionPolicy,
 );
 household.start();
 const deviceLogs = new DevicePushLogs(
@@ -81,7 +91,19 @@ perception.start().catch((error: unknown) => {
   console.error("Perception startup failed", error);
 });
 const shutdown = new AbortController();
+const { RoomAnalysisService } = await import("./room-analysis/service");
+const { createRoomAnalysisClient } =
+  await import("./room-analysis/agent-client");
+const roomAnalysis = new RoomAnalysisService(
+  household,
+  createRoomAnalysisClient(
+    async () => (await connectionStore.read()).services.agent.url,
+  ),
+);
 const app = createApp({
+  contextRepository: database
+    ? createContextRepository(database.db)
+    : undefined,
   perception,
   staticRoot: join(import.meta.dir, "public"),
   environment,
@@ -89,6 +111,7 @@ const app = createApp({
   household,
   mijiaService,
   deviceLogs,
+  roomAnalysis,
   shutdownSignal: shutdown.signal,
   readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
 });
@@ -103,6 +126,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
+    roomAnalysis.close();
     (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {

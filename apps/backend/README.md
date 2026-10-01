@@ -2,9 +2,9 @@
 
 基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
 
-当前设备清单与规格接入尚未形成家庭语义模型，也未实现属性集采、人物／宠物状态、空间覆盖、活动判断或生效要求管理。backend 提供上下文并接纳 Agent 候选判断的设计边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md#家庭情景上下文的生产接纳与消费)，持续情景、长期任务、统一执行及 Agent 提交接口见[协作实施计划](../../docs/plans/household-automation.md)，均尚未实现；设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和完成范围见[感知功能说明](../../docs/perception.md)；人体外观跟踪与猫狗位置跟踪已接入，音频、前置筛选和媒体候选尚未接入，其独立交付边界见[摄像头计划](../../docs/plans/media-perception.md#agent-暂缓时的交付边界)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪与猫狗位置跟踪已接入；身份确认、音视频语义理解和媒体候选交付仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -47,9 +47,9 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 米家账号以扫码为唯一用户登录入口，backend 复用扫码身份静默完成 OAuth 授权。MiCloud 与 OAuth 共同构成完整接入会话，由 `MijiaService` 统一负责保存、恢复、续期和退出。新会话必须符合持久家庭绑定，完成授权并保存成功后才采用，OAuth 失败不覆盖现有账号；活动会话续期最终认证失败则撤销整个账号的设备清单、读取、观察和媒体访问，进入重新认证状态。MQTT 连接认证拒绝先交账号维护强制刷新 token；普通网络、限流及单 topic 权限拒绝不直接等价于整账号失效。完整生命周期见[授权与配置](../../docs/mijia.md#授权与配置)。
 
-`MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、所选家庭归属及读取运行标识；该标识用于排除会话更新前的旧读取结果。`properties/read-request.ts` 按设备分组检查 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。当前没有属性读取 HTTP 路由或周期读取。
+`MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、所选家庭归属及读取运行标识；该标识用于排除会话更新前的旧读取结果。`properties/read-request.ts` 按设备分组检查 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。应用层通过 `POST /api/mijia/properties/read` 提供一次性读取，不做周期属性轮询。
 
-`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。该入口已用于[限时上报日志](../../docs/household-runtime.md#设备上报日志)，不提交家庭 `latest` 或 `availability`；持续采集、独立设备事件与自动补读尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/contracts/mijia.md)。
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。家庭采集模块和[限时上报日志](../../docs/household-runtime.md#设备上报日志)分别消费该入口；只有家庭运行时提交 `latest` 与有效在线状态。采集范围、必要补读与房间查询见[设备事实与房间快照](../../docs/contracts/device-facts.md)。独立设备事件尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/contracts/mijia.md)。
 
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。浏览器预览视频不经过 backend；本地感知另从 go2rtc 私有分析出口读取视频，在 backend 的计算子进程内解码。官方能力列表声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道能力列表生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 
@@ -163,6 +163,28 @@ bun run db:down      # 停止容器，保留数据卷
 `mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表、选择 API 与切换语义见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 
 `credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
+
+### 家庭上下文表
+
+家庭上下文使用三张普通 PostgreSQL 表，属于当前实例绑定的家庭，不新增账号或家庭实体表：
+
+| 表                   | 内容与约束                                                                                                                                                                  |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `household_subjects` | 人物或宠物的稳定 UUID、类型、名称、补充资料 `details` 和登记时间；姓名不作为唯一身份。                                                                                      |
+| `context_records`    | 一次观察 `observation` 或判断 `assessment` 的主题、描述、结构化 `data`、支持程度、发生时间、保存时间、可选到期时间、证据引用 `evidence` 和运行标识 `scope_epoch`。          |
+| `context_entities`   | 上下文与人物、宠物、房间、设备的多对多关联；角色为主体 `subject`、参与者 `participant`、地点 `location` 或来源 `source`。同一上下文、对象类型、对象 ID 与角色组合不能重复。 |
+
+“爸爸妈妈一起回家”只保存一条上下文，分别添加爸爸和妈妈的参与者关联。成员关联使用 `household_subjects.id` 的字符串形式；房间与设备沿用设备清单中的来源 ID。`entity_id` 同时引用不同种类的对象，因此没有指向对象表的数据库外键，也不保证关联对象存在；只有 `context_id` 具有外键，删除上下文会自动删除它的全部关联。成员移除本身不会删除历史上下文。
+
+`certainty` 使用 `supported`（有支持）、`tentative`（暂定）、`unknown`（未知）、`conflicting`（冲突）。`occurred_at` 是证据所描述的发生／观察时间，`created_at` 是保存时间；`expires_at` 为空不代表判断永久有效。JSONB 是 PostgreSQL 的 JSON 存储类型，`details` 和 `data` 保存对象，`evidence` 保存引用和摘要数组，不存原始媒体。数据库约束检查 JSON 外层类型，不校验证据条目的业务结构。
+
+上下文主键由提交方生成并在重试时复用，主键约束阻止重复插入；它不执行语义去重，也不自动将重复插入转为成功。时间检索使用 `(occurred_at, id)` 索引，对象检索使用 `(entity_type, entity_id, context_id)` 索引。切换家庭时，在更新绑定的同一事务中清空上下文、关联和成员，保留登录凭据。
+
+已提供表结构、迁移、切换家庭清理及只读浏览接口；尚未接入成员管理、上下文写入或定期清理。现有房间分析不会自动写入这些表。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
+
+`POST /api/household-context/browse` 为 Web 的 `/data` 页面提供三张表的只读浏览。请求包含当前 `scope_epoch`、白名单表名 `table`、从 0 开始的 `page` 和 `search`；可按 `context_id` 或 `entity: { type, id }` 查看相关上下文及关联。成员按名称搜索，上下文按描述或主题搜索，关联按对象 ID 搜索；每页 25 条、最多第 10,001 页，返回是否还有下一页。计数是各表总数，不是筛选后的记录数。字段元数据从 Drizzle 表定义生成，响应最多 2 MiB，超限拒绝返回。
+
+接口仅允许本机访问，不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取与家庭切换共用绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
 
 配置协调由后台周期任务执行，状态查询没有维护副作用。保存新的 go2rtc 地址后自动迁移连接；`POST /api/mijia/connection/retry` 只恢复未就绪部分。纯设备识别位于 `devices/mapping.ts`，摄像头共享流规格由 `media/camera-source-spec.ts` 定义。
 

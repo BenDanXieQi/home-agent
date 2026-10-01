@@ -1,5 +1,9 @@
-import { DeviceList, DeviceRow } from "./DeviceList";
-import { twMerge } from "tailwind-merge";
+import { householdSnapshotAtom } from "../../modules/household/state";
+import { devicePropertiesAtom } from "../../modules/devices/facts";
+import { DeviceStateRow } from "./DeviceStateRow";
+import { RoomAnalysisPanel } from "./RoomAnalysisPanel";
+import { CollectionDetails } from "./CollectionDetails";
+import { DeviceList } from "./DeviceList";
 import { EmptyState } from "../../components/EmptyState";
 import {
   memo,
@@ -17,14 +21,7 @@ import {
 import { VirtualRow } from "../../components/VirtualRow";
 import { usePreviousKeys } from "../../utils/use-previous-keys";
 import { useAtom, useAtomValue } from "jotai";
-import { Link } from "@tanstack/react-router";
-import {
-  Search,
-  Video,
-  Box,
-  ArrowUpRight,
-  SlidersHorizontal,
-} from "lucide-react";
+import { Search, Box, SlidersHorizontal } from "lucide-react";
 import { m, AnimatePresence } from "motion/react";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { Button } from "../../components/Button";
@@ -65,7 +62,19 @@ export const DeviceBrowser = memo(function DeviceBrowser({
   const [search, setSearch] = useAtom(deviceSearchAtom);
   const [filter, setFilter] = useAtom(deviceFilterAtom);
   const [filters, setFilters] = useAtom(deviceFiltersAtom);
-  const activeRefinements = Object.values(filters).filter(Boolean).length;
+  const snapshot = useAtomValue(householdSnapshotAtom);
+  const properties = useAtomValue(devicePropertiesAtom);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const selectedRoom = Object.values(snapshot?.projection.room ?? {}).find(
+    (room) =>
+      !room.archived &&
+      JSON.stringify([room.home_id, room.room_id]) === filters.room,
+  );
+  const activeRefinements = [
+    filters.category,
+    filters.capability,
+    filter === "all" ? "" : filter,
+  ].filter(Boolean).length;
   const [refinementsOpen, setRefinementsOpen] = useState(activeRefinements > 0);
   const options = useAtomValue(deviceFilterOptionsAtom);
   const devices = useAtomValue(filteredDevicesAtom);
@@ -135,7 +144,9 @@ export const DeviceBrowser = memo(function DeviceBrowser({
       ? "没有符合筛选条件的设备"
       : filter !== "all"
         ? (categoryEmpty.get(filter) ?? "当前视图没有设备")
-        : "所选家庭没有设备";
+        : filters.room
+          ? "这个房间没有设备"
+          : "所选家庭没有设备";
   const emptyDescription = searching
     ? "试试其他名称、别名或型号，或清除搜索。"
     : activeRefinements
@@ -145,14 +156,37 @@ export const DeviceBrowser = memo(function DeviceBrowser({
         : "刷新设备清单后，已添加的设备会显示在这里。";
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 max-md:items-stretch">
-        <SegmentedControl
-          label="设备状态"
-          variant="underline"
-          value={filter}
-          onValueChange={setFilter}
-          options={availabilityOptions}
+      <SegmentedControl
+        className="mb-5 border-b border-line"
+        label="房间"
+        variant="underline"
+        value={filters.room}
+        onValueChange={(room) => {
+          setFilters({ ...filters, room });
+          setExpanded(null);
+        }}
+        options={[
+          { value: "", label: "全部房间" },
+          ...(filters.room &&
+          !options.rooms.some(([value]) => value === filters.room)
+            ? [{ value: filters.room, label: "原房间已移除" }]
+            : []),
+          ...options.rooms.map(([value, label]) => ({ value, label })),
+        ]}
+      />
+      {snapshot && selectedRoom ? (
+        <RoomAnalysisPanel
+          key={`${snapshot.scope_epoch}/${selectedRoom.room_id}`}
+          scope={snapshot.scope_epoch}
+          roomId={selectedRoom.room_id}
+          roomName={selectedRoom.name}
+          synced={reliable}
         />
+      ) : null}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-4 max-md:items-stretch">
+        <span className="text-xs text-muted">
+          {devices.length} 台设备 · 最近状态
+        </span>
         <div className="flex min-w-0 items-center gap-2 max-md:w-full">
           <label className="relative m-0 flex w-60 items-center [&_svg]:absolute [&_svg]:left-2.5 [&_svg]:text-muted max-md:w-auto max-md:min-w-0 max-md:flex-1">
             <Search size={14} />
@@ -179,23 +213,13 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           <m.div ref={refinements} className="overflow-hidden" {...expand}>
             <div id="device-refinements" className="mb-4 flex flex-wrap gap-4">
               <div className="m-0 flex min-w-36 flex-1 items-center gap-2 text-[13px] text-muted">
-                房间
+                连接{" "}
                 <Select
-                  label="房间"
+                  label="连接状态"
                   className="flex-1"
-                  value={filters.room}
-                  onValueChange={(room) => setFilters({ ...filters, room })}
-                  options={[
-                    { value: "", label: "全部房间" },
-                    ...(filters.room &&
-                    !options.rooms.some(([value]) => value === filters.room)
-                      ? [{ value: filters.room, label: "原房间已移除" }]
-                      : []),
-                    ...options.rooms.map(([value, name]) => ({
-                      value,
-                      label: name,
-                    })),
-                  ]}
+                  value={filter}
+                  onValueChange={setFilter}
+                  options={availabilityOptions}
                 />
               </div>
               <div className="m-0 flex min-w-36 flex-1 items-center gap-2 text-[13px] text-muted">
@@ -281,64 +305,18 @@ export const DeviceBrowser = memo(function DeviceBrowser({
                   entering={!previousKeys.has(device.id)}
                   onSize={measureRow}
                 >
-                  <DeviceRow>
-                    <div className="flex min-w-0 items-center gap-3">
-                      <span className="grid size-8 shrink-0 place-items-center rounded-lg text-muted">
-                        {device.camera ? (
-                          <Video size={20} strokeWidth={1.4} />
-                        ) : (
-                          <Box size={20} strokeWidth={1.4} />
-                        )}
-                      </span>
-                      <strong
-                        className="truncate text-sm font-medium max-md:text-[14px] max-md:whitespace-normal max-md:wrap-anywhere max-md:leading-[1.5]"
-                        title={device.name}
-                      >
-                        {device.name}
-                      </strong>
-                    </div>
-                    <span
-                      className="truncate font-mono text-xs text-muted max-md:hidden"
-                      title={device.model}
-                    >
-                      {device.model}
-                    </span>
-                    <span
-                      className="flex items-center gap-1.5 text-xs text-muted data-[availability=online]:text-sage data-[availability=offline]:text-warning"
-                      data-availability={
-                        reliable ? device.availability : "unknown"
+                  {snapshot ? (
+                    <DeviceStateRow
+                      device={device}
+                      properties={properties.get(device.id)}
+                      scope={snapshot.scope_epoch}
+                      reliable={reliable}
+                      open={expanded === device.id}
+                      onOpenChange={(open) =>
+                        setExpanded(open ? device.id : null)
                       }
-                    >
-                      <i
-                        className={twMerge(
-                          "size-1.5 rounded-full",
-                          reliable && device.availability === "online"
-                            ? "bg-current status-ping"
-                            : "border border-current bg-transparent",
-                        )}
-                      />
-                      {!reliable
-                        ? "待确认"
-                        : device.availability === "online"
-                          ? "在线"
-                          : device.availability === "offline"
-                            ? "离线"
-                            : "未知"}
-                    </span>
-                    {device.camera ? (
-                      <Link
-                        draggable={false}
-                        to="/cameras"
-                        className="flex select-none items-center justify-end gap-1 text-xs text-muted hover:text-ink max-md:col-span-full max-md:justify-start max-md:pl-12"
-                        aria-label={`查看${device.name}画面`}
-                      >
-                        查看画面
-                        <ArrowUpRight size={13} className="shrink-0" />
-                      </Link>
-                    ) : (
-                      <span />
-                    )}
-                  </DeviceRow>
+                    />
+                  ) : null}
                 </VirtualRow>
               );
             })}
@@ -360,9 +338,10 @@ export const DeviceBrowser = memo(function DeviceBrowser({
             ) : activeRefinements ? (
               <Button
                 variant="primary"
-                onClick={() =>
-                  setFilters({ room: "", category: "", capability: "" })
-                }
+                onClick={() => {
+                  setFilters({ ...filters, category: "", capability: "" });
+                  setFilter("all");
+                }}
               >
                 清除筛选
               </Button>
@@ -374,6 +353,13 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           </EmptyState>
         ) : null}
       </DeviceList>
+      {snapshot ? (
+        <CollectionDetails
+          key={snapshot.scope_epoch}
+          snapshot={snapshot}
+          reliable={reliable}
+        />
+      ) : null}
     </>
   );
 });

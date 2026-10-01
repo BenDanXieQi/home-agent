@@ -1,4 +1,5 @@
 # Xiaomi Miloco License Agreement
+
 Copyright (C) 2025 Xiaomi Corporation.  
 The ownership and intellectual property rights in the entire content of Xiaomi Miloco project provided under this License, including but not limited to software, code, models, interfaces, plugins, documentation, and other materials contained in its current and all future versions (collectively, "Licensed Work"), whether provided in source code, object code, or any other form, are exclusively owned by Xiaomi. Subject to the terms and conditions of this License, Xiaomi hereby grants you a personal, limited, non-exclusive, non-transferable, non-sublicensable and royalty-free license to reproduce, use, modify and distribute the Licensed Work only for your use of Xiaomi Miloco project for non-commercial purposes. For the avoidance of doubt, Xiaomi does not authorize you to use the Licensed Work for any other purpose, including but not limited to use Licensed Work to develop applications (APP), Web services, and other forms of software.  
 For the avoidance of doubt, any third-party components incorporated into the Licensed Work remain subject to their respective applicable original licenses. Any separate use of such third-party components shall be governed by their respective applicable original licenses; provided, however, that any use of the Licensed Work, including use of the Licensed Work as a whole or any portion thereof incorporating such third-party components, shall be subject to the terms and conditions of this License.  
@@ -11,8 +12,8 @@ you make, have made, manufacture, sell or offer to sell the products that knock 
 
 ---
 
-
 # Xiaomi Miloco 许可证
+
 版权声明 (C) 2025 小米  
 在本许可证下提供的 Xiaomi Miloco 项目的全部内容，包括其当前及未来所有版本中包含的软件、代码、模型、接口、插件、文档等（统称为“授权作品”），无论以源代码、目标代码或其他形式提供，授权作品的所有权及知识产权均归小米所有。小米在此授予您一项个人的、有限的、非排他的、不可转让的、不可转授权的、免费的权利，仅限于您为非商业性目的使用Xiaomi Miloco项目而复制、使用、修改、分发授权作品。为避免疑义，本许可证未授权您将授权作品用于任何其他用途，包括但不限于开发应用程序（APP）、Web 服务以及其他形式的软件等。  
 为免疑义，本授权作品中包含的任何第三方组件，仍受其各自适用的原始许可证约束。单独使用该等第三方组件的，应遵守其各自适用的原始许可证；但对本授权作品的任何使用，包括对包含该等第三方组件的本授权作品整体或任何部分的使用，均应遵守本许可证的条款和条件。  
