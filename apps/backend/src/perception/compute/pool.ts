@@ -22,6 +22,7 @@ import {
 
 const optionsSchema = z.object({
   cpuRatio: cpuRatioSchema,
+  workerLimit: z.int().positive().optional(),
   initializeTimeoutMs: z.int().positive().max(300_000).default(30_000),
   taskTimeoutMs: z.int().positive().max(300_000).default(10_000),
   closeTimeoutMs: z.int().min(100).max(300_000).default(10_000),
@@ -74,7 +75,14 @@ export async function createDetectionPool(
   shutdownSignal?: AbortSignal,
 ) {
   const options = optionsSchema.parse(input);
-  const budget = resolveComputeBudget(options.cpuRatio);
+  const resolved = resolveComputeBudget(options.cpuRatio);
+  const budget = {
+    ...resolved,
+    workersPerProcess: Math.min(
+      resolved.workersPerProcess,
+      options.workerLimit ?? resolved.workersPerProcess,
+    ),
+  };
   const capacity =
     detectionComputeBudget.processes *
       budget.workersPerProcess *

@@ -22,6 +22,7 @@ export function createPerceptionRoutes(
       rejectedRetiredResults: view.rejectedRetiredResults,
       error: view.error,
       settings: view.config,
+      resources: view.resources,
       compute: view.compute,
       model: view.model
         ? { sha256: view.model.sha256, provider: view.model.provider }

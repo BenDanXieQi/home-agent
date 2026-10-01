@@ -14,3 +14,6 @@ coverage/
 .DS_Store
 data/
 *.log
+
+# Optional local ASR weights; source and fingerprints are documented in models/README.md.
+/apps/backend/models/sensevoice/

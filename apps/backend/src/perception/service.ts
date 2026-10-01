@@ -1,3 +1,5 @@
+import type { createSpeechInbox } from "../conversation/speech-inbox";
+import { planPerceptionResources } from "./compute/resources";
 import { prepareSourceLease } from "./source-lease";
 import { createAudioService } from "./audio/service";
 import { errorDetails } from "./compute/protocol";
@@ -13,6 +15,10 @@ export function createPerceptionService(options: {
   configPath: string;
   executable: string;
   sources: PerceptionSources;
+  speechInbox?: Pick<
+    ReturnType<typeof createSpeechInbox>,
+    "configure" | "authorize" | "revoke" | "accept"
+  >;
 }) {
   const instanceId = crypto.randomUUID();
   let householdVersion:
@@ -20,6 +26,7 @@ export function createPerceptionService(options: {
     | null = null;
   let sequence = 0;
   let config = perceptionConfigSchema.parse({});
+  let resources: ReturnType<typeof planPerceptionResources> | undefined;
   let store = createObservationStore(config.maxFrameAgeMs);
   let pool: Awaited<ReturnType<typeof createDetectionPool>> | undefined;
   let status:
@@ -60,6 +67,7 @@ export function createPerceptionService(options: {
     for (const listener of listeners) listener();
   };
   const audio = createAudioService({
+    ...(options.speechInbox ? { speechInbox: options.speechInbox } : {}),
     sources: options.sources,
     executable: options.executable,
     changed,
@@ -197,13 +205,20 @@ export function createPerceptionService(options: {
   const timer = setInterval(reconcile, 500);
   async function ensurePool() {
     if (stopped) throw new DetectionPoolError("closed", "Perception stopped");
+    if (!configRead) await initialize();
+    if (configurationError) throw configurationError;
+    if (stopped) throw new DetectionPoolError("closed", "Perception stopped");
     if (pool) {
       await pool.retry();
       return pool;
     }
     creatingPool ??= (async () => {
       const created = await createDetectionPool(
-        { cpuRatio: config.cpuRatio },
+        {
+          cpuRatio: config.cpuRatio,
+          workerLimit: (resources ??= planPerceptionResources(config))
+            .videoWorkers,
+        },
         shutdown.signal,
       );
       pool = created;
@@ -243,6 +258,8 @@ export function createPerceptionService(options: {
           store = createObservationStore(config.maxFrameAgeMs);
           unsubscribeStore = store.subscribe(changed);
         }
+        resources ??= planPerceptionResources(config);
+        options.speechInbox?.configure(config.dialogue);
         audio.start();
         const videoEnabled =
           config.sources === "household" || config.sources.length > 0;
@@ -290,6 +307,7 @@ export function createPerceptionService(options: {
         status,
         error,
         config,
+        resources: resources ?? null,
         compute: pool?.getStatus() ?? null,
         model: pool?.metadata ?? null,
         audio: audioSnapshot,

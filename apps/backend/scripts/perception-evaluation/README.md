@@ -93,7 +93,7 @@ bun run --cwd apps/backend benchmark:audio --variant=service --sources=8 --subsc
 
 保留独立 FFmpeg 解码器的依据是单轨故障可独立回收，以及实际时效与 CPU 成本；进程内 libav 的内存优势不足以单独证明整体更优。对照实现不进入生产选择分支。
 
-`verify-camera-audio.ts` 从正在运行的后端读取已提交设备清单，以工作室优先顺序验证所有摄像头；账号凭据仅从本机数据库读取。它以 `cpuRatio: 0.15` 和默认 3 fps 采样运行检测；这不是默认 `cpuRatio: 0.5` 的部署内存承诺。它启动独立 go2rtc 实例，使用本机 1986/18556 端口，提供临时浏览器页面、正式感知查询接口和资源观测，退出时释放自己拥有的播放、采集与进程。运行前保证这两个端口空闲；不替换日常使用的媒体服务。
+`verify-camera-audio.ts` 从正在运行的后端读取已提交设备清单，以工作室优先顺序验证所有摄像头；账号凭据仅从本机数据库读取。它以 `cpuRatio: 0.5` 和默认 3 fps 采样运行检测；视频 worker 从共同音视频预算中分配，实际峰值内存仍需观察。它启动独立 go2rtc 实例，使用本机 1986/18556 端口，提供临时浏览器页面、正式感知查询接口和资源观测，退出时释放自己拥有的播放、采集与进程。运行前保证这两个端口空闲；不替换日常使用的媒体服务。
 
 ```sh
 bun --env-file=.env apps/backend/scripts/verify-camera-audio.ts \
@@ -104,3 +104,73 @@ bun --env-file=.env apps/backend/scripts/verify-camera-audio.ts \
 浏览器需检查真实接收的音频采样和解码视频帧，不能只以 SDP 成功或连接状态作为通过依据。关闭、重新打开预览后，后台音轨运行应保持不变。运行时定期核对家庭作用域；发生变化时停止验证，避免沿用旧授权。该工具不会保存摄像头音视频。
 
 原始测量放在 Git 忽略的 `data/perception/`；功能文档只维护可复现入口、设计取舍与已知验证边界。
+
+## SenseVoice 本地语音转写
+
+`sensevoice.mjs` 是离线模型评估入口，不启动持续音频服务或 Agent。它通过 `sherpa-onnx-node` 的原生接口运行 SenseVoice-Small INT8，并使用仓库现有 Silero 权重验证语音切段。该命令的独立资产与报告放在 Git 忽略的 `data/perception/sensevoice/`；正式服务使用固定的 `models/sensevoice/` 资产。
+
+从仓库根目录准备独立运行库和[官方模型及公开样本](https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html)：
+
+```sh
+mkdir -p data/perception/sensevoice/runtime
+npm install --prefix data/perception/sensevoice/runtime --save-exact sherpa-onnx-node@1.13.8
+curl -fL --retry 2 -o data/perception/sensevoice/model.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+tar -xjf data/perception/sensevoice/model.tar.bz2 -C data/perception/sensevoice
+
+bun apps/backend/scripts/perception-evaluation/sensevoice.mjs \
+  --runtime-dir data/perception/sensevoice/runtime \
+  --model-dir data/perception/sensevoice/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17 \
+  --vad-model apps/backend/models/silero_vad.onnx \
+  --output data/perception/sensevoice/result.json \
+  --threads 1 --repeats 3 \
+  data/perception/sensevoice/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/test_wavs/zh.wav
+```
+
+同一命令可用 `node` 替代 `bun`，顺序运行以免两个推理进程相互干扰。运行库支持 macOS arm64；其他平台以[官方安装说明](https://k2-fsa.github.io/sherpa/onnx/javascript-api/install.html)和实际安装结果为准。权重 SHA-256 为 `c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51`，tokens 为 `f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc`；脚本记录实际指纹以便核对，不自动下载或校验许可证。指纹计算分块读取，不为测量额外保留整份权重副本。包内 LICENSE 指向上游许可说明，正式服务的许可与资产准备见[模型说明](../../models/README.md#语音转写模型)。
+
+输入须为 16 kHz、单声道 WAV，每份不超过 4 MiB 或 60 秒。可以追加多个位置参数；输出文件会被覆盖。其他输入先用 FFmpeg 转换，不手写 WAV 解码或音频特征提取。以下是独立的静音与噪声对照素材：
+
+```sh
+ffmpeg -v error -y -f lavfi -i anullsrc=r=16000:cl=mono -t 5 \
+  -c:a pcm_s16le data/perception/sensevoice/silence.wav
+ffmpeg -v error -y -f lavfi \
+  -i 'anoisesrc=color=white:amplitude=0.1:sample_rate=16000:seed=42' -t 5 \
+  -c:a pcm_s16le data/perception/sensevoice/noise.wav
+```
+
+每份输入分别记录完整音频的首次识别、重复识别及 VAD 分段识别；首次调用只对该输入单独列出，只有整个进程的第一次识别属于冷推理。`loadMs` 统计识别器构造，不包括模块导入、指纹计算、VAD 加载或音频读取。RTF（处理耗时除以音频时长）只覆盖波形提交与同步识别，不包含等待说话结束、排队和来源解码。
+
+VAD 采用阈值 `0.4`、最短人声 `0.25` 秒、结束静音 `0.5` 秒、最大语音段参数 `15` 秒和 512 点输入块。每个文件重置状态，结束时显式 flush（交付剩余语音）；这些是评估参数，不改变正式 P3 的分块规则。每段同时比较原始裁切与前置最多 200 ms、后置最多 100 ms 的上下文；后置内容只能来自当时已交付的输入，不能读取未来样本。相邻表示共享同一语音段，不能作为两次独立发言。
+
+报告记录原文、段起止、段被交付时的采样位置、是否由文件结束触发、墙钟耗时、CPU 时间、RSS（进程驻留内存）及进程峰值。切段和识别都按离线速度执行，采样位置不等于真实端到端延迟。RSS 包含运行时、VAD、ASR 和原生分配；模型文件大小不等于运行内存。`--repeats` 支持 1–100，便于观察短期重复运行，不能代替长期泄漏或多路负载验证。
+
+本入口刻意包含不经 VAD 的识别作为对照，不能据此让生产系统直接转写静音或噪声。摄像头远场、电视人声、混响、多人重叠与方言仍需按实际来源验证；正式持续链路与资源边界见下一节。最大语音段参数不是严格缓存上限；同步原生识别应由受监督的计算进程承载。公开样本、人工衰减和编码转换不能证明家庭识别准确率，当前入口不计算或声称 CER（字错误率）。
+
+## SenseVoice 持续语音链路
+
+`../verify-speech.ts` 通过正式 `createAudioService`，或启用视频时通过正式 `createPerceptionService` 和感知 HTTP 路由验证语音。评估主进程只提供受控编码流、读取结果和观测资源；PCM 解码、单一 P3 VAD 与切段位于正式音频子进程，SenseVoice 位于该进程下的独立子进程。不使用另一套实验语音运行时。
+
+先安装仓库依赖并按[语音模型资产](../../models/README.md#语音转写模型)放置固定权重。将公开中文样本转为带静音间隔的 8 kHz 单声道 A-law 编码流，从仓库根目录运行：
+
+```sh
+ffmpeg -v error -y \
+  -i data/perception/sensevoice/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17/test_wavs/zh.wav \
+  -af 'adelay=1000,apad=pad_dur=1.5' -ar 8000 -ac 1 -c:a pcm_alaw -f alaw \
+  data/perception/sensevoice/continuous.alaw
+
+ORT_DISABLE_TELEMETRY=1 bun apps/backend/scripts/verify-speech.ts \
+  --audio data/perception/sensevoice/continuous.alaw \
+  --output data/perception/sensevoice/production.json \
+  --seconds 115 --sources 2 --video --lifecycle
+```
+
+`--audio` 只接受无文件头的 8 kHz 单声道 A-law 字节，最长 60 秒；按墙钟循环发送，每块 20 ms。`--seconds` 为 15–3600 秒，`--sources` 为 1–8 个物理音轨。`--dual-channel` 给每个物理设备配置两个镜头，总通道数仍不超过 8，用于核对共享音轨只有一次识别。所有场景使用正式 `speech` 配置，空闲卸载设为 5 秒以缩短验证；生产默认值仍为 60 秒。
+
+- `--video` 提供 1280×720、15 fps 的移动图案 MPEG-TS 流，由正式视频子进程和其 FFmpeg 子进程读取、解码、采样及检测。配置请求 3 fps、`cpuRatio: 0.5`，不补帧。通过正式 HTTP 路由校验共享 schema 和结果输出。视频计数属于当前运行，来源重建后会重置，不是整个实验的累计帧数。
+- `--lifecycle` 要求至少 110 秒及有语音的输入。第 12 秒暂停首路源端发送，第 17 秒恢复，核对正式断流重建；第 30 秒起等待识别开始后撤销来源，至少 5 秒后重新授权；第 50 秒起等待识别开始，确认进程的父 PID 和进程组属于音频进程后向其发送 SIGSTOP。第 72 秒切换为静音，核对模型进程退出；第 87 秒恢复人声，核对重新加载时音频 PID、运行身份和采样仍连续。只操纵本次创建的来源与进程。
+- `--expect-silence` 从开始就发送静音，要求没有转写、ASR 加载次数为零；不能与生命周期场景一起使用。它只改变源端音频与验收预期，不绕过 VAD 或模型。
+
+报告记录配置、转写及其时间、ASR 父进程／进程组关系、源端与识别故障、空闲释放、再次唤起、定期进程树 CPU/RSS，以及关闭后的自有子进程数量。JSONL 随运行写入，最终 JSON 汇总结果；重复执行覆盖指定输出。CPU 是当时存活进程的累计值，跨重建区间不能直接相减。段尾时间来自音轨采样和 VAD，不是人工标注的真实说话结束时间。
+
+输入是公开或自行构造的素材，不包含真实摄像头网络、远场、电视声或多人叠音。短时进程验证不能证明家庭转写准确率或日级内存稳定性。当前生产功能和限制见[本地语音转写](../../../../docs/perception.md#本地语音转写)。

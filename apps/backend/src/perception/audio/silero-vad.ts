@@ -97,6 +97,10 @@ export async function createVad() {
 // The supplied evaluator serializes calls to the one process-wide ONNX session.
 export function createSileroTrack(
   evaluate?: Awaited<ReturnType<typeof createVad>>["evaluate"],
+  observe?: (
+    block: Awaited<ReturnType<SpeechAnalysis["accept"]>>["blocks"][number],
+    samples: Float32Array,
+  ) => Promise<void>,
 ) {
   let state = new Float32Array(256);
   const input = new Float32Array(576);
@@ -116,11 +120,14 @@ export function createSileroTrack(
           state = result.state;
           input.copyWithin(0, 512, 576);
           const endSample = startSample + index + 1;
-          blocks.push({
+          const block = {
             startSample: endSample - 512,
             endSample,
             probability: result.probability,
-          });
+          };
+          blocks.push(block);
+          if (observe)
+            await observe(block, Float32Array.from(input.subarray(64)));
         } catch (cause) {
           error = String(cause).slice(0, 4096);
           state.fill(0);
