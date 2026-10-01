@@ -87,6 +87,7 @@ export function useFrameViewer(
         ? {
             ...source.target,
             analysis: store.get(source.activeSourceAtom) ?? null,
+            audio: store.get(source.audioAtom),
           }
         : null,
       presentation: accessible ? display.current?.inspect() : null,

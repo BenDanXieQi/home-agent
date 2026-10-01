@@ -29,7 +29,7 @@ export async function readAudioStream(
     if (result.success && result.data.code === "audio_track_missing")
       throw new AudioTrackMissing("Camera has no audio track");
     throw new Error(
-      `Audio stream unavailable: ${result.success ? result.data.code : response.status}`,
+      `Audio stream unavailable (HTTP ${response.status}): ${result.success ? result.data.code : response.statusText}`,
     );
   }
   if (!response.body) throw new Error("Missing audio stream body");
