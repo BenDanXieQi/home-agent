@@ -110,7 +110,7 @@ export function LogEvents({
   );
   const shownCount = returnCount ?? pending;
   return (
-    <div className="relative">
+    <div className="relative h-full min-h-0">
       <AnimatePresence>
         {reading ? (
           <ReturnLatest
@@ -138,7 +138,7 @@ export function LogEvents({
         aria-label="日志事件"
         // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard users need to focus the independently scrolling log region.
         tabIndex={0}
-        className="h-[clamp(360px,_calc(100dvh_-_250px),_820px)] overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable] px-1 pb-2 data-[empty=true]:h-auto data-[empty=true]:overflow-visible"
+        className="h-full overflow-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable] px-1 pb-2"
         data-empty={visible.length === 0}
         onScrollEnd={(event) => {
           if (event.currentTarget.scrollTop <= 1 && reading) resumeLatest();

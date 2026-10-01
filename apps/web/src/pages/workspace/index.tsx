@@ -1,6 +1,6 @@
 import { WorkspaceFrame } from "./WorkspaceFrame";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { Outlet, useMatches, useRouterState } from "@tanstack/react-router";
 import { useAtom } from "jotai";
 import { AnimatePresence, useReducedMotion } from "motion/react";
 import { Dialog } from "radix-ui";
@@ -21,6 +21,10 @@ export default function WorkspaceLayout() {
   );
   const [loginOpen, openLogin] = useAtom(accountDialogOpenAtom);
   const path = useRouterState({ select: (state) => state.location.pathname });
+  const contained = useMatches({
+    select: (matches) =>
+      matches.some((match) => match.staticData.contentLayout === "viewport"),
+  });
   const current = navigation.find(
     (item) => item.to === path || path.startsWith(`${item.to}/`),
   );
@@ -55,6 +59,7 @@ export default function WorkspaceLayout() {
           跳到主内容
         </a>
         <WorkspaceFrame
+          contained={contained}
           sidebar={<WorkspaceSidebar path={path} />}
           header={
             <WorkspaceHeader
@@ -64,9 +69,18 @@ export default function WorkspaceLayout() {
             />
           }
         >
-          <main id="main-content" tabIndex={-1} className="px-4 pb-6">
+          <main
+            id="main-content"
+            tabIndex={-1}
+            className={`px-4 pb-6 ${contained ? "min-h-0 flex-1" : ""}`}
+          >
             {/* The router owns page lifetimes; animating must not remount its outlet. */}
-            <div ref={page} className="min-h-[calc(100dvh-90px)]">
+            <div
+              ref={page}
+              className={
+                contained ? "h-full min-h-0" : "min-h-[calc(100dvh-90px)]"
+              }
+            >
               <PageHeaderContext value={headerSlots}>
                 <Outlet />
               </PageHeaderContext>

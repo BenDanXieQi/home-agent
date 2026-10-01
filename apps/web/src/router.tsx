@@ -91,6 +91,7 @@ const settingsRoute = createRoute({
 const deviceLogsRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/device-logs",
+  staticData: { contentLayout: "viewport" },
   component: lazyRouteComponent(() => import("./pages/device-logs/index")),
 });
 const dataRoute = createRoute({
@@ -117,6 +118,9 @@ export const router = createRouter({
   defaultPreload: "intent",
 });
 declare module "@tanstack/react-router" {
+  interface StaticDataRouteOption {
+    contentLayout?: "viewport";
+  }
   interface Register {
     router: typeof router;
   }

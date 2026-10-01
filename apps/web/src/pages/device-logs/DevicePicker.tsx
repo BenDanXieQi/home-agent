@@ -115,11 +115,11 @@ export const DevicePicker = memo(function DevicePicker({
   return (
     <aside
       id="log-devices"
-      className="bg-paper p-3 min-w-0 max-[901px]:border-r-0"
+      className="flex min-h-0 min-w-0 flex-col bg-paper p-3 min-[901px]:h-full"
       data-open={devicesOpen}
       aria-label="设备列表"
     >
-      <div className="flex items-center justify-between gap-3 text-[12px] mb-2.5 max-[901px]:flex-wrap py-0 px-2.5 max-[901px]:mb-0">
+      <div className="flex shrink-0 items-center justify-between gap-3 text-[12px] mb-2.5 max-[901px]:flex-wrap py-0 px-2.5 max-[901px]:mb-0">
         <strong>设备</strong>
         <button
           type="button"
@@ -148,80 +148,82 @@ export const DevicePicker = memo(function DevicePicker({
       </div>
       <div
         id="log-device-picker"
-        className={devicesOpen ? "max-[901px]:pt-3" : "max-[901px]:hidden"}
+        className={`flex min-h-0 flex-1 flex-col ${devicesOpen ? "max-[901px]:pt-3" : "max-[901px]:hidden"}`}
       >
-        <label className="m-0 flex min-w-0 items-center gap-2 rounded-lg bg-linen/60 px-2.5 text-muted focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-accent/50">
-          <Search size={15} className="shrink-0" aria-hidden="true" />
-          <input
-            className="w-full min-w-0 border-0 bg-transparent px-0 py-[9px] text-[13px] focus-visible:outline-none focus-visible:shadow-none"
-            aria-label="搜索设备"
-            placeholder="设备、房间或 ID"
-            value={deviceQuery}
-            onChange={(event) => {
-              updateFilters({ query: event.target.value });
-            }}
-          />
-        </label>
-        <fieldset
-          className="min-w-0 mt-2 mx-0 mb-0 grid grid-cols-2 gap-y-1 gap-x-2 p-0 border-0"
-          aria-label="筛选设备"
-        >
-          <Select
-            label="房间"
-            className={twMerge(
-              `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${room ? "border-ink/24 text-ink font-medium" : ""}`,
-            )}
-            value={room}
-            onValueChange={(value) => {
-              updateFilters({ room: value });
-            }}
-            options={roomOptions}
-          />
-          <Select
-            label="设备类型"
-            searchable
-            className={twMerge(
-              `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${category ? "border-ink/24 text-ink font-medium" : ""}`,
-            )}
-            value={category}
-            onValueChange={(value) => {
-              updateFilters({ category: value });
-            }}
-            options={categoryOptions}
-          />
-          <div className="col-span-full grid grid-cols-2 items-center gap-2 min-w-0">
-            <Select
-              label="上报情况"
-              className={twMerge(
-                `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${reportFilter ? "border-ink/24 text-ink font-medium" : ""}`,
-              )}
-              value={reportFilter}
-              onValueChange={(value) => {
-                updateFilters({ reportFilter: value });
+        <div className="min-h-0 shrink overflow-auto overscroll-contain">
+          <label className="m-0 flex min-w-0 items-center gap-2 rounded-lg bg-linen/60 px-2.5 text-muted focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-accent/50">
+            <Search size={15} className="shrink-0" aria-hidden="true" />
+            <input
+              className="w-full min-w-0 border-0 bg-transparent px-0 py-[9px] text-[13px] focus-visible:outline-none focus-visible:shadow-none"
+              aria-label="搜索设备"
+              placeholder="设备、房间或 ID"
+              value={deviceQuery}
+              onChange={(event) => {
+                updateFilters({ query: event.target.value });
               }}
-              options={[
-                { value: "", label: "上报不限" },
-                { value: "reported", label: "有上报" },
-                { value: "silent", label: "暂未上报" },
-              ]}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              className="justify-self-end w-auto h-8 min-h-8 py-0 px-2 bg-transparent text-ink text-[12px] enabled:hover:bg-surface enabled:hover:text-ink disabled:text-muted disabled:opacity-40 disabled:cursor-default pointer-coarse:min-h-11"
-              icon={<RotateCcw size={14} aria-hidden="true" />}
-              aria-label="重置筛选"
-              title="重置筛选"
-              onClick={clearFilters}
-              disabled={!filtering}
-            >
-              重置
-            </Button>
-          </div>
-        </fieldset>
+          </label>
+          <fieldset
+            className="shrink-0 min-w-0 mt-2 mx-0 mb-0 grid grid-cols-2 gap-y-1 gap-x-2 p-0 border-0"
+            aria-label="筛选设备"
+          >
+            <Select
+              label="房间"
+              className={twMerge(
+                `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${room ? "border-ink/24 text-ink font-medium" : ""}`,
+              )}
+              value={room}
+              onValueChange={(value) => {
+                updateFilters({ room: value });
+              }}
+              options={roomOptions}
+            />
+            <Select
+              label="设备类型"
+              searchable
+              className={twMerge(
+                `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${category ? "border-ink/24 text-ink font-medium" : ""}`,
+              )}
+              value={category}
+              onValueChange={(value) => {
+                updateFilters({ category: value });
+              }}
+              options={categoryOptions}
+            />
+            <div className="col-span-full grid grid-cols-2 items-center gap-2 min-w-0">
+              <Select
+                label="上报情况"
+                className={twMerge(
+                  `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${reportFilter ? "border-ink/24 text-ink font-medium" : ""}`,
+                )}
+                value={reportFilter}
+                onValueChange={(value) => {
+                  updateFilters({ reportFilter: value });
+                }}
+                options={[
+                  { value: "", label: "上报不限" },
+                  { value: "reported", label: "有上报" },
+                  { value: "silent", label: "暂未上报" },
+                ]}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                className="justify-self-end w-auto h-8 min-h-8 py-0 px-2 bg-transparent text-ink text-[12px] enabled:hover:bg-surface enabled:hover:text-ink disabled:text-muted disabled:opacity-40 disabled:cursor-default pointer-coarse:min-h-11"
+                icon={<RotateCcw size={14} aria-hidden="true" />}
+                aria-label="重置筛选"
+                title="重置筛选"
+                onClick={clearFilters}
+                disabled={!filtering}
+              >
+                重置
+              </Button>
+            </div>
+          </fieldset>
+        </div>
         <m.div
           ref={deviceList}
-          className="group/device-list relative grid content-start gap-0.75 mt-2.5 h-[clamp(300px,_calc(100dvh_-_270px),_760px)] overflow-auto [scrollbar-gutter:stable] max-[901px]:h-60 isolate"
+          className="group/device-list relative grid min-h-0 flex-[1_0_4rem] content-start gap-0.75 mt-2.5 overflow-auto overscroll-contain [scrollbar-gutter:stable] isolate"
           data-comparing={comparing}
           layoutScroll
         >
@@ -357,7 +359,7 @@ export const DevicePicker = memo(function DevicePicker({
             )}
           </AnimatePresence>
         </m.div>
-        <p className="text-muted text-[11px] leading-[1.8] py-2 px-1.5">
+        <p className="shrink-0 text-muted text-[11px] leading-[1.8] py-2 px-1.5">
           {comparing
             ? "左侧筛选用于找设备，不会移除已选设备。"
             : "筛选只影响显示，不影响采集。"}

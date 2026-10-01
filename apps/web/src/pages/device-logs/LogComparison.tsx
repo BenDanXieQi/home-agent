@@ -146,24 +146,31 @@ export const LogComparison = memo(function LogComparison({
   const anchorTime = anchor ? presentLogEntry(anchor).timestamp : null;
   if (devices.length < 2)
     return (
-      <EmptyState
-        icon={<Columns2 size={24} />}
-        title={devices.length ? "再选择一台设备" : "选择要对比的设备"}
-        description={`选择 2–${maximumComparedDevices} 台设备后，上报会按接收时间并排显示。`}
-      />
+      <div className="h-full overflow-auto overscroll-contain">
+        <EmptyState
+          icon={<Columns2 size={24} />}
+          title={devices.length ? "再选择一台设备" : "选择要对比的设备"}
+          description={`选择 2–${maximumComparedDevices} 台设备后，上报会按接收时间并排显示。`}
+        />
+      </div>
     );
   if (!rows.length)
     return (
-      <EmptyState
-        icon={<Activity size={24} />}
-        title="所选设备暂无匹配上报"
-        description="可以调整事件搜索、显示重复上报，或查看其他设备。"
-      />
+      <div className="h-full overflow-auto overscroll-contain">
+        <EmptyState
+          icon={<Activity size={24} />}
+          title="所选设备暂无匹配上报"
+          description="可以调整事件搜索、显示重复上报，或查看其他设备。"
+        />
+      </div>
     );
   return (
-    <section aria-label="设备日志时间对比">
+    <section
+      className="flex h-full min-h-0 flex-col"
+      aria-label="设备日志时间对比"
+    >
       {anchor && (
-        <output className="flex items-center justify-between gap-2.5 py-2.5 px-4 bg-linen text-ink text-[11px] max-[901px]:items-start">
+        <output className="flex shrink-0 items-center justify-between gap-2.5 py-2.5 px-4 bg-linen text-ink text-[11px] max-[901px]:items-start">
           <span>
             时间基准：{anchor.device_name} ·{" "}
             {presentLogEntry(anchor).preciseTime} · #{anchor.sequence}
@@ -178,7 +185,7 @@ export const LogComparison = memo(function LogComparison({
         </output>
       )}
       <div
-        className="overflow-auto [scrollbar-gutter:stable] max-h-162.5 focus-visible:outline-1 focus-visible:outline-ink/50 focus-visible:-outline-offset-2"
+        className="min-h-0 flex-1 overflow-auto overscroll-contain [scrollbar-gutter:stable] focus-visible:outline-1 focus-visible:outline-ink/50 focus-visible:-outline-offset-2"
         tabIndex={0}
         aria-label="横向滚动查看全部对比设备"
       >
