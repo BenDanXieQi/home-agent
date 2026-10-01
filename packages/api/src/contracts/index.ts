@@ -88,6 +88,8 @@ export * from "./chat";
 
 export {
   perceptionSnapshotSchema,
+  audioRunSchema,
+  audioTrackSchema,
   trackingObservationSchema,
   imageLimits,
   frameLimits,

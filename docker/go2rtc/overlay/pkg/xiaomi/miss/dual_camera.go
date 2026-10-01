@@ -89,6 +89,7 @@ func (c *DualCamera) Open(channel int) (core.Producer, error) {
 type dualSession struct {
 	client    *Client
 	codecs    [2]*core.Codec
+	audio     *core.Codec
 	done      chan struct{}
 	closeOnce sync.Once
 	stopping  atomic.Bool
@@ -117,15 +118,25 @@ func (s *dualSession) close() {
 func (s *dualSession) prepare() error {
 	data := binary.BigEndian.AppendUint32(nil, cmdVideoStart)
 	quality := s.client.videoQuality("")
-	data = fmt.Appendf(data, `{"videoquality":%s,"videoquality2":%s,"enableaudio":0}`, quality, quality)
+	data = fmt.Appendf(data, `{"videoquality":%s,"videoquality2":%s,"enableaudio":1}`, quality, quality)
 	if err := s.client.WriteCommand(data); err != nil {
 		return err
 	}
 	_ = s.client.SetDeadline(time.Now().Add(15 * time.Second))
-	for s.codecs[0] == nil || s.codecs[1] == nil {
+	var audioDeadline time.Time
+	for {
 		packet, err := s.client.ReadPacket()
 		if err != nil {
 			return err
+		}
+		if packet.CodecID == codecPCMA {
+			s.audio = &core.Codec{Name: core.CodecPCMA, ClockRate: 8000}
+		}
+		if packet.CodecID == codecOPUS {
+			s.audio = &core.Codec{Name: core.CodecOpus, ClockRate: 48000, Channels: 2}
+		}
+		if s.codecs[0] != nil && s.codecs[1] != nil && (s.audio != nil || !time.Now().Before(audioDeadline)) {
+			break
 		}
 		if packet.CodecID != codecH264 && packet.CodecID != codecH265 {
 			continue
@@ -143,15 +154,26 @@ func (s *dualSession) prepare() error {
 		} else if packet.CodecID == codecH265 && h265.NALUType(avcc) == h265.NALUTypeVPS {
 			s.codecs[channel] = h265.AVCCToCodec(avcc)
 		}
+		if s.codecs[0] != nil && s.codecs[1] != nil {
+			if s.audio != nil {
+				break
+			}
+			// A probe deadline is not a transport timeout: the video reader must remain alive.
+			audioDeadline = time.Now().Add(time.Second)
+		}
 	}
 	return nil
 }
 
 func (s *dualSession) producer(channel int) *dualProducer {
 	codec := s.codecs[channel]
+	medias := []*core.Media{{Kind: core.KindVideo, Direction: core.DirectionRecvonly, Codecs: []*core.Codec{codec}}}
+	if s.audio != nil {
+		medias = append(medias, &core.Media{Kind: core.KindAudio, Direction: core.DirectionRecvonly, Codecs: []*core.Codec{s.audio}})
+	}
 	return &dualProducer{
 		Connection: core.Connection{ID: core.NewID(), FormatName: "xiaomi/miss", Protocol: s.client.Protocol(),
-			Medias: []*core.Media{{Kind: core.KindVideo, Direction: core.DirectionRecvonly, Codecs: []*core.Codec{codec}}}},
+			Medias: medias},
 		session: s, channel: channel, packets: make(chan *Packet, 100), done: make(chan struct{}),
 	}
 }
@@ -167,20 +189,21 @@ func (s *dualSession) run() {
 			}
 			return
 		}
-		if packet.CodecID != codecH264 && packet.CodecID != codecH265 {
+		audio := packet.CodecID == codecPCMA || packet.CodecID == codecOPUS
+		if !audio && packet.CodecID != codecH264 && packet.CodecID != codecH265 {
 			continue
 		}
 		// MISS encodes the lens index in the flags high byte. This was verified
 		// on the local dual camera and independently documented for another
 		// Xiaomi dual-lens device in go2rtc PR #2027; do not infer from resolution.
 		channel := int(packet.Flags >> 24)
-		if channel > 1 {
+		if !audio && channel > 1 {
 			diagnostic.Report("dual_camera_channel", errors.New("invalid channel"))
 			return
 		}
 		s.mu.Lock()
 		for reader := range s.readers {
-			if reader.channel != channel {
+			if !audio && reader.channel != channel {
 				continue
 			}
 			select {
@@ -207,6 +230,7 @@ type dualProducer struct {
 func (p *dualProducer) finish() { p.once.Do(func() { close(p.done) }) }
 
 func (p *dualProducer) Start() error {
+	var audioTS uint32
 	p.session.mu.Lock()
 	p.session.readers[p] = struct{}{}
 	p.session.mu.Unlock()
@@ -219,9 +243,34 @@ func (p *dualProducer) Start() error {
 			return io.EOF
 		case packet := <-p.packets:
 			p.Recv += len(packet.Payload)
-			raw := &rtp.Packet{Header: rtp.Header{SequenceNumber: uint16(packet.Sequence), Timestamp: TimeToRTP(packet.Timestamp, 90000)}, Payload: annexb.EncodeToAVCC(packet.Payload)}
+			raw := &rtp.Packet{Header: rtp.Header{SequenceNumber: uint16(packet.Sequence), Timestamp: TimeToRTP(packet.Timestamp, 90000)}, Payload: packet.Payload}
+			if packet.CodecID == codecH264 || packet.CodecID == codecH265 {
+				raw.Payload = annexb.EncodeToAVCC(packet.Payload)
+			}
+			name := core.CodecH264
+			if packet.CodecID == codecH265 {
+				name = core.CodecH265
+			}
+			if packet.CodecID == codecPCMA || packet.CodecID == codecOPUS {
+				name = core.CodecPCMA
+				raw.Payload = packet.Payload
+				raw.Timestamp = audioTS
+				raw.Version = 2
+				if packet.CodecID == codecOPUS {
+					name = core.CodecOpus
+				}
+				samples, err := audioSamples(packet)
+				if err != nil {
+					// Drop only invalid audio. The sequence gap resets continuous
+					// audio readers without reconnecting either video lens.
+					continue
+				}
+				audioTS += samples
+			}
 			for _, receiver := range p.Receivers {
-				receiver.WriteRTP(raw)
+				if receiver.Codec.Name == name {
+					receiver.WriteRTP(raw)
+				}
 			}
 		}
 	}

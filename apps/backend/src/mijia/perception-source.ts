@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { PerceptionSources } from "../perception/sources";
 import type { sourceSelectionSchema } from "../perception/config";
 import type { HouseholdRuntime } from "../household/runtime";
 import type { MijiaService } from "./service";
@@ -80,5 +81,5 @@ export function createPerceptionSources(
         throw new Error("Camera access retired");
       return { ...prepared, scopeEpoch: granted.scopeEpoch };
     },
-  };
+  } satisfies PerceptionSources;
 }

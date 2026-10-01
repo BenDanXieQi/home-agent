@@ -1,0 +1,174 @@
+import { setTimeout as delay } from "node:timers/promises";
+import { spawn } from "node:child_process";
+import { Readable } from "node:stream";
+import {
+  sourceAccessSchema,
+  type PerceptionSources,
+} from "../../src/perception/sources";
+
+// A paced encoded source exercises the production HTTP/FFmpeg/IPC path.
+// Quiet and audible sources are distinct physical inputs, not mocked VAD results.
+export async function createAudioSource(count = 1) {
+  const encoder = spawn(
+    process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
+    [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-f",
+      "lavfi",
+      "-i",
+      "sine=frequency=400:sample_rate=8000:duration=1",
+      "-c:a",
+      "pcm_alaw",
+      "-f",
+      "alaw",
+      "pipe:1",
+    ],
+    { stdio: ["ignore", "pipe", "pipe"] },
+  );
+  const encoderExit = new Promise<number | null>((resolve, reject) => {
+    encoder.once("error", reject);
+    encoder.once("close", resolve);
+  });
+  const [encoded, exitCode, diagnostic] = await Promise.all([
+    new Response(Readable.toWeb(encoder.stdout)).arrayBuffer(),
+    encoderExit,
+    new Response(Readable.toWeb(encoder.stderr)).text(),
+  ]);
+  if (exitCode !== 0)
+    throw new Error(`Unable to encode the audio fixture: ${diagnostic}`);
+  const tone = new Uint8Array(encoded);
+  const quiet = new Uint8Array(tone.length).fill(0xd5);
+  let scopeEpoch = crypto.randomUUID();
+  let allowed = true;
+  let lease = new AbortController();
+  const selected = Array.from({ length: count }, (_, index) => ({
+    deviceId: String(1000 + index),
+    channel: 1 as const,
+  }));
+  const sourceIds = selected.map(() => crypto.randomUUID());
+  const sessionId = crypto.randomUUID();
+  const modes = new Map(selected.map(({ deviceId }) => [deviceId, "tone"]));
+  const readers = new Set<AbortController>();
+  let requests = 0;
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    idleTimeout: 0,
+    async fetch(request) {
+      const input = sourceAccessSchema
+        .omit({ endpoint: true })
+        .parse(await request.json());
+      const source =
+        selected[sourceIds.findIndex((id) => id === input.sourceId)];
+      if (!source) return new Response(null, { status: 404 });
+      requests++;
+      if (modes.get(source.deviceId) === "missing")
+        return Response.json({ code: "audio_track_missing" }, { status: 422 });
+      const stopped = new AbortController();
+      readers.add(stopped);
+      const signal = AbortSignal.any([stopped.signal, request.signal]);
+      signal.addEventListener(
+        "abort",
+        () => {
+          readers.delete(stopped);
+        },
+        { once: true },
+      );
+      let samples = 0;
+      const started = performance.now();
+      const anchor =
+        Date.now() - (modes.get(source.deviceId) === "old" ? 5000 : 0);
+      const stream = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          try {
+            if (modes.get(source.deviceId) === "stalled") {
+              await delay(60_000, undefined, { signal });
+              return;
+            }
+            await delay(
+              Math.max(0, started + samples / 8 - performance.now()),
+              undefined,
+              { signal },
+            );
+            const bytes = modes.get(source.deviceId) === "quiet" ? quiet : tone;
+            const offset = samples % bytes.length;
+            const chunk = bytes.subarray(
+              offset,
+              Math.min(offset + 160, bytes.length),
+            );
+            samples += chunk.length;
+            controller.enqueue(chunk);
+          } catch (error) {
+            controller.error(error);
+          }
+        },
+        cancel() {
+          stopped.abort();
+          readers.delete(stopped);
+        },
+      });
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "X-Audio-Format": "alaw",
+          "X-Audio-Generation": crypto.randomUUID(),
+          "X-Audio-Received-At": String(anchor),
+          "X-Audio-Start-Offset-Ms": "0",
+        },
+      });
+    },
+  });
+  const sources = {
+    list: () => (allowed ? selected : []),
+    eligibility: () =>
+      allowed
+        ? {
+            scopeEpoch,
+            identity: scopeEpoch,
+            householdVersion: { scope_epoch: scopeEpoch, sequence: 0 },
+          }
+        : null,
+    subscribe: () => () => {},
+    async prepare(source, signal) {
+      signal.throwIfAborted();
+      return {
+        access: {
+          endpoint: `${server.url.toString()}analysis`,
+          sessionId,
+          sourceId:
+            sourceIds[
+              selected.findIndex((entry) => entry.deviceId === source.deviceId)
+            ]!,
+        },
+        signal: lease.signal,
+      };
+    },
+  } satisfies PerceptionSources;
+  return {
+    selected,
+    sources,
+    modes,
+    get activeReaders() {
+      return readers.size;
+    },
+    get requests() {
+      return requests;
+    },
+    revoke() {
+      allowed = false;
+      lease.abort();
+    },
+    grant() {
+      scopeEpoch = crypto.randomUUID();
+      lease = new AbortController();
+      allowed = true;
+    },
+    async close() {
+      lease.abort();
+      for (const reader of readers) reader.abort();
+      await server.stop(true);
+    },
+  };
+}

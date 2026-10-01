@@ -107,6 +107,55 @@ export const trackingObservationSchema = z.object({
     )
     .max(16),
 });
+export const audioRunSchema = z.object({
+  deviceId: z.string().regex(/^[0-9]{1,32}$/),
+  scopeEpoch: z.uuid(),
+  trackRunId: z.uuid(),
+});
+const sampleInterval = z.object({
+  startSample: z.int().nonnegative(),
+  endSample: z.int().positive(),
+});
+export const audioTrackSchema = z.object({
+  run: audioRunSchema,
+  channels: z
+    .array(z.union([z.literal(1), z.literal(2)]))
+    .min(1)
+    .max(2),
+  status: z.enum(["starting", "reading", "no_track", "failed", "unavailable"]),
+  error: z.string().max(4096).optional(),
+  generation: z.uuid().nullable(),
+  anchorReceivedAt: z.number().nullable(),
+  decodedStartOffsetMs: z.number().nonnegative().max(1000),
+  timeQuality: z.literal("host_receive_anchor"),
+  synchronizationAccuracyMs: z.null(),
+  sampleRate: z.literal(16000),
+  receivedAt: z.number().nullable(),
+  observedAt: z.number().nullable(),
+  sequence: z.int().nonnegative(),
+  samples: z.int().nonnegative(),
+  energy: z
+    .array(
+      sampleInterval.extend({
+        rms: z.number().min(0).max(1),
+        active: z.boolean(),
+      }),
+    )
+    .max(8),
+  vad: z
+    .array(
+      sampleInterval.extend({
+        probability: z.number().min(0).max(1),
+        aboveThreshold: z.boolean(),
+      }),
+    )
+    .max(8),
+  vadStatus: z.enum(["insufficient_input", "ready", "unavailable"]),
+  vadError: z.string().max(4096).optional(),
+  energyRemainder: z.int().min(0).max(479),
+  vadRemainder: z.int().min(0).max(511),
+  validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
+});
 export const perceptionSnapshotSchema = z.object({
   sequence: z.int().nonnegative(),
   householdVersion: stateVersionSchema.nullable(),
@@ -141,8 +190,24 @@ export const perceptionSnapshotSchema = z.object({
   model: z
     .object({ sha256: z.string(), provider: z.literal("cpu") })
     .nullable(),
+  audio: z.object({
+    status: z.enum([
+      "disabled",
+      "starting",
+      "running",
+      "unavailable",
+      "closed",
+    ]),
+    processId: z.int().positive().optional(),
+    model: z
+      .object({ sha256: z.string(), provider: z.literal("cpu") })
+      .nullable(),
+    error: z.string().max(4096).optional(),
+    tracks: z.array(audioTrackSchema).max(8),
+  }),
   sources: z.array(
     z.object({
+      audioTrackRunId: z.uuid().nullable(),
       source: run.pick({ deviceId: true, channel: true }),
       run: run.nullable(),
       authorizedAt: stateVersionSchema.nullable(),

@@ -1,6 +1,8 @@
+import { prepareSourceLease } from "./source-lease";
+import { createAudioService } from "./audio/service";
 import { errorDetails } from "./compute/protocol";
 import pTimeout from "p-timeout";
-import type { createPerceptionSources } from "../mijia/perception-source";
+import type { PerceptionSources } from "./sources";
 import { readPerceptionConfig } from "./config-file";
 import { perceptionConfigSchema, sourceKey } from "./config";
 import { createDetectionPool, DetectionPoolError } from "./compute/pool";
@@ -10,7 +12,7 @@ import { createObservationStore } from "./observation-store";
 export function createPerceptionService(options: {
   configPath: string;
   executable: string;
-  sources: ReturnType<typeof createPerceptionSources>;
+  sources: PerceptionSources;
 }) {
   const instanceId = crypto.randomUUID();
   let householdVersion:
@@ -57,6 +59,11 @@ export function createPerceptionService(options: {
     sequence++;
     for (const listener of listeners) listener();
   };
+  const audio = createAudioService({
+    sources: options.sources,
+    executable: options.executable,
+    changed,
+  });
   let unsubscribeStore = store.subscribe(changed);
   function retire(key: string, reason: string) {
     const entry = desired.get(key);
@@ -88,14 +95,15 @@ export function createPerceptionService(options: {
   }
   function reconcile() {
     if (stopped) return;
+    const selected =
+      config.sources === "household" ? options.sources.list() : config.sources;
+    audio.reconcile(config, selected);
     const compute = pool?.getStatus();
     if (computeId !== compute?.processId || compute?.status !== "ready") {
       for (const key of desired.keys())
         retire(key, "Compute unavailable or replaced");
       computeId = compute?.processId;
     }
-    const selected =
-      config.sources === "household" ? options.sources.list() : config.sources;
     if (selected.length > 8) {
       status = "unavailable";
       error = "Perception supports at most 8 camera channels";
@@ -157,27 +165,19 @@ export function createPerceptionService(options: {
       desired.set(key, entry);
       entry.pending = (async () => {
         try {
-          const prepared = await options.sources.prepare(
+          const mediaAccess = await prepareSourceLease(
+            options.sources,
             source,
             controller.signal,
+            () => {
+              if (desired.get(key) === entry)
+                retire(key, "Media source retired");
+            },
           );
           if (desired.get(key) !== entry || controller.signal.aborted) return;
-          const invalidate = () => {
-            if (desired.get(key) === entry) retire(key, "Media source retired");
-          };
-          prepared.signal.addEventListener("abort", invalidate, { once: true });
-          controller.signal.addEventListener(
-            "abort",
-            () => prepared.signal.removeEventListener("abort", invalidate),
-            { once: true },
-          );
-          if (prepared.signal.aborted) {
-            invalidate();
-            return;
-          }
           await pool!.startVideo({
             run,
-            access: prepared.access,
+            access: mediaAccess,
             config,
             executable: options.executable,
           });
@@ -243,6 +243,7 @@ export function createPerceptionService(options: {
           store = createObservationStore(config.maxFrameAgeMs);
           unsubscribeStore = store.subscribe(changed);
         }
+        audio.start();
         const videoEnabled =
           config.sources === "household" || config.sources.length > 0;
         if (videoEnabled && !pool) await ensurePool();
@@ -277,9 +278,11 @@ export function createPerceptionService(options: {
     },
     retry() {
       if (stopped) return Promise.reject(new Error("Perception stopped"));
+      audio.retry();
       return initialize();
     },
     snapshot() {
+      const audioSnapshot = audio.snapshot();
       return {
         sequence,
         instanceId,
@@ -289,7 +292,14 @@ export function createPerceptionService(options: {
         config,
         compute: pool?.getStatus() ?? null,
         model: pool?.metadata ?? null,
+        audio: audioSnapshot,
         sources: store.snapshot().map((source) => ({
+          audioTrackRunId:
+            audioSnapshot.tracks.find(
+              (track) =>
+                track.run.deviceId === source.source.deviceId &&
+                track.channels.includes(source.source.channel),
+            )?.run.trackRunId ?? null,
           ...source,
           authorizedAt: source.run
             ? (desired.get(sourceKey(source.source))?.authorizedAt ?? null)
@@ -319,6 +329,7 @@ export function createPerceptionService(options: {
           // preparing when their individual stop command was superseded.
           await Promise.all([
             pool?.close(),
+            audio.close(),
             pTimeout(Promise.all(cleanup), {
               milliseconds: Math.max(1, deadline - performance.now()),
             }),

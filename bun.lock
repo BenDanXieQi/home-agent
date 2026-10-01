@@ -70,6 +70,7 @@
         "@types/bun": "catalog:",
         "@types/write-file-atomic": "catalog:",
         "drizzle-kit": "catalog:",
+        "eventsource-parser": "4.1.1",
         "oxlint": "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript": "catalog:",
