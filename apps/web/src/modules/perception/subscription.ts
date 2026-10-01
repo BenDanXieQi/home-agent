@@ -12,6 +12,7 @@ export function subscribePerception(
   let controller: AbortController | undefined;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   async function connect() {
+    if (stopped) return;
     const current = new AbortController();
     controller = current;
     try {

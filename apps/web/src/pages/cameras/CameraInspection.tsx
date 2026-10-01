@@ -1,0 +1,71 @@
+import { useEffect, useState } from "react";
+import { ChevronRight } from "lucide-react";
+import type { useFrameViewer } from "../../modules/perception/use-frame-viewer";
+
+export function CameraInspection({
+  inspect,
+  inspection,
+  watching,
+}: Pick<
+  ReturnType<typeof useFrameViewer>,
+  "inspect" | "inspection" | "watching"
+>) {
+  const [expanded, setExpanded] = useState(true);
+  return (
+    <details
+      className="group/inspection rounded-2xl bg-white p-1.5 shadow-panel"
+      open={expanded}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-[10px] px-2 py-1.5 text-[13px] font-medium text-ink hover:bg-surface focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          size={14}
+          aria-hidden="true"
+          className="shrink-0 group-open/inspection:rotate-90"
+        />
+        <span>帧与结果</span>
+        <span className="rounded-md bg-surface px-1.5 py-0.5 font-mono text-[11px] font-normal leading-4 text-muted">
+          JSON
+        </span>
+      </summary>
+      {expanded ? (
+        <div className="space-y-3 px-2.5 pb-2.5 pt-1">
+          <p className="text-xs leading-6 text-muted">
+            实时更新画面与分析结果；定格后固定，后台继续分析。
+          </p>
+          {watching ? (
+            <LiveInspection inspect={inspect} />
+          ) : (
+            <InspectionJson inspection={inspection} />
+          )}
+        </div>
+      ) : null}
+    </details>
+  );
+}
+
+function LiveInspection({
+  inspect,
+}: Pick<ReturnType<typeof useFrameViewer>, "inspect">) {
+  const [inspection, setInspection] = useState<ReturnType<typeof inspect>>();
+  useEffect(() => {
+    const update = () => setInspection(inspect());
+    update();
+    const timer = setInterval(update, 250);
+    return () => clearInterval(timer);
+  }, [inspect]);
+  return <InspectionJson inspection={inspection} />;
+}
+
+function InspectionJson({
+  inspection,
+}: Pick<ReturnType<typeof useFrameViewer>, "inspection">) {
+  return (
+    <pre
+      className="max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs"
+      aria-label="帧与结果 JSON 内容"
+    >
+      {JSON.stringify(inspection, null, 2)}
+    </pre>
+  );
+}

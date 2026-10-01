@@ -36,8 +36,11 @@ async function run(task: z.infer<typeof commandSchema>) {
     const result = await pool.submit(task);
     video = createVideoRuntime({
       tracking: createTrackingRuntime({
-        model: createReidProcess(),
+        createModel: createReidProcess,
         reserveCompute: () => pool!.reserveTracking(),
+        releaseCompute: () => {
+          pool!.releaseTracking();
+        },
         emit: (observation) =>
           send({
             kind: "video",

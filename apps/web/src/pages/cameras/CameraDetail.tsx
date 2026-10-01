@@ -1,8 +1,8 @@
 import { twMerge } from "tailwind-merge";
 import { Link, useParams } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
-import { useMemo, useState } from "react";
-import { ArrowLeft, ChevronRight, Pause, Play, RefreshCw } from "lucide-react";
+import { useState } from "react";
+import { ArrowLeft, Pause, Play } from "lucide-react";
 import { Button } from "../../components/Button";
 import { buttonStyles } from "../../components/button-styles";
 import { Notice, StatusNotice } from "../../components/Notice";
@@ -11,9 +11,9 @@ import {
   householdSyncedAtom,
 } from "../../modules/household/state";
 import { createPerceptionSourceState } from "../../modules/perception/source-state";
-import { usePerceptionSource } from "../../modules/perception/use-perception-source";
 import { useFrameViewer } from "../../modules/perception/use-frame-viewer";
 import { CameraFrame } from "./MijiaPlayer";
+import { CameraInspection } from "./CameraInspection";
 import { CameraHeader } from "./CameraHeader";
 import { PlaybackStatus } from "./PlaybackStatus";
 import { PlaybackLoader } from "./PlaybackLoader";
@@ -65,7 +65,6 @@ function CameraDetailContent({
 }: {
   source: ReturnType<typeof createPerceptionSourceState>;
 }) {
-  usePerceptionSource(source);
   const {
     canvas,
     view,
@@ -74,14 +73,13 @@ function CameraDetailContent({
     ready,
     freeze,
     live: returnToLive,
+    inspection,
     inspect,
   } = useFrameViewer(source);
   const device = useAtomValue(source.deviceAtom);
   const connected = useAtomValue(source.connectedAtom);
   const configured = useAtomValue(source.configuredAtom);
   const error = useAtomValue(source.errorAtom);
-  const [inspection, setInspection] = useState<ReturnType<typeof inspect>>();
-  const json = useMemo(() => JSON.stringify(inspection, null, 2), [inspection]);
   const presentation = playbackPresentation(snapshot);
   const frozen = !!view?.frozen;
   const live = watching && ready;
@@ -132,7 +130,6 @@ function CameraDetailContent({
             disabled={!view?.hasFrame || frozen}
             onClick={() => {
               freeze();
-              setInspection(inspect());
             }}
           >
             定格当前画面
@@ -144,7 +141,6 @@ function CameraDetailContent({
             disabled={watching}
             onClick={() => {
               returnToLive();
-              setInspection(undefined);
             }}
           >
             返回实时
@@ -152,55 +148,19 @@ function CameraDetailContent({
         </div>
       </article>
       {!connected ? (
-        <StatusNotice>
-          感知结果正在同步，暂不接纳新的检测与跟踪结果。
-        </StatusNotice>
+        <StatusNotice>正在连接分析结果…</StatusNotice>
       ) : !configured ? (
-        <StatusNotice>
-          当前视频未配置感知采集，可观看和定格；暂无检测或跟踪结果。
-        </StatusNotice>
+        <StatusNotice>当前视频暂无分析结果，可继续观看和定格。</StatusNotice>
       ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {view?.failure ? (
         <Notice tone="error">无法绘制当前画面，请重新打开视频详情。</Notice>
       ) : null}
-      <details
-        className="group/inspection rounded-2xl bg-white p-1.5 shadow-panel"
-        onToggle={(event) => {
-          if (event.currentTarget.open) setInspection(inspect());
-        }}
-      >
-        <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-[10px] px-2 py-1.5 text-[13px] font-medium text-ink hover:bg-surface focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
-          <ChevronRight
-            size={14}
-            aria-hidden="true"
-            className="shrink-0 group-open/inspection:rotate-90"
-          />
-          <span>帧与结果</span>
-          <span className="rounded-md bg-surface px-1.5 py-0.5 font-mono text-[11px] font-normal leading-4 text-muted">
-            JSON
-          </span>
-        </summary>
-        <div className="space-y-3 px-2.5 pb-2.5 pt-1">
-          <p className="text-xs leading-6 text-muted">
-            展开、刷新或定格时取样，包含来源状态、最新结果与画面关联结果，不随实时画面自动更新。
-          </p>
-          <Button
-            type="button"
-            size="small"
-            icon={<RefreshCw size={14} />}
-            onClick={() => setInspection(inspect())}
-          >
-            刷新 JSON
-          </Button>
-          <pre
-            className="max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs"
-            aria-label="帧与结果 JSON 内容"
-          >
-            {json}
-          </pre>
-        </div>
-      </details>
+      <CameraInspection
+        inspect={inspect}
+        inspection={inspection}
+        watching={watching}
+      />
     </>
   );
 }

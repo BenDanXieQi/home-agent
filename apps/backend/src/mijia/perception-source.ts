@@ -8,6 +8,14 @@ export function createPerceptionSources(
   household: HouseholdRuntime,
   mijia: MijiaService,
 ) {
+  function householdReady() {
+    const snapshot = household.snapshot();
+    return (
+      household.ready &&
+      snapshot.projection.account.account.status === "authenticated" &&
+      snapshot.projection.household.household.sync_status === "synced"
+    );
+  }
   function eligibility(source: z.infer<typeof sourceSelectionSchema>) {
     const { scope_epoch, projection } = household.snapshot();
     const device = Object.values(projection.device).find(
@@ -15,7 +23,7 @@ export function createPerceptionSources(
     );
     const media = mijia.sourceSnapshot();
     if (
-      !household.ready ||
+      !householdReady() ||
       !device?.camera ||
       !device.channels.includes(source.channel) ||
       media.binding.status !== "ready"
@@ -23,6 +31,7 @@ export function createPerceptionSources(
       return null;
     return {
       scopeEpoch: scope_epoch,
+      householdVersion: household.version(),
       revision: media.revision,
       identity: JSON.stringify([
         scope_epoch,
@@ -34,7 +43,7 @@ export function createPerceptionSources(
   }
   return {
     list() {
-      if (!household.ready) return [];
+      if (!householdReady()) return [];
       return Object.values(household.snapshot().projection.device)
         .filter((device) => device.camera)
         .flatMap((device) =>
@@ -42,9 +51,13 @@ export function createPerceptionSources(
         );
     },
     eligibility,
-    subscribe(listener: () => void) {
-      const stopHousehold = household.subscribe(listener);
-      const stopMijia = mijia.subscribe(listener);
+    subscribe(
+      listener: (version: ReturnType<HouseholdRuntime["version"]>) => void,
+    ) {
+      const notify = () => listener(household.version());
+      const stopHousehold = household.subscribe(notify);
+      const stopMijia = mijia.subscribe(notify);
+      notify();
       return () => {
         stopHousehold();
         stopMijia();

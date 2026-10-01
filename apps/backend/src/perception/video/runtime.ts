@@ -1,3 +1,4 @@
+import { ComputeBusyError } from "../compute/protocol";
 import type { createTrackingRuntime } from "../tracking/runtime";
 import type { z } from "zod";
 import type { videoEventSchema } from "./events";
@@ -112,7 +113,7 @@ export function createVideoRuntime(dependencies: {
       >,
     ) {
       if (closing || sources.size >= 8 || sources.has(input.run.runId))
-        throw new Error("Video source capacity unavailable");
+        throw new ComputeBusyError("Video source capacity unavailable");
       const source = createVideoSource({
         run: input.run,
         config: input.config,
@@ -125,7 +126,7 @@ export function createVideoRuntime(dependencies: {
         ready: () => scheduler.ready(input.run.runId),
         failure: (error) => {
           scheduler.remove(input.run.runId);
-          dependencies.tracking.stop(input.run.runId);
+          dependencies.tracking.stop(input.run.runId).catch(dependencies.fatal);
           dependencies
             .emit({
               event: "health",
@@ -147,8 +148,7 @@ export function createVideoRuntime(dependencies: {
       const source = sources.get(id);
       if (!source) return;
       scheduler.remove(id);
-      dependencies.tracking.stop(id);
-      await source.close();
+      await Promise.all([dependencies.tracking.stop(id), source.close()]);
       // Retiring instances still consume decoder capacity until exit is confirmed.
       if (sources.get(id) === source) sources.delete(id);
     },

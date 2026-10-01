@@ -453,7 +453,8 @@ export async function createDetectionPool(
       if (result.kind !== "video_ack")
         throw new Error("Unexpected video control response");
     } catch (error) {
-      fail(generation, new Error("Video control failed", { cause: error }));
+      if (!(error instanceof ComputeBusyError))
+        fail(generation, new Error("Video control failed", { cause: error }));
       throw error;
     } finally {
       activeControls--;

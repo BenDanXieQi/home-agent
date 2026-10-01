@@ -43,13 +43,15 @@ function createRunState() {
 }
 export function createTrackingRuntime(options: {
   reserveCompute: () => boolean;
-  model: ReturnType<typeof createReidProcess>;
+  releaseCompute: () => void;
+  createModel: typeof createReidProcess;
   emit: (
     observation: z.infer<typeof trackingObservationSchema>,
   ) => Promise<void>;
   failure: (error: unknown) => void;
 }) {
-  const model = options.model;
+  let model = options.createModel();
+  let releasing: Promise<void> | undefined;
   const runs = new Map<string, ReturnType<typeof createRunState>>();
   const pending = new Set<Promise<void>>();
   // FIFO eligibility contains only source IDs and expires when input stops.
@@ -61,10 +63,20 @@ export function createTrackingRuntime(options: {
     start(run: z.infer<typeof runSchema>) {
       runs.set(run.runId, createRunState());
     },
-    stop(runId: string) {
+    async stop(runId: string) {
       runs.get(runId)?.release?.();
       runs.delete(runId);
       pixelTurns.delete(runId);
+      if (runs.size) return;
+      releasing ??= (async () => {
+        await Promise.all(pending);
+        await model.close();
+        options.releaseCompute();
+        if (!closed) model = options.createModel();
+      })().finally(() => {
+        releasing = undefined;
+      });
+      await releasing;
     },
     capture(
       run: z.infer<typeof runSchema>,
@@ -152,8 +164,13 @@ export function createTrackingRuntime(options: {
                 features[i] ? [] : [i],
               );
               if (missing.length) {
-                if (options.reserveCompute()) model.start();
-                if (!rgb || !model.status.ready || model.status.busy) {
+                if (!releasing && options.reserveCompute()) model.start();
+                if (
+                  releasing ||
+                  !rgb ||
+                  !model.status.ready ||
+                  model.status.busy
+                ) {
                   status = "degraded";
                   reason = !rgb
                     ? "Appearance frame capacity unavailable"
@@ -277,6 +294,7 @@ export function createTrackingRuntime(options: {
       for (const entry of runs.values()) entry.release?.();
       runs.clear();
       pixelTurns.clear();
+      await releasing;
       await model.close();
       await Promise.all(pending);
     },

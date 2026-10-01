@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { errorDetails } from "./compute/protocol";
 import pTimeout from "p-timeout";
 import type { createPerceptionSources } from "../mijia/perception-source";
 import { readPerceptionConfig } from "./config-file";
@@ -6,18 +6,17 @@ import { perceptionConfigSchema, sourceKey } from "./config";
 import { createDetectionPool } from "./compute/pool";
 import { createObservationStore } from "./observation-store";
 
-function message(cause: unknown) {
-  return (cause instanceof Error ? cause.message : String(cause)).slice(
-    0,
-    4096,
-  );
-}
-
+// Capture belongs to the backend; browser viewing and freezing do not own its lifetime.
 export function createPerceptionService(options: {
   configPath: string;
   executable: string;
   sources: ReturnType<typeof createPerceptionSources>;
 }) {
+  const instanceId = crypto.randomUUID();
+  let householdVersion:
+    | Parameters<Parameters<typeof options.sources.subscribe>[0]>[0]
+    | null = null;
+  let sequence = 0;
   let config = perceptionConfigSchema.parse({});
   let store = createObservationStore(config.maxFrameAgeMs);
   let pool: Awaited<ReturnType<typeof createDetectionPool>> | undefined;
@@ -44,11 +43,15 @@ export function createPerceptionService(options: {
       identity: string;
       controller: AbortController;
       pending: Promise<void>;
+      authorizedAt: NonNullable<
+        ReturnType<typeof options.sources.eligibility>
+      >["householdVersion"];
     }
   >();
   const retryAfter = new Map<string, number>();
   const cleanup = new Set<Promise<void>>();
   const changed = () => {
+    sequence++;
     for (const listener of listeners) listener();
   };
   let unsubscribeStore = store.subscribe(changed);
@@ -65,16 +68,17 @@ export function createPerceptionService(options: {
           await owned.stopVideo(entry.runId);
       })
       .catch((cause: unknown) => {
-        error = message(cause);
+        error = errorDetails(cause).message;
         changed();
       });
     cleanup.add(task);
     task.then(
       () => {
         cleanup.delete(task);
+        changed();
       },
       (cause: unknown) => {
-        error = message(cause);
+        error = errorDetails(cause).message;
         changed();
       },
     );
@@ -144,6 +148,7 @@ export function createPerceptionService(options: {
         identity: access.identity,
         controller,
         pending: Promise.resolve(),
+        authorizedAt: access.householdVersion,
       };
       desired.set(key, entry);
       entry.pending = (async () => {
@@ -175,13 +180,16 @@ export function createPerceptionService(options: {
         } catch (cause) {
           if (desired.get(key) !== entry) return;
           retryAfter.set(key, performance.now() + 5000);
-          retire(key, message(cause));
+          retire(key, errorDetails(cause).message);
         }
       })();
     }
     changed();
   }
-  const unsubscribeSources = options.sources.subscribe(reconcile);
+  const unsubscribeSources = options.sources.subscribe((version) => {
+    householdVersion = version;
+    reconcile();
+  });
   const timer = setInterval(reconcile, 500);
   function initialize() {
     initializing ??= (async () => {
@@ -199,32 +207,12 @@ export function createPerceptionService(options: {
           store.close();
           store = createObservationStore(config.maxFrameAgeMs);
           unsubscribeStore = store.subscribe(changed);
-          if (config.sources !== "household")
-            for (const source of config.sources) store.expect(source);
         }
         if (config.sources !== "household" && !config.sources.length) {
           status = "disabled";
           return;
         }
         if (!pool) {
-          const probe = spawn(options.executable, ["-version"], {
-            stdio: "ignore",
-          });
-          try {
-            await pTimeout(
-              new Promise<void>((resolve, reject) => {
-                probe.once("error", reject);
-                probe.once("exit", (code) =>
-                  code === 0
-                    ? resolve()
-                    : reject(new Error("FFmpeg unavailable")),
-                );
-              }),
-              { milliseconds: 3000 },
-            );
-          } finally {
-            if (probe.exitCode === null) probe.kill("SIGKILL");
-          }
           shutdown.signal.throwIfAborted();
           pool = await createDetectionPool(
             { cpuRatio: config.cpuRatio },
@@ -247,7 +235,7 @@ export function createPerceptionService(options: {
         reconcile();
       } catch (cause) {
         status = "unavailable";
-        error = message(cause);
+        error = errorDetails(cause).message;
       } finally {
         changed();
       }
@@ -264,12 +252,20 @@ export function createPerceptionService(options: {
     },
     snapshot() {
       return {
+        sequence,
+        instanceId,
+        householdVersion,
         status,
         error,
         config,
         compute: pool?.getStatus() ?? null,
         model: pool?.metadata ?? null,
-        sources: store.snapshot(),
+        sources: store.snapshot().map((source) => ({
+          ...source,
+          authorizedAt: source.run
+            ? (desired.get(sourceKey(source.source))?.authorizedAt ?? null)
+            : null,
+        })),
         rejectedRetiredResults: store.rejectedRetiredResults,
       };
     },
@@ -301,7 +297,7 @@ export function createPerceptionService(options: {
           status = "closed";
         } catch (cause) {
           status = "unavailable";
-          error = message(cause);
+          error = errorDetails(cause).message;
           throw cause;
         } finally {
           unsubscribeStore();

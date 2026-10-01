@@ -1,5 +1,6 @@
 import { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
 import { z } from "zod";
+import { stateVersionSchema } from "./household";
 
 const run = z.object({
   deviceId: z.string(),
@@ -67,6 +68,9 @@ export const trackingObservationSchema = z.object({
     .max(16),
 });
 export const perceptionSnapshotSchema = z.object({
+  sequence: z.int().nonnegative(),
+  householdVersion: stateVersionSchema.nullable(),
+  instanceId: z.uuid(),
   rejectedRetiredResults: z.int().nonnegative(),
   status: z.string(),
   error: z.string().optional(),
@@ -99,11 +103,9 @@ export const perceptionSnapshotSchema = z.object({
     .nullable(),
   sources: z.array(
     z.object({
-      source: z.object({
-        deviceId: z.string(),
-        channel: z.union([z.literal(1), z.literal(2)]),
-      }),
+      source: run.pick({ deviceId: true, channel: true }),
       run: run.nullable(),
+      authorizedAt: stateVersionSchema.nullable(),
       media: sourceMediaSchema.nullable(),
       status: z.string(),
       error: z.string().optional(),
