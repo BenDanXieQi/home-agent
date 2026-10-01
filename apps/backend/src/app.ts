@@ -18,6 +18,8 @@ import type { MijiaService } from "./mijia/service";
 import type { DevicePushLogs } from "./household/device-logs";
 import type { RoomAnalysisService } from "./room-analysis/service";
 import { createRoomAnalysisRoutes } from "./room-analysis/routes";
+import { createContextRoutes } from "./household-context/routes";
+import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
   perception: ReturnType<typeof createPerceptionService>;
@@ -28,6 +30,7 @@ type AppDependencies = {
   mijiaService: MijiaService;
   deviceLogs: DevicePushLogs;
   roomAnalysis: RoomAnalysisService;
+  contextRepository: ReturnType<typeof createContextRepository> | undefined;
   shutdownSignal: AbortSignal;
   readAgentUrl: () => Promise<string>;
 };
@@ -41,6 +44,7 @@ export function createApp({
   mijiaService,
   deviceLogs,
   roomAnalysis,
+  contextRepository,
   shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
@@ -70,6 +74,14 @@ export function createApp({
           runtime: "bun",
           timestamp: new Date().toISOString(),
         }),
+      ),
+    )
+    .route(
+      "/api/household-context",
+      createContextRoutes(
+        environment.BACKEND_PORT,
+        household,
+        contextRepository,
       ),
     )
     .route(
@@ -116,7 +128,15 @@ export function createApp({
     app.get("/*", serveStatic({ root: staticRoot }));
     app.on(
       "GET",
-      ["/", "/devices", "/cameras", "/settings", "/device-logs", "/rooms"],
+      [
+        "/",
+        "/devices",
+        "/cameras",
+        "/settings",
+        "/device-logs",
+        "/rooms",
+        "/data",
+      ],
       serveStatic({ root: staticRoot, path: "index.html" }),
     );
   }

@@ -5,6 +5,7 @@ import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
 import { createDatabase } from "./db";
+import { createContextRepository } from "./household-context/repository";
 import { createCredentialStore } from "./credentials/store";
 import { createHomeSelectionStore } from "./mijia/homes/store";
 import { readCredentialKey } from "./credentials/key";
@@ -100,6 +101,9 @@ const roomAnalysis = new RoomAnalysisService(
   ),
 );
 const app = createApp({
+  contextRepository: database
+    ? createContextRepository(database.db)
+    : undefined,
   perception,
   staticRoot: join(import.meta.dir, "public"),
   environment,
