@@ -1,7 +1,7 @@
 import { twMerge } from "tailwind-merge";
 import { Link, useParams } from "@tanstack/react-router";
-import { useAtomValue } from "jotai";
-import { useState } from "react";
+import { useAtom, useAtomValue } from "jotai";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Pause, Play } from "lucide-react";
 import { Button } from "../../components/Button";
 import { buttonStyles } from "../../components/button-styles";
@@ -18,21 +18,24 @@ import { CameraHeader } from "./CameraHeader";
 import { PlaybackStatus } from "./PlaybackStatus";
 import { PlaybackLoader } from "./PlaybackLoader";
 import { playbackPresentation } from "./playback-presentation";
-import { cameraTileClassName } from "./camera-styles";
+import { cameraTileClassName, cameraTransitionName } from "./camera-styles";
+import { useCameraReturn } from "./use-camera-return";
+import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 
 export default function CameraDetailPage() {
+  useCameraReturn();
   const { deviceId, channel } = useParams({
     from: "/account/cameras/$deviceId/$channel",
   });
   return (
-    <section className="mx-auto max-w-4xl space-y-4">
+    <section className="space-y-3">
       <Link
         to="/cameras"
         className={twMerge(
           `${buttonStyles.base} ${buttonStyles.ghost} -ml-2 min-h-8 gap-1 rounded-[10px] border-0 px-2 py-1.5 text-xs font-normal hover:bg-surface hover:text-ink focus-visible:outline-2`,
         )}
       >
-        <ArrowLeft size={14} aria-hidden="true" /> 返回视频列表
+        <ArrowLeft size={14} aria-hidden="true" /> 返回
       </Link>
       {channel === "1" || channel === "2" ? (
         <CameraDetailSource
@@ -76,6 +79,14 @@ function CameraDetailContent({
     inspection,
     inspect,
   } = useFrameViewer(source);
+  const aspectAtom = useMemo(
+    () => createCameraAspectAtom(source.target.deviceId, source.target.channel),
+    [source.target.deviceId, source.target.channel],
+  );
+  const [aspectRatio, setAspectRatio] = useAtom(aspectAtom);
+  useEffect(() => {
+    if (view?.aspectRatio) setAspectRatio(view.aspectRatio);
+  }, [view?.aspectRatio, setAspectRatio]);
   const device = useAtomValue(source.deviceAtom);
   const connected = useAtomValue(source.connectedAtom);
   const configured = useAtomValue(source.configuredAtom);
@@ -90,12 +101,22 @@ function CameraDetailContent({
       : device?.name;
 
   return (
-    <>
-      <article className={cameraTileClassName}>
-        <CameraHeader title={label ?? "视频详情"}>
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
+      <article
+        className={`${cameraTileClassName} [&_.camera-surface]:max-h-[65dvh]`}
+      >
+        <CameraHeader
+          title={label ?? "视频详情"}
+          className="min-h-12 pr-4 py-2"
+        >
           <span className="text-xs text-muted">{device?.room_name}</span>
         </CameraHeader>
         <CameraFrame
+          aspectRatio={aspectRatio}
+          transitionName={cameraTransitionName(
+            source.target.deviceId,
+            source.target.channel,
+          )}
           placeholder={
             view?.hasFrame
               ? null
@@ -115,6 +136,20 @@ function CameraDetailContent({
             live ? <PlaybackStatus snapshot={snapshot} /> : undefined
           }
           loader={<PlaybackLoader active={waiting} />}
+          statusAction={
+            <Button
+              type="button"
+              className="min-w-36 rounded-[10px]"
+              icon={watching ? <Pause size={15} /> : <Play size={15} />}
+              disabled={watching && (!view?.hasFrame || frozen)}
+              onClick={() => {
+                if (watching) freeze();
+                else returnToLive();
+              }}
+            >
+              {watching ? "定格当前画面" : "返回实时"}
+            </Button>
+          }
         >
           <canvas
             ref={canvas}
@@ -122,35 +157,23 @@ function CameraDetailContent({
             aria-label={`${label ?? "视频"} 关联帧画面`}
           />
         </CameraFrame>
-        <div className="-mt-1 px-1.5 pb-2.5">
-          <Button
-            type="button"
-            className="min-w-36 rounded-[10px]"
-            icon={watching ? <Pause size={15} /> : <Play size={15} />}
-            disabled={watching && (!view?.hasFrame || frozen)}
-            onClick={() => {
-              if (watching) freeze();
-              else returnToLive();
-            }}
-          >
-            {watching ? "定格当前画面" : "返回实时"}
-          </Button>
-        </div>
       </article>
-      {!connected ? (
-        <StatusNotice>正在连接分析结果…</StatusNotice>
-      ) : !configured ? (
-        <StatusNotice>当前视频暂无分析结果，可继续观看和定格。</StatusNotice>
-      ) : null}
-      {error ? <Notice tone="error">{error}</Notice> : null}
-      {view?.failure ? (
-        <Notice tone="error">无法绘制当前画面，请重新打开视频详情。</Notice>
-      ) : null}
-      <CameraInspection
-        inspect={inspect}
-        inspection={inspection}
-        watching={watching}
-      />
-    </>
+      <aside className="min-w-0 space-y-3" aria-label="画面分析数据">
+        {!connected ? (
+          <StatusNotice>正在连接分析结果…</StatusNotice>
+        ) : !configured ? (
+          <StatusNotice>当前视频暂无分析结果，可继续观看和定格。</StatusNotice>
+        ) : null}
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {view?.failure ? (
+          <Notice tone="error">无法绘制当前画面，请重新打开视频详情。</Notice>
+        ) : null}
+        <CameraInspection
+          inspect={inspect}
+          inspection={inspection}
+          watching={watching}
+        />
+      </aside>
+    </div>
   );
 }

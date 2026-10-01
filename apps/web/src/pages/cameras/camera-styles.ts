@@ -3,3 +3,7 @@ export const cameraTileClassName =
 
 export const cameraGridClassName =
   "grid gap-5 grid-cols-[repeat(_auto-fit,_minmax(min(100%,_max(260px,_calc((100%_-_2.5rem)_/_3))),_1fr)_)]";
+
+export function cameraTransitionName(deviceId: string, channel: number) {
+  return `camera-${CSS.escape(deviceId)}-${channel}`;
+}

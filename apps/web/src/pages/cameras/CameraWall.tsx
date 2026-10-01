@@ -1,16 +1,19 @@
 import { Link } from "@tanstack/react-router";
-import { cameraTileClassName, cameraGridClassName } from "./camera-styles";
+import {
+  cameraTileClassName,
+  cameraGridClassName,
+  cameraTransitionName,
+} from "./camera-styles";
 import { CameraHeader } from "./CameraHeader";
 import { EmptyState } from "../../components/EmptyState";
+import { memo, useMemo, useRef, type ComponentProps } from "react";
+import { useInView } from "motion/react";
+import { useAtomValue, useSetAtom } from "jotai";
+import { playbackPageActiveAtom } from "../../modules/playback/page-activity";
 import {
-  memo,
-  useCallback,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentProps,
-} from "react";
-import { useInView, usePageInView } from "motion/react";
+  pausedPlaybackKeysAtom,
+  setPlaybackEnabledAtom,
+} from "../../modules/playback/preferences";
 import { twMerge } from "tailwind-merge";
 import { buttonStyles } from "../../components/button-styles";
 import { ArrowUpRight, Video } from "lucide-react";
@@ -27,7 +30,7 @@ const CameraTile = memo(function CameraTile({
   scope_epoch,
   channel,
   ready,
-  pageVisible,
+  pageActive,
   playbackKey,
   enabled,
   onEnabledChange,
@@ -37,7 +40,7 @@ const CameraTile = memo(function CameraTile({
 > & {
   device: Projection["device"][string];
   ready: boolean;
-  pageVisible: boolean;
+  pageActive: boolean;
   playbackKey: string;
   onEnabledChange: (key: string, enabled: boolean) => void;
 }) {
@@ -72,7 +75,7 @@ const CameraTile = memo(function CameraTile({
           channel={channel}
           name={label}
           enabled={enabled}
-          active={pageVisible && nearViewport}
+          active={pageActive && nearViewport}
           notice={notice}
           statusAction={analysisLink}
           onEnabledChange={(value) => onEnabledChange(playbackKey, value)}
@@ -85,6 +88,7 @@ const CameraTile = memo(function CameraTile({
             </span>
           </CameraHeader>
           <CameraFrame
+            transitionName={cameraTransitionName(device.id, channel)}
             notice={notice}
             statusAction={analysisLink}
             placeholder="摄像头服务尚未就绪"
@@ -108,18 +112,9 @@ export default function CameraWall({
   scope_epoch: string;
   ready: boolean;
 }) {
-  const pageVisible = usePageInView();
-  // Playback choices outlive a camera's temporary offline state or media revision.
-  // The household epoch's React key clears them when the managed scope changes.
-  const [paused, setPaused] = useState(() => new Set<string>());
-  const changeEnabled = useCallback((key: string, enabled: boolean) => {
-    setPaused((previous) => {
-      const next = new Set(previous);
-      if (enabled) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  }, []);
+  const pageActive = useAtomValue(playbackPageActiveAtom);
+  const paused = useAtomValue(pausedPlaybackKeysAtom);
+  const changeEnabled = useSetAtom(setPlaybackEnabledAtom);
   // Display order belongs to the camera wall, not the cloud response order.
   const cameras = useMemo(
     () =>
@@ -145,7 +140,7 @@ export default function CameraWall({
                 revision={revision}
                 scope_epoch={scope_epoch}
                 ready={ready}
-                pageVisible={pageVisible}
+                pageActive={pageActive}
                 playbackKey={`${device.id}:${channel}`}
                 enabled={!paused.has(`${device.id}:${channel}`)}
                 onEnabledChange={changeEnabled}

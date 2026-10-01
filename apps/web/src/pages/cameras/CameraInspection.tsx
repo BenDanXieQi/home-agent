@@ -13,7 +13,7 @@ export function CameraInspection({
   const [expanded, setExpanded] = useState(true);
   return (
     <details
-      className="group/inspection rounded-2xl bg-white p-1.5 shadow-panel"
+      className="group/inspection min-w-0 rounded-2xl bg-surface p-1.5"
       open={expanded}
       onToggle={(event) => setExpanded(event.currentTarget.open)}
     >

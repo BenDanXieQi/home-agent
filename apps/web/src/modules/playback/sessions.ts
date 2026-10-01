@@ -45,6 +45,10 @@ export function createPlaybackSessions() {
     entry.session.stop();
   }
   return {
+    get(target: ConstructorParameters<typeof PlaybackSession>[0]) {
+      const session = entries.get(targetKey(target))?.session;
+      return session?.stopped ? undefined : session;
+    },
     setAnalysisActive(active: boolean) {
       if (active === analysisActive) return;
       analysisActive = active;
