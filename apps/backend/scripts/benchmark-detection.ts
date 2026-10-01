@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import { promisify, parseArgs } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { resolve } from "node:path";
@@ -88,7 +89,7 @@ async function main() {
       const reference = await detectImage();
       for (let i = 1; i < 5; i++) await detectImage();
       const timing: Awaited<ReturnType<typeof detectImage>>["timing"][] = [];
-      const timerLag: number[] = [];
+      const eventLoop = monitorEventLoopDelay({ resolution: 10 });
       const memory: {
         parentMiB: number;
         childMiB: number;
@@ -102,12 +103,7 @@ async function main() {
       const started = performance.now();
       const durationMs = seconds * 1000;
       const schedule = createFrameSchedule(fps, durationMs);
-      let lastTick = started;
-      const responsiveness = setInterval(() => {
-        const now = performance.now();
-        timerLag.push(Math.max(0, now - lastTick - 10));
-        lastTick = now;
-      }, 10);
+      eventLoop.enable();
       async function sampleMemory() {
         if (sampling) return;
         sampling = true;
@@ -163,7 +159,7 @@ async function main() {
       } finally {
         clearTimeout(producer);
         await Promise.all(pending);
-        clearInterval(responsiveness);
+        eventLoop.disable();
         clearInterval(memoryTimer);
         await samplePending;
       }
@@ -205,7 +201,14 @@ async function main() {
           preprocessMs: distribution(timing.map((t) => t.preprocessMs)),
           inferenceMs: distribution(timing.map((t) => t.inferenceMs)),
           postprocessMs: distribution(timing.map((t) => t.postprocessMs)),
-          mainTimerDelayMs: distribution(timerLag),
+          eventLoopDelayMs: {
+            samples: eventLoop.count,
+            resolutionMs: 10,
+            p50: eventLoop.count ? eventLoop.percentile(50) / 1e6 : null,
+            p95: eventLoop.count ? eventLoop.percentile(95) / 1e6 : null,
+            p99: eventLoop.count ? eventLoop.percentile(99) / 1e6 : null,
+            max: eventLoop.count ? eventLoop.max / 1e6 : null,
+          },
           memory: {
             sampleIntervalMs: 250,
             sampleError,

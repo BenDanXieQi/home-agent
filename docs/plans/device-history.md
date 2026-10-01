@@ -75,7 +75,7 @@
 
 查询只显示保留的观测与可确认缺口。区间前的值、没有记录的空白和未启用保存的能力，都不能画成已确认持续状态；页面不以插值暗示完整经过。查询响应不写回当前状态。
 
-本能力记录初始保留 30 天，缺口与运行记录保留到不再解释保留期内的数据；尚未结束的缺口不按创建时间直接删除。原始表按天分块、每小时清理，实际保留可能多一个块及清理周期；返回实际保存口径，清理失败进入 history_health。期限是按部署空间和场景调整的工程参数，不是必须提供 30 天完整记录的承诺。
+原始观测与设备事件使用 TimescaleDB 时序表，初始按天分块、保留 30 天。迁移调用 [`add_retention_policy`](https://github.com/timescale/Tiger-Data-Docs/blob/main/src/content/docs/reference/timescaledb/data-retention/add_retention_policy.mdx)，设置 `drop_after => INTERVAL '30 days'`、`schedule_interval => INTERVAL '1 hour'`；到期块由数据库清理，不写应用端逐行删除循环或每小时定时器。实际保留可能多一个块及清理周期，查询返回实际保存口径；读取数据库保留任务的执行状态，将失败投影到 `history_health`。缺口与运行记录使用普通表，只清理已结束且不再解释保留数据的记录，不能对它们直接套用按创建时间删除的策略。期限是按部署空间和场景调整的工程参数，不是必须提供 30 天完整记录的承诺。
 
 使用 `device_observations`、`device_events`、`collection_gaps`、`collection_sessions`，表与迁移由现有 Drizzle 管理。没有正式明细与诊断重复入库要求；需要录制临时观察时使用设备采集计划的可选限量本机文件。
 
