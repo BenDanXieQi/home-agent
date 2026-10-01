@@ -3,7 +3,7 @@ import pTimeout from "p-timeout";
 import type { createPerceptionSources } from "../mijia/perception-source";
 import { readPerceptionConfig } from "./config-file";
 import { perceptionConfigSchema, sourceKey } from "./config";
-import { createDetectionPool } from "./compute/pool";
+import { createDetectionPool, DetectionPoolError } from "./compute/pool";
 import { createObservationStore } from "./observation-store";
 
 // Capture belongs to the backend; browser viewing and freezing do not own its lifetime.
@@ -30,6 +30,9 @@ export function createPerceptionService(options: {
   let error: string | undefined;
   let stopped = false;
   let initializing: Promise<void> | undefined;
+  let creatingPool:
+    | Promise<Awaited<ReturnType<typeof createDetectionPool>>>
+    | undefined;
   let closing: Promise<void> | undefined;
   let configRead = false;
   let configurationError: unknown;
@@ -110,9 +113,10 @@ export function createPerceptionService(options: {
         retire(key, "Camera removed from current household");
     store.retain(selectedKeys);
     for (const source of selected) store.expect(source);
-    if (compute && !initializing) {
-      status =
-        compute.status === "ready"
+    if (compute && !initializing && !configurationError) {
+      status = !selected.length
+        ? "disabled"
+        : compute.status === "ready"
           ? "running"
           : compute.status === "recovering"
             ? "recovering"
@@ -191,9 +195,40 @@ export function createPerceptionService(options: {
     reconcile();
   });
   const timer = setInterval(reconcile, 500);
+  async function ensurePool() {
+    if (stopped) throw new DetectionPoolError("closed", "Perception stopped");
+    if (pool) {
+      await pool.retry();
+      return pool;
+    }
+    creatingPool ??= (async () => {
+      const created = await createDetectionPool(
+        { cpuRatio: config.cpuRatio },
+        shutdown.signal,
+      );
+      pool = created;
+      created.subscribeStatus(reconcile);
+      created.subscribeVideo((event) => {
+        store.receive(event);
+        if (event.event === "health" && event.status === "failed") {
+          const key = sourceKey(event.run);
+          if (desired.get(key)?.runId === event.run.runId) {
+            retryAfter.set(key, performance.now() + 5000);
+            retire(key, event.error ?? "Video unavailable");
+          }
+        }
+      });
+      reconcile();
+      return created;
+    })().finally(() => {
+      creatingPool = undefined;
+    });
+    return await creatingPool;
+  }
   function initialize() {
     initializing ??= (async () => {
       try {
+        if (pool) await ensurePool();
         if (configurationError) throw configurationError;
         if (!configRead) {
           configRead = true;
@@ -208,29 +243,10 @@ export function createPerceptionService(options: {
           store = createObservationStore(config.maxFrameAgeMs);
           unsubscribeStore = store.subscribe(changed);
         }
-        if (config.sources !== "household" && !config.sources.length) {
-          status = "disabled";
-          return;
-        }
-        if (!pool) {
-          shutdown.signal.throwIfAborted();
-          pool = await createDetectionPool(
-            { cpuRatio: config.cpuRatio },
-            shutdown.signal,
-          );
-          pool.subscribeStatus(reconcile);
-          pool.subscribeVideo((event) => {
-            store.receive(event);
-            if (event.event === "health" && event.status === "failed") {
-              const key = sourceKey(event.run);
-              if (desired.get(key)?.runId === event.run.runId) {
-                retryAfter.set(key, performance.now() + 5000);
-                retire(key, event.error ?? "Video unavailable");
-              }
-            }
-          });
-        } else await pool.retry();
-        status = "running";
+        const videoEnabled =
+          config.sources === "household" || config.sources.length > 0;
+        if (videoEnabled && !pool) await ensurePool();
+        status = videoEnabled ? "running" : "disabled";
         error = undefined;
         reconcile();
       } catch (cause) {
@@ -246,6 +262,19 @@ export function createPerceptionService(options: {
   }
   return {
     start: initialize,
+    async detectImage(
+      input: Parameters<
+        Awaited<ReturnType<typeof createDetectionPool>>["detectImage"]
+      >[0],
+      signal: AbortSignal,
+    ) {
+      await initializing;
+      signal.throwIfAborted();
+      const compute = await ensurePool();
+      signal.throwIfAborted();
+      // Cancellation stops HTTP waiting, not an admitted native computation.
+      return await compute.detectImage(input);
+    },
     retry() {
       if (stopped) return Promise.reject(new Error("Perception stopped"));
       return initialize();
@@ -285,7 +314,7 @@ export function createPerceptionService(options: {
       closing = (async () => {
         const deadline = performance.now() + 10_000;
         try {
-          await initializing;
+          await Promise.allSettled([initializing, creatingPool]);
           // The pool closes the whole video runtime, including sources still
           // preparing when their individual stop command was superseded.
           await Promise.all([

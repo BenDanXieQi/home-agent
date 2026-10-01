@@ -9,6 +9,7 @@ import {
   Outlet,
 } from "@tanstack/react-router";
 import { AccountGate } from "./pages/workspace/AccountGate";
+import WorkspaceLayout from "./pages/workspace/index";
 const rootRoute = createRootRoute({
   component: Outlet,
   pendingComponent: () => <output>正在打开页面…</output>,
@@ -34,6 +35,11 @@ const accountRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: "account",
   component: AccountGate,
+});
+const publicWorkspaceRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: "public-workspace",
+  component: WorkspaceLayout,
 });
 const indexRoute = createRoute({
   getParentRoute: () => accountRoute,
@@ -72,6 +78,11 @@ const cameraDetailRoute = createRoute({
   path: "$deviceId/$channel",
   component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
 });
+const imageAnalysisRoute = createRoute({
+  getParentRoute: () => publicWorkspaceRoute,
+  path: "/cameras/images",
+  component: lazyRouteComponent(() => import("./pages/cameras/ImageAnalysis")),
+});
 const settingsRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/settings",
@@ -99,6 +110,7 @@ export const router = createRouter({
       dataRoute,
       settingsRoute,
     ]),
+    publicWorkspaceRoute.addChildren([imageAnalysisRoute]),
   ]),
   scrollRestoration: true,
   getScrollRestorationKey: (location) => location.href,

@@ -27,6 +27,11 @@ export const errorCodeSchema = z.enum([
   "request_cancelled",
   "run_timeout",
   "agent_execution_failed",
+  "perception_image_invalid",
+  "perception_busy",
+  "perception_unavailable",
+  "perception_timeout",
+  "perception_failed",
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 

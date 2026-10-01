@@ -2,6 +2,46 @@ import { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
 import { z } from "zod";
 import { stateVersionSchema } from "./household";
 
+export const imageLimits = { maxFileBytes: 32 * 1024 * 1024 } as const;
+export const frameLimits = {
+  maxDimension: 8192,
+  maxPixels: 3840 * 2160,
+} as const;
+export const detectionLabels = ["human", "cat", "dog", "head", "face"] as const;
+export const detectionSchema = z.object({
+  x: z.int().nonnegative(),
+  y: z.int().nonnegative(),
+  w: z.int().positive(),
+  h: z.int().positive(),
+  confidence: z.number().min(0).max(1),
+  classId: z
+    .int()
+    .min(0)
+    .max(detectionLabels.length - 1),
+  className: z.enum(detectionLabels),
+});
+export const detectionTimingSchema = z.object({
+  readMs: z.number().nonnegative(),
+  decodeMs: z.number().nonnegative(),
+  preprocessMs: z.number().nonnegative(),
+  inferenceMs: z.number().nonnegative(),
+  postprocessMs: z.number().nonnegative(),
+  queueMs: z.number().nonnegative(),
+  workerDispatchMs: z.number().nonnegative(),
+});
+export const imageDetectionResponseSchema = z.object({
+  kind: z.literal("image_detected"),
+  inputSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  width: z.int().positive().max(frameLimits.maxDimension),
+  height: z.int().positive().max(frameLimits.maxDimension),
+  detections: z.array(detectionSchema),
+  timing: detectionTimingSchema.extend({
+    totalMs: z.number().nonnegative(),
+    dispatchMs: z.number().nonnegative(),
+    ipcRoundTripMs: z.number().nonnegative(),
+  }),
+});
+
 const run = z.object({
   deviceId: z.string(),
   channel: z.union([z.literal(1), z.literal(2)]),

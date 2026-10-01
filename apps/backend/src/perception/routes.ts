@@ -3,12 +3,15 @@ import { requireLocalAccess } from "@home-agent/api/local-access";
 import { perceptionSnapshotSchema } from "@home-agent/api/contracts";
 import type { createPerceptionService } from "./service";
 import { createPerceptionStream } from "./stream";
+import { createImageUpload } from "./image-upload";
 
 export function createPerceptionRoutes(
   service: ReturnType<typeof createPerceptionService>,
   port: number,
   shutdown: AbortSignal,
+  requestTimeoutMs: number,
 ) {
+  const uploadImage = createImageUpload(service, shutdown, requestTimeoutMs);
   function snapshot() {
     const view = service.snapshot();
     return perceptionSnapshotSchema.parse({
@@ -34,6 +37,7 @@ export function createPerceptionRoutes(
     })
     .get("/", (c) => c.json(snapshot()))
     .get("/stream", createPerceptionStream(service, snapshot, shutdown))
+    .post("/images/detect", async (c) => c.json(await uploadImage(c.req.raw)))
     .post("/retry", async (c) => {
       await service.retry();
       return c.json(snapshot());

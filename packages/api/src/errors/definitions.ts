@@ -69,4 +69,18 @@ export const errorDefinitions = {
   request_cancelled: { status: 408, message: "The request was cancelled." },
   run_timeout: { status: 504, message: "The Agent run timed out." },
   agent_execution_failed: { status: 500, message: "The Agent run failed." },
+  perception_image_invalid: {
+    status: 400,
+    message: "Provide a valid image within the input limits.",
+  },
+  perception_busy: {
+    status: 503,
+    message: "Image analysis is busy. Try again shortly.",
+  },
+  perception_unavailable: {
+    status: 503,
+    message: "Image analysis is unavailable.",
+  },
+  perception_timeout: { status: 504, message: "Image analysis timed out." },
+  perception_failed: { status: 500, message: "Image analysis failed." },
 } as const satisfies Record<ErrorCode, { status: number; message: string }>;

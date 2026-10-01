@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { frameSchema } from "./frame";
 import { detectionComputeBudget } from "../compute/budget";
 
-import { detectionLabels } from "./labels";
+import { detectionLabels } from "@home-agent/api/contracts";
 import { detectionModelPath } from "./model";
 
 export async function createDetector(minimumConfidence = 0.5) {

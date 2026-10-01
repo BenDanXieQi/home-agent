@@ -1,6 +1,6 @@
 # 文档导航与维护边界
 
-当前功能、待实施设计和来源／业务契约分开维护。文档中的“已实现”以源码与对应验证范围为准；规划中的接口、字段和模块不表示已经可用。应用启动与开发命令还见仓库根目录及各应用 README。
+当前功能、待实施设计、外部实现参考和来源／业务契约分开维护。文档中的“已实现”以源码与对应验证范围为准；规划中的接口、字段和模块不表示已经可用，外部参考行为不表示本项目已经采用。应用启动与开发命令还见仓库根目录及各应用 README。
 
 ## 按编码任务定位
 
@@ -14,7 +14,7 @@
 | 人物与宠物资料维护       | [Web 家庭成员](../apps/web/README.md#家庭成员)、[Backend 家庭上下文表](../apps/backend/README.md#家庭上下文表)                                      | [成员接口与存储](../apps/backend/src/household/members)、[成员页面](../apps/web/src/pages/members)                   |
 | 家庭上下文数据库浏览     | [Backend 表结构与接口](../apps/backend/README.md#家庭上下文表)、[Web 浏览页面](../apps/web/README.md#家庭数据库浏览)                                | [只读接口](../apps/backend/src/household-context)、[浏览页面](../apps/web/src/pages/database)                        |
 | 本地检测、音视频证据     | [当前检测](perception.md)，新增能力再读[音视频计划](plans/media-perception.md)                                                                      | [感知模块](../apps/backend/src/perception)、[go2rtc 扩展](../docker/go2rtc)                                          |
-| 感知调试、视频框与定格   | [后台分析与结果校验](perception.md#后台分析与结果校验)、[视频详情与感知调试计划](plans/perception-debug-ui.md)、[Web README](../apps/web/README.md) | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                           |
+| 感知调试、图片与视频框   | [后台分析与结果校验](perception.md#后台分析与结果校验)、[视频详情与感知调试计划](plans/perception-debug-ui.md)、[Web README](../apps/web/README.md) | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                           |
 | 房间事实与观测描述       | [设备事实](contracts/device-facts.md)、[房间分析](contracts/room-analysis.md)                                                                       | [事实模块](../apps/backend/src/household)、[分析模块](../apps/backend/src/room-analysis)                             |
 | Agent、情景推理与自动化  | [Agent 当前能力](../apps/agent/README.md)、[领域模型](plans/household-model.md)、[协作实施顺序](plans/household-automation.md#9-实施顺序与改动位置) | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                    |
 | 设备采集、历史和页面增量 | [计划入口](plans/README.md)选择对应能力，再读 [Web README](../apps/web/README.md)                                                                   | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules) |
@@ -25,13 +25,13 @@
 
 ## 当前功能
 
-| 文档                                            | 回答的问题与维护范围                                           |
-| ----------------------------------------------- | -------------------------------------------------------------- |
-| [本地运行](running.md)                          | 如何启动、配置服务连接、切换 go2rtc 运行方式及停止服务         |
-| [米家接入与摄像头](mijia.md)                    | 如何授权、预览、管理媒体资源；米家设备能力与使用限制           |
-| [家庭运行时](household-runtime.md)              | 当前家庭绑定、设备清单、规格、公共状态订阅与设备上报日志       |
-| [设备事实与房间快照](contracts/device-facts.md) | 持续采集、当前值质量、本机策略、房间查询与读取                 |
-| [房间 AI 上下文](contracts/room-analysis.md)    | 观测描述、触发策略、证据接纳、有效性及模型限制                 |
+| 文档                                            | 回答的问题与维护范围                                                               |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| [本地运行](running.md)                          | 如何启动、配置服务连接、切换 go2rtc 运行方式及停止服务                             |
+| [米家接入与摄像头](mijia.md)                    | 如何授权、预览、管理媒体资源；米家设备能力与使用限制                               |
+| [家庭运行时](household-runtime.md)              | 当前家庭绑定、设备清单、规格、公共状态订阅与设备上报日志                           |
+| [设备事实与房间快照](contracts/device-facts.md) | 持续采集、当前值质量、本机策略、房间查询与读取                                     |
+| [房间 AI 上下文](contracts/room-analysis.md)    | 观测描述、触发策略、证据接纳、有效性及模型限制                                     |
 | [本地目标检测](perception.md)                   | 已实现图片／摄像头检测、人宠跟踪、后台分析与结果校验、计算资源、模型契约及验证范围 |
 
 当前家庭运行时不等于完整家庭情景；目标检测不等于身份与活动识别。未来能力交付后，把实际用法和限制更新到所属功能文档，不把规划全文复制过来。
@@ -44,12 +44,20 @@
 | [家庭领域模型](plans/household-model.md)           | 实体、证据、判断、事件、要求及状态所有权；定义语义与不变量                               |
 | [家庭情景与自动化](plans/household-automation.md)  | 第一方 Agent 与 backend 协作、持续情景、长期任务、本地规则运行器、接口、预算及主交付顺序 |
 | [音视频感知与证据](plans/media-perception.md)      | 跟踪剩余验收、音频、窗口、筛选、媒体与证据交付；MiLoCo 作为参考来源                      |
-| [视频详情与感知调试](plans/perception-debug-ui.md) | 图片分析、结果复制与下载及后续声音与窗口展示                           |
+| [视频详情与感知调试](plans/perception-debug-ui.md) | 后续声音与窗口展示                                                                       |
 | [设备采集与当前状态](plans/device-collection.md)   | 接收设备观测、确定当前值、质量与连续性，不维护人物和活动判断                             |
 | [设备观测历史](plans/device-history.md)            | 选定原始观测的写入、缺口、查询及清理，不承担语义事件或动作的可靠交接                     |
 | [设备状态与历史页面](plans/device-state-ui.md)     | 消费采集和历史的页面增量，不重建状态协议或复制家庭情景                                   |
 
 领域模型说明“信息是什么、归谁负责”，协作计划说明“如何接入和执行”，媒体与设备计划各自定义来源契约。主交付顺序只在协作计划维护；能力按实际依赖交付，不按文件排列串行施工。第一方 Agent 是项目归属，不要求语义理解、条件求值和动作执行全部交给模型。
+
+## 外部实现参考
+
+| 文档                                                         | 回答的问题与维护范围                                                                     |
+| ------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| [MiLoCo 媒体感知与身份识别](references/miloco-perception.md) | 固定提交的媒体筛选、主模型请求、人物重审、参考样本与宠物识别行为，以及与本项目的职责差异 |
+
+外部实现的实际行为、默认值及源码依据集中在参考文档；本项目采用的参数、任务预算和交付依赖仍由所属功能文档及计划维护。默认配置与生效代码分别核对，不把配置项的存在当作执行保证。
 
 ## 来源与业务契约
 

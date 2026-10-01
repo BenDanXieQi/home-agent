@@ -98,6 +98,7 @@ export function createApp({
         perception,
         environment.BACKEND_PORT,
         shutdownSignal,
+        environment.BACKEND_REQUEST_TIMEOUT_MS,
       ),
     )
     .route(

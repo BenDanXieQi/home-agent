@@ -23,7 +23,7 @@ export function CameraInspection({
           aria-hidden="true"
           className="shrink-0 group-open/inspection:rotate-90"
         />
-        <span>帧与结果</span>
+        <span>调试数据</span>
         <span className="rounded-md bg-surface px-1.5 py-0.5 font-mono text-[11px] font-normal leading-4 text-muted">
           JSON
         </span>
@@ -31,7 +31,12 @@ export function CameraInspection({
       {expanded ? (
         <div className="space-y-3 px-2.5 pb-2.5 pt-1">
           <p className="text-xs leading-6 text-muted">
-            实时更新画面与分析结果；定格后固定，后台继续分析。
+            包含播放状态、后台最新分析和当前画面信息。定格后固定这份数据，后台继续分析。
+          </p>
+          <p className="text-xs leading-6 text-muted">
+            source.analysis 是后台最新分析，不一定对应当前画面；presentation
+            是当前画面及其关联结果。定格会保留当时显示的画面和识别框；框来自稍早的分析时，matching
+            为 carried，ageMs 记录两帧的时间差（毫秒）。
           </p>
           {watching ? (
             <LiveInspection inspect={inspect} />
@@ -63,7 +68,7 @@ function InspectionJson({
   return (
     <pre
       className="max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs"
-      aria-label="帧与结果 JSON 内容"
+      aria-label="调试数据 JSON 内容"
     >
       {JSON.stringify(inspection, null, 2)}
     </pre>

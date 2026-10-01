@@ -1,4 +1,5 @@
 import { House } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { LoginFlow } from "./LoginFlow";
 
 export default function LoginPage() {
@@ -17,6 +18,12 @@ export default function LoginPage() {
           使用米家账号连接你的设备与摄像头。
         </p>
         <LoginFlow />
+        <Link
+          to="/cameras/images"
+          className="mt-6 inline-block text-sm underline"
+        >
+          图片分析
+        </Link>
         <div className="mt-8 text-xs leading-6 text-muted">
           中国大陆 · 授权加密保存在本机，重启后自动恢复
         </div>

@@ -497,5 +497,5 @@ P3 音频及设备事件按场景需要接入共用入口。无摄像头卧室�
 - [LangGraph 工作流与 Agent](https://docs.langchain.com/oss/javascript/langgraph/workflows-agents)：固定核验与开放任务可在同一应用使用不同流程，共用运行基础。
 - [DeepSORT](https://arxiv.org/abs/1703.07402)：参考局部运动与外观关联，不将轨迹编号当成员身份。
 - [选择性分类](https://arxiv.org/abs/1705.08500)：允许未知与拒绝；论文保证不自动适用于本项目阈值。
-- MiLoCo 固定提交 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`：参考身份状态、样本和 fused 输入；本项目由第一方 Agent 组织语义任务，不以共享样本聚类宣称已交付全屋连续位置追踪。
+- [MiLoCo 媒体感知与身份识别参考](../references/miloco-perception.md)，固定提交 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`：参考身份状态、样本和 fused 输入；主模型请求与身份重审频率分别核对。本项目由第一方 Agent 组织语义任务，不以共享样本聚类宣称已交付全屋连续位置追踪。
 - 同提交的 `plugins/skills/miloco-create-task/SKILL.md` 与 `backend/miloco/src/miloco/rule/{service,runner}.py`：参考自然语言装配结构化任务、独立选择条件来源与动作方式。STATIC 仅表示动作直接执行，视频条件仍可依赖模型；其 `schedule/runner.py` 到期调用 Agent，本项目已明确的期限及设备选择步骤由本地运行器执行。
