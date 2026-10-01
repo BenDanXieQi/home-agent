@@ -1,6 +1,11 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "../../db";
-import { mijiaHomeSelections, householdDirectories } from "../../db/schema";
+import {
+  mijiaHomeSelections,
+  householdDirectories,
+  contextRecords,
+  householdSubjects,
+} from "../../db/schema";
 import { householdLimits } from "../../household/config";
 import { MijiaError } from "../errors";
 import {
@@ -56,7 +61,12 @@ export function createHomeSelectionStore(db: Database) {
             if (row?.homeId === homeId) return true;
             const data = { accountKey, homeId, updatedAt: new Date() };
             beforeWrite();
-            if (previousHomeId !== null) await tx.delete(householdDirectories);
+            if (previousHomeId !== null) {
+              // Context links are deleted by the context_records foreign key.
+              await tx.delete(contextRecords);
+              await tx.delete(householdSubjects);
+              await tx.delete(householdDirectories);
+            }
             await tx
               .insert(mijiaHomeSelections)
               .values(data)
