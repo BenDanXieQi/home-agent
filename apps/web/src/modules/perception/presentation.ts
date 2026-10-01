@@ -54,7 +54,6 @@ export function createFramePresentation(
     ageMs: number;
   } = { detection: null, tracking: null, matching: "none", ageMs: 0 };
   let runId: string | undefined, generation: string | undefined;
-  let frozenRun: string | undefined;
   let active = false,
     frozen = false,
     closed = false;
@@ -80,18 +79,7 @@ export function createFramePresentation(
     layers = { detection: null, tracking: null, matching: "none", ageMs: 0 };
   }
   function chooseLayers() {
-    if (frozen) {
-      const exact = displayed && results.get(displayed.id);
-      if (active && runId === frozenRun && exact) {
-        layers = {
-          detection: exact.detection ?? layers.detection,
-          tracking: exact.tracking ?? layers.tracking,
-          matching: "same",
-          ageMs: 0,
-        };
-      }
-      return;
-    }
+    if (frozen) return;
     emptyLayers();
     if (
       !displayed ||
@@ -169,16 +157,6 @@ export function createFramePresentation(
       );
       context!.setLineDash([]);
     }
-    const label =
-      layers.matching === "same"
-        ? "同帧结果"
-        : layers.matching === "carried"
-          ? `沿用 ${Math.round(layers.ageMs)} ms`
-          : "暂无同帧结果";
-    context!.fillStyle = "rgba(0,0,0,.75)";
-    context!.fillRect(Math.max(0, canvas.width - 130), 0, 130, 24);
-    context!.fillStyle = "white";
-    context!.fillText(label, Math.max(5, canvas.width - 124), 16);
     notify();
   }
   function tick() {
@@ -347,10 +325,7 @@ export function createFramePresentation(
     freeze() {
       if (frozen || !displayed) return;
       frozen = true;
-      frozenRun = runId;
       clearQueue();
-      emptyLayers();
-      chooseLayers();
       draw();
     },
     live() {

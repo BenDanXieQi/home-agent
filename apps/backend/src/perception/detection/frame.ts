@@ -1,9 +1,6 @@
 import { z } from "zod";
-
-export const frameLimits = {
-  maxDimension: 8192,
-  maxPixels: 3840 * 2160,
-} as const;
+import { frameLimits } from "@home-agent/api/contracts";
+export { frameLimits };
 
 // Shared boundary; importing it never loads the native inference runtime.
 export const frameSchema = z

@@ -128,10 +128,11 @@ export function createInferencePool(
     if (task.kind === "close") return close();
     if (!initialized)
       return Promise.reject(new Error("Inference pool is not initialized"));
-    // Ready video gets the next free slot instead of competing with an unlimited
-    // stream of image submissions. Existing image work still drains normally.
+    // Image requests can use the existing bounded wait slot even while video
+    // is ready. dispatchQueued() admits it before waking video listeners.
     if (
       !onAdmitted &&
+      task.kind !== "detect_image" &&
       [...availableListeners.values()].some((waiting) => waiting())
     )
       return Promise.reject(

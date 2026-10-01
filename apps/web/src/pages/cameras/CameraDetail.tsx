@@ -110,7 +110,7 @@ function CameraDetailContent({
           waiting={waiting}
           tone={live ? presentation.tone : "unknown"}
           status={frozen ? "已定格" : watching ? "未就绪" : "已暂停"}
-          detail={frozen ? <p>仅保留同帧结果</p> : undefined}
+          detail={frozen ? <p>画面与调试数据已固定</p> : undefined}
           statusContent={
             live ? <PlaybackStatus snapshot={snapshot} /> : undefined
           }
@@ -122,28 +122,18 @@ function CameraDetailContent({
             aria-label={`${label ?? "视频"} 关联帧画面`}
           />
         </CameraFrame>
-        <div className="-mt-1 flex flex-wrap gap-1.5 px-1.5 pb-2.5">
+        <div className="-mt-1 px-1.5 pb-2.5">
           <Button
             type="button"
-            className="rounded-[10px]"
-            icon={<Pause size={15} />}
-            disabled={!view?.hasFrame || frozen}
+            className="min-w-36 rounded-[10px]"
+            icon={watching ? <Pause size={15} /> : <Play size={15} />}
+            disabled={watching && (!view?.hasFrame || frozen)}
             onClick={() => {
-              freeze();
+              if (watching) freeze();
+              else returnToLive();
             }}
           >
-            定格当前画面
-          </Button>
-          <Button
-            type="button"
-            className="rounded-[10px]"
-            icon={<Play size={15} />}
-            disabled={watching}
-            onClick={() => {
-              returnToLive();
-            }}
-          >
-            返回实时
+            {watching ? "定格当前画面" : "返回实时"}
           </Button>
         </div>
       </article>

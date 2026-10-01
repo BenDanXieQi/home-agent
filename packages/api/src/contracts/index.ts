@@ -89,6 +89,12 @@ export * from "./chat";
 export {
   perceptionSnapshotSchema,
   trackingObservationSchema,
+  imageLimits,
+  frameLimits,
+  detectionLabels,
+  detectionSchema,
+  detectionTimingSchema,
+  imageDetectionResponseSchema,
 } from "./perception";
 
 export { sourceMediaSchema, mediaFrameTimeSchema } from "./media";

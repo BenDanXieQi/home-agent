@@ -132,6 +132,7 @@ function useStatusFeedback(status: "idle" | "pending" | "success" | "error") {
 
 /**
  * Ordinary operations keep their label and show only pending feedback.
+ * Cancellable operations reveal their action with the delayed pending feedback.
  * A result morph is explicitly chosen for a committed action such as saving.
  */
 export function Button({
@@ -139,6 +140,7 @@ export function Button({
   size = "default",
   status = "idle",
   feedback = "pending",
+  pendingAction,
   icon,
   className = "",
   style,
@@ -150,6 +152,10 @@ export function Button({
   size?: keyof typeof buttonSizes;
   status?: "idle" | "pending" | "success" | "error";
   feedback?: "pending" | "result";
+  pendingAction?: {
+    label: ReactNode;
+    onClick: NonNullable<ComponentProps<typeof m.button>["onClick"]>;
+  };
   icon?: ReactNode;
   children?: ReactNode;
 }) {
@@ -157,7 +163,6 @@ export function Button({
   const shown = useStatusFeedback(
     feedback === "result" || status === "pending" ? status : "idle",
   );
-  const disabled = shown === "pending" || props.disabled;
   const busy = shown !== "idle";
   const compact = feedback === "result" && busy;
   const [pendingVisible, setPendingVisible] = useState(false);
@@ -172,20 +177,25 @@ export function Button({
     return () => clearTimeout(timer);
   }, [shown]);
   const showPending = shown === "pending" && pendingVisible;
+  const cancellation = showPending ? pendingAction : undefined;
+  const disabled = (shown === "pending" && !cancellation) || props.disabled;
   const { width, radius } = useFittedSize(content, compact);
   const reduced = useReducedMotion();
+  const contentLabel = cancellation ? cancellation.label : children;
   const label =
-    children !== undefined && children !== null && children !== ""
-      ? children
+    contentLabel !== undefined && contentLabel !== null && contentLabel !== ""
+      ? contentLabel
       : null;
   return (
     <m.button
       className={twMerge(
         `${buttonStyles.base} aria-busy:cursor-progress aria-busy:opacity-100 [&:not(.button-primary)[data-status='success']]:text-sage data-[status=error]:border-danger/30 data-[status=error]:bg-danger/5 data-[status=error]:text-danger data-[status=error]:border-dashed ${buttonVariants[variant]} ${buttonSizes[size].control} ${label === null ? buttonSizes[size].icon : ""} ${className}`,
+        cancellation ? "aria-busy:cursor-pointer" : "",
       )}
       data-status={busy ? shown : undefined}
       aria-busy={shown === "pending" || undefined}
       {...props}
+      onClick={cancellation ? cancellation.onClick : props.onClick}
       whileHover={disabled ? {} : (props.whileHover ?? {})}
       whileTap={disabled || reduced ? {} : (props.whileTap ?? { scale: 0.98 })}
       disabled={disabled}

@@ -28,16 +28,19 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 ## 接口
 
-| 接口                         | 职责                                     |
-| ---------------------------- | ---------------------------------------- |
-| `GET /api/health`            | backend 存活状态，不检查外围服务或数据库 |
-| `GET /api/config`            | 读取连接配置及可写状态                   |
-| `PUT /api/config`            | 校验并保存完整连接配置                   |
-| `GET /api/services/status`   | 检查 Agent 与 go2rtc 的接口是否可用      |
-| `POST /api/chat`             | 将 JSON 请求转发至 Agent，透传响应与 SSE |
-| `GET /api/perception`        | 本地检测与人宠跟踪的健康及最新观测       |
-| `GET /api/perception/stream` | 订阅本地检测当前状态，不传输媒体片段     |
-| `POST /api/perception/retry` | 显式重试感知计算，不重连物理摄像头       |
+| 接口                                 | 职责                                           |
+| ------------------------------------ | ---------------------------------------------- |
+| `GET /api/health`                    | backend 存活状态，不检查外围服务或数据库       |
+| `GET /api/config`                    | 读取连接配置及可写状态                         |
+| `PUT /api/config`                    | 校验并保存完整连接配置                         |
+| `GET /api/services/status`           | 检查 Agent 与 go2rtc 的接口是否可用            |
+| `POST /api/chat`                     | 将 JSON 请求转发至 Agent，透传响应与 SSE       |
+| `GET /api/perception`                | 本地检测与人宠跟踪的健康及最新观测             |
+| `GET /api/perception/stream`         | 订阅本地检测当前状态，不传输媒体片段           |
+| `POST /api/perception/images/detect` | 接收图片字节并返回该输入的检测结果，复用共享池 |
+| `POST /api/perception/retry`         | 显式重试感知计算，不重连物理摄像头             |
+
+图片上传接口只要求本机访问及模型可用，不要求家庭或媒体就绪；输入限额、临时文件、等待与共享计算行为见[图片上传分析](../../docs/perception.md#独立图片上传分析)。`perception/image-upload.ts` 负责 HTTP 字节与临时输入，感知服务按需准备、复用和恢复已有检测池，视频禁用不阻止图片计算恢复。
 
 连接地址来自根目录 `config/config.yaml`，每次请求重新读取文件，内容未变时复用解析结果。配置生成、编辑和 `--config` 用法见[本地运行](../../docs/running.md#服务连接)。
 

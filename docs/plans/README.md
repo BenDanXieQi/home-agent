@@ -9,7 +9,7 @@
 | [家庭模型](household-model.md)                   | 实体、证据、判断、要求、状态归属及即时动作的领域规则                     |
 | [第一方 Agent 协作实施](household-automation.md) | 主交付顺序、持续情景、长期任务、规则与语义触发、统一执行、观察接口及预算 |
 | [媒体与本地感知](media-perception.md)            | P2 剩余实景验收、P3 音频、P4 筛选与证据、媒体期限和模型输入边界          |
-| [视频详情与感知调试](perception-debug-ui.md)     | 图片分析、结果复制与下载及后续声音与窗口展示           |
+| [视频详情与感知调试](perception-debug-ui.md)     | 后续声音与窗口展示                                                       |
 | [设备采集](device-collection.md)                 | 属性仲裁、当前质量、连续性、读取及采集资源                               |
 | [设备历史](device-history.md)                    | 选定观测的保存、缺口、查询与清理                                         |
 | [设备状态页面](device-state-ui.md)               | 待接入的历史、活动、画像与动作条件展示，不重复已实现订阅协议             |

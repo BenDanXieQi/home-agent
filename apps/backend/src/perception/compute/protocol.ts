@@ -6,7 +6,10 @@ import { analysisAccessSchema } from "../../mijia/media/analysis-stream";
 import { z } from "zod";
 import { inspect } from "node:util";
 import { frameSchema } from "../detection/frame";
-import { detectionLabels } from "../detection/labels";
+import {
+  detectionSchema,
+  detectionTimingSchema,
+} from "@home-agent/api/contracts";
 import {
   ImageProcessingError,
   imageRequestSchema,
@@ -48,26 +51,8 @@ const tensorMetadata = z.object({
 });
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const detectionResultSchema = z.object({
-  detections: z.array(
-    z.object({
-      x: z.int().nonnegative(),
-      y: z.int().nonnegative(),
-      w: z.int().positive(),
-      h: z.int().positive(),
-      confidence: z.number().min(0).max(1),
-      classId: z.int().min(0).max(4),
-      className: z.enum(detectionLabels),
-    }),
-  ),
-  timing: z.object({
-    readMs: z.number().nonnegative(),
-    decodeMs: z.number().nonnegative(),
-    preprocessMs: z.number().nonnegative(),
-    inferenceMs: z.number().nonnegative(),
-    postprocessMs: z.number().nonnegative(),
-    queueMs: z.number().nonnegative(),
-    workerDispatchMs: z.number().nonnegative(),
-  }),
+  detections: z.array(detectionSchema),
+  timing: detectionTimingSchema,
 });
 export const resultSchema = z.discriminatedUnion("kind", [
   z.object({

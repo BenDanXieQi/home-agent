@@ -11,7 +11,12 @@ import { mediaStateAtom } from "../../modules/playback/state";
 import { canStartPlaybackAtom } from "../../modules/playback/access";
 import { RetryConnectionButton } from "../../modules/mijia/RetryConnectionButton";
 import { Notice, StatusNotice } from "../../components/Notice";
-import { PageHeaderCount } from "../../components/PageHeaderContent";
+import {
+  PageHeaderCount,
+  PageHeaderContent,
+} from "../../components/PageHeaderContent";
+import { buttonStyles } from "../../components/button-styles";
+import { ImagePlus } from "lucide-react";
 import CameraWall from "./CameraWall";
 import { CameraWallSkeleton } from "./skeletons";
 
@@ -23,6 +28,14 @@ export default function CamerasPage() {
   const snapshot = useAtomValue(householdSnapshotAtom);
   return (
     <>
+      <PageHeaderContent slot="actions">
+        <Link
+          to="/cameras/images"
+          className={`${buttonStyles.base} ${buttonStyles.secondary}`}
+        >
+          <ImagePlus size={15} aria-hidden="true" /> 图片分析
+        </Link>
+      </PageHeaderContent>
       <PageHeaderCount
         count={count}
         loading={!inventory || inventory.status === "loading"}

@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { resolve } from "node:path";
 import { frameLimits } from "./frame";
-
-export const imageLimits = {
-  maxFileBytes: 32 * 1024 * 1024,
-} as const;
+export { imageLimits } from "@home-agent/api/contracts";
 
 const imagePathSchema = z
   .string()
