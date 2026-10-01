@@ -27,6 +27,7 @@ type homeAgentCameraState struct {
 	playbacks     map[string]*homeAgentPlaybackState
 	analyses      map[*homeAgentAnalysisConsumer]context.CancelFunc
 	activity      atomic.Pointer[homeAgentPacketActivity]
+	timeline      atomic.Pointer[homeAgentMediaTime]
 	releaseSource func()
 }
 
@@ -90,17 +91,20 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 	}
 	// Private streams never enter the global stream registry or configuration.
 	ctx, cancel := context.WithCancel(context.Background())
-	stream := streams.NewStream(source.String())
-	var releaseSource func()
-	if body.ChannelCount == 2 {
-		stream, releaseSource = homeAgentDualStream(session, source, body.Channel)
-	}
-	session.cameras[body.SourceID] = &homeAgentCameraState{
-		stream: stream, releaseSource: releaseSource,
+	camera := &homeAgentCameraState{
 		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
 		playbacks: make(map[string]*homeAgentPlaybackState),
-		analyses:  make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
+		analyses: make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
 	}
+	camera.stream = streams.NewHomeAgentStream(func() (core.Producer, error) {
+		producer, err := streams.GetProducer(source.String())
+		if err != nil { return nil, err }
+		return homeAgentTimeProducer(camera, producer), nil
+	})
+	if body.ChannelCount == 2 {
+		camera.stream, camera.releaseSource = homeAgentDualStream(session, source, body.Channel, camera)
+	}
+	session.cameras[body.SourceID] = camera
 	homeAgentCapture(session, session.cameras[body.SourceID])
 	w.WriteHeader(http.StatusNoContent)
 }

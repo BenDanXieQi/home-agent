@@ -1,3 +1,4 @@
+import { mediaFrameTimeSchema } from "@home-agent/api/contracts";
 import { z } from "zod";
 import { sourceSelectionSchema } from "./config";
 
@@ -19,7 +20,7 @@ export const observationSchema = z.object({
   sequence: z.int().positive(),
   receivedAt: z.number(),
   sampledAt: z.number(),
-  mediaTime: z.null(),
+  mediaTime: mediaFrameTimeSchema,
   width: z.int().positive(),
   height: z.int().positive(),
   coordinateBasis: z.literal("decoded_rgb24"),

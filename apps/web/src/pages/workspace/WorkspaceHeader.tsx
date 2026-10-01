@@ -15,7 +15,9 @@ export function WorkspaceHeader({
   detailsRef?: ComponentProps<"div">["ref"];
   actionsRef?: ComponentProps<"div">["ref"];
 }) {
-  const current = navigation.find((item) => item.to === path);
+  const current = navigation.find(
+    (item) => item.to === path || path.startsWith(`${item.to}/`),
+  );
   const PageIcon = current?.icon ?? House;
   const reducedMotion = useReducedMotion();
   return (
@@ -27,7 +29,7 @@ export function WorkspaceHeader({
         >
           <AnimatePresence initial={false}>
             <m.span
-              key={path}
+              key={current?.to ?? "workspace"}
               className="col-start-1 row-start-1 inline-flex"
               initial={
                 reducedMotion
@@ -66,7 +68,7 @@ export function WorkspaceHeader({
           </AnimatePresence>
         </div>
         <TextReveal
-          changeKey={path}
+          changeKey={current?.to ?? "workspace"}
           className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"
         >
           <h1>{current?.label ?? "Home Agent"}</h1>

@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import { cameraTileClassName, cameraGridClassName } from "./camera-styles";
 import { CameraHeader } from "./CameraHeader";
 import { EmptyState } from "../../components/EmptyState";
@@ -10,7 +11,9 @@ import {
   type ComponentProps,
 } from "react";
 import { useInView, usePageInView } from "motion/react";
-import { Video } from "lucide-react";
+import { twMerge } from "tailwind-merge";
+import { buttonStyles } from "../../components/button-styles";
+import { ArrowUpRight, Video } from "lucide-react";
 import { CameraWallSkeleton } from "./skeletons";
 import type { Projection } from "@home-agent/api/household";
 import { CameraFrame, MijiaPlayer } from "./MijiaPlayer";
@@ -47,6 +50,18 @@ const CameraTile = memo(function CameraTile({
       : device.name;
   const notice =
     device.availability === "offline" ? "设备离线，保留现有画面" : null;
+  const analysisLink = (
+    <Link
+      to="/cameras/$deviceId/$channel"
+      params={{ deviceId: device.id, channel: String(channel) }}
+      aria-label={label + "画面分析"}
+      className={twMerge(
+        `${buttonStyles.base} ${buttonStyles.secondary} min-h-7 gap-0.5 rounded-[10px] py-1 pl-2 pr-1.5 text-xs hover:bg-sidebar focus-visible:outline-2`,
+      )}
+    >
+      画面分析 <ArrowUpRight size={14} aria-hidden="true" />
+    </Link>
+  );
   return (
     <article ref={tile} className={cameraTileClassName}>
       {ready ? (
@@ -59,6 +74,7 @@ const CameraTile = memo(function CameraTile({
           enabled={enabled}
           active={pageVisible && nearViewport}
           notice={notice}
+          statusAction={analysisLink}
           onEnabledChange={(value) => onEnabledChange(playbackKey, value)}
         />
       ) : (
@@ -70,6 +86,7 @@ const CameraTile = memo(function CameraTile({
           </CameraHeader>
           <CameraFrame
             notice={notice}
+            statusAction={analysisLink}
             placeholder="摄像头服务尚未就绪"
             tone="unknown"
             status="未就绪"

@@ -13,7 +13,7 @@ function metadata(run: z.infer<typeof runSchema>, frame: VideoFrame) {
     sequence: frame.sequence,
     receivedAt: frame.receivedAt,
     sampledAt: frame.receivedAt,
-    mediaTime: null,
+    mediaTime: frame.mediaTime,
     ageMs: Math.max(0, performance.now() - frame.availableAt),
     width: frame.width,
     height: frame.height,

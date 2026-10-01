@@ -1,3 +1,4 @@
+import { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
 import { z } from "zod";
 
 const run = z.object({
@@ -11,7 +12,7 @@ const observation = z.object({
   sequence: z.int().positive(),
   receivedAt: z.number(),
   sampledAt: z.number(),
-  mediaTime: z.null(),
+  mediaTime: mediaFrameTimeSchema,
   width: z.int().positive(),
   height: z.int().positive(),
   coordinateBasis: z.literal("decoded_rgb24"),
@@ -39,7 +40,7 @@ export const trackingObservationSchema = z.object({
   sequence: z.int().positive(),
   receivedAt: z.number(),
   sampledAt: z.number(),
-  mediaTime: z.null(),
+  mediaTime: mediaFrameTimeSchema,
   ageMs: z.number().nonnegative(),
   width: z.int().positive(),
   height: z.int().positive(),
@@ -103,6 +104,7 @@ export const perceptionSnapshotSchema = z.object({
         channel: z.union([z.literal(1), z.literal(2)]),
       }),
       run: run.nullable(),
+      media: sourceMediaSchema.nullable(),
       status: z.string(),
       error: z.string().optional(),
       validity: z.enum(["no_data", "valid", "expired", "unavailable"]),

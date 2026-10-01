@@ -41,11 +41,13 @@ export function WorkspaceNavigation({
                 : undefined
             }
             draggable={false}
-            activeOptions={{ exact: true }}
+            activeOptions={{ exact: false }}
             className={navigationItemClassName(to, false)}
-            activeProps={{ className: "pointer-events-none" }}
+            activeProps={{
+              className: path === to ? "pointer-events-none" : "",
+            }}
           >
-            {path === to ? (
+            {path === to || path.startsWith(`${to}/`) ? (
               <SelectionIndicator
                 layoutId={selectionId}
                 className="inset-0 rounded-xl"

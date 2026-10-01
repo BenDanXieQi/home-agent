@@ -12,6 +12,7 @@
 | 米家授权、属性读取与推送 | [来源契约](contracts/mijia.md)、[Backend 模块职责](../apps/backend/README.md#目录与约定)                                                            | [米家接入](../apps/backend/src/mijia)                                                                                |
 | 家庭绑定、设备清单与订阅 | [家庭运行时](household-runtime.md)、[业务规则](contracts/household-runtime.md)                                                                      | [家庭运行时](../apps/backend/src/household)、[共享契约](../packages/api/src/contracts)                               |
 | 本地检测、音视频证据     | [当前检测](perception.md)，新增能力再读[音视频计划](plans/media-perception.md)                                                                      | [感知模块](../apps/backend/src/perception)、[go2rtc 扩展](../docker/go2rtc)                                          |
+| 感知调试、视频框与定格   | [视频详情与感知调试计划](plans/perception-debug-ui.md)、[Web README](../apps/web/README.md)                                                         | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                           |
 | Agent、情景推理与自动化  | [Agent 当前能力](../apps/agent/README.md)、[领域模型](plans/household-model.md)、[协作实施顺序](plans/household-automation.md#9-实施顺序与改动位置) | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                    |
 | 设备采集、历史和页面增量 | [计划入口](plans/README.md)选择对应能力，再读 [Web README](../apps/web/README.md)                                                                   | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules) |
 
@@ -32,15 +33,16 @@
 
 ## 实施计划
 
-| 文档                                              | 唯一维护的设计                                                                           |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| [计划入口](plans/README.md)                       | 计划导航和共同交付要求，不另维护一份实施路线                                             |
-| [家庭领域模型](plans/household-model.md)          | 实体、证据、判断、事件、要求及状态所有权；定义语义与不变量                               |
-| [家庭情景与自动化](plans/household-automation.md) | 第一方 Agent 与 backend 协作、持续情景、长期任务、本地规则运行器、接口、预算及主交付顺序 |
-| [音视频感知与证据](plans/media-perception.md)     | 跟踪剩余验收、音频、窗口、筛选、媒体与证据交付；MiLoCo 作为参考来源                      |
-| [设备采集与当前状态](plans/device-collection.md)  | 接收设备观测、确定当前值、质量与连续性，不维护人物和活动判断                             |
-| [设备观测历史](plans/device-history.md)           | 选定原始观测的写入、缺口、查询及清理，不承担语义事件或动作的可靠交接                     |
-| [设备状态与历史页面](plans/device-state-ui.md)    | 消费采集和历史的页面增量，不重建状态协议或复制家庭情景                                   |
+| 文档                                               | 唯一维护的设计                                                                           |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| [计划入口](plans/README.md)                        | 计划导航和共同交付要求，不另维护一份实施路线                                             |
+| [家庭领域模型](plans/household-model.md)           | 实体、证据、判断、事件、要求及状态所有权；定义语义与不变量                               |
+| [家庭情景与自动化](plans/household-automation.md)  | 第一方 Agent 与 backend 协作、持续情景、长期任务、本地规则运行器、接口、预算及主交付顺序 |
+| [音视频感知与证据](plans/media-perception.md)      | 跟踪剩余验收、音频、窗口、筛选、媒体与证据交付；MiLoCo 作为参考来源                      |
+| [视频详情与感知调试](plans/perception-debug-ui.md) | 调试采集控制、连续视频与框关联、定格查看、P0–P4 展示及临时资源                           |
+| [设备采集与当前状态](plans/device-collection.md)   | 接收设备观测、确定当前值、质量与连续性，不维护人物和活动判断                             |
+| [设备观测历史](plans/device-history.md)            | 选定原始观测的写入、缺口、查询及清理，不承担语义事件或动作的可靠交接                     |
+| [设备状态与历史页面](plans/device-state-ui.md)     | 消费采集和历史的页面增量，不重建状态协议或复制家庭情景                                   |
 
 领域模型说明“信息是什么、归谁负责”，协作计划说明“如何接入和执行”，媒体与设备计划各自定义来源契约。主交付顺序只在协作计划维护；能力按实际依赖交付，不按文件排列串行施工。第一方 Agent 是项目归属，不要求语义理解、条件求值和动作执行全部交给模型。
 

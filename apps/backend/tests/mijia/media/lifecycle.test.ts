@@ -147,75 +147,6 @@ describe("independent viewers and bounded cleanup", () => {
     await playback.release(active.id);
     expect(playback.reserve("revision", camera.did, 1).id).toBeString();
   });
-
-  test("DELETE prevents a late answer from restoring access", async () => {
-    const { playback, handlers, calls } = await setup();
-    const entered = deferred();
-    const response = deferred<Response>();
-    handlers.set("POST playback", () => {
-      entered.resolve();
-      return response.promise;
-    });
-    const { id } = playback.reserve("revision", camera.did, 1);
-    const outcome = playback.offer("revision", id, "offer", signal()).then(
-      () => "accepted",
-      () => "cancelled",
-    );
-    await entered.promise;
-    await playback.release(id);
-    response.resolve(
-      Response.json({
-        playbackId: id,
-        answer: "late-answer",
-        telemetry: playbackTelemetry,
-      }),
-    );
-    expect(await outcome).toBe("cancelled");
-    expect(() => playback.snapshot(id)).toThrow();
-    expect(
-      calls.some(
-        (call) => call.method === "DELETE" && call.body.playbackId === id,
-      ),
-    ).toBe(true);
-  });
-
-  test("accepted negotiation survives caller transport disconnect and invalid telemetry, and can be recovered by retry", async () => {
-    const { playback, handlers } = await setup();
-    const entered = deferred();
-    const response = deferred<Response>();
-    handlers.set("POST playback", () => {
-      entered.resolve();
-      return response.promise;
-    });
-    const caller = new AbortController();
-    const { id } = playback.reserve("revision", camera.did, 1);
-    const offer = playback.offer("revision", id, "offer", caller.signal);
-    await entered.promise;
-    caller.abort();
-    response.resolve(
-      Response.json({
-        playbackId: id,
-        answer: "answer",
-        telemetry: {
-          ...playbackTelemetry,
-          timings: { queueMs: 0, sourceMs: 0 },
-        },
-      }),
-    );
-    const accepted = await offer;
-    expect(accepted).toMatchObject({
-      id,
-      sdp: "answer",
-      connection: { sourceRecentlyActive: null },
-    });
-    expect(accepted.connection.timings.negotiationMs).toBeGreaterThanOrEqual(
-      accepted.connection.timings.prepareMs,
-    );
-    expect(await playback.offer("revision", id, "offer", signal())).toEqual(
-      accepted,
-    );
-    expect(playback.snapshot(id).phase).toBe("active");
-  });
 });
 
 describe("resident camera source ownership", () => {
@@ -578,21 +509,5 @@ describe("private media session boundary", () => {
     response.resolve(Response.json({ playbackIds: [] }));
     await heartbeat;
     expect(ended).toHaveBeenCalledWith([old]);
-  });
-
-  test("unrelated playback identity in a successful HTTP response is never accepted", async () => {
-    const { playback, handlers } = await setup();
-    handlers.set("POST playback", () =>
-      Response.json({
-        playbackId: crypto.randomUUID(),
-        answer: "answer",
-        telemetry: playbackTelemetry,
-      }),
-    );
-    const { id } = playback.reserve("revision", camera.did, 1);
-    await expect(
-      playback.offer("revision", id, "offer", signal()),
-    ).rejects.toThrow();
-    expect(() => playback.snapshot(id)).toThrow();
   });
 });

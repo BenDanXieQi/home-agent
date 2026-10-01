@@ -23,7 +23,6 @@ bun run --cwd apps/web test -- tests/modules/household/subscription.test.ts test
 | `modules/mijia/commands.test.ts`           | 请求串行、取消验证、迟到响应隔离、HTTP 结果与状态版本确认、错误恢复。                             |
 | `modules/mijia/login.test.ts`              | 自动登录去重、失败后不自动循环、旧媒体清理期间阻止自动登录。                                      |
 | `modules/mijia/api.test.ts`                | 人工验证请求使用独立期限并能超时取消。                                                            |
-| `modules/playback/api.test.ts`             | 显式播放目标、相同参数重试、重试次数及取消边界、观看资源释放请求。                                |
 | `modules/playback/access.test.ts`          | 短暂断流、退出结果不确定和缓存恢复时的播放资格。                                                  |
 | `modules/devices/state.test.ts`            | 无关公共状态变化不重建设备数组或通知设备订阅者。                                                  |
 | `modules/device-logs/state.test.ts`        | 家庭与采集批次隔离、日志累积上限、重复命令抑制、结果确认和旧请求隔离。                            |

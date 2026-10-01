@@ -21,7 +21,9 @@ export default function WorkspaceLayout() {
   );
   const [loginOpen, openLogin] = useAtom(accountDialogOpenAtom);
   const path = useRouterState({ select: (state) => state.location.pathname });
-  const current = navigation.find((item) => item.to === path);
+  const current = navigation.find(
+    (item) => item.to === path || path.startsWith(`${item.to}/`),
+  );
   const page = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion();
   const headerSlots = useMemo(

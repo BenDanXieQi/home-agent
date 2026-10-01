@@ -117,6 +117,11 @@ export function createVideoRuntime(dependencies: {
         run: input.run,
         config: input.config,
         decoder: input.decoder,
+        media: (media) => {
+          dependencies
+            .emit({ event: "media", run: input.run, media })
+            .catch(dependencies.fatal);
+        },
         ready: () => scheduler.ready(input.run.runId),
         failure: (error) => {
           scheduler.remove(input.run.runId);

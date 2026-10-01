@@ -1,3 +1,4 @@
+import { sourceMediaSchema } from "@home-agent/api/contracts";
 import { readLimitedJson } from "@home-agent/api/http/read-body";
 import { z } from "zod";
 
@@ -36,5 +37,25 @@ export async function readAnalysisStream(
     await response.body?.cancel();
     throw new Error(`Analysis stream unavailable (HTTP ${response.status})`);
   }
-  return response.body;
+  try {
+    const media = sourceMediaSchema.parse({
+      generation: response.headers.get("x-media-generation"),
+      clockRate: Number(response.headers.get("x-media-clock-rate")),
+    });
+    const ptsOrigin = z.coerce
+      .number()
+      .int()
+      .min(0)
+      .max(0xffffffff)
+      .parse(
+        z
+          .string()
+          .regex(/^(0|[1-9][0-9]{0,9})$/)
+          .parse(response.headers.get("x-media-pts-origin")),
+      );
+    return { stream: response.body, media, ptsOrigin };
+  } catch (error) {
+    await response.body.cancel();
+    throw error;
+  }
 }
