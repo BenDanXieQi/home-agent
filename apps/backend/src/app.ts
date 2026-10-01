@@ -5,7 +5,7 @@ import { currentTraceId, httpTracing } from "@home-agent/observability";
 import { Hono } from "hono";
 import { AppError } from "@home-agent/api/errors";
 import { errorResponse, handleHttpError } from "@home-agent/api/errors/hono";
-import { serveStatic } from "hono/bun";
+import { createWebRoutes } from "./web/routes";
 import { secureHeaders } from "hono/secure-headers";
 import { createChatRoutes } from "./chat/routes";
 import type { Environment } from "./environment";
@@ -104,14 +104,7 @@ export function createApp({
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));
-  if (staticRoot) {
-    app.get("/*", serveStatic({ root: staticRoot }));
-    app.on(
-      "GET",
-      ["/", "/devices", "/cameras", "/settings", "/device-logs"],
-      serveStatic({ root: staticRoot, path: "index.html" }),
-    );
-  }
+  if (staticRoot) app.route("/", createWebRoutes(staticRoot));
   app.notFound((c) => errorResponse(c, new AppError("not_found")));
   app.onError(handleHttpError);
   return routes;

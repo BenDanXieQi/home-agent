@@ -89,9 +89,9 @@ export const LogReader = memo(function LogReader({
           changeKey={comparing ? "comparing" : (deviceId ?? "all")}
           className="flex flex-wrap items-center gap-x-3 gap-y-1.5"
         >
-          <h3 className="m-0 text-[17px] font-semibold">
+          <h2 className="m-0 text-[17px] font-semibold">
             {comparing ? `设备对比 · ${compareIds.length} 台` : selectionLabel}
-          </h3>
+          </h2>
           {!comparing && selectedDevice && (
             <span className="text-[12px] text-muted wrap-anywhere">
               {selectedDevice.room}

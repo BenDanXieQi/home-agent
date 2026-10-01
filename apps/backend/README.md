@@ -18,6 +18,14 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 默认监听 `http://127.0.0.1:3000`，通过 `BACKEND_HOST`、`BACKEND_PORT` 调整。配置、服务检查、米家和聊天接口同时验证 TCP 对端为 loopback 及 Host／Origin 为允许的本机地址；调整监听地址不会放宽访问限制。当前仅供可信本机使用，尚无用户认证。构建产物需要 workspace 与已安装的依赖。
 
+## 静态文件服务
+
+`src/web/routes.ts` 仅处理生产 Web 构建产物。浏览器声明支持对应格式时，优先返回构建生成的 Brotli 或 gzip 副本；未选择压缩格式时返回原文件。响应使用 `Vary: Accept-Encoding` 区分传输格式。
+
+`/assets/` 下名称含构建哈希的已存在资源设置 `Cache-Control: public, max-age=31536000, immutable`，允许缓存一年；文件内容变化时构建会生成新 URL。HTML 及无哈希的公共文件使用 `Cache-Control: no-cache`，允许保存但每次使用前需重新验证。ETag 是内容标识；浏览器提交相同标识时返回无响应体的 304，避免重复下载。页面深链沿用 HTML 回退，缺失资源返回 404，不作为可长期缓存的资源。
+
+该策略只作用于静态文件，不进入 API、SSE（服务端事件流）和视频流处理。部署时需一起更新 Web 原文件与压缩副本。
+
 ## 接口
 
 | 接口                         | 职责                                     |
@@ -72,6 +80,8 @@ src/
 ├── main.ts                 # 启动、资源初始化与关闭
 ├── app.ts                  # 中间件、子路由与错误处理的组装
 ├── environment.ts          # 环境变量解析
+├── web/
+│   └── routes.ts           # Web 预压缩文件、缓存与页面回退
 ├── connections/
 │   ├── routes.ts           # 连接配置接口
 │   ├── store.ts            # YAML 路径、校验与读写
