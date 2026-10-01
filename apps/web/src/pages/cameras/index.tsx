@@ -31,7 +31,7 @@ export default function CamerasPage() {
       <InventoryNotice />
       {inventory?.status === "error" ? (
         <Link to="/devices" className="mb-4 inline-block text-sm underline">
-          前往设备页重试
+          前往房间页重试
         </Link>
       ) : null}
       <HouseholdAccess fallback={<CameraWallSkeleton />}>

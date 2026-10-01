@@ -324,18 +324,18 @@ Agent 普通代码检查观察仍有效、证据可取、是否已处理、在�
 
 以下是拟实施的本机 API，按交付批次注册；全部复用现有本机访问校验和错误结构，修改操作校验 epoch，所有证据读取与结果接纳重新核对资格。
 
-| backend 接口                                                                   | Agent 工具／调用方              | 最小返回与行为                                                                                           |
-| ------------------------------------------------------------------------------ | ------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `PUT /api/household/members/:id`、`POST /api/household/members/:id/references` | 批次 C 的登记入口               | 用户登记人类成员或猫狗的物种、名称及有界参考图；返回资料版本，Agent 不能凭猜测登记真实身份               |
-| `PUT /api/household/coverage/:id`                                              | 批次 B 的最小覆盖登记入口       | 保存用户确认的设备／通道与区域覆盖，不从安装房间自动生成                                                 |
-| `GET /api/household/observation-capabilities`                                  | `list_observation_capabilities` | 已实现模板、来源、参数范围与不可用原因                                                                   |
-| `PUT /api/household/observation-requests/:id`                                  | `put_observation`               | 新建、修改或 `enabled=false` 撤销；返回可靠保存后的有效版本与额度                                        |
-| `GET /api/household/observation-requests`                                      | `list_observations`             | 当前绑定家庭的请求及暂停／到期原因，有界分页                                                             |
-| `GET /api/household/candidates/events`                                         | Agent 输入适配器                | 当前候选快照、变化、心跳；不是 LLM 工具                                                                  |
-| `GET /api/household/context`                                                   | `get_household_context`         | 按来源／成员／区域选取状态、证据引用、缺失项和各领域版本                                                 |
-| `POST /api/household/evidence/read`                                            | `read_evidence`                 | 给定已发出的引用，单次读取一个已确认表示的有限媒体流；对应不可变描述通过候选／上下文返回，不接受任意 URL |
-| `PUT /api/household/assessments/:id`                                           | `submit_assessment`             | 接纳或拒绝及原因；以稳定结果 ID 去重，返回正式判断与版本                                                 |
-| `GET /api/household/assessments/:id`                                           | 执行器确认回执                  | 同一运行内查询接纳结果，响应丢失不重跑模型                                                               |
+| backend 接口                                  | Agent 工具／调用方              | 最小返回与行为                                                                                                      |
+| --------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `POST /api/household-members/:id/references`  | 批次 C 的参考资料入口           | 基于[现有成员资料](../../apps/backend/README.md#家庭上下文表)补充有界参考图和资料版本，Agent 不能凭猜测登记真实身份 |
+| `PUT /api/household/coverage/:id`             | 批次 B 的最小覆盖登记入口       | 保存用户确认的设备／通道与区域覆盖，不从安装房间自动生成                                                            |
+| `GET /api/household/observation-capabilities` | `list_observation_capabilities` | 已实现模板、来源、参数范围与不可用原因                                                                              |
+| `PUT /api/household/observation-requests/:id` | `put_observation`               | 新建、修改或 `enabled=false` 撤销；返回可靠保存后的有效版本与额度                                                   |
+| `GET /api/household/observation-requests`     | `list_observations`             | 当前绑定家庭的请求及暂停／到期原因，有界分页                                                                        |
+| `GET /api/household/candidates/events`        | Agent 输入适配器                | 当前候选快照、变化、心跳；不是 LLM 工具                                                                             |
+| `GET /api/household/context`                  | `get_household_context`         | 按来源／成员／区域选取状态、证据引用、缺失项和各领域版本                                                            |
+| `POST /api/household/evidence/read`           | `read_evidence`                 | 给定已发出的引用，单次读取一个已确认表示的有限媒体流；对应不可变描述通过候选／上下文返回，不接受任意 URL            |
+| `PUT /api/household/assessments/:id`          | `submit_assessment`             | 接纳或拒绝及原因；以稳定结果 ID 去重，返回正式判断与版本                                                            |
+| `GET /api/household/assessments/:id`          | 执行器确认回执                  | 同一运行内查询接纳结果，响应丢失不重跑模型                                                                          |
 
 接口字段以共用 Zod schema 定义，HTTP 路由只作转换。媒体通过工具内部的有界资源句柄交给模型适配器，不进入普通聊天 JSON、工具文本或日志。证据准备／保留期限遵循[媒体与判断期限](media-perception.md#媒体与判断的期限)；流未读完整视为未取得证据，不能发起模型请求。
 

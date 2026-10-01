@@ -1,3 +1,4 @@
+import { createMemberRepository } from "./household/members/repository";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
 import { createAgentHouseholdReset } from "./household/reset-agent";
@@ -101,6 +102,7 @@ const roomAnalysis = new RoomAnalysisService(
   ),
 );
 const app = createApp({
+  memberRepository: database ? createMemberRepository(database.db) : undefined,
   contextRepository: database
     ? createContextRepository(database.db)
     : undefined,
