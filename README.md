@@ -47,7 +47,7 @@ backend 与项目自有的第一方 Agent 运行在独立进程中，通过 HTTP
 
 ## 快速开始
 
-需要 Bun ≥ 1.4.2 和已运行的 Docker。摄像头预览需要本机能访问摄像头所在局域网；Docker 模式请先完成[网络设置](docs/running.md#docker-摄像头网络)。
+需要 Bun ≥ 1.4.2、Caddy 和已运行的 Docker。macOS 可运行 `brew install caddy` 安装入口服务；其他平台见[运行说明](docs/running.md#https-与-http2-入口)。摄像头预览需要本机能访问摄像头所在局域网；Docker 模式请先完成[网络设置](docs/running.md#docker-摄像头网络)。
 
 ```sh
 bun install --frozen-lockfile
@@ -62,7 +62,7 @@ bun run db:migrate
 bun run dev
 ```
 
-打开 <http://127.0.0.1:5173/>，使用米家 App 扫码登录。设备与摄像头仅接入已选择的家庭；首次使用请在“设置 → 米家家庭”选择要接入的家庭。日常运行 `bun run dev`，停止应用与依赖使用 `bun run stop`。新增数据库迁移后需重新执行 `bun run db:migrate`。
+首次启动后运行 `bun run web:trust`，按系统提示完成本地证书信任。打开 <https://localhost:8443/>，使用米家 App 扫码登录。设备与摄像头仅接入已选择的家庭；首次使用请在“设置 → 米家家庭”选择要接入的家庭。日常运行 `bun run dev`，停止应用与依赖使用 `bun run stop`。新增数据库迁移后需重新执行 `bun run db:migrate`。
 
 本机配置与凭据不提交 Git。恢复已有数据库授权时，还需恢复对应的凭据加密密钥；详见[米家与摄像头](docs/mijia.md)。
 

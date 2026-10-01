@@ -6,7 +6,7 @@
 
 ## 运行
 
-在仓库根目录执行 `bun run dev`，访问 <http://127.0.0.1:5173/>。Vite 将 `/api` 代理到根目录 `.env` 中配置的 backend 地址。生产环境执行 `bun run start`，通过 backend 的 HTTP 端口访问。Vite 静态预览不提供 API 代理。
+在仓库根目录执行 `bun run dev`，首次运行 `bun run web:trust` 完成本地证书信任，访问 <https://localhost:8443/>。Caddy 把页面与热更新连接转发到 Vite，把 `/api` 转发到 `.env` 中配置的 backend；生产环境执行 `bun run start`，使用同一 HTTPS 入口提供构建页面和 API。Vite 的 `5173` 为内部开发端口，静态预览不提供 API 代理。独立启动 Web 时另运行 `bun run web:dev`；入口配置、证书与停止方式见[运行说明](../../docs/running.md#https-与-http2-入口)。
 
 构建时，`build/precompress.ts` 为 HTML、JavaScript、CSS 和 SVG 生成更小的 Brotli（`.br`）与 gzip（`.gz`）副本，原文件继续保留；字体本身已压缩，不重复处理。压缩副本随 Web 构建产物一起复制到 backend。生产静态响应与缓存策略见 [Backend 静态文件服务](../backend/README.md#静态文件服务)。开发服务器不使用这些预压缩文件。
 

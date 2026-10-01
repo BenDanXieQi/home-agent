@@ -96,7 +96,7 @@ export function createConnectionStatusRoutes(
   connectionStore: Pick<ConnectionStore, "read">,
 ) {
   return new Hono()
-    .use(requireLocalAccess([port, 5173]))
+    .use(requireLocalAccess([port, 5173], { webEntry: true }))
     .get("/status", async (c) => {
       const { services } = await connectionStore.read();
       const [agent, go2rtc] = await Promise.all([

@@ -4,6 +4,7 @@ import { getConnInfo } from "hono/bun";
 import { createMiddleware } from "hono/factory";
 
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
+const webEntry = new URL("https://localhost:8443");
 
 function isLoopbackAddress(address: string | undefined) {
   if (!address) return false;
@@ -17,9 +18,12 @@ function isLoopbackAddress(address: string | undefined) {
   );
 }
 
-// Do not trust forwarded headers. Vite preserves the browser's Host header.
+// Do not trust forwarded headers. Both local proxies preserve Host and Origin.
 // JSON PUT requests need an explicit Origin check; hono/csrf only covers forms.
-export function requireLocalAccess(ports: readonly number[]) {
+export function requireLocalAccess(
+  ports: readonly number[],
+  options: { webEntry?: boolean } = {},
+) {
   const allowedPorts = new Set(ports.map(String));
   const isAllowedManagementUrl = (url: URL) =>
     ["http:", "https:"].includes(url.protocol) &&
@@ -39,12 +43,15 @@ export function requireLocalAccess(ports: readonly number[]) {
         isLoopbackAddress(getConnInfo(c).remote.address) &&
         Boolean(host) &&
         hostUrl.host === host?.toLowerCase() &&
-        isAllowedManagementUrl(hostUrl);
+        (isAllowedManagementUrl(hostUrl) ||
+          (options.webEntry === true && hostUrl.host === webEntry.host));
       const origin = c.req.header("origin");
       if (origin !== undefined) {
         const originUrl = new URL(origin);
         isTrustedRequest &&=
-          originUrl.origin === origin && isAllowedManagementUrl(originUrl);
+          originUrl.origin === origin &&
+          (isAllowedManagementUrl(originUrl) ||
+            (options.webEntry === true && origin === webEntry.origin));
       }
     } catch {
       isTrustedRequest = false;

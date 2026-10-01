@@ -1,0 +1,24 @@
+{
+	admin "unix/{$HOME_AGENT_CADDY_SOCKET}"
+	persist_config off
+	auto_https disable_redirects
+	skip_install_trust
+	storage file_system {
+		root "{$HOME_AGENT_CADDY_DATA}"
+	}
+	log default {
+		output file "{$HOME_AGENT_CADDY_LOG}"
+	}
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://localhost:8443 {
+	bind 127.0.0.1 ::1
+	tls internal
+	handle /api/* {
+		reverse_proxy {$BACKEND_HOST:127.0.0.1}:{$BACKEND_PORT:3000}
+	}
+	import {$HOME_AGENT_WEB_MODE}.caddy
+}
