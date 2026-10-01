@@ -118,6 +118,11 @@ func homeAgentAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if action == "audio" && r.Method == http.MethodPost {
+		homeAgentAudio(w, r)
+		return
+	}
+
 	if action == "analysis" && r.Method == http.MethodPost {
 		homeAgentAnalysis(w, r)
 		return

@@ -4,22 +4,37 @@ import pTimeout from "p-timeout";
 import type { createPerceptionService } from "./service";
 
 export function createPerceptionStream(
-  service: ReturnType<typeof createPerceptionService>,
+  service: Pick<ReturnType<typeof createPerceptionService>, "subscribe">,
   snapshot: () => unknown,
   shutdown: AbortSignal,
 ) {
   let connections = 0;
+  let cached: string | undefined;
+  function publication() {
+    if (cached !== undefined) return cached;
+    const data = JSON.stringify(snapshot());
+    if (Buffer.byteLength(data) > 2 * 1024 * 1024)
+      throw new Error("Perception snapshot exceeds transport budget");
+    cached = data;
+    // Share this delivery batch, not a time-dependent view with future joiners.
+    queueMicrotask(() => {
+      cached = undefined;
+    });
+    return data;
+  }
   return (c: Context) => {
     if (c.req.method === "HEAD")
       return c.body(null, 200, { "Content-Type": "text/event-stream" });
     if (connections >= 16 || shutdown.aborted)
       return c.json({ error: "Perception subscription unavailable" }, 503);
+    if (!connections) cached = undefined;
     connections++;
     return streamSSE(c, async (stream) => {
       let wake = Promise.withResolvers<void>();
       let dirty = true;
       let ended = false;
       function notify() {
+        cached = undefined;
         dirty = true;
         wake.resolve();
       }
@@ -38,11 +53,9 @@ export function createPerceptionStream(
       try {
         while (!shutdown.aborted) {
           if (ended) break;
-          const data = dirty ? JSON.stringify(snapshot()) : "{}";
+          const data = dirty ? publication() : "{}";
           const event = dirty ? "snapshot" : "heartbeat";
           dirty = false;
-          if (Buffer.byteLength(data) > 2 * 1024 * 1024)
-            throw new Error("Perception snapshot exceeds transport budget");
           await pTimeout(stream.writeSSE({ event, data }), {
             milliseconds: 15000,
           });
@@ -61,6 +74,7 @@ export function createPerceptionStream(
         unsubscribe();
         shutdown.removeEventListener("abort", stop);
         connections--;
+        if (!connections) cached = undefined;
       }
     });
   };

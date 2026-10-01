@@ -24,6 +24,7 @@ export function createPerceptionRoutes(
         ? { sha256: view.model.sha256, provider: view.model.provider }
         : null,
       sources: view.sources,
+      audio: view.audio,
     });
   }
   return new Hono()

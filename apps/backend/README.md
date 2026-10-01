@@ -1,10 +1,10 @@
 # Backend
 
-基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
+基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测、音频能量与人声分析和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪与猫狗位置跟踪已接入；身份确认、音视频语义理解和媒体候选交付仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪及音频分析已接入；身份确认、音视频语义理解和媒体候选交付仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -35,9 +35,9 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `PUT /api/config`            | 校验并保存完整连接配置                   |
 | `GET /api/services/status`   | 检查 Agent 与 go2rtc 的接口是否可用      |
 | `POST /api/chat`             | 将 JSON 请求转发至 Agent，透传响应与 SSE |
-| `GET /api/perception`        | 本地检测与人宠跟踪的健康及最新观测       |
-| `GET /api/perception/stream` | 订阅本地检测当前状态，不传输媒体片段     |
-| `POST /api/perception/retry` | 显式重试感知计算，不重连物理摄像头       |
+| `GET /api/perception`        | 本地检测、人宠跟踪与音频的健康及最新观测 |
+| `GET /api/perception/stream` | 订阅本地感知当前状态，不传输媒体片段     |
+| `POST /api/perception/retry` | 显式重试检测与音频计算，重新准入失败音轨 |
 
 连接地址来自根目录 `config/config.yaml`，每次请求重新读取文件，内容未变时复用解析结果。配置生成、编辑和 `--config` 用法见[本地运行](../../docs/running.md#服务连接)。
 
@@ -112,6 +112,7 @@ src/
 │   │   ├── session.ts     # 配置巡检、媒体绑定、运行标识与资源生命周期
 │   │   ├── camera-source-spec.ts    # 单路摄像头共享流规格
 │   │   ├── camera-source-manager.ts # 共享流注册、重试、离线保留与释放
+│   │   ├── audio-stream.ts          # 米家音轨 HTTP 接入与编码流边界转换
 │   │   ├── playback-manager.ts      # 播放预约、观看资源、取消与记录回收
 │   │   └── go2rtc-adapter.ts        # 专用 go2rtc 协议、心跳与超时
 │   └── protocols/
@@ -120,7 +121,10 @@ src/
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、SSE 与限时设备推送日志
-├── perception/            # 本地检测、配置来源协调、人宠跟踪与人体外观模型、隔离计算、视频解码/调度、当前观测与接口
+├── perception/            # 本地检测、来源协调、人宠跟踪、独立音频解码与连续 VAD、隔离计算、当前观测与接口
+│   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
+│   ├── source-lease.ts     # 音视频共用的来源资格撤销与取消联动
+│   └── audio/              # 连续分块、Silero 适配、解码与音频进程监督
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验
