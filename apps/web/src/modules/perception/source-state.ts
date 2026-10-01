@@ -52,6 +52,37 @@ export function createPerceptionSourceState(
       ? source
       : undefined;
   });
+  const audioAtom = atom((get) => {
+    const source = get(sourceAtom);
+    const snapshot = get(perceptionSnapshotAtom);
+    const access = get(perceptionSourceAccessAtom);
+    const removed = access.removed.get(`${target.deviceId}:${target.channel}`);
+    // Audio owns its run independently of video compute. The synchronized
+    // snapshot confirms household access; a pre-removal snapshot cannot restore it.
+    if (
+      !get(connectedAtom) ||
+      !get(accessibleAtom) ||
+      !source ||
+      !snapshot?.householdVersion ||
+      (access.epoch === snapshot.householdVersion.scope_epoch &&
+        removed !== undefined &&
+        snapshot.householdVersion.sequence <= removed)
+    )
+      return null;
+    const { audio } = snapshot;
+    return {
+      status: audio.status,
+      error: audio.error,
+      track:
+        audio.tracks.find(
+          (track) =>
+            track.run.trackRunId === source.audioTrackRunId &&
+            track.run.scopeEpoch === get(householdScopeEpochAtom) &&
+            track.run.deviceId === target.deviceId &&
+            track.channels.includes(target.channel),
+        ) ?? null,
+    };
+  });
   const playbackTargetAtom = atom((get) => {
     const scope_epoch = get(householdScopeEpochAtom);
     const revision = get(mediaStateAtom)?.revision;
@@ -78,6 +109,7 @@ export function createPerceptionSourceState(
     deviceAtom,
     accessibleAtom,
     activeSourceAtom,
+    audioAtom,
     playbackTargetAtom,
     configuredAtom: atom((get) => !!get(sourceAtom)),
     errorAtom: atom((get) => get(sourceAtom)?.error),
