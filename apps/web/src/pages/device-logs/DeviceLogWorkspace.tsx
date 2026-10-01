@@ -15,7 +15,7 @@ import { LogReader } from "./LogReader";
 import { useDeviceSelection } from "./use-device-selection";
 import { useLogComparison } from "./use-log-comparison";
 
-const narrowQuery = "(max-width: 900px)";
+const narrowQuery = "(width < 901px)";
 const subscribeNarrow = (notify: () => void) => {
   const query = matchMedia(narrowQuery);
   query.addEventListener("change", notify);
@@ -95,25 +95,30 @@ export const DeviceLogWorkspace = memo(function DeviceLogWorkspace({
     />
   );
   return (
-    <section className="grid gap-4 my-0 mx-auto [--switch-on:var(--color-ink)] [--segmented-accent:var(--color-ink)] [&_button:focus-visible]:outline-1 [&_button:focus-visible]:outline-ink/50 [&_button:focus-visible]:-outline-offset-2">
-      <CaptureControls
-        run={run}
-        connected={connected}
-        loaded={loaded}
-        ready={ready}
-        paused={paused}
-        unseen={unseen}
-        onLiveChange={setLive}
-        onCaptured={resume}
-      />
+    <section className="flex h-full min-h-0 flex-col gap-4 [--switch-on:var(--color-ink)] [--segmented-accent:var(--color-ink)] [&_button:focus-visible]:outline-1 [&_button:focus-visible]:outline-ink/50 [&_button:focus-visible]:-outline-offset-2">
+      <div className="shrink-0 empty:hidden">
+        <CaptureControls
+          run={run}
+          connected={connected}
+          loaded={loaded}
+          ready={ready}
+          paused={paused}
+          unseen={unseen}
+          onLiveChange={setLive}
+          onCaptured={resume}
+        />
+      </div>
       {narrow ? (
-        <div className="relative bg-white max-[901px]:grid">
+        <div
+          className="relative grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-white data-[devices-open=true]:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]"
+          data-devices-open={devicesOpen}
+        >
           {picker}
           {reader}
         </div>
       ) : (
         <Group
-          className="relative bg-white max-[901px]:grid"
+          className="relative min-h-0 flex-1 bg-white"
           id="device-log-panels"
         >
           <Panel

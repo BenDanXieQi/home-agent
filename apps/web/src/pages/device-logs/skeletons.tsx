@@ -25,7 +25,7 @@ export function LogDevicesSkeleton() {
 export function LogEventsSkeleton() {
   return (
     <output
-      className="h-[clamp(360px,_calc(100dvh_-_250px),_820px)] overflow-auto [overflow-anchor:none] [scrollbar-gutter:stable] px-1 pb-2 block"
+      className="h-full overflow-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable] px-1 pb-2 block"
       aria-label="正在读取设备日志"
     >
       {Array.from({ length: 6 }, (_, index) => (

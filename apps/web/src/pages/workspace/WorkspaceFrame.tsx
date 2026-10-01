@@ -5,15 +5,21 @@ export function WorkspaceFrame({
   sidebar,
   header,
   children,
+  contained = false,
 }: {
   sidebar: ReactNode;
   header: ReactNode;
   children?: ReactNode;
+  contained?: boolean;
 }) {
   return (
-    <div className="flex min-h-dvh">
+    <div
+      className={contained ? "flex h-dvh overflow-hidden" : "flex min-h-dvh"}
+    >
       {sidebar}
-      <div className="min-w-0 flex-1 pl-[112px] max-md:pl-0 max-md:pb-[calc(76px_+_env(safe-area-inset-bottom))]">
+      <div
+        className={`min-w-0 flex-1 pl-[112px] max-md:pl-0 max-md:pb-[calc(76px_+_env(safe-area-inset-bottom))] ${contained ? "flex min-h-0 flex-col overflow-hidden" : ""}`}
+      >
         {header}
         {children}
       </div>
