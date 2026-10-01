@@ -8,6 +8,15 @@ import {
   mijiaErrorSchema,
 } from "./mijia";
 import { mijiaDeviceSpecSchema } from "./mijia-spec";
+import {
+  latestPropertySchema,
+  sourceHealthSchema,
+  deviceCoverageSchema,
+  collectionStatusSchema,
+  propertyKey,
+  propertyAddressSchema,
+  propertyReadItemSchema,
+} from "./observations";
 import { operationSchema } from "./operations";
 import { apiErrorSchema } from "./errors";
 
@@ -208,10 +217,21 @@ export const projectionSchema = z.object({
     }),
   }),
   ...directorySchema.shape,
+  latest: z.record(z.string(), latestPropertySchema),
+  source_health: z.record(z.string(), sourceHealthSchema),
+  device_coverage: z.record(z.string(), deviceCoverageSchema),
+  collection: z.object({ collection: collectionStatusSchema }),
 });
 export type Projection = z.infer<typeof projectionSchema>;
 export const entityKey = (...parts: string[]) => JSON.stringify(parts);
 const matchesIdentity = {
+  latest: (key: string, value: z.infer<typeof latestPropertySchema>) =>
+    key ===
+    propertyKey(value.account_id, value.device_id, value.siid, value.piid),
+  source_health: (key: string, value: z.infer<typeof sourceHealthSchema>) =>
+    key === value.source_id,
+  device_coverage: (key: string, value: z.infer<typeof deviceCoverageSchema>) =>
+    key === entityKey(value.account_id, value.device_id),
   home: (key: string, value: z.infer<typeof homeSchema>) =>
     key === entityKey(value.account_id, value.home_id),
   room: (key: string, value: z.infer<typeof roomSchema>) =>
@@ -242,9 +262,19 @@ export const upsertChangeSchema = z
     change("home", homeSchema),
     change("room", roomSchema),
     change("device", deviceSchema),
+    change("latest", latestPropertySchema),
+    change("source_health", sourceHealthSchema),
+    change("device_coverage", deviceCoverageSchema),
+    change("collection", collectionStatusSchema),
   ])
   .refine((item) => {
     switch (item.entity) {
+      case "latest":
+        return matchesIdentity.latest(item.key, item.value);
+      case "source_health":
+        return matchesIdentity.source_health(item.key, item.value);
+      case "device_coverage":
+        return matchesIdentity.device_coverage(item.key, item.value);
       case "home":
         return matchesIdentity.home(item.key, item.value);
       case "room":
@@ -259,7 +289,14 @@ export const changeSchema = z.discriminatedUnion("op", [
   upsertChangeSchema,
   z.object({
     op: z.literal("remove"),
-    entity: z.enum(["home", "room", "device"]),
+    entity: z.enum([
+      "home",
+      "room",
+      "device",
+      "latest",
+      "source_health",
+      "device_coverage",
+    ]),
     key: z.string(),
   }),
 ]);
@@ -283,6 +320,17 @@ export const snapshotSchema = stateVersionSchema
     checkIdentities("home", projection.home, matchesIdentity.home);
     checkIdentities("room", projection.room, matchesIdentity.room);
     checkIdentities("device", projection.device, matchesIdentity.device);
+    checkIdentities("latest", projection.latest, matchesIdentity.latest);
+    checkIdentities(
+      "source_health",
+      projection.source_health,
+      matchesIdentity.source_health,
+    );
+    checkIdentities(
+      "device_coverage",
+      projection.device_coverage,
+      matchesIdentity.device_coverage,
+    );
   });
 export const stateChangeSchema = stateVersionSchema.extend({
   changes: z.array(changeSchema),
@@ -328,4 +376,116 @@ export function applyChanges(
       }
     }),
   );
+}
+
+export const propertyReadResultSchema = commandResultSchema.extend({
+  items: z.array(propertyReadItemSchema),
+});
+
+export const roomFactsQuerySchema = z.strictObject({
+  room_id: z.string().max(128).nullable(),
+  device_ids: z.array(z.string().max(512)).max(100).optional(),
+  properties: z.array(propertyAddressSchema).max(100).optional(),
+  limit: z.number().int().min(1).max(2000).default(500),
+  offset: z.number().int().nonnegative().max(20_000).default(0),
+});
+
+/** Pure view of one committed snapshot, shared by HTTP and the subscribed Web view. */
+export function selectRoomFacts(
+  snapshot: z.infer<typeof snapshotSchema>,
+  query: z.input<typeof roomFactsQuerySchema>,
+) {
+  const input = roomFactsQuerySchema.parse(query);
+  const projection = snapshot.projection;
+  const household = projection.household.household;
+  const room =
+    Object.values(projection.room).find(
+      (item) =>
+        item.room_id === input.room_id && item.home_id === household.home_id,
+    ) ?? null;
+  const allDevices = Object.values(projection.device).filter(
+    (device) => !device.archived && (device.room_id ?? null) === input.room_id,
+  );
+  const devices = allDevices.filter(
+    (device) => !input.device_ids || input.device_ids.includes(device.id),
+  );
+  const ids = new Set(devices.map((device) => device.id));
+  const requested = input.properties
+    ? new Set(
+        input.properties.map(({ did, siid, piid }) =>
+          propertyKey(household.account_id ?? "", did, siid, piid),
+        ),
+      )
+    : undefined;
+  const properties = Object.values(projection.latest).filter(
+    (fact) =>
+      ids.has(fact.device_id) &&
+      (!requested ||
+        requested.has(
+          propertyKey(fact.account_id, fact.device_id, fact.siid, fact.piid),
+        )),
+  );
+  properties.sort(
+    (a, b) =>
+      a.device_id.localeCompare(b.device_id) ||
+      a.siid - b.siid ||
+      a.piid - b.piid,
+  );
+  const items = properties.slice(input.offset, input.offset + input.limit);
+  const coverage = devices
+    .map(
+      (device) =>
+        projection.device_coverage[entityKey(device.account_id, device.id)],
+    )
+    .filter((item) => item !== undefined);
+  const sources = new Set(coverage.map((item) => item.source_id));
+  return {
+    state_version: {
+      scope_epoch: snapshot.scope_epoch,
+      sequence: snapshot.sequence,
+    },
+    account_id: household.account_id,
+    home_id: household.home_id,
+    room_id: input.room_id,
+    room,
+    devices,
+    properties: items,
+    device_coverage: coverage,
+    source_health: Object.values(projection.source_health).filter((item) =>
+      sources.has(item.source_id),
+    ),
+    collection: projection.collection.collection,
+    coverage: {
+      room_known: input.room_id === null || room !== null,
+      devices: devices.length,
+      room_devices: allDevices.length,
+      properties: properties.length,
+      missing: properties.filter((item) => !item.has_value).length,
+      valid: properties.filter((item) => item.quality === "valid").length,
+      unknown_specifications: devices.filter(
+        (device) => device.spec_status !== "ready",
+      ).length,
+      unconfirmed_subscriptions: devices.filter(
+        (device) =>
+          projection.device_coverage[entityKey(device.account_id, device.id)]
+            ?.properties !== "confirmed",
+      ).length,
+      filtered: input.device_ids !== undefined || requested !== undefined,
+      missing_requested_properties:
+        input.properties?.filter(
+          ({ did, siid, piid }) =>
+            !ids.has(did) ||
+            !projection.latest[
+              propertyKey(household.account_id ?? "", did, siid, piid)
+            ],
+        ) ?? [],
+      truncated:
+        input.offset > 0 || input.offset + items.length < properties.length,
+      next_offset:
+        input.offset + items.length < properties.length
+          ? input.offset + items.length
+          : null,
+      independent_events: "unsupported" as const,
+    },
+  };
 }

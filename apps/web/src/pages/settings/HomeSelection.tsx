@@ -118,7 +118,9 @@ export function HomeSelection() {
               {target
                 ? `确认将管理的家庭改为“${target.name}”？`
                 : "请选择要重新绑定的家庭。"}
-              重新绑定会停止当前家庭的设备任务和视频连接，再加载新家庭的设备。
+              重新绑定会清空所有家庭设备清单缓存和 Agent
+              对话记录，停止旧家庭任务，再加载新家庭的设备。登录凭据保留，已清除的数据无法恢复；请先等待
+              Agent 当前任务结束并保持服务在线。
             </p>
           ) : null}
           <div className="flex gap-2">
@@ -140,7 +142,7 @@ export function HomeSelection() {
               {action === "selectHome"
                 ? "正在保存…"
                 : editing
-                  ? "确认重新绑定"
+                  ? "清空数据并重新绑定"
                   : "绑定家庭"}
             </Button>
             {editing ? (
