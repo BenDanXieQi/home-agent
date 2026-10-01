@@ -1,33 +1,21 @@
-// Exact minimum-cost assignment with optional unmatched rows. At most eight
-// tracks gives 256 masks; bounded detections avoid an unbounded matching matrix.
+import { munkres } from "munkres";
+
+// Dummy columns permit unmatched tracks. Their penalty makes cardinality take
+// precedence over cost; gated edges can never beat an available dummy column.
 export function assign(costs: number[][], threshold: number) {
   const columns = costs[0]?.length ?? 0;
-  let states = new Map<number, { cost: number; pairs: [number, number][] }>([
-    [0, { cost: 0, pairs: [] }],
-  ]);
-  for (let column = 0; column < columns; column++) {
-    const next = new Map(states);
-    for (const [mask, state] of states) {
-      for (let row = 0; row < costs.length; row++) {
-        const cost = costs[row]![column]!;
-        if (mask & (1 << row) || cost > threshold || !Number.isFinite(cost))
-          continue;
-        const key = mask | (1 << row);
-        // Unmatched costs exceed every accepted edge, maximizing cardinality first.
-        const candidate =
-          state.cost + cost - (costs.length + 1) * (threshold + 1);
-        if (candidate < (next.get(key)?.cost ?? Infinity))
-          next.set(key, {
-            cost: candidate,
-            pairs: [...state.pairs, [row, column]],
-          });
-      }
-    }
-    states = next;
-  }
-  return [...states.values()].reduce((best, state) =>
-    state.cost < best.cost ? state : best,
-  ).pairs;
+  if (!columns) return [];
+  const unmatched = (costs.length + 1) * (threshold + 1);
+  return munkres(
+    costs.map((row) => [
+      ...row.map((cost) =>
+        Number.isFinite(cost) && cost <= threshold ? cost : Infinity,
+      ),
+      ...Array<number>(costs.length).fill(unmatched),
+    ]),
+  )
+    .filter(([, column]) => column < columns)
+    .toSorted((a, b) => a[1] - b[1]);
 }
 export function iou(
   a: { x: number; y: number; w: number; h: number },

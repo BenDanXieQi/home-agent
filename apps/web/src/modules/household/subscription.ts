@@ -1,4 +1,4 @@
-import { createParser } from "eventsource-parser";
+import { consumeEventStream } from "../../api/event-stream";
 import { rpc } from "../../api/client";
 import {
   snapshotSchema,
@@ -55,27 +55,35 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
     }
     const current = new AbortController();
     controller = current;
-    let timeout = setTimeout(() => current.abort(), 10_000);
     let stable: ReturnType<typeof setTimeout> | undefined;
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let hasSnapshot = false;
     const active = () =>
       !stopped && controller === current && !current.signal.aborted;
-    const resetDeadline = (ms: number) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => current.abort(), ms);
-    };
-    const parser = createParser({
-      maxBufferSize: householdStreamPolicy.snapshotBytes + 1024 * 1024,
-      onError: () => current.abort(),
-      onEvent: (event) => {
-        if (!active()) return;
-        try {
-          if (
-            new TextEncoder().encode(event.data).byteLength >
-            householdStreamPolicy.snapshotBytes
-          )
-            throw new Error("Oversized state");
+    try {
+      await consumeEventStream(
+        {
+          request: (signal) =>
+            rpc.api.mijia.events.$get(
+              {},
+              { init: { signal, cache: "no-store" } },
+            ),
+          signal: current.signal,
+          maxBufferSize: householdStreamPolicy.snapshotBytes + 1024 * 1024,
+          maxEventBytes: householdStreamPolicy.snapshotBytes,
+          firstEventTimeoutMs: 30_000,
+          silenceMs: householdStreamPolicy.silenceMs,
+          onResponse(response) {
+            if (response.status === 503)
+              nextAllowedAt = Math.max(
+                nextAllowedAt,
+                Date.now() +
+                  (parseRetryAfter(response.headers.get("Retry-After")) ??
+                    30_000),
+              );
+          },
+        },
+        (event) => {
+          if (!active()) return;
           const data: unknown = JSON.parse(event.data);
           const previous = store.get(householdSnapshotAtom);
           switch (event.event) {
@@ -137,52 +145,13 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
           store.set(householdUpdatedAtom, lastMessage);
           store.set(householdSyncedAtom, true);
           store.set(householdConnectionFailedAtom, false);
-          resetDeadline(householdStreamPolicy.silenceMs);
-        } catch {
-          current.abort();
-        }
-      },
-    });
-    try {
-      const response = await rpc.api.mijia.events.$get(
-        {},
-        { init: { signal: current.signal, cache: "no-store" } },
+        },
       );
-      if (!active()) {
-        await response.body?.cancel();
-        return;
-      }
-      if (response.status === 503) {
-        nextAllowedAt = Math.max(
-          nextAllowedAt,
-          Date.now() +
-            (parseRetryAfter(response.headers.get("Retry-After")) ?? 30_000),
-        );
-      }
-      if (
-        !response.ok ||
-        !response.headers.get("content-type")?.includes("text/event-stream") ||
-        !response.body
-      )
-        throw new Error("Stream unavailable");
-      resetDeadline(30_000);
-      reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      while (active()) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        if (!active()) break;
-        parser.feed(decoder.decode(chunk.value, { stream: true }));
-      }
-    } catch {
-      /* The shared sync status reports transport loss. */
+    } catch (error) {
+      if (active()) console.warn("Household stream interrupted", error);
     } finally {
-      clearTimeout(timeout);
       clearTimeout(stable);
       current.abort();
-      await reader?.cancel().catch(() => {});
-      reader?.releaseLock();
-      parser.reset();
       if (controller === current) {
         controller = undefined;
         store.set(householdSyncedAtom, false);

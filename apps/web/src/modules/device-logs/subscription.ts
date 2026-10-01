@@ -4,7 +4,7 @@ import {
   deviceLogReconnectAtom,
   receiveDeviceLogsAtom,
 } from "./state";
-import { createParser } from "eventsource-parser";
+import { consumeEventStream } from "../../api/event-stream";
 import {
   deviceLogSnapshotSchema,
   type DeviceLogSnapshot,
@@ -30,15 +30,18 @@ export function subscribeDeviceLogs(
   async function connect() {
     const current = new AbortController();
     controller = current;
-    let deadline = setTimeout(() => current.abort(), 10_000);
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let hasSnapshot = false;
-    const parser = createParser({
-      maxBufferSize: 8 * 1024 * 1024,
-      onError: () => current.abort(),
-      onEvent: (event) => {
-        if (stopped || current.signal.aborted) return;
-        try {
+    try {
+      await consumeEventStream(
+        {
+          request: (signal) =>
+            rpc.api.mijia.logs.events.$get({}, { init: { signal } }),
+          signal: current.signal,
+          maxBufferSize: 8 * 1024 * 1024,
+          silenceMs: 15_000,
+        },
+        (event) => {
+          if (stopped || current.signal.aborted) return;
           if (
             event.event !== "snapshot" &&
             (event.event !== "update" || !hasSnapshot)
@@ -49,34 +52,13 @@ export function subscribeDeviceLogs(
           hasSnapshot = true;
           store.set(receiveDeviceLogsAtom, scope, data, reset);
           delay = 1000;
-          clearTimeout(deadline);
-          deadline = setTimeout(() => current.abort(), 15_000);
-        } catch {
-          current.abort();
-        }
-      },
-    });
-    try {
-      const response = await rpc.api.mijia.logs.events.$get(
-        {},
-        { init: { signal: current.signal } },
+        },
       );
-      if (!response.ok || !response.body)
-        throw new Error("Log stream unavailable");
-      reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      while (!current.signal.aborted) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        parser.feed(decoder.decode(chunk.value, { stream: true }));
-      }
-    } catch {
-      /* The stream reconnects without stopping the capture. */
+    } catch (error) {
+      if (!stopped && !current.signal.aborted)
+        console.warn("Log stream interrupted", error);
     } finally {
-      clearTimeout(deadline);
       current.abort();
-      await reader?.cancel().catch(() => {});
-      reader?.releaseLock();
     }
     controller = undefined;
     if (!stopped) {
