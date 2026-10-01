@@ -10,6 +10,7 @@ export function createAudioService(options: {
   sources: PerceptionSources;
   executable: string;
   changed: () => void;
+  media?: Parameters<typeof createAudioProcess>[0]["track"];
 }) {
   const tracks = new Map<
     string,
@@ -46,6 +47,12 @@ export function createAudioService(options: {
   function retire(key: string) {
     const entry = tracks.get(key);
     if (!entry) return;
+    options.media?.({
+      ...entry.view,
+      status: "unavailable",
+      validity: "unavailable",
+      vadStatus: "unavailable",
+    });
     tracks.delete(key);
     entry.controller.abort();
     const owned = process;
@@ -107,6 +114,7 @@ export function createAudioService(options: {
         performance.now() >= entry.expiresAt
       ) {
         entry.view.validity = "expired";
+        options.media?.(entry.view);
         notify();
       }
       if (
@@ -156,7 +164,7 @@ export function createAudioService(options: {
       status = "starting";
       try {
         process = createAudioProcess({
-          track(view) {
+          track(view, pcm) {
             const entry = tracks.get(view.run.deviceId);
             if (
               !entry ||
@@ -174,6 +182,7 @@ export function createAudioService(options: {
               entry.view.validity = "unavailable";
             if (view.status === "failed" || view.status === "no_track")
               retryAfter.set(view.run.deviceId, performance.now() + 5000);
+            options.media?.(entry.view, pcm);
             notify();
           },
           failure(reason) {
@@ -181,7 +190,7 @@ export function createAudioService(options: {
             nextProcessAt = performance.now() + 5000;
             status = "unavailable";
             error = reason;
-            for (const entry of tracks.values())
+            for (const entry of tracks.values()) {
               entry.view = {
                 ...entry.view,
                 status: "unavailable",
@@ -191,6 +200,8 @@ export function createAudioService(options: {
                 energy: [],
                 vad: [],
               };
+              options.media?.(entry.view);
+            }
             notify();
           },
         });
@@ -268,6 +279,7 @@ export function createAudioService(options: {
             error: String(cause).slice(0, 4096),
           };
           retryAfter.set(deviceId, performance.now() + 5000);
+          options.media?.(entry.view);
           notify();
         }
       })();

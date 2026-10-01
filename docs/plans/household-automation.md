@@ -344,7 +344,7 @@ backend 保存有界的当前候选：`candidate_id, watch_id, watch_revision, s
 | `PUT /api/household/assessments/:id`          | `submit_assessment`             | 接纳或拒绝及原因；以稳定结果 ID 去重，返回正式判断与版本                                                            |
 | `GET /api/household/assessments/:id`          | 执行器确认回执                  | 同一运行内查询接纳结果，响应丢失不重跑模型                                                                          |
 
-接口字段以共用 Zod schema 定义，HTTP 路由只作转换。媒体通过工具内部的有界资源句柄交给模型适配器，不进入普通聊天 JSON、工具文本或日志。证据准备／保留期限遵循[媒体与判断期限](media-perception.md#媒体与判断的期限)；流未读完整视为未取得证据，不能发起模型请求。
+接口字段以共用 Zod schema 定义，HTTP 路由只作转换。媒体通过工具内部的有界资源句柄交给模型适配器，不进入普通聊天 JSON、工具文本或日志。证据准备／保留期限遵循[媒体与判断期限](media-perception.md#p5p6-证据登记与提交期限)；流未读完整视为未取得证据，不能发起模型请求。
 
 Agent HTTP 结果提交的公共字段为 `task_id, scope_epoch, evidence_refs, expected_subject_revision, result`，提交 ID 由接口路径提供。`origin` 按来源判别：`observation` 携带 `watch_id, watch_revision, candidate_id, evidence_revision`；`device_event` 携带已接纳的事件身份及规则版本；`interactive` 携带聊天任务与该任务实际取得的证据身份。仅相应来源携带对应字段，不为聊天或设备事件伪造观察请求。来源关联由 backend 已发出的事件、证据记录及调用资格核验，Agent 自报任务身份不构成授权。`result` 按 `scene_assessment / identity_association` 判别；身份只能引用本次允许的成员及证据中同物种目标（轨迹引用可选），也可返回 unknown；批次 C 接纳后登记出现记录并汇总最后出现位置。backend 校验目标版本、来源、证据与对应任务资格后，在一次领域提交中记录接纳回执并更新判断。观察来源的提交还校验观察有效性，失效观察拒绝其迟到新提交；其他来源按自身资格和期限校验。已经接纳的身份与位置按自身证据策略继续有效，不因停止观察自动抹掉事实。
 

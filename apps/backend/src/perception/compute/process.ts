@@ -191,6 +191,18 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
         videoTasks.delete(key);
       }
       events.emit("video", event);
+      if (event.event === "window_frame" && child.connected) {
+        child.send(
+          {
+            kind: "window_ack",
+            runId: event.run.runId,
+            sequence: event.frame.sequence,
+          },
+          (error) => {
+            if (error) report(error);
+          },
+        );
+      }
       return;
     }
     const request = pending.get(response.id);

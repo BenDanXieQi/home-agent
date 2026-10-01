@@ -1,3 +1,5 @@
+import { createWindowStore } from "./window/store";
+import { createWindowMedia } from "./media/window-media";
 import { prepareSourceLease } from "./source-lease";
 import { createAudioService } from "./audio/service";
 import { errorDetails } from "./compute/protocol";
@@ -59,7 +61,20 @@ export function createPerceptionService(options: {
     sequence++;
     for (const listener of listeners) listener();
   };
+  const windows = createWindowStore({
+    retentionMs: () => config.window.retentionMs,
+    authorized: (run, identity) => {
+      const access = options.sources.eligibility(run);
+      return (
+        access?.identity === identity && access.scopeEpoch === run.scopeEpoch
+      );
+    },
+  });
+  const media = createWindowMedia(windows, options.executable);
   const audio = createAudioService({
+    media: (track, pcm) => {
+      windows.audio(track, pcm);
+    },
     sources: options.sources,
     executable: options.executable,
     changed,
@@ -68,6 +83,7 @@ export function createPerceptionService(options: {
   function retire(key: string, reason: string) {
     const entry = desired.get(key);
     if (!entry) return;
+    windows.stopVideo(entry.runId);
     store.revoke(key, reason);
     desired.delete(key);
     entry.controller.abort();
@@ -95,8 +111,27 @@ export function createPerceptionService(options: {
   }
   function reconcile() {
     if (stopped) return;
+    windows.tick(Date.now());
+    media.snapshot();
     const selected =
       config.sources === "household" ? options.sources.list() : config.sources;
+    windows.reconcile(
+      selected.length > 8
+        ? []
+        : selected.flatMap((source) => {
+            const access = options.sources.eligibility(source);
+            return access
+              ? [
+                  {
+                    source,
+                    identity: access.identity,
+                    scopeEpoch: access.scopeEpoch,
+                  },
+                ]
+              : [];
+          }),
+      Date.now(),
+    );
     audio.reconcile(config, selected);
     const compute = pool?.getStatus();
     if (computeId !== compute?.processId || compute?.status !== "ready") {
@@ -155,6 +190,7 @@ export function createPerceptionService(options: {
       };
       const controller = new AbortController();
       store.grant(run);
+      windows.bindVideo(run);
       const entry = {
         runId: run.runId,
         identity: access.identity,
@@ -209,6 +245,7 @@ export function createPerceptionService(options: {
       pool = created;
       created.subscribeStatus(reconcile);
       created.subscribeVideo((event) => {
+        windows.video(event, Date.now());
         store.receive(event);
         if (event.event === "health" && event.status === "failed") {
           const key = sourceKey(event.run);
@@ -263,6 +300,11 @@ export function createPerceptionService(options: {
   }
   return {
     start: initialize,
+    windows: () => ({
+      ...windows.snapshot(Date.now()),
+      media: media.snapshot(),
+    }),
+    media,
     async detectImage(
       input: Parameters<
         Awaited<ReturnType<typeof createDetectionPool>>["detectImage"]
@@ -330,6 +372,7 @@ export function createPerceptionService(options: {
           await Promise.all([
             pool?.close(),
             audio.close(),
+            media.close(),
             pTimeout(Promise.all(cleanup), {
               milliseconds: Math.max(1, deadline - performance.now()),
             }),
@@ -342,6 +385,7 @@ export function createPerceptionService(options: {
         } finally {
           unsubscribeStore();
           store.close();
+          windows.close();
           listeners.clear();
         }
       })();

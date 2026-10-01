@@ -1,3 +1,4 @@
+import { pcmSchema } from "./pcm";
 import { z } from "zod";
 import { audioRunSchema, audioTrackSchema } from "@home-agent/api/contracts";
 import { sourceAccessSchema } from "../sources";
@@ -23,7 +24,11 @@ export const audioResponseSchema = z.discriminatedUnion("kind", [
     error: z.string().max(4096).optional(),
   }),
   z.object({ kind: z.literal("pulse"), inferenceSince: z.number().nullable() }),
-  z.object({ kind: z.literal("track"), track: audioTrackSchema }),
+  z.object({
+    kind: z.literal("track"),
+    track: audioTrackSchema,
+    pcm: pcmSchema.optional(),
+  }),
   z.object({ kind: z.literal("stopped"), trackRunId: z.uuid() }),
   z.object({ kind: z.literal("closed") }),
   z.object({ kind: z.literal("fatal"), error: z.string().max(4096) }),

@@ -1,3 +1,4 @@
+import { createWindowRoutes } from "./window/routes";
 import { Hono } from "hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
 import { perceptionSnapshotSchema } from "@home-agent/api/contracts";
@@ -36,6 +37,7 @@ export function createPerceptionRoutes(
       c.header("Cache-Control", "no-store");
       await next();
     })
+    .route("/windows", createWindowRoutes(service, shutdown))
     .get("/", (c) => c.json(snapshot()))
     .get("/stream", createPerceptionStream(service, snapshot, shutdown))
     .post("/images/detect", async (c) => c.json(await uploadImage(c.req.raw)))

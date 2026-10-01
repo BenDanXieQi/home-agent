@@ -1,5 +1,6 @@
 import { fork } from "node:child_process";
 import pTimeout from "p-timeout";
+import type { pcmSchema } from "./pcm";
 import { audioResponseSchema } from "./protocol";
 import type { audioCommandSchema, audioStartSchema } from "./protocol";
 import type { audioTrackSchema } from "@home-agent/api/contracts";
@@ -7,7 +8,10 @@ import type { z } from "zod";
 
 // One additional native process owns every audio decoder and a single VAD CPU thread.
 export function createAudioProcess(options: {
-  track: (track: z.infer<typeof audioTrackSchema>) => void;
+  track: (
+    track: z.infer<typeof audioTrackSchema>,
+    pcm?: z.infer<typeof pcmSchema>,
+  ) => void;
   failure: (error: string) => void;
 }) {
   if (process.platform === "win32")
@@ -105,7 +109,8 @@ export function createAudioProcess(options: {
     } else if (response.kind === "pulse") {
       lastPulse = performance.now();
       inferenceSince = response.inferenceSince;
-    } else if (response.kind === "track") options.track(response.track);
+    } else if (response.kind === "track")
+      options.track(response.track, response.pcm);
     else if (response.kind === "stopped") {
       waiting.get(response.trackRunId)?.resolve();
       waiting.delete(response.trackRunId);
