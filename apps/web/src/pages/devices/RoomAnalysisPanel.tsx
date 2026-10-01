@@ -1,3 +1,5 @@
+import { m, useReducedMotion } from "motion/react";
+import { contentSwap } from "../../utils/motion";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -24,11 +26,14 @@ export function RoomAnalysisPanel({
   scope,
   roomId,
   synced,
+  roomName,
 }: {
+  roomName: string;
   scope: string;
   roomId: string | null;
   synced: boolean;
 }) {
+  const reduced = useReducedMotion();
   const [state, setState] = useState<ReturnType<
     typeof roomAnalysisStateSchema.parse
   > | null>(null);
@@ -89,15 +94,26 @@ export function RoomAnalysisPanel({
     submitting || state?.status === "queued" || state?.status === "running";
   const stale = !!latest?.stale_reason || !synced || !!error || hiddenResult;
   return (
-    <section className="room-analysis" aria-label="AI 房间上下文">
-      <header>
+    <m.section
+      {...(reduced ? {} : contentSwap)}
+      className="mb-5 rounded-2xl bg-surface p-5"
+      aria-label="AI 房间上下文"
+    >
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <span className="room-analysis-kicker">场景上下文</span>
-          <h2>AI 对这个房间的理解</h2>
+          <h2 className="text-sm font-medium">
+            {roomName}近况{" "}
+            <span className="ml-2 text-xs font-normal text-muted">AI 观测</span>
+          </h2>
+          {latest ? (
+            <p className="mt-1 text-xs text-muted">
+              {time(latest.completed_at)}
+            </p>
+          ) : null}
         </div>
-        <div className="room-analysis-actions">
+        <div className="flex items-center gap-3">
           <output
-            className={`analysis-status ${stale ? "stale" : (state?.status ?? "idle")}`}
+            className={stale ? "text-xs text-warning" : "text-xs text-muted"}
           >
             {!synced || error
               ? "等待同步"
@@ -140,15 +156,15 @@ export function RoomAnalysisPanel({
       ) : null}
       {result && latest ? (
         <div
-          className={
-            stale ? "room-analysis-result is-stale" : "room-analysis-result"
-          }
+          className={stale ? "mt-4 border-l-2 border-warning/40 pl-3" : "mt-4"}
         >
-          <p className="room-analysis-summary">{result.summary.text}</p>
+          <p className="whitespace-pre-wrap wrap-anywhere text-sm leading-7">
+            {result.summary.text}
+          </p>
           {result.unknowns.length ? (
-            <div className="room-analysis-unknowns">
+            <div className="mt-3 text-xs leading-6 text-muted">
               <h3>还不能确定</h3>
-              <ul>
+              <ul className="list-disc pl-4">
                 {result.unknowns.map((item, index) => (
                   <li key={index}>{item}</li>
                 ))}
@@ -157,7 +173,7 @@ export function RoomAnalysisPanel({
           ) : null}
         </div>
       ) : (
-        <p className="room-analysis-empty">
+        <p className="mt-3 text-sm leading-6 text-muted">
           {state?.status === "running"
             ? "正在根据本次房间证据生成总结…"
             : hiddenResult
@@ -165,8 +181,8 @@ export function RoomAnalysisPanel({
               : "还没有 AI 总结。可以主动分析当前房间，之后由符合条件的设备变化触发更新。"}
         </p>
       )}
-      <details className="room-analysis-details rooms-help">
-        <summary>分析信息</summary>
+      <details className="mt-3 text-xs leading-6 text-muted">
+        <summary className="cursor-pointer">分析信息</summary>
         {latest && result ? (
           <p>
             {stale ? "上一次总结" : "总结时间"}：{time(latest.completed_at)} ·{" "}
@@ -191,9 +207,9 @@ export function RoomAnalysisPanel({
         同值上报和低于阈值的数值波动不会触发分析或使总结失效；累计变化达到阈值再处理。
         实际分析读取相关设备的最新状态，涵盖开启与关闭，不受下方设备筛选影响。仅提供解释，不执行设备操作。
       </details>
-      <footer className="rooms-help">
+      <footer className="mt-3 text-xs text-muted">
         根据设备最近报告整理，仅展示观测描述；设备原始值可在下方设备状态中查看。
       </footer>
-    </section>
+    </m.section>
   );
 }

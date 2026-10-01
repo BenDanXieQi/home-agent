@@ -54,11 +54,6 @@ const settingsRoute = createRoute({
   path: "/settings",
   component: lazyRouteComponent(() => import("./pages/settings/index")),
 });
-const roomsRoute = createRoute({
-  getParentRoute: () => accountRoute,
-  path: "/rooms",
-  component: lazyRouteComponent(() => import("./pages/rooms/index")),
-});
 const deviceLogsRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/device-logs",
@@ -71,7 +66,6 @@ export const router = createRouter({
       devicesRoute,
       camerasRoute,
       deviceLogsRoute,
-      roomsRoute,
       settingsRoute,
     ]),
   ]),
