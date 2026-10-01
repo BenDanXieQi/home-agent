@@ -1,15 +1,11 @@
 import { sourceMediaSchema } from "@home-agent/api/contracts";
 import { readLimitedJson } from "@home-agent/api/http/read-body";
 import { z } from "zod";
+import type { sourceAccessSchema } from "../../perception/sources";
 
-export const analysisAccessSchema = z.strictObject({
-  endpoint: z.url(),
-  sessionId: z.uuid(),
-  sourceId: z.uuid(),
-});
 // Only the trusted composition root supplies this descriptor, never an HTTP client.
 export async function readAnalysisStream(
-  access: z.infer<typeof analysisAccessSchema>,
+  access: z.infer<typeof sourceAccessSchema>,
   signal: AbortSignal,
 ) {
   const response = await fetch(access.endpoint, {

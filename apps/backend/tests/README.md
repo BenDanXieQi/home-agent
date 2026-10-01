@@ -43,3 +43,27 @@ bun run --cwd apps/web test -- tests/modules/mijia/commands.test.ts
 这些测试验证确定性业务契约与协议边界，不测试 React UI，不执行 Go overlay、真实供应商请求、数据库迁移或实机出帧验收。家庭运行时的规则映射与证据边界见[家庭功能测试](household/README.md)；设备采集计划中的自动采集、补读、根据来源和时间确定 latest 当前值和规则不属于测试范围。违反契约的实现通过普通失败测试暴露，不用跳过或修改预期掩盖。
 
 参考 [Hono 测试指南](https://hono.dev/docs/guides/testing)。新增测试前需遵循仓库规则，取得用户明确许可。
+
+## 音频业务回归
+
+音频测试从可观察的业务结果出发，不以分支覆盖或参数校验数量作为目标：
+
+- `perception/audio-facts.test.ts`：同一声音不因传输分块或另一台摄像头的活动而改变事实；新运行不继承旧模型状态；清晰语音与静音可区分；模型不可用时仍提供能量，但不宣称无人声。
+- `perception/audio-lifecycle.test.ts`：家庭访问撤销后立即移除事实；单摄卡住不影响其他来源；陈旧媒体不能刷新事实有效期；无音轨与安静不同；初始化中关闭释放资源。通过真实 HTTP、FFmpeg、IPC 和模型执行，不替换分析结果。
+- `perception/audio-time.test.ts`：Opus 解码跳过起始采样后，观察时间不能被提前到首包接收时间。
+- `perception/audio-cleanup.test.ts`：操作系统迟报退出时，前次超时不能使后续清理永久失败，也不能再次向已经失去所有权的进程组发送信号。仅操作系统进程边界使用替身。
+- `perception/stream-isolation.test.ts`：慢浏览器不能拖住其他订阅，关闭后释放订阅名额；事实过期后新加入的观察者应读到当前有效性，即使没有新媒体事件；使用真实本机 HTTP 与 SSE。
+
+```sh
+bun test apps/backend/tests/perception/audio-facts.test.ts \
+  apps/backend/tests/perception/audio-lifecycle.test.ts \
+  apps/backend/tests/perception/audio-time.test.ts \
+  apps/backend/tests/perception/audio-cleanup.test.ts \
+  apps/backend/tests/perception/stream-isolation.test.ts
+```
+
+上述音频测试需要本机 FFmpeg 和固定 Silero 资产；不读取真实账号凭据或操作摄像头。`speech-16k.pcm` 是本机语音合成生成的英文句子，16 kHz 单声道 int16，小端序，无家庭录音；`opus-silence.ogg` 是 Go 音频适配器封装的交替 20/40 ms Opus 静音包。样本来源及再生成说明见同目录 [音频样本](perception/fixtures/audio-fixtures.md)。
+
+Go overlay 的 `TestAudioTimelineSurvivesOpusPackaging` 用真实 FFmpeg 检查封装前后的声音时长；`TestMalformedAudioDoesNotInterruptVideo` 检查异常音频后的正常视频仍可交付。在应用补丁并复制 overlay 的 go2rtc 源码内运行这两项，环境需要 Go 与 FFmpeg，不运行整个上游测试集。
+
+性能、压力和实机验证入口见 [感知评估](../scripts/perception-evaluation/README.md#音频链路与资源)。这类结果不能替代回归断言，也不能用一次短时采样证明长期部署容量。

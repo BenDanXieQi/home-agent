@@ -1,4 +1,4 @@
-# 目标检测模型资产
+# 本地感知模型资产
 
 目标检测固定使用本目录的 `det_4C.onnx`。`src/perception/detection/model.ts` 通过内部常量定位文件，模型路径不作为调用参数、命令参数或环境变量。
 
@@ -20,3 +20,15 @@
 - 许可依据仍为同目录 [LICENSE.md](LICENSE.md)，未发现该模型单独的许可声明。
 
 构建后的 `dist/perception/tracking/reid-entry.js` 使用同一份资产；运行时不下载。加载失败只使人体外观特征不可用，基础检测继续运行。
+
+## 人声检测模型
+
+音频链路固定使用官方 `silero_vad.onnx`，由 `src/perception/audio/silero-vad.ts` 定位并校验。模型只返回分块人声概率，不识别说话人、不识别声音类别、不转写语音。
+
+- 来源：[Silero VAD v5.1](https://github.com/snakers4/silero-vad/tree/84768cefdf5a3852400e9d8237f7315d14b64a08)，提交 `84768cefdf5a3852400e9d8237f7315d14b64a08` 的 `src/silero_vad/data/silero_vad.onnx`。
+- SHA-256：`2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f`，初始化必须匹配；许可原文保存在 [SILERO-LICENSE](SILERO-LICENSE)，适用 MIT 许可。
+- 官方连续接口：[OnnxWrapper](https://github.com/snakers4/silero-vad/blob/84768cefdf5a3852400e9d8237f7315d14b64a08/src/silero_vad/utils_vad.py)。本项目固定 16 kHz，每次 512 个单声道采样，前置上一块末尾 64 点；int16 值除以 32768 后输入 float32 `[1,576]`。
+- 输入名 `input/state/sr`；`state` 为 float32 `[2,1,128]`，`sr` 为标量 int64 `16000`。资产元信息的动态维度为空字符串，输入固定形状由实际推理检查，不猜测其他版本。
+- 输出名 `output/stateN`；实际输出分别为 float32 `[1,1]` 和 `[2,1,128]`，拒绝非有限值或范围外概率。Silero 适配器为每个音轨运行创建独立实例，拥有状态、64 点上下文和不足 512 点的余量；连续块续接，断流及运行替换后重置。模型输入缓冲区在该实例内复用。
+
+源码及构建后的 `dist/perception/audio/process-entry.js` 使用同一份资产。运行时不下载；模型缺失、哈希不符或推理失败只将 VAD（语音活动检测）报告为不可用，音频能量与视频检测继续运行。

@@ -78,3 +78,29 @@ bun run --cwd apps/backend evaluate:models \
 固定比较阈值为 0.5，另比较 0.1/0.25/0.5/0.7；每个模型只根据 tune 子集的三类平均 F1 选择阈值，效果在 holdout 子集独立报告。各模型分数不一定同样校准，不能只比较一个阈值。时间使用同机单线程 CPU ONNX Runtime，包含预处理、推理和后处理，排除 JPEG 解码与三次预热；各模型按自身输入尺寸运行，报告的是整条模型配置的取舍，不是等输入分辨率的架构消融。
 
 正式检测回归以 `tests/perception/fixtures/indoor-manifest.json` 固定的 63 张室内图片为主，运行入口和门槛见 [感知文档](../../../../docs/perception.md#针对性验证入口)。模型对照使用同一批图片时，应把该清单保存为数据目录的 `manifest.json`；户外运动素材仅用于补充检查跟踪行为。
+
+## 音频链路与资源
+
+`benchmark-audio.ts` 比较相同 PCMA 8 kHz 单声道输入、相同 16 kHz PCM 输出和固定 Silero 模型。输入按墙钟发送；前 5 秒预热，测量期间统计父子进程总 CPU 时间、RSS、PCM 采样推进、媒体年龄、事件循环以及订阅开销。CPU 百分比以单个逻辑核为 100%；采样不足、有效性丢失或链路错误会使命令失败退出，不能把失败后的低资源占用当作优化结果。
+
+```sh
+bun run --cwd apps/backend benchmark:audio --variant=ffmpeg --sources=8 --seconds=30
+bun run --cwd apps/backend benchmark:audio --variant=libav --sources=8 --seconds=30
+bun run --cwd apps/backend benchmark:audio --variant=service --sources=8 --subscribers=16 --seconds=600
+```
+
+`ffmpeg` 使用正式独立解码器，`libav` 是仅供对照的进程内 `Demuxer → Decoder → FilterAPI` 链路，二者都执行同一个模型。`service` 使用正式音频服务、监督进程及 IPC；SSE 订阅中最后一路故意缓慢读取，用于核对隔离。命令同时报告外部 FFmpeg 与 node-av 内置 FFmpeg 版本；通过 `PERCEPTION_FFMPEG_PATH` 指定匹配版本可排除版本差异。不同版本的结果只代表具体部署组合，不能当作纯架构对照。对照按顺序运行，记录主机与其他负载；持续验证可与真实摄像头联合运行，但该结果属于竞争负载场景，不能与空闲主机数据混作同条件比较。RSS 包含基准进程及其子进程，不包括无关应用；合成输入不能证明真实摄像头的全部时钟与网络行为。
+
+保留独立 FFmpeg 解码器的依据是单轨故障可独立回收，以及实际时效与 CPU 成本；进程内 libav 的内存优势不足以单独证明整体更优。对照实现不进入生产选择分支。
+
+`verify-camera-audio.ts` 从正在运行的后端读取已提交设备清单，以工作室优先顺序验证所有摄像头；账号凭据仅从本机数据库读取。它以 `cpuRatio: 0.15` 和默认 3 fps 采样运行检测；这不是默认 `cpuRatio: 0.5` 的部署内存承诺。它启动独立 go2rtc 实例，使用本机 1986/18556 端口，提供临时浏览器页面、正式感知查询接口和资源观测，退出时释放自己拥有的播放、采集与进程。运行前保证这两个端口空闲；不替换日常使用的媒体服务。
+
+```sh
+bun --env-file=.env apps/backend/scripts/verify-camera-audio.ts \
+  --binary=/path/to/verified/go2rtc --key=config/credentials.key \
+  --management=http://127.0.0.1:3000 --seconds=600
+```
+
+浏览器需检查真实接收的音频采样和解码视频帧，不能只以 SDP 成功或连接状态作为通过依据。关闭、重新打开预览后，后台音轨运行应保持不变。运行时定期核对家庭作用域；发生变化时停止验证，避免沿用旧授权。该工具不会保存摄像头音视频。
+
+原始测量放在 Git 忽略的 `data/perception/`；功能文档只维护可复现入口、设计取舍与已知验证边界。

@@ -26,6 +26,7 @@ type homeAgentCameraState struct {
 	gate          chan struct{}
 	playbacks     map[string]*homeAgentPlaybackState
 	analyses      map[*homeAgentAnalysisConsumer]context.CancelFunc
+	audioAnalyses map[*homeAgentAudioConsumer]context.CancelFunc
 	activity      atomic.Pointer[homeAgentPacketActivity]
 	timeline      atomic.Pointer[homeAgentMediaTime]
 	releaseSource func()
@@ -83,7 +84,7 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	source := url.URL{Scheme: "xiaomi", User: url.UserPassword(session.alias, session.region), Host: body.LocalIP}
-	source.RawQuery = url.Values{"did": {body.Did}, "model": {body.Model}, "audio": {"0"}}.Encode()
+	source.RawQuery = url.Values{"did": {body.Did}, "model": {body.Model}, "audio": {"1"}}.Encode()
 	if body.Channel == 2 {
 		query := source.Query()
 		query.Set("channel", "2")
@@ -93,12 +94,15 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	camera := &homeAgentCameraState{
 		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
-		playbacks: make(map[string]*homeAgentPlaybackState),
-		analyses: make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
+		playbacks:     make(map[string]*homeAgentPlaybackState),
+		analyses:      make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
+		audioAnalyses: make(map[*homeAgentAudioConsumer]context.CancelFunc),
 	}
 	camera.stream = streams.NewHomeAgentStream(func() (core.Producer, error) {
 		producer, err := streams.GetProducer(source.String())
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		return homeAgentTimeProducer(camera, producer), nil
 	})
 	if body.ChannelCount == 2 {

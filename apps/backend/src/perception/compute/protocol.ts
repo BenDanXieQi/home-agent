@@ -2,7 +2,7 @@ import { computeBudgetSchema } from "./budget";
 import { perceptionConfigSchema } from "../config";
 import { runSchema } from "../observations";
 import { videoEventSchema } from "../video/events";
-import { analysisAccessSchema } from "../../mijia/media/analysis-stream";
+import { sourceAccessSchema } from "../sources";
 import { z } from "zod";
 import { inspect } from "node:util";
 import { frameSchema } from "../detection/frame";
@@ -28,7 +28,7 @@ export const taskSchema = z.discriminatedUnion("kind", [
 ]);
 export const videoStartSchema = z.object({
   run: runSchema,
-  access: analysisAccessSchema,
+  access: sourceAccessSchema,
   config: perceptionConfigSchema,
   executable: z.string().min(1),
 });
