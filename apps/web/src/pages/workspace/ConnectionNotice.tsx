@@ -47,7 +47,7 @@ export function ConnectionNotice() {
             to="/settings"
             className="select-none inline-flex items-center justify-between w-full py-2.25 px-2.75 rounded-[10px] text-ink bg-white text-[12px] font-medium hover:bg-[#e7e7e7]"
           >
-            检查连接 <ArrowUpRight size={14} className="shrink-0" />
+            打开设置 <ArrowUpRight size={14} className="shrink-0" />
           </Link>
         </Popover.Close>
       </Popover.Content>

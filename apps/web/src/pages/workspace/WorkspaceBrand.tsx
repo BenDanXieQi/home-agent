@@ -20,27 +20,37 @@ export function WorkspaceBrand() {
   const activity = useAtomValue(activityAtom);
   const notice = useAtomValue(connectionNoticeAtom);
   return (
-    <Popover.Root>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
+    <>
+      {notice.attention ? (
+        <Popover.Root>
+          <Popover.Trigger asChild>
+            <button
+              type="button"
+              className={`${workspaceBrandClassName} cursor-pointer`}
+              aria-label={`Home Agent，${activity.label}，${notice.title}，查看连接问题`}
+              title={notice.title}
+            >
+              <AgentAvatar state={activity.state} />
+              <span
+                className="absolute right-3 top-4 size-1.5 rounded-full bg-amber-500"
+                aria-hidden="true"
+              />
+            </button>
+          </Popover.Trigger>
+          <ConnectionNotice />
+        </Popover.Root>
+      ) : (
+        <div
           className={workspaceBrandClassName}
-          aria-label={`Home Agent，${activity.label}${notice.attention ? `，${notice.title}` : ""}，查看连接状态`}
-          title={notice.attention ? notice.title : activity.label}
+          title={activity.label}
         >
+          <span className="sr-only">Home Agent，{activity.label}</span>
           <AgentAvatar state={activity.state} />
-          {notice.attention ? (
-            <span
-              className="absolute right-3 top-4 size-1.5 rounded-full bg-amber-500"
-              aria-hidden="true"
-            />
-          ) : null}
-        </button>
-      </Popover.Trigger>
+        </div>
+      )}
       <output className="sr-only" aria-live="polite" aria-atomic="true">
         {notice.attention ? notice.title : ""}
       </output>
-      <ConnectionNotice />
-    </Popover.Root>
+    </>
   );
 }

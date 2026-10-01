@@ -1,3 +1,5 @@
+import { useMobileWorkspace } from "./use-mobile-workspace";
+import { WorkspaceBrand } from "./WorkspaceBrand";
 import { WorkspaceFrame } from "./WorkspaceFrame";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useMatches, useRouterState } from "@tanstack/react-router";
@@ -13,6 +15,7 @@ import { WorkspaceHeader } from "./WorkspaceHeader";
 import AccountDialog from "./AccountDialog";
 
 export default function WorkspaceLayout() {
+  const mobile = useMobileWorkspace();
   const [headerDetails, setHeaderDetails] = useState<HTMLDivElement | null>(
     null,
   );
@@ -60,10 +63,17 @@ export default function WorkspaceLayout() {
         </a>
         <WorkspaceFrame
           contained={contained}
-          sidebar={<WorkspaceSidebar path={path} />}
+          sidebar={
+            <WorkspaceSidebar
+              path={path}
+              mobile={mobile}
+              brand={mobile ? null : <WorkspaceBrand />}
+            />
+          }
           header={
             <WorkspaceHeader
               path={path}
+              brand={mobile ? <WorkspaceBrand /> : null}
               detailsRef={setHeaderDetails}
               actionsRef={setHeaderActions}
             />
