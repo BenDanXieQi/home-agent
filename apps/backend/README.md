@@ -4,7 +4,7 @@
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪及音频分析已接入；身份确认、音视频语义理解和媒体候选交付仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、音频分析及 P4 窗口筛选／按需媒体已接入；身份确认与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -28,17 +28,19 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 ## 接口
 
-| 接口                                 | 职责                                           |
-| ------------------------------------ | ---------------------------------------------- |
-| `GET /api/health`                    | backend 存活状态，不检查外围服务或数据库       |
-| `GET /api/config`                    | 读取连接配置及可写状态                         |
-| `PUT /api/config`                    | 校验并保存完整连接配置                         |
-| `GET /api/services/status`           | 检查 Agent 与 go2rtc 的接口是否可用            |
-| `POST /api/chat`                     | 将 JSON 请求转发至 Agent，透传响应与 SSE       |
-| `GET /api/perception`                | 本地检测、人宠跟踪与音频的健康及最新观测       |
-| `GET /api/perception/stream`         | 订阅本地感知当前状态，不传输媒体片段           |
-| `POST /api/perception/images/detect` | 接收图片字节并返回该输入的检测结果，复用共享池 |
-| `POST /api/perception/retry`         | 显式重试检测与音频计算，重新准入失败音轨       |
+| 接口                                     | 职责                                                                                |
+| ---------------------------------------- | ----------------------------------------------------------------------------------- |
+| `GET /api/health`                        | backend 存活状态，不检查外围服务或数据库                                            |
+| `GET /api/config`                        | 读取连接配置及可写状态                                                              |
+| `PUT /api/config`                        | 校验并保存完整连接配置                                                              |
+| `GET /api/services/status`               | 检查 Agent 与 go2rtc 的接口是否可用                                                 |
+| `POST /api/chat`                         | 将 JSON 请求转发至 Agent，透传响应与 SSE                                            |
+| `GET /api/perception`                    | 本地检测、人宠跟踪与音频的健康及最新观测                                            |
+| `GET /api/perception/stream`             | 订阅本地感知当前状态，不传输媒体片段                                                |
+| `POST /api/perception/images/detect`     | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
+| `GET /api/perception/windows`            | 有界窗口、筛选事实、候选摘要和媒体资源用量                                          |
+| `POST /api/perception/windows/:id/media` | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
+| `POST /api/perception/retry`             | 显式重试检测与音频计算，重新准入失败音轨                                            |
 
 图片上传接口只要求本机访问及模型可用，不要求家庭或媒体就绪；输入限额、临时文件、等待与共享计算行为见[图片上传分析](../../docs/perception.md#独立图片上传分析)。`perception/image-upload.ts` 负责 HTTP 字节与临时输入，感知服务按需准备、复用和恢复已有检测池，视频禁用不阻止图片计算恢复。
 
@@ -124,10 +126,13 @@ src/
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、SSE 与限时设备推送日志
-├── perception/            # 本地检测、来源协调、人宠跟踪、独立音频解码与连续 VAD、隔离计算、当前观测与接口
+├── perception/            # 本地检测、来源协调、人宠跟踪、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
 │   ├── source-lease.ts     # 音视频共用的来源资格撤销与取消联动
-│   └── audio/              # 连续分块、Silero 适配、解码与音频进程监督
+│   ├── audio/              # 连续分块、Silero 适配、解码与音频进程监督
+│   ├── window/             # 窗口聚合、覆盖判定、有限期输入与访问接口
+│   ├── gate/               # 场景筛选和裁切区域规则
+│   └── media/              # 媒体解码、表示参数、编码与受控读取
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验

@@ -17,6 +17,7 @@ export function createVideoSource(options: {
     | "silenceTimeoutMs"
     | "onMedia"
   >;
+  frame?: (frame: VideoFrame) => void;
   ready: () => void;
   media: Parameters<typeof createFfmpegDecoder>[0]["onMedia"];
   failure: (error: unknown) => void;
@@ -51,6 +52,7 @@ export function createVideoSource(options: {
             actions: [
               assign(({ context }) => ({ sequence: context.sequence + 1 })),
               ({ context, event }) => {
+                options.frame?.({ ...event.frame, sequence: context.sequence });
                 metrics.values.complete++;
                 metrics.values.sampled++;
                 if (

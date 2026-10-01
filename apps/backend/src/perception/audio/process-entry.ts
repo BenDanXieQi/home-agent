@@ -132,7 +132,11 @@ process.on("message", (message: unknown) => {
               sequence: view.sequence + 1,
               vadError: result.vadError ?? modelError,
             };
-            await send({ kind: "track", track: view });
+            await send({
+              kind: "track",
+              track: view,
+              pcm: new Int16Array(pcm),
+            });
           },
         }),
       };

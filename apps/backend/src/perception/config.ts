@@ -1,3 +1,4 @@
+import { windowPolicySchema } from "@home-agent/api/contracts";
 import { cpuRatioSchema } from "./compute/budget";
 import { z } from "zod";
 
@@ -8,6 +9,7 @@ export const sourceSelectionSchema = z.strictObject({
 export const perceptionConfigSchema = z
   .strictObject({
     cpuRatio: cpuRatioSchema,
+    window: windowPolicySchema.default(() => windowPolicySchema.parse({})),
     sources: z
       .union([z.literal("household"), z.array(sourceSelectionSchema).max(8)])
       .default([]),

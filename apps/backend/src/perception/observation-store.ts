@@ -104,6 +104,8 @@ export function createObservationStore(maxAgeMs: number) {
       changed();
     },
     receive(event: z.infer<typeof videoEventSchema>) {
+      if (event.event === "window_frame" || event.event === "window_gap")
+        return;
       const entry = sources.get(sourceKey(event.run));
       if (
         !entry ||

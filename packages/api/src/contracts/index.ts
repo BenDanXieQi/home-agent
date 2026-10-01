@@ -100,3 +100,5 @@ export {
 } from "./perception";
 
 export { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
+
+export * from "./perception-window";

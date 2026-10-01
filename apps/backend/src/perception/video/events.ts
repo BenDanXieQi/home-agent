@@ -1,4 +1,8 @@
 import {
+  windowFrameEventSchema,
+  windowGapEventSchema,
+} from "../window/protocol";
+import {
   sourceMediaSchema,
   trackingObservationSchema,
 } from "@home-agent/api/contracts";
@@ -7,6 +11,8 @@ import { runSchema, observationSchema } from "../observations";
 import { videoMetricsSchema } from "./metrics";
 
 export const videoEventSchema = z.discriminatedUnion("event", [
+  windowFrameEventSchema,
+  windowGapEventSchema,
   z.object({
     event: z.literal("media"),
     run: runSchema,
