@@ -275,14 +275,10 @@ export function buildRoomContext(
   return context;
 }
 
+// Property expiry belongs to HouseholdRuntime; the snapshot retains its original evidence.
 export function contextExpired(
   context: z.infer<typeof roomContextSchema>,
   now = Date.now(),
 ) {
-  return (
-    now >= Date.parse(context.captured_at) + roomAnalysisLimits.maxAgeMs ||
-    context.facts.some(
-      (fact) => fact.expires_at !== null && Date.parse(fact.expires_at) <= now,
-    )
-  );
+  return now >= Date.parse(context.captured_at) + roomAnalysisLimits.maxAgeMs;
 }

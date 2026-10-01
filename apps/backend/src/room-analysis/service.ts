@@ -50,6 +50,8 @@ function roomEntry(scope: string, room: string | null) {
       attempt: null,
     }),
     dependencies: null as ReturnType<typeof roomDependencies> | null,
+    runningDependencies: null as ReturnType<typeof roomDependencies> | null,
+    invalidated: false,
     pending: [] as z.infer<typeof analysisChangeSchema>[],
     truncated: false,
     manual: false,
@@ -107,8 +109,26 @@ export class RoomAnalysisService {
             !canTrigger(change.value) ||
             (previous.success &&
               factMetadata(previous.data) !== factMetadata(change.value))
-          )
+          ) {
             this.baselines.delete(change.key);
+            if (previous.success) {
+              const fact = previous.data;
+              const entry = this.rooms.get(fact.room_id);
+              if (entry) {
+                const pending = entry.pending.filter(
+                  (item) =>
+                    item.device_id !== fact.device_id ||
+                    item.siid !== fact.siid ||
+                    item.piid !== fact.piid,
+                );
+                if (pending.length !== entry.pending.length) {
+                  entry.pending = pending;
+                  entry.truncated = true;
+                  this.dirty.add(fact.room_id);
+                }
+              }
+            }
+          }
           if (
             change.op === "upsert" &&
             previous.success &&
@@ -184,6 +204,21 @@ export class RoomAnalysisService {
         entry.pending.push(parsed.data);
         this.queue(entry, false);
         this.dirty.add(fact.room_id);
+      }
+      // Observe each commit before a recovery can hide an intervening invalidation.
+      for (const room of this.dirty) {
+        const entry = this.rooms.get(room);
+        if (!entry) continue;
+        this.reconcile(entry);
+        if (
+          entry.runningDependencies &&
+          !entry.invalidated &&
+          roomDependenciesChanged(
+            entry.runningDependencies,
+            roomDependencies(household.snapshot(), room),
+          )
+        )
+          entry.invalidated = true;
       }
       if (this.dirty.size) this.schedule();
     });
@@ -333,9 +368,6 @@ export class RoomAnalysisService {
           next,
           Date.parse(latest.context.captured_at) + roomAnalysisLimits.maxAgeMs,
         );
-        for (const fact of latest.context.facts)
-          if (fact.expires_at)
-            next = Math.min(next, Date.parse(fact.expires_at));
       }
     }
     this.dirty.clear();
@@ -407,6 +439,8 @@ export class RoomAnalysisService {
     const request = entry.state.attempt;
     const controller = new AbortController();
     entry.controller = controller;
+    entry.runningDependencies = dependencies;
+    entry.invalidated = false;
     entry.lastStarted = Date.now();
     entry.state.status = "running";
     entry.state.message = null;
@@ -434,6 +468,7 @@ export class RoomAnalysisService {
       )
         throw new Error("AI 总结未通过观测描述或证据校验，结果未展示。");
       if (
+        entry.invalidated ||
         contextExpired(context) ||
         roomDependenciesChanged(
           dependencies,
@@ -465,6 +500,7 @@ export class RoomAnalysisService {
           : "房间分析未完成，请稍后重试。";
     } finally {
       entry.controller = null;
+      entry.runningDependencies = null;
       this.running--;
       entry.state.updated_at = new Date().toISOString();
       if (entry.queuedAt) entry.state.status = "queued";
