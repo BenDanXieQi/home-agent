@@ -6,11 +6,13 @@ import { navigation } from "../../navigation";
 
 export function WorkspaceHeader({
   path,
+  brand,
   detailsRef,
   actionsRef,
   children,
 }: {
   path: string;
+  brand?: ReactNode;
   children?: ReactNode;
   detailsRef?: ComponentProps<"div">["ref"];
   actionsRef?: ComponentProps<"div">["ref"];
@@ -22,7 +24,8 @@ export function WorkspaceHeader({
   const reducedMotion = useReducedMotion();
   return (
     <header className="sticky top-0 z-10 flex min-h-14 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-paper px-4 py-3 [&_h1]:text-[18px] [&_h1]:font-semibold [&_h1]:tracking-tight max-md:gap-2 max-md:[&_h1]:text-lg">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+        {brand}
         <div
           className="grid size-6 shrink-0 place-items-center text-ink/75 motion-safe:animate-[heading-icon-enter_180ms_ease-out] max-md:hidden"
           aria-hidden="true"

@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai";
 import { Dialog } from "radix-ui";
-import { WorkspaceBrand } from "./WorkspaceBrand";
+import type { ReactNode } from "react";
 import { WorkspaceNavigation } from "./WorkspaceNavigation";
 import { SidebarFrame } from "./WorkspaceFrame";
 import { workspaceAccountClassName } from "./workspace-styles";
@@ -8,7 +8,15 @@ import { AccountAvatar } from "../../modules/mijia/AccountAvatar";
 import { mijiaAccountAtom } from "../../modules/mijia/account";
 import { mijiaAccountLabelAtom } from "../../modules/mijia/login";
 import { deviceCapabilityFailureCountAtom } from "../../modules/devices/state";
-export function WorkspaceSidebar({ path }: { path: string }) {
+export function WorkspaceSidebar({
+  path,
+  brand,
+  mobile,
+}: {
+  path: string;
+  brand?: ReactNode;
+  mobile: boolean;
+}) {
   const capabilityFailures = useAtomValue(deviceCapabilityFailureCountAtom);
   const accountLabel = useAtomValue(mijiaAccountLabelAtom);
   const account = useAtomValue(mijiaAccountAtom);
@@ -17,18 +25,20 @@ export function WorkspaceSidebar({ path }: { path: string }) {
     "米家账号";
   return (
     <SidebarFrame
-      brand={<WorkspaceBrand />}
+      brand={brand}
       account={
-        <Dialog.Trigger asChild>
-          <button
-            type="button"
-            className={workspaceAccountClassName}
-            aria-label={`账户，${accountName}，${accountLabel}`}
-          >
-            <AccountAvatar />
-            <span className="whitespace-nowrap max-md:hidden">账户</span>
-          </button>
-        </Dialog.Trigger>
+        mobile ? null : (
+          <Dialog.Trigger asChild>
+            <button
+              type="button"
+              className={workspaceAccountClassName}
+              aria-label={`账户，${accountName}，${accountLabel}`}
+            >
+              <AccountAvatar />
+              <span className="whitespace-nowrap max-md:hidden">账户</span>
+            </button>
+          </Dialog.Trigger>
+        )
       }
     >
       <WorkspaceNavigation

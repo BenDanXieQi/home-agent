@@ -1,7 +1,11 @@
 import { useAtomValue } from "jotai";
+import { ChevronRight, CircleAlert, Hourglass } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { AccountAvatar } from "../../modules/mijia/AccountAvatar";
+import { mijiaAccountLabelAtom } from "../../modules/mijia/login";
+import { useMobileWorkspace } from "../workspace/use-mobile-workspace";
 import { m } from "motion/react";
 import { contentSwap } from "../../utils/motion";
-import { CircleAlert, Hourglass } from "lucide-react";
 import { mediaBindingAtom } from "../../modules/playback/state";
 import { mijiaActionErrorAtom } from "../../modules/mijia/commands";
 import {
@@ -19,9 +23,30 @@ export default function SettingsPage() {
   const { ready } = useAtomValue(connectionReadinessAtom);
   const binding = useAtomValue(mediaBindingAtom);
   const actionError = useAtomValue(mijiaActionErrorAtom);
+  const accountLabel = useAtomValue(mijiaAccountLabelAtom);
+  const mobile = useMobileWorkspace();
 
   return (
     <>
+      {mobile ? (
+        <Dialog.Trigger asChild>
+          <button
+            type="button"
+            className="mb-6 flex min-h-20 w-full items-center gap-3 rounded-2xl bg-white p-5 text-left shadow-panel hover:bg-black/4 md:hidden"
+            aria-haspopup="dialog"
+            aria-label={`米家账号，${accountLabel}，管理账户`}
+          >
+            <AccountAvatar />
+            <span className="flex-1">
+              <span className="block text-base font-semibold">米家账号</span>
+              <span className="mt-1 block text-xs text-muted">
+                {accountLabel}
+              </span>
+            </span>
+            <ChevronRight size={18} className="text-muted" aria-hidden="true" />
+          </button>
+        </Dialog.Trigger>
+      ) : null}
       {!ready || notice.attention ? (
         <section
           aria-live="polite"

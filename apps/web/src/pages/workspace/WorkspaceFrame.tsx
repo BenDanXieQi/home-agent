@@ -40,12 +40,12 @@ export function SidebarFrame({
       {brand}
       <nav
         id="workspace-navigation"
-        className="relative isolate flex flex-1 flex-col gap-2 px-2 pt-2 max-md:flex-row max-md:gap-1 max-md:p-2"
+        className="relative isolate flex min-w-0 flex-1 flex-col gap-2 px-2 pt-2 max-md:flex-row max-md:gap-1 max-md:p-2"
         aria-label="工作台导航"
       >
         {children}
       </nav>
-      <div className="mx-2 mb-2 flex items-center max-md:m-0 max-md:border-0 max-md:bg-transparent max-md:p-0 max-md:pl-1">
+      <div className="mx-2 mb-2 flex shrink-0 items-center max-md:hidden">
         {account}
       </div>
     </aside>
