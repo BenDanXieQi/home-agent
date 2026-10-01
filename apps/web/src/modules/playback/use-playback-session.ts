@@ -28,7 +28,9 @@ export function usePlaybackSession({
   onStop?: () => void;
 }) {
   const sessions = usePlaybackSessions();
-  const [session, setSession] = useState<PlaybackSession | null>(null);
+  const [session, setSession] = useState(() =>
+    target ? (sessions.get(target) ?? null) : null,
+  );
   const [attempt, setAttempt] = useState(0);
   const [statusAtom] = useState(createPlaybackStatusAtom);
   const setPhase = useSetAtom(statusAtom);
@@ -71,8 +73,8 @@ export function usePlaybackSession({
     registerPlayback(statusAtom, true);
     next.start();
     return () => {
-      detach();
       unsubscribe();
+      detach();
       registerPlayback(statusAtom, false);
       lease.release();
       onStop?.();

@@ -24,7 +24,7 @@ export const navigation = [
   },
   {
     to: "/cameras",
-    label: "视频",
+    label: "看家",
     icon: Video,
     cornerRadius: 22,
     mobilePrimary: true,

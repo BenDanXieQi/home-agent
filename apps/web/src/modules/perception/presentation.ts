@@ -63,7 +63,7 @@ export function createFramePresentation(
   let failure: string | undefined;
   let published = "";
   function notify() {
-    const state = `${!!displayed}:${frozen}:${failure ?? ""}`;
+    const state = `${!!displayed}:${displayed?.originalWidth}:${displayed?.originalHeight}:${frozen}:${failure ?? ""}`;
     if (state === published) return;
     published = state;
     changed();
@@ -356,7 +356,14 @@ export function createFramePresentation(
       };
     },
     snapshot() {
-      return { hasFrame: !!displayed, frozen, failure };
+      return {
+        hasFrame: !!displayed,
+        frozen,
+        failure,
+        aspectRatio: displayed
+          ? displayed.originalWidth / displayed.originalHeight
+          : undefined,
+      };
     },
     close() {
       closed = true;

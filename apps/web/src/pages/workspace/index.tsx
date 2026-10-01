@@ -31,6 +31,7 @@ export default function WorkspaceLayout() {
   const current = navigation.find(
     (item) => item.to === path || path.startsWith(`${item.to}/`),
   );
+  const pageEntranceKey = current?.to ?? "workspace";
   const page = useRef<HTMLDivElement>(null);
   const reducedMotion = useReducedMotion();
   const headerSlots = useMemo(
@@ -45,8 +46,8 @@ export default function WorkspaceLayout() {
     });
     return () => animation?.cancel();
   }, [
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A committed route change replays the page entrance without remounting it.
-    path,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only switching navigation sections replays the page entrance; detail routes remain visible.
+    pageEntranceKey,
     reducedMotion,
   ]);
   useEffect(() => {

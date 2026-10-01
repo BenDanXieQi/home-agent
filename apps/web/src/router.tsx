@@ -78,6 +78,12 @@ const cameraDetailRoute = createRoute({
   path: "$deviceId/$channel",
   component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
 });
+const cameraViewRoute = createRoute({
+  getParentRoute: () => camerasRoute,
+  path: "$deviceId/$channel/view",
+  staticData: { contentLayout: "viewport" },
+  component: lazyRouteComponent(() => import("./pages/cameras/CameraView")),
+});
 const imageAnalysisRoute = createRoute({
   getParentRoute: () => publicWorkspaceRoute,
   path: "/cameras/images",
@@ -106,7 +112,11 @@ export const router = createRouter({
       devicesRoute,
       membersRoute,
       addMemberRoute,
-      camerasRoute.addChildren([camerasIndexRoute, cameraDetailRoute]),
+      camerasRoute.addChildren([
+        camerasIndexRoute,
+        cameraDetailRoute,
+        cameraViewRoute,
+      ]),
       deviceLogsRoute,
       dataRoute,
       settingsRoute,
@@ -116,6 +126,21 @@ export const router = createRouter({
   scrollRestoration: true,
   getScrollRestorationKey: (location) => location.href,
   defaultPreload: "intent",
+  defaultViewTransition: {
+    types: ({ fromLocation, toLocation }) => {
+      if (window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+        return false;
+      const from = fromLocation?.pathname;
+      const to = toLocation.pathname;
+      const detail = /^\/cameras\/[^/]+\/[12](?:\/view)?\/?$/;
+      return (from === "/cameras" && detail.test(to)) ||
+        (from !== undefined &&
+          detail.test(from) &&
+          (to === "/cameras" || detail.test(to)))
+        ? ["camera-expand"]
+        : false;
+    },
+  },
 });
 declare module "@tanstack/react-router" {
   interface StaticDataRouteOption {

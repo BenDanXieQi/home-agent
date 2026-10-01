@@ -1,0 +1,52 @@
+/* Picture and black backdrop resize separately, so letterboxing stays continuous. */
+html:active-view-transition-type(camera-expand) {
+  &::view-transition-group(.camera),
+  &::view-transition-group(.camera-background) {
+    animation-duration: 320ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  &::view-transition-group(.camera) {
+    z-index: 2;
+  }
+
+  &::view-transition-group(.camera-background) {
+    z-index: 1;
+  }
+
+  &::view-transition-old(root) {
+    animation: none;
+    opacity: 0;
+  }
+
+  &::view-transition-new(root) {
+    animation: none;
+  }
+
+  &::view-transition-old(.camera),
+  &::view-transition-new(.camera),
+  &::view-transition-old(.camera-background),
+  &::view-transition-new(.camera-background) {
+    animation: none;
+    mix-blend-mode: normal;
+    width: 100%;
+    height: 100%;
+    object-fit: fill;
+  }
+
+  &::view-transition-old(.camera),
+  &::view-transition-old(.camera-background) {
+    opacity: 1;
+  }
+
+  &::view-transition-new(.camera),
+  &::view-transition-old(.camera):only-child,
+  &::view-transition-new(.camera-background),
+  &::view-transition-old(.camera-background):only-child {
+    opacity: 0;
+  }
+
+  &::view-transition-new(.camera-background):only-child {
+    opacity: 1;
+  }
+}

@@ -5,6 +5,7 @@ import { createPlaybackSessions } from "./sessions";
 import { canStartPlaybackAtom } from "./access";
 import { mediaStateAtom } from "./state";
 import { householdSnapshotAtom, householdSyncedAtom } from "../household/state";
+import { playbackPageActiveAtom } from "./page-activity";
 import { devicesAtom } from "../devices/state";
 
 /** The video route owns connections; atoms still hold only UI state and eligibility. */
@@ -24,7 +25,7 @@ export function PlaybackProvider({
   useEffect(() => {
     const reconcile = () => {
       if (
-        document.visibilityState !== "visible" ||
+        !store.get(playbackPageActiveAtom) ||
         !store.get(canStartPlaybackAtom) ||
         !store.get(householdSyncedAtom)
       ) {
@@ -50,12 +51,11 @@ export function PlaybackProvider({
       householdSnapshotAtom,
       householdSyncedAtom,
       canStartPlaybackAtom,
+      playbackPageActiveAtom,
     ].map((state) => store.sub(state, reconcile));
-    document.addEventListener("visibilitychange", reconcile);
     reconcile();
     return () => {
       for (const stop of unsubscribe) stop();
-      document.removeEventListener("visibilitychange", reconcile);
       sessions.close();
     };
   }, [sessions, store]);

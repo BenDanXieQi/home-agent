@@ -1,10 +1,10 @@
-import { usePlaybackSessions } from "../../modules/playback/playback-context";
-import { CameraFullscreen } from "./CameraFullscreen";
+import { Link } from "@tanstack/react-router";
 import { CameraHeader } from "./CameraHeader";
 import { twMerge } from "tailwind-merge";
-import { Pause, Play, RotateCcw } from "lucide-react";
+import { Maximize, Pause, Play, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
-import { useState, type ReactNode, type ComponentProps } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
+import { useAtom } from "jotai";
 import { AnimatePresence, m } from "motion/react";
 import { contentSwap } from "../../utils/motion";
 import { useMijiaPlayback } from "../../modules/playback/use-mijia-playback";
@@ -14,6 +14,9 @@ import {
 } from "./playback-presentation";
 import { PlaybackLoader } from "./PlaybackLoader";
 import { PlaybackStatus } from "./PlaybackStatus";
+import { buttonStyles } from "../../components/button-styles";
+import { cameraTransitionName } from "./camera-styles";
+import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 
 /**
  * Surface and status row shared by every tile state, so switching between
@@ -30,6 +33,8 @@ export function CameraFrame({
   statusAction,
   statusContent,
   loader,
+  transitionName,
+  aspectRatio = 16 / 9,
 }: {
   children?: ReactNode;
   placeholder: string | null;
@@ -41,11 +46,29 @@ export function CameraFrame({
   statusAction?: ReactNode;
   statusContent?: ReactNode;
   loader?: ReactNode;
+  transitionName?: string;
+  aspectRatio?: number;
 }) {
   return (
     <>
-      <div className="camera-surface relative aspect-video w-full bg-[#111111] [&_video]:block [&_video]:size-full [&_video]:object-contain">
-        {children}
+      <div
+        className="camera-surface relative grid aspect-video w-full place-items-center bg-[#111111] [container-type:size] [view-transition-class:camera-background] [&_video]:block [&_video]:size-full [&_video]:object-contain"
+        style={{
+          viewTransitionName: transitionName
+            ? `${transitionName}-background`
+            : undefined,
+        }}
+      >
+        <div
+          className="relative [view-transition-class:camera]"
+          style={{
+            viewTransitionName: transitionName,
+            width: `min(100cqw, calc(100cqh * ${aspectRatio}))`,
+            height: `min(100cqh, calc(100cqw / ${aspectRatio}))`,
+          }}
+        >
+          {children}
+        </div>
         {/* The first frame is revealed by fading the placeholder, not by a cut. */}
         <AnimatePresence initial={false}>
           {placeholder !== null ? (
@@ -105,56 +128,6 @@ export function CameraFrame({
   );
 }
 
-function CameraPlayback({
-  revision,
-  scope_epoch,
-  deviceId,
-  channel,
-  name,
-  notice,
-  statusAction,
-}: Parameters<typeof useMijiaPlayback>[0] & {
-  name: string;
-  notice?: ReactNode;
-  statusAction?: ReactNode;
-}) {
-  const { videoRef, snapshot } = useMijiaPlayback({
-    revision,
-    scope_epoch,
-    deviceId,
-    channel,
-  });
-  const presentation = playbackPresentation(snapshot);
-
-  return (
-    <CameraFrame
-      notice={notice}
-      statusAction={statusAction}
-      waiting={snapshot.phase === "connecting" || snapshot.phase === "waiting"}
-      placeholder={
-        snapshot.phase === "playing" ||
-        (snapshot.phase === "hidden" && snapshot.firstFrameAt !== null)
-          ? null
-          : snapshot.phase === "error"
-            ? "暂时无法播放"
-            : "等待摄像头画面"
-      }
-      tone={presentation.tone}
-      status={presentation.label}
-      loader={<PlaybackLoader active={snapshot.visible} />}
-      statusContent={<PlaybackStatus snapshot={snapshot} />}
-    >
-      <video
-        ref={videoRef}
-        autoPlay
-        muted
-        playsInline
-        aria-label={`${name} 实时画面`}
-      />
-    </CameraFrame>
-  );
-}
-
 export function MijiaPlayer({
   revision,
   scope_epoch,
@@ -166,17 +139,48 @@ export function MijiaPlayer({
   onEnabledChange,
   notice,
   statusAction,
-}: ComponentProps<typeof CameraPlayback> & {
+  expanded = false,
+}: NonNullable<Parameters<typeof useMijiaPlayback>[0]> & {
+  name: string;
+  notice?: ReactNode;
+  statusAction?: ReactNode;
   enabled: boolean;
   active: boolean;
   onEnabledChange: (enabled: boolean) => void;
+  expanded?: boolean;
 }) {
-  const [attempt, setAttempt] = useState(0);
-  const sessions = usePlaybackSessions();
+  const { videoRef, snapshot, restart } = useMijiaPlayback(
+    enabled && active ? { revision, scope_epoch, deviceId, channel } : null,
+  );
+  const aspectAtom = useMemo(
+    () => createCameraAspectAtom(deviceId, channel),
+    [deviceId, channel],
+  );
+  const [aspectRatio, setAspectRatio] = useAtom(aspectAtom);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return undefined;
+    const recordRatio = () => {
+      if (video.videoWidth && video.videoHeight)
+        setAspectRatio(video.videoWidth / video.videoHeight);
+    };
+    video.addEventListener("loadedmetadata", recordRatio);
+    video.addEventListener("resize", recordRatio);
+    recordRatio();
+    return () => {
+      video.removeEventListener("loadedmetadata", recordRatio);
+      video.removeEventListener("resize", recordRatio);
+    };
+  }, [videoRef, setAspectRatio]);
+  const presentation = playbackPresentation(snapshot);
+  const playing = enabled && active;
   return (
-    <CameraFullscreen name={name}>
+    <div
+      className={expanded ? "flex h-full min-h-0 flex-col" : "relative"}
+      aria-label={`${name} 视频预览`}
+    >
       <CameraHeader title={name}>
-        <div className="flex gap-1 relative shrink-0 flex-nowrap mr-9">
+        <div className="flex gap-1 relative shrink-0 flex-nowrap">
           <AnimatePresence mode="popLayout" initial={false}>
             {enabled ? (
               <Button
@@ -206,33 +210,61 @@ export function MijiaPlayer({
             title={enabled ? "重新播放" : "开始播放"}
             icon={enabled ? <RotateCcw size={15} /> : <Play size={15} />}
             onClick={() => {
-              sessions.invalidate({ deviceId, channel, scope_epoch, revision });
-              setAttempt((value) => value + 1);
+              restart();
               onEnabledChange(true);
             }}
           />
+          {!expanded ? (
+            <Link
+              to="/cameras/$deviceId/$channel/view"
+              params={{ deviceId, channel: String(channel) }}
+              className={twMerge(
+                `${buttonStyles.base} ${buttonStyles.ghost} size-8 min-h-8 min-w-8 rounded-[10px] p-0 hover:bg-surface hover:text-ink`,
+              )}
+              aria-label={`放大查看${name}`}
+              title="放大查看"
+            >
+              <Maximize size={15} aria-hidden="true" />
+            </Link>
+          ) : null}
         </div>
       </CameraHeader>
-      {enabled && active ? (
-        <CameraPlayback
-          key={attempt}
-          revision={revision}
-          scope_epoch={scope_epoch}
-          deviceId={deviceId}
-          channel={channel}
-          name={name}
-          notice={notice}
-          statusAction={statusAction}
+      <CameraFrame
+        aspectRatio={aspectRatio}
+        transitionName={cameraTransitionName(deviceId, channel)}
+        notice={notice}
+        statusAction={statusAction}
+        waiting={
+          playing &&
+          snapshot.firstFrameAt === null &&
+          (snapshot.phase === "connecting" || snapshot.phase === "waiting")
+        }
+        placeholder={
+          !playing
+            ? enabled
+              ? "画面可见时自动播放"
+              : "已暂停播放"
+            : snapshot.phase === "error"
+              ? "暂时无法播放"
+              : snapshot.firstFrameAt !== null
+                ? null
+                : "等待摄像头画面"
+        }
+        tone={playing ? presentation.tone : "unknown"}
+        status={playing ? presentation.label : enabled ? "等待显示" : "已暂停"}
+        loader={<PlaybackLoader active={playing && snapshot.visible} />}
+        statusContent={
+          playing ? <PlaybackStatus snapshot={snapshot} /> : undefined
+        }
+      >
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          aria-label={`${name} 实时画面`}
         />
-      ) : (
-        <CameraFrame
-          notice={notice}
-          statusAction={statusAction}
-          placeholder={enabled ? "画面可见时自动播放" : "已暂停播放"}
-          tone="unknown"
-          status={enabled ? "等待显示" : "已暂停"}
-        />
-      )}
-    </CameraFullscreen>
+      </CameraFrame>
+    </div>
   );
 }
