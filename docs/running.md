@@ -12,6 +12,8 @@ bun run status                 # 查看运行状态
 
 两种模式都需要 Docker，分别用于数据库和 go2rtc 构建／运行，无需本机安装 Go。首次构建需联网。模式切换由启动命令管理，会中断现有播放；不要同时手工启动另一套 go2rtc。
 
+修改 `docker/go2rtc/` 源码后，需要重新构建并重启 go2rtc；已运行的服务不会因再次执行 `bun run dev` 自动更新。Docker 模式使用 `docker compose up -d --build --no-deps go2rtc`，原生模式使用 `bun run stop` 后再执行 `bun run dev --mode native`。重启期间摄像头连接会中断并重新建立。音频请求返回 HTTP 404、`invalid_request` 时，应核对运行产物是否包含当前音频接口。
+
 go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `config/runtime/`，均不提交 Git。修改配置后用 `bun run stop`、`bun run dev` 重启。开发终端按 Ctrl+C 后依赖进程仍保持运行，但 backend 正常关闭会请求释放其 go2rtc 运行时会话和媒体资源；go2rtc 进程仍在不等于摄像头仍在取流。完整停止请用 `bun run stop`，异常退出的资源清理见[米家资源释放](mijia.md#资源释放)。
 
 ### Docker 摄像头网络

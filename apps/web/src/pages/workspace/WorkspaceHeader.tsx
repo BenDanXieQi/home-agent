@@ -1,4 +1,9 @@
-import type { ComponentProps, ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { House } from "lucide-react";
 import { TextReveal } from "../../components/TextReveal";
@@ -22,8 +27,30 @@ export function WorkspaceHeader({
   );
   const PageIcon = current?.icon ?? House;
   const reducedMotion = useReducedMotion();
+  const header = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const element = header.current;
+    const workspace = element?.parentElement;
+    if (!element || !workspace) return undefined;
+    const updateHeight = () => {
+      workspace.style.setProperty(
+        "--workspace-header-height",
+        `${element.getBoundingClientRect().height}px`,
+      );
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element, { box: "border-box" });
+    return () => {
+      observer.disconnect();
+      workspace.style.removeProperty("--workspace-header-height");
+    };
+  }, []);
   return (
-    <header className="sticky top-0 z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-paper px-4 py-3 [&_h1]:text-[18px] [&_h1]:font-semibold [&_h1]:tracking-tight max-md:gap-2 max-md:[&_h1]:text-lg">
+    <header
+      ref={header}
+      className="sticky top-0 z-10 flex min-h-16 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 bg-paper px-4 py-3 [&_h1]:text-[18px] [&_h1]:font-semibold [&_h1]:tracking-tight max-md:gap-2 max-md:[&_h1]:text-lg"
+    >
       <div className="flex min-w-0 items-center gap-2">
         {brand}
         <div
