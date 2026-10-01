@@ -64,6 +64,7 @@ export class MiotMqtt {
   ) {
     this.client = connect("mqtts://cn-ha.mqtt.io.mi.com:8883", {
       protocolVersion: 5,
+      properties: { maximumPacketSize: 256 * 1024 },
       clientId: `miloco:${session.uuid}`,
       username: "2882303761520431603",
       password: session.accessToken,
@@ -88,6 +89,13 @@ export class MiotMqtt {
     this.client.on("message", (topic, payload, packet) => {
       if (this.status !== "connected") return;
       this.stats.received++;
+      if (payload.length > 256 * 1024) {
+        this.stats.discarded++;
+        this.close("payload_too_large").catch(() => {
+          console.warn("MQTT close failed after an oversized payload");
+        });
+        return;
+      }
       const events = pushObservations(
         topic,
         payload,

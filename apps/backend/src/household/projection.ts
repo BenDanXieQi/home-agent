@@ -1,3 +1,4 @@
+import { initialCollectionStatus } from "@home-agent/api/observations";
 import { isDeepStrictEqual } from "node:util";
 import {
   changeSchema,
@@ -42,6 +43,10 @@ export function initialProjection() {
     home: {},
     room: {},
     device: {},
+    latest: {},
+    source_health: {},
+    device_coverage: {},
+    collection: { collection: initialCollectionStatus() },
   });
 }
 

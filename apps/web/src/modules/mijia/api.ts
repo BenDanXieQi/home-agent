@@ -39,7 +39,9 @@ export function executeMijiaCommand(
     timeoutMs:
       command.type === "verifyLogin"
         ? mijiaTimeouts.verification
-        : mijiaTimeouts.control,
+        : command.type === "selectHome"
+          ? 35_000
+          : mijiaTimeouts.control,
   };
   switch (command.type) {
     case "selectHome":

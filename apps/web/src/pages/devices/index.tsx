@@ -1,3 +1,4 @@
+import { householdSnapshotAtom } from "../../modules/household/state";
 import { useAtomValue } from "jotai";
 import { useRef } from "react";
 import { HouseholdAccess } from "../../modules/household/HouseholdAccess";
@@ -14,6 +15,7 @@ import { DeviceRecovery } from "./DeviceRecovery";
 
 export default function DevicesPage() {
   const layoutRef = useRef<HTMLDivElement>(null);
+  const snapshot = useAtomValue(householdSnapshotAtom);
   const inventory = useAtomValue(deviceInventoryAtom);
   const count = useAtomValue(deviceCountAtom);
   const reliable = useAtomValue(householdReliableAtom);
@@ -29,6 +31,7 @@ export default function DevicesPage() {
       <HouseholdAccess fallback={<DeviceBrowserSkeleton />}>
         {inventory ? (
           <DeviceBrowser
+            key={snapshot?.scope_epoch}
             status={inventory.status}
             reliable={reliable}
             layoutRef={layoutRef}

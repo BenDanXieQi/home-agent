@@ -20,7 +20,7 @@ const rootRoute = createRootRoute({
         to="/"
         className={`${buttonStyles.base} ${buttonStyles.primary} hover:bg-ink/85 mt-6`}
       >
-        返回设备
+        返回房间
       </Link>
     </div>
   ),
@@ -43,6 +43,19 @@ const devicesRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/devices",
   component: lazyRouteComponent(() => import("./pages/devices/index")),
+});
+const membersRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/members",
+  validateSearch: (search: Record<string, unknown>) => ({
+    member: typeof search.member === "string" ? search.member : undefined,
+  }),
+  component: lazyRouteComponent(() => import("./pages/members/index")),
+});
+const addMemberRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/members/new",
+  component: lazyRouteComponent(() => import("./pages/members/AddMemberPage")),
 });
 const camerasRoute = createRoute({
   getParentRoute: () => accountRoute,
@@ -69,13 +82,21 @@ const deviceLogsRoute = createRoute({
   path: "/device-logs",
   component: lazyRouteComponent(() => import("./pages/device-logs/index")),
 });
+const dataRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/data",
+  component: lazyRouteComponent(() => import("./pages/database/index")),
+});
 export const router = createRouter({
   routeTree: rootRoute.addChildren([
     accountRoute.addChildren([
       indexRoute,
       devicesRoute,
+      membersRoute,
+      addMemberRoute,
       camerasRoute.addChildren([camerasIndexRoute, cameraDetailRoute]),
       deviceLogsRoute,
+      dataRoute,
       settingsRoute,
     ]),
   ]),
