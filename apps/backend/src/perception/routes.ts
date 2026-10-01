@@ -12,6 +12,9 @@ export function createPerceptionRoutes(
   function snapshot() {
     const view = service.snapshot();
     return perceptionSnapshotSchema.parse({
+      sequence: view.sequence,
+      householdVersion: view.householdVersion,
+      instanceId: view.instanceId,
       status: view.status,
       rejectedRetiredResults: view.rejectedRetiredResults,
       error: view.error,

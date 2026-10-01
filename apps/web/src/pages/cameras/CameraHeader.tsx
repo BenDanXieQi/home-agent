@@ -9,7 +9,7 @@ export function CameraHeader({
   children: ReactNode;
 }) {
   return (
-    <div className="flex min-h-18 items-center justify-between gap-3 bg-white px-4 py-3 text-ink">
+    <div className="flex min-h-18 items-center justify-between gap-3 bg-white py-3 pl-4 pr-1.5 text-ink">
       <h2
         className="min-w-0 flex-1 line-clamp-2 text-sm leading-5 font-medium"
         title={typeof title === "string" ? title : undefined}

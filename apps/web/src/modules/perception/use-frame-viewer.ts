@@ -17,6 +17,7 @@ export function useFrameViewer(
   );
   const [view, setView] =
     useState<ReturnType<NonNullable<typeof display.current>["snapshot"]>>();
+  const [inspection, setInspection] = useState<ReturnType<typeof inspect>>();
   const [watching, setWatching] = useState(
     () => document.visibilityState === "visible",
   );
@@ -28,20 +29,19 @@ export function useFrameViewer(
     });
     display.current = presentation;
     const update = () => {
+      if (store.get(source.revokedAtom)) {
+        presentation.revoke();
+        setInspection(undefined);
+        return;
+      }
       presentation.update(store.get(source.activeSourceAtom));
     };
     const unsubscribe = store.sub(source.activeSourceAtom, update);
+    const unsubscribeAccess = store.sub(source.revokedAtom, update);
     update();
-    const visibility = () => {
-      if (document.visibilityState !== "visible") {
-        presentation.freeze();
-        setWatching(false);
-      }
-    };
-    document.addEventListener("visibilitychange", visibility);
     return () => {
-      document.removeEventListener("visibilitychange", visibility);
       unsubscribe();
+      unsubscribeAccess();
       display.current = null;
       presentation.close();
     };
@@ -73,33 +73,64 @@ export function useFrameViewer(
     return () => clearTimeout(timer);
   }, [watching, target, snapshot.phase, restart]);
 
-  return {
-    canvas,
-    view,
-    snapshot,
-    watching,
-    ready: !!target,
-    freeze: () => {
-      display.current?.freeze();
-      setWatching(false);
-    },
-    live: () => {
-      display.current?.live();
-      setWatching(true);
-    },
-    inspect: () => ({
+  const ready = !!target;
+  const inspect = useCallback(() => {
+    const live = watching && ready && !display.current?.snapshot().frozen;
+    const accessible = store.get(source.accessibleAtom);
+    return {
       sampledAt: new Date().toISOString(),
       streamReady: store.get(source.connectedAtom),
       householdSynced: store.get(householdSyncedAtom),
-      playbackPhase: watching && target ? snapshot.phase : null,
-      playbackId: watching && target ? snapshot.playbackId : null,
-      source: store.get(source.accessibleAtom)
-        ? { ...source.target, analysis: store.get(source.sourceAtom) ?? null }
+      playbackPhase: live ? snapshot.phase : null,
+      playbackId: live ? snapshot.playbackId : null,
+      source: accessible
+        ? {
+            ...source.target,
+            analysis: store.get(source.activeSourceAtom) ?? null,
+          }
         : null,
-      presentation: store.get(source.accessibleAtom)
-        ? display.current?.inspect()
-        : null,
+      presentation: accessible ? display.current?.inspect() : null,
       failure: view?.failure ?? null,
-    }),
+    };
+  }, [
+    store,
+    source,
+    watching,
+    ready,
+    snapshot.phase,
+    snapshot.playbackId,
+    view?.failure,
+  ]);
+
+  const freeze = useCallback(() => {
+    const presentation = display.current;
+    if (!presentation || presentation.snapshot().frozen) return;
+    presentation.freeze();
+    setInspection(inspect());
+    setWatching(false);
+  }, [inspect]);
+
+  useEffect(() => {
+    const visibility = () => {
+      if (document.visibilityState !== "visible") freeze();
+    };
+    document.addEventListener("visibilitychange", visibility);
+    return () => document.removeEventListener("visibilitychange", visibility);
+  }, [freeze]);
+
+  return {
+    canvas,
+    inspection,
+    inspect,
+    view,
+    snapshot,
+    watching,
+    ready,
+    freeze,
+    live: () => {
+      display.current?.live();
+      setInspection(undefined);
+      setWatching(true);
+    },
   };
 }

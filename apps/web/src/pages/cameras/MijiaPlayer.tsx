@@ -176,7 +176,7 @@ export function MijiaPlayer({
   return (
     <CameraFullscreen name={name}>
       <CameraHeader title={name}>
-        <div className="flex gap-1 relative shrink-0 flex-nowrap mr-10">
+        <div className="flex gap-1 relative shrink-0 flex-nowrap mr-9">
           <AnimatePresence mode="popLayout" initial={false}>
             {enabled ? (
               <Button

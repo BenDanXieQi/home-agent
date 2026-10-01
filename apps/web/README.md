@@ -36,7 +36,7 @@
 
 ## 视频详情与感知帧查看
 
-视频页每个镜头卡片的“画面分析”进入 `/cameras/$deviceId/$channel`，工作台导航保持选中“视频”。详情按该设备与镜头匹配感知来源，用原生 WebRTC 解码帧、来源媒体代次及 RTP 时间关联检测／跟踪，并支持定格、返回实时与 JSON 查看。未配置感知的来源仍可观看和定格，并明确显示暂无检测／跟踪结果；不自动改看其他来源。它不提供采集控制、图片上传、导出或 P3–P4 页面。协议、预算和实机验证范围统一见[感知说明](../../docs/perception.md#单路帧关联与定格)。
+视频页每个镜头卡片的“画面分析”进入 `/cameras/$deviceId/$channel`，工作台导航保持选中“视频”。详情按该设备与镜头匹配感知来源，用原生 WebRTC 解码帧、来源媒体代次及 RTP 时间关联检测／跟踪，并支持定格、返回实时与 JSON 查看。未配置感知的来源仍可观看和定格，并明确显示暂无检测／跟踪结果；不自动改看其他来源。后台按配置独立持续分析，视频列表和详情不提供采集管理；进入、离开、定格及返回实时均不启停后台。JSON 默认展开并实时更新；折叠时停止 JSON 取样，重新展开读取最新结果。定格同时固定画面、框与 JSON，隐藏标签页不重新取样已定格内容，返回实时恢复更新；当前规则见[后台分析与结果校验](../../docs/perception.md#后台分析与结果校验)。尚无图片上传、导出或 P3–P4 页面。协议、预算和实机验证范围统一见[感知说明](../../docs/perception.md#单路帧关联与定格)。
 
 `PlaybackSession.attach()` 为已有连接挂接原生视频或 Canvas 展示；Canvas 回调按需读取接收轨道的克隆，切换展示时取消读取并停止克隆，不终止原接收轨道。回调借用 `VideoFrame` 及该观看的媒体代次，回调同时提供同一帧元数据中的 `rtpTimestamp`（90 kHz 来源时间），不把 `VideoFrame.timestamp` 当作 RTP 时间。观看会话在回调结束后释放原生帧，读取者不能保留它；页面展示控制器持有自己的有界位图。帧身份契约来自根目录 `packages/api`。普通观看以 `<video>` 为显示面，关联观看以 Canvas 为显示面，共享观看会话；后者要求 `MediaStreamTrackProcessor` 和 `VideoFrame.metadata().rtpTimestamp`。感知订阅使用类型化 RPC 读取一条页面级 SSE，断开暂停实时结果接纳，离页取消读取并释放 reader（流读取器）。
 
@@ -47,7 +47,7 @@
 - `src/modules/household/`：家庭公共快照、状态订阅、纯版本确认规则、同步状态与提示、家庭选择查询，以及共享的 `HouseholdAccess` 访问提示。
 - `src/modules/devices/`：从公共快照派生设备清单、同步状态、数量和能力异常；提供设备分类文案与清单错误提示。搜索和筛选属于设备页面。
 - `src/modules/mijia/`：`account.ts` 读取账号与扫码尝试，`login.ts` 派生登录展示和自动启动条件，`commands.ts` 统一协调命令互斥、取消和回执确认，`connection.ts` 派生连接重试资格，`api.ts` 转换米家控制协议。账号头像与连接重试入口在该领域内复用。
-- `src/modules/perception/`：每个视频详情持有自己的来源状态与页面级订阅；`source-state.ts` 派生访问资格、当前来源及播放目标，`use-perception-source.ts` 装配订阅，`use-frame-viewer.ts` 装配连续位图展示、帧身份匹配、定格及资源释放。结果通过 Store 订阅直接交给展示控制器，页面只读取连接、配置和错误等低频状态，不随每次检测结果重渲染。
+- `src/modules/perception/`：视频父路由持有一条页面级感知订阅及访问校验，列表和详情复用；每个详情持有自己的来源状态；`source-state.ts` 派生访问资格、当前来源及播放目标，`state.ts` 接纳只读结果，`use-perception-subscription.ts` 装配共享订阅，`source-access.ts` 保存跨列表／详情的设备移除版本，`use-frame-viewer.ts` 装配连续位图展示、帧身份匹配、定格及资源释放。结果通过 Store 订阅直接交给展示控制器；`CameraInspection.tsx` 独立负责 JSON 展示，仅在展开且实时观看时定时取样，取样不重渲染播放器区域。定格快照由查看会话持有，折叠不丢失；画面不依赖 React 更新逐帧绘制。
 - `src/modules/playback/`：`access.ts` 派生播放资格，`state.ts` 提供媒体状态及观看阶段汇总；`session.ts` 持有浏览器媒体资源，`api.ts` 接收完整播放目标并发送请求，`history.ts` 处理本地存储，`environment.ts` 观察浏览器环境，`estimates.ts` 保存纯样本规则。`use-playback-session.ts` 为原生视频和 Canvas 共用会话接管、`useSyncExternalStore` 快照读取及 Jotai 阶段注册；`use-mijia-playback.ts` 负责原生视频元素适配。`PlaybackProvider` 随视频父路由存续，按家庭作用域、媒体版本、设备和镜头复用会话；子页卸载只解除显示并释放使用权，1 秒内同一路接管会沿用 WebRTC 连接，超时无人使用才关闭。进入分析时另外保留列表当时正在使用的连接，隐藏画面立即解除显示和帧处理，返回列表再接管；只保留这一组来源，不累积滚动浏览过的连接。离开视频模块、隐藏标签页、来源撤权或媒体版本失效时立即关闭，显式重新播放会重建连接。画面和媒体资源由会话持有，不放入 Jotai；工作台只汇总正在展示的轻量播放阶段。
 - `src/modules/connections/`：服务配置、连接检查、健康查询及派生提示。
 - `src/modules/device-logs/`：日志快照与采集命令确认、HTTP 请求和状态订阅；`use-device-logs.ts` 将页面生命周期连接到订阅。

@@ -231,6 +231,11 @@ export function createInferencePool(
         workers.length - reservedTracking
       );
     },
+    releaseTracking() {
+      reservedTracking = 0;
+      dispatchQueued();
+      for (const listener of availableListeners.keys()) listener();
+    },
     get available() {
       return (
         !closing &&

@@ -145,7 +145,7 @@ export function CameraFullscreen({
           size="small"
           type="button"
           variant="ghost"
-          className="absolute right-4 top-5 z-10 outline-none focus-visible:outline-none focus-visible:bg-surface enabled:hover:bg-surface"
+          className="absolute right-1.5 top-5 z-10 outline-none focus-visible:outline-none focus-visible:bg-surface enabled:hover:bg-surface"
           aria-label={`${expanded ? "退出全屏" : "全屏查看"}${name}`}
           title={expanded ? "退出全屏（Esc）" : "全屏查看"}
           icon={expanded ? <Minimize size={15} /> : <Maximize size={15} />}

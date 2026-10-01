@@ -286,14 +286,14 @@ export function createFramePresentation(
       }
     },
     update(source: Source | undefined) {
-      if (closed) return;
+      if (closed || frozen) return;
       let changedLayers = false;
       const nextRun = source?.run?.runId;
       if (nextRun !== runId) {
         changedLayers = true;
         results.clear();
         runId = nextRun;
-        if (!frozen) emptyLayers();
+        emptyLayers();
       }
       active =
         !!source?.run &&
@@ -301,10 +301,8 @@ export function createFramePresentation(
         source.status !== "failed";
       if (!active) {
         results.clear();
-        if (!frozen) {
-          emptyLayers();
-          draw();
-        }
+        emptyLayers();
+        draw();
         return;
       }
       const detection =
@@ -318,7 +316,6 @@ export function createFramePresentation(
         if (
           !result ||
           result.run.runId !== runId ||
-          (frozen && runId !== frozenRun) ||
           result.mediaTime.generation !== generation
         )
           continue;
@@ -326,7 +323,6 @@ export function createFramePresentation(
           result.mediaTime.generation,
           result.mediaTime.rtpTimestamp,
         );
-        if (frozen && id !== displayed?.id) continue;
         const previous = results.get(id) ?? { detection: null, tracking: null };
         if (previous[kind]) continue;
         results.set(id, { ...previous, [kind]: result });
@@ -334,11 +330,7 @@ export function createFramePresentation(
       }
       while (results.size > presentationLimits.maxResults)
         results.delete(results.keys().next().value!);
-      if (
-        changedLayers &&
-        displayed &&
-        (!frozen || (active && results.has(displayed.id)))
-      ) {
+      if (changedLayers && displayed) {
         chooseLayers();
         draw();
       }

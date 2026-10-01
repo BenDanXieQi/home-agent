@@ -1,8 +1,10 @@
 import { atom } from "jotai";
-import type { perceptionSnapshotSchema } from "@home-agent/api/contracts";
+import { perceptionSourceAccessAtom } from "./source-access";
+import { perceptionSnapshotAtom, perceptionSyncedAtom } from "./state";
 import { devicesAtom } from "../devices/state";
 import {
   householdScopeEpochAtom,
+  householdSnapshotAtom,
   householdSyncedAtom,
 } from "../household/state";
 import { canStartPlaybackAtom } from "../playback/access";
@@ -16,11 +18,14 @@ export function createPerceptionSourceState(
     "deviceId" | "channel"
   >,
 ) {
-  const sourceAtom =
-    atom<
-      ReturnType<typeof perceptionSnapshotSchema.parse>["sources"][number]
-    >();
-  const connectedAtom = atom(false);
+  const sourceAtom = atom((get) =>
+    get(perceptionSnapshotAtom)?.sources.find(
+      (source) =>
+        source.source.deviceId === target.deviceId &&
+        source.source.channel === target.channel,
+    ),
+  );
+  const connectedAtom = perceptionSyncedAtom;
   const deviceAtom = atom((get) =>
     get(devicesAtom).find((device) => device.id === target.deviceId),
   );
@@ -34,7 +39,14 @@ export function createPerceptionSourceState(
   });
   const activeSourceAtom = atom((get) => {
     const source = get(sourceAtom);
+    const access = get(perceptionSourceAccessAtom);
+    const removed = access.removed.get(`${target.deviceId}:${target.channel}`);
+    const authorized = source?.authorizedAt;
     return get(connectedAtom) &&
+      !!authorized &&
+      (removed === undefined ||
+        access.epoch !== authorized.scope_epoch ||
+        authorized.sequence > removed) &&
       get(accessibleAtom) &&
       source?.run?.scopeEpoch === get(householdScopeEpochAtom)
       ? source
@@ -52,6 +64,15 @@ export function createPerceptionSourceState(
   });
   return {
     target,
+    revokedAtom: atom((get) => {
+      const household = get(householdSnapshotAtom);
+      const device = get(deviceAtom);
+      return (
+        !!household &&
+        get(householdSyncedAtom) &&
+        (!device?.camera || !device.channels.includes(target.channel))
+      );
+    }),
     sourceAtom,
     connectedAtom,
     deviceAtom,
