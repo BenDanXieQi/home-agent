@@ -2,15 +2,25 @@ import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import pTimeout from "p-timeout";
-import { createFrameAssembler } from "./frame-assembler";
+import { readNutFrames } from "./nut-frames";
+import type { sourceMediaSchema } from "@home-agent/api/contracts";
+import type { z } from "zod";
+import type { VideoFrame } from "./latest-frame";
 
 export function createFfmpegDecoder(options: {
   executable: string;
-  read: (signal: AbortSignal) => Promise<ReadableStream<Uint8Array>>;
+  read: (signal: AbortSignal) => Promise<{
+    stream: ReadableStream<Uint8Array>;
+    media: z.infer<typeof sourceMediaSchema>;
+    ptsOrigin: number;
+  }>;
   sampleFps: number;
   firstFrameTimeoutMs: number;
   silenceTimeoutMs: number;
-  onFrame: Parameters<typeof createFrameAssembler>[0];
+  onMedia: (media: z.infer<typeof sourceMediaSchema>) => void;
+  onFrame: (
+    frame: Omit<VideoFrame, "sequence" | "receivedAt" | "availableAt">,
+  ) => void;
 }) {
   const controller = new AbortController();
   let child: ReturnType<typeof spawn> | undefined;
@@ -18,6 +28,7 @@ export function createFfmpegDecoder(options: {
   let closing: Promise<void> | undefined;
   let diagnostic = "";
   let exit: Promise<unknown> = Promise.resolve();
+  let io: Promise<unknown>[] = [];
   function arm(milliseconds: number) {
     clearTimeout(timer);
     timer = setTimeout(
@@ -26,15 +37,14 @@ export function createFfmpegDecoder(options: {
       milliseconds,
     );
   }
-  const assembler = createFrameAssembler((frame) => {
-    arm(options.silenceTimeoutMs);
-    options.onFrame(frame);
-  });
   const completed = (async () => {
     arm(options.firstFrameTimeoutMs);
     try {
-      const stream = await options.read(controller.signal);
+      const { stream, media, ptsOrigin } = await options.read(
+        controller.signal,
+      );
       controller.signal.throwIfAborted();
+      options.onMedia(media);
       // No new process group: the compute supervisor owns this entire process tree.
       child = spawn(
         options.executable,
@@ -53,6 +63,9 @@ export function createFfmpegDecoder(options: {
           "1048576",
           "-analyzeduration",
           "1000000",
+          "-copyts",
+          "-correct_ts_overflow",
+          "0",
           "-f",
           "mpegts",
           "-i",
@@ -72,11 +85,19 @@ export function createFfmpegDecoder(options: {
           "-fps_mode",
           "passthrough",
           "-c:v",
-          "ppm",
+          "rawvideo",
           "-pix_fmt",
           "rgb24",
           "-f",
-          "image2pipe",
+          "nut",
+          "-enc_time_base",
+          "1:90000",
+          "-avoid_negative_ts",
+          "disabled",
+          "-write_index",
+          "0",
+          "-flush_packets",
+          "1",
           "pipe:1",
         ],
         { stdio: ["pipe", "pipe", "pipe"] },
@@ -96,12 +117,34 @@ export function createFfmpegDecoder(options: {
         signal: controller.signal,
       });
       const output = (async () => {
-        for await (const chunk of child.stdout!) {
+        for await (const frame of readNutFrames(
+          child.stdout!,
+          controller.signal,
+        )) {
           controller.signal.throwIfAborted();
-          assembler.push(chunk);
+          const sourcePts = frame.pts + ptsOrigin;
+          if (sourcePts > 0xffffffff)
+            throw new Error(
+              "Analysis frame crossed its source media generation",
+            );
+          arm(options.silenceTimeoutMs);
+          options.onFrame({
+            width: frame.width,
+            height: frame.height,
+            rgb: frame.rgb,
+            mediaTime: {
+              generation: media.generation,
+              pts: sourcePts,
+              rtpTimestamp: sourcePts,
+              timeBaseNumerator: 1,
+              timeBaseDenominator: 90000,
+              quality: "source_media",
+            },
+          });
         }
         throw new Error(`Video decoder ended: ${diagnostic}`);
       })();
+      io = [input, output];
       await Promise.race([
         input.then(() => {
           throw new Error("Analysis stream ended");
@@ -114,11 +157,10 @@ export function createFfmpegDecoder(options: {
     } finally {
       clearTimeout(timer);
       controller.abort();
-      assembler.clear();
       child?.kill("SIGKILL");
-      await pTimeout(exit, {
+      await pTimeout(Promise.allSettled([exit, ...io]), {
         milliseconds: 3000,
-        message: "FFmpeg exit unconfirmed",
+        message: "Video decoder cleanup unconfirmed",
       });
     }
   })();
@@ -129,9 +171,9 @@ export function createFfmpegDecoder(options: {
         controller.abort(new Error("Video source stopped"));
         child?.kill("SIGKILL");
         await Promise.allSettled([completed]);
-        await pTimeout(exit, {
+        await pTimeout(Promise.allSettled([exit, ...io]), {
           milliseconds: 3000,
-          message: "FFmpeg exit unconfirmed",
+          message: "Video decoder cleanup unconfirmed",
         });
       })();
       return closing;

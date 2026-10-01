@@ -16,3 +16,7 @@ export const householdReconnectAtom = atom<(() => void) | null>(null);
 export const reconnectHouseholdAtom = atom(null, (get) =>
   get(householdReconnectAtom)?.(),
 );
+
+export const householdScopeEpochAtom = atom(
+  (get) => get(householdSnapshotAtom)?.scope_epoch,
+);

@@ -1,3 +1,4 @@
+import { sourceMediaSchema } from "@home-agent/api/contracts";
 import type { CameraSourceSpec } from "./camera-source-spec";
 import { createHash } from "node:crypto";
 import { mijiaTimeouts } from "@home-agent/api/mijia";
@@ -19,6 +20,7 @@ import {
 
 const responseSchema = z.object({
   playbackId: z.uuid(),
+  media: sourceMediaSchema,
   answer: z
     .string()
     .min(1)
@@ -217,6 +219,7 @@ export class Go2RtcAdapter {
     return {
       id: result.data.playbackId,
       sdp: result.data.answer,
+      media: result.data.media,
       observation: readPlaybackObservation(result.data.telemetry, owner.id),
     };
   }

@@ -1,3 +1,5 @@
+/// <reference types="dom-mediacapture-transform" />
+import { z } from "zod";
 import { mijiaTimeouts } from "@home-agent/api/mijia";
 import { RequestError } from "../../api/errors";
 import {
@@ -10,6 +12,10 @@ import {
   invalidatePlaybackHistory,
   recordPlaybackHistory,
 } from "./history";
+
+const sourceFrameMetadata = z.object({
+  rtpTimestamp: z.int().min(0).max(0xffffffff),
+});
 
 type PlaybackSnapshot = {
   phase: "connecting" | "waiting" | "playing" | "hidden" | "error";
@@ -77,8 +83,24 @@ async function gatherIce(peer: RTCPeerConnection, signal: AbortSignal) {
   });
 }
 
-/** Owns one browser viewer, its monotonic measurements and all media cleanup. */
+type PlaybackSurface = {
+  element: HTMLVideoElement | HTMLCanvasElement;
+  onFrame?: (input: {
+    frame: VideoFrame;
+    media: Awaited<ReturnType<typeof offerMijiaPlayback>>["media"];
+    availableAt: number;
+    rtpTimestamp: number;
+  }) => void;
+};
+
+/** Owns one connection; video and canvas surfaces can take turns displaying it. */
 export class PlaybackSession {
+  private frameReader: ReadableStreamDefaultReader<VideoFrame> | undefined;
+  private media:
+    | Awaited<ReturnType<typeof offerMijiaPlayback>>["media"]
+    | undefined;
+  private surface: PlaybackSurface | undefined;
+  private frameTrack: MediaStreamTrack | undefined;
   private snapshot = initialPlaybackSnapshot;
   private readonly listeners = new Set<() => void>();
   private readonly controller = new AbortController();
@@ -93,17 +115,21 @@ export class PlaybackSession {
   private frameDeadline = 0;
   private firstFrameRecorded = false;
   private visibilityInterrupted = document.visibilityState !== "visible";
-  private readonly video: HTMLVideoElement;
   private readonly target: Parameters<typeof beginPlaybackHistory>[0];
   private readonly scopeEpoch: string;
 
-  constructor(
-    video: HTMLVideoElement,
-    { scope_epoch, ...target }: Parameters<typeof reserveMijiaPlayback>[0],
-  ) {
-    this.video = video;
+  constructor({
+    scope_epoch,
+    ...target
+  }: Parameters<typeof reserveMijiaPlayback>[0]) {
     this.target = target;
     this.scopeEpoch = scope_epoch;
+  }
+
+  private get video() {
+    return this.surface?.element instanceof HTMLVideoElement
+      ? this.surface.element
+      : undefined;
   }
 
   getSnapshot = () => this.snapshot;
@@ -114,6 +140,79 @@ export class PlaybackSession {
       this.listeners.delete(listener);
     };
   };
+
+  get stopped() {
+    return this.controller.signal.aborted;
+  }
+
+  attach(surface: PlaybackSurface) {
+    this.detach();
+    this.surface = surface;
+    this.visibilityKnown = false;
+    this.inViewport = false;
+    this.visibilityObserver?.observe(surface.element);
+    this.updateVisibility();
+    this.displayStream();
+    return () => {
+      if (this.surface === surface) this.detach();
+    };
+  }
+
+  private detach() {
+    this.visibilityObserver?.disconnect();
+    if (this.frameCallback !== undefined)
+      this.video?.cancelVideoFrameCallback(this.frameCallback);
+    this.frameCallback = undefined;
+    const reader = this.frameReader;
+    this.frameReader = undefined;
+    reader?.cancel().catch((error: unknown) => {
+      console.error("Playback frame reader cleanup failed", error);
+    });
+    this.frameTrack?.stop();
+    this.frameTrack = undefined;
+    const video = this.video;
+    if (video) {
+      video.pause();
+      video.srcObject = null;
+      video.load();
+    }
+    this.surface = undefined;
+    this.inViewport = false;
+    this.updateVisibility();
+  }
+
+  private displayStream() {
+    if (!this.surface || !this.stream?.getVideoTracks().length || this.stopped)
+      return;
+    if (this.surface.onFrame) {
+      if (typeof MediaStreamTrackProcessor !== "function") {
+        this.fail("unsupported_browser");
+        return;
+      }
+      // Cancelling the canvas reader must not end the reusable receiver track.
+      const track = this.stream.getVideoTracks()[0]!.clone();
+      this.frameTrack = track;
+      this.readFrames(track).catch((error: unknown) => {
+        if (!this.stopped && this.frameTrack === track) {
+          console.error("Playback frame reader failed", error);
+          this.fail("negotiation_failed");
+        }
+      });
+    } else {
+      const video = this.video;
+      if (!video || typeof video.requestVideoFrameCallback !== "function") {
+        this.fail("unsupported_browser");
+        return;
+      }
+      const surface = this.surface;
+      video.srcObject = this.stream;
+      video.play().catch(() => {
+        if (this.surface === surface && !this.stopped)
+          this.fail("autoplay_failed");
+      });
+      this.frameCallback = video.requestVideoFrameCallback(this.onFrame);
+    }
+  }
 
   private update(patch: Partial<PlaybackSnapshot>) {
     this.snapshot = { ...this.snapshot, ...patch };
@@ -139,13 +238,10 @@ export class PlaybackSession {
     clearTimeout(this.negotiationDeadline);
     this.visibilityObserver?.disconnect();
     document.removeEventListener("visibilitychange", this.updateVisibility);
-    if (this.frameCallback !== undefined)
-      this.video.cancelVideoFrameCallback(this.frameCallback);
+    this.detach();
     this.peer?.close();
     for (const track of this.stream?.getTracks() ?? []) track.stop();
-    this.video.pause();
-    this.video.srcObject = null;
-    this.video.load();
+    this.stream = undefined;
     if (this.snapshot.playbackId)
       releaseMijiaPlayback(this.snapshot.playbackId);
     this.update({ playbackId: null, visible: false });
@@ -236,7 +332,7 @@ export class PlaybackSession {
     });
   }
 
-  private onFrame = () => {
+  private receivedFrame() {
     if (this.controller.signal.aborted) return;
     if (this.snapshot.visible && document.visibilityState === "visible") {
       const now = performance.now();
@@ -248,14 +344,59 @@ export class PlaybackSession {
         this.update({ phase: "playing" });
       }
     }
-    this.frameCallback = this.video.requestVideoFrameCallback(this.onFrame);
+  }
+
+  private onFrame = () => {
+    this.receivedFrame();
+    if (!this.controller.signal.aborted && this.video)
+      this.frameCallback = this.video?.requestVideoFrameCallback(this.onFrame);
   };
+
+  private async readFrames(track: MediaStreamVideoTrack) {
+    const reader = new MediaStreamTrackProcessor({
+      track,
+      maxBufferSize: 1,
+    }).readable.getReader();
+    this.frameReader = reader;
+    try {
+      while (!this.controller.signal.aborted && this.frameReader === reader) {
+        const { done, value: frame } = await reader.read();
+        if (done) break;
+        try {
+          if (this.controller.signal.aborted || this.frameReader !== reader)
+            break;
+          if (frame.displayWidth * frame.displayHeight > 1920 * 1080)
+            throw new Error("Video exceeds presentation pixel limit");
+          if (
+            !this.media ||
+            !("metadata" in frame) ||
+            typeof frame.metadata !== "function"
+          )
+            throw new Error("Source frame metadata unavailable");
+          const { rtpTimestamp } = sourceFrameMetadata.parse(frame.metadata());
+          this.receivedFrame();
+          this.surface?.onFrame?.({
+            frame,
+            media: this.media,
+            rtpTimestamp,
+            availableAt: performance.now(),
+          });
+        } finally {
+          frame.close();
+        }
+      }
+      if (!this.controller.signal.aborted && this.frameReader === reader)
+        this.fail("track_ended");
+    } finally {
+      reader.releaseLock();
+      if (this.frameReader === reader) this.frameReader = undefined;
+    }
+  }
 
   private async connect() {
     if (
       typeof RTCPeerConnection !== "function" ||
-      typeof MediaStream !== "function" ||
-      typeof this.video.requestVideoFrameCallback !== "function"
+      typeof MediaStream !== "function"
     ) {
       this.fail("unsupported_browser");
       return;
@@ -265,13 +406,18 @@ export class PlaybackSession {
       document.addEventListener("visibilitychange", this.updateVisibility);
       this.visibilityObserver = new IntersectionObserver(
         ([entry]) => {
-          if (signal.aborted || !entry) return;
+          if (
+            signal.aborted ||
+            !entry ||
+            entry.target !== this.surface?.element
+          )
+            return;
           this.inViewport = entry.isIntersecting && entry.intersectionRatio > 0;
           this.updateVisibility();
         },
         { threshold: [0, 0.01] },
       );
-      this.visibilityObserver.observe(this.video);
+      if (this.surface) this.visibilityObserver.observe(this.surface.element);
       this.negotiationDeadline = setTimeout(
         () => this.fail("negotiation_timeout"),
         mijiaTimeouts.negotiation,
@@ -280,7 +426,9 @@ export class PlaybackSession {
       this.stream = stream;
       const peer = new RTCPeerConnection({ iceServers: [] });
       this.peer = peer;
-      peer.addTransceiver("video", { direction: "recvonly" });
+      peer.addTransceiver("video", {
+        direction: "recvonly",
+      });
       peer.addEventListener(
         "track",
         (event) => {
@@ -293,8 +441,7 @@ export class PlaybackSession {
               signal,
             },
           );
-          this.video.srcObject = stream;
-          this.video.play().catch(() => this.fail("autoplay_failed"));
+          this.displayStream();
         },
         { signal },
       );
@@ -305,7 +452,6 @@ export class PlaybackSession {
         },
         { signal },
       );
-      this.frameCallback = this.video.requestVideoFrameCallback(this.onFrame);
       // Reservation must finish even after teardown, so its returned ID can be
       // released. It does not start media and runs alongside browser preparation.
       const [reservation] = await Promise.all([
@@ -332,6 +478,7 @@ export class PlaybackSession {
         signal,
       );
       if (signal.aborted) return;
+      this.media = result.media;
       await peer.setRemoteDescription({ type: "answer", sdp: result.sdp });
       if (signal.aborted) return;
       this.update({

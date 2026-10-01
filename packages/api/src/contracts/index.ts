@@ -90,3 +90,5 @@ export {
   perceptionSnapshotSchema,
   trackingObservationSchema,
 } from "./perception";
+
+export { sourceMediaSchema, mediaFrameTimeSchema } from "./media";

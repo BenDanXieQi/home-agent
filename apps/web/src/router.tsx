@@ -47,7 +47,17 @@ const devicesRoute = createRoute({
 const camerasRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/cameras",
+  component: lazyRouteComponent(() => import("./pages/cameras/CameraLayout")),
+});
+const camerasIndexRoute = createRoute({
+  getParentRoute: () => camerasRoute,
+  path: "/",
   component: lazyRouteComponent(() => import("./pages/cameras/index")),
+});
+const cameraDetailRoute = createRoute({
+  getParentRoute: () => camerasRoute,
+  path: "$deviceId/$channel",
+  component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
 });
 const settingsRoute = createRoute({
   getParentRoute: () => accountRoute,
@@ -64,12 +74,13 @@ export const router = createRouter({
     accountRoute.addChildren([
       indexRoute,
       devicesRoute,
-      camerasRoute,
+      camerasRoute.addChildren([camerasIndexRoute, cameraDetailRoute]),
       deviceLogsRoute,
       settingsRoute,
     ]),
   ]),
   scrollRestoration: true,
+  getScrollRestorationKey: (location) => location.href,
   defaultPreload: "intent",
 });
 declare module "@tanstack/react-router" {

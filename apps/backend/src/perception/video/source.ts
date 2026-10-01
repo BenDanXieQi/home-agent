@@ -11,9 +11,14 @@ export function createVideoSource(options: {
   config: z.infer<typeof perceptionConfigSchema>;
   decoder: Omit<
     Parameters<typeof createFfmpegDecoder>[0],
-    "onFrame" | "sampleFps" | "firstFrameTimeoutMs" | "silenceTimeoutMs"
+    | "onFrame"
+    | "sampleFps"
+    | "firstFrameTimeoutMs"
+    | "silenceTimeoutMs"
+    | "onMedia"
   >;
   ready: () => void;
+  media: Parameters<typeof createFfmpegDecoder>[0]["onMedia"];
   failure: (error: unknown) => void;
 }) {
   const slot = createLatestFrame();
@@ -80,6 +85,7 @@ export function createVideoSource(options: {
   const decoder = createFfmpegDecoder({
     ...options.decoder,
     ...options.config,
+    onMedia: options.media,
     onFrame(frame) {
       actor.send({
         type: "FRAME",
@@ -150,7 +156,7 @@ export function createVideoSource(options: {
         sequence: frame.sequence,
         receivedAt: frame.receivedAt,
         sampledAt: frame.receivedAt,
-        mediaTime: null,
+        mediaTime: frame.mediaTime,
         width: frame.width,
         height: frame.height,
         coordinateBasis: "decoded_rgb24" as const,

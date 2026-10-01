@@ -107,7 +107,8 @@ export function createWorkspaceActivityAtom(path: string, navigating: boolean) {
     )
       candidates.push(activities.synchronizing);
 
-    if (path === "/devices" || path === "/cameras") {
+    const camerasPage = path === "/cameras" || path.startsWith("/cameras/");
+    if (path === "/devices" || camerasPage) {
       if (inventory?.status === "loading") candidates.push(activities.devices);
       if (
         inventory?.status === "error" ||
@@ -116,7 +117,7 @@ export function createWorkspaceActivityAtom(path: string, navigating: boolean) {
         candidates.push(activities.devicesError);
       if (actionError) candidates.push(activities.homeError);
     }
-    if (path === "/cameras") {
+    if (camerasPage) {
       if (binding?.status === "installing" || get(playbackWaitingAtom))
         candidates.push(activities.cameras);
       if (binding?.status === "error" || get(playbackFailedAtom))

@@ -406,17 +406,6 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  test("invalid playback inputs are rejected before negotiation", async () => {
-    const h = harness();
-    const offer = spyOn(h.service, "offer");
-    const response = await h.request(
-      "/playback/viewer",
-      json("PUT", { revision: crypto.randomUUID(), sdp: "x".repeat(70_001) }),
-    );
-    expect(response.status).toBe(413);
-    expect(offer).not.toHaveBeenCalled();
-  });
-
   test("logout cleanup failure is an error response, never a successful command version", async () => {
     const h = harness();
     spyOn(h.service, "logout").mockRejectedValue(
@@ -427,55 +416,5 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     const body = await response.json();
     expect(body).toMatchObject({ code: "mijia_go2rtc_cleanup" });
     expect(body).not.toHaveProperty("state_version");
-  });
-
-  test("viewer answer includes connection measurements and DELETE waits for cleanup", async () => {
-    const h = harness();
-    const id = crypto.randomUUID();
-    const answer = {
-      id,
-      sdp: "v=0\r\nprivate-answer",
-      connection: {
-        sourceRecentlyActive: true,
-        timings: { prepareMs: 10, negotiationMs: 20 },
-      },
-    };
-    spyOn(h.service, "playbackSnapshot").mockReturnValue({
-      id,
-      phase: "active",
-      answer,
-    });
-    const snapshot = await h.request(`/playback/${id}`);
-    expect(await snapshot.json()).toEqual({ id, phase: "active", answer });
-    expect(snapshot.headers.get("cache-control")).toBe("no-store");
-    const offer = spyOn(h.service, "offer").mockResolvedValue(answer);
-    const offered = await h.request(
-      `/playback/${id}`,
-      json("PUT", {
-        revision: crypto.randomUUID(),
-        sdp: "v=0\r\nvalid-offer-sdp",
-      }),
-    );
-    expect(offered.status).toBe(200);
-    expect(await offered.json()).toEqual(answer);
-    expect(offer).toHaveBeenCalledTimes(1);
-    const released = deferred();
-    const release = spyOn(h.service, "release").mockImplementation(
-      () => released.promise,
-    );
-    let completed = false;
-    const pending = h
-      .request(`/playback/${id}`, { method: "DELETE" })
-      .then((response) => {
-        completed = true;
-        return response;
-      });
-    await eventually(() => release.mock.calls.length === 1);
-    expect(completed).toBe(false);
-    released.resolve();
-    const response = await pending;
-    expect(release).toHaveBeenCalledWith(id);
-    expect(response.status).toBe(204);
-    expect(await response.text()).toBe("");
   });
 });

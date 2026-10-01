@@ -155,7 +155,7 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 	// A slow HTTP writer never blocks a newer offer or cancellation.
 	w.Header().Set("Content-Type", "application/json")
 	failureCode = "response_failed"
-	success = json.NewEncoder(w).Encode(map[string]any{"playbackId": playback.id, "answer": answer, "telemetry": playback.timing.snapshot()}) == nil
+	success = json.NewEncoder(w).Encode(map[string]any{"playbackId": playback.id, "answer": answer, "telemetry": playback.timing.snapshot(), "media": map[string]any{"generation": homeAgentMediaGeneration(camera), "clockRate": 90000}}) == nil
 }
 
 func homeAgentRelease(w http.ResponseWriter, r *http.Request) {

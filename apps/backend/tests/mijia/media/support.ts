@@ -1,3 +1,7 @@
+export const playbackMedia = {
+  generation: "00000000-0000-4000-8000-000000000001",
+  clockRate: 90000 as const,
+};
 import { z } from "zod";
 import { Go2RtcAdapter } from "../../../src/mijia/media/go2rtc-adapter";
 
@@ -55,6 +59,7 @@ export function mediaPeer(
           playbackId: call.body.playbackId,
           answer: "v=0\r\nfixture-answer",
           telemetry: playbackTelemetry,
+          media: playbackMedia,
         });
       return new Response(null, { status: 204 });
     },

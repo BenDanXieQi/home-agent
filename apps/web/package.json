@@ -51,6 +51,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "vite": "catalog:",
-    "@home-agent/oxlint-config": "workspace:*"
+    "@home-agent/oxlint-config": "workspace:*",
+    "@types/dom-mediacapture-transform": "0.1.12"
   }
 }

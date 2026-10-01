@@ -1,3 +1,4 @@
+import { sourceMediaSchema } from "./media";
 export {
   mijiaDeviceSpecSchema,
   type MijiaDeviceSpec,
@@ -154,6 +155,7 @@ export const mijiaPlaybackResponseSchema = z.object({
   id: z.string().uuid(),
   sdp: z.string(),
   connection: playbackConnectionSummarySchema,
+  media: sourceMediaSchema,
 });
 export type MijiaPlaybackResponse = z.infer<typeof mijiaPlaybackResponseSchema>;
 export const mijiaPlaybackStateSchema = z.discriminatedUnion("phase", [

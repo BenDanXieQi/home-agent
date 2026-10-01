@@ -211,6 +211,7 @@ export class PlaybackManager {
           const answer = {
             id: result.id,
             sdp: result.sdp,
+            media: result.media,
             connection: {
               sourceRecentlyActive:
                 result.observation?.sourceRecentlyActive ?? null,

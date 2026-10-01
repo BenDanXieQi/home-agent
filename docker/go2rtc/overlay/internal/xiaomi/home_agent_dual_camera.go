@@ -16,7 +16,7 @@ type homeAgentDualCamera struct {
 
 // Caller holds homeAgentMu. Ownership is scoped to the runtime account, device
 // and address; neither producers nor cloud credentials use a global device cache.
-func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int) (*streams.Stream, func()) {
+func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int, camera *homeAgentCameraState) (*streams.Stream, func()) {
 	query := source.Query()
 	query.Del("channel")
 	source.RawQuery = query.Encode()
@@ -33,7 +33,7 @@ func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int)
 		session.dualCameras[key] = shared
 	}
 	shared.channels++
-	stream := streams.NewHomeAgentStream(func() (core.Producer, error) { return shared.source.Open(channel) })
+	stream := streams.NewHomeAgentStream(func() (core.Producer, error) { producer, err := shared.source.Open(channel); if err != nil { return nil, err }; return homeAgentTimeProducer(camera, producer), nil })
 	release := sync.OnceFunc(func() {
 		shared.channels--
 		if shared.channels == 0 {

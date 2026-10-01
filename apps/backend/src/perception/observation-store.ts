@@ -1,4 +1,7 @@
-import type { trackingObservationSchema } from "@home-agent/api/contracts";
+import type {
+  sourceMediaSchema,
+  trackingObservationSchema,
+} from "@home-agent/api/contracts";
 import type { z } from "zod";
 import {
   acceptsObservation,
@@ -15,6 +18,7 @@ function initial(source: z.infer<typeof sourceSelectionSchema>) {
     source,
     run: null as z.infer<typeof runSchema> | null,
     granted: false,
+    media: null as z.infer<typeof sourceMediaSchema> | null,
     status: "waiting_for_access",
     error: undefined as string | undefined,
     observation: null as z.infer<typeof observationSchema> | null,
@@ -93,6 +97,7 @@ export function createObservationStore(maxAgeMs: number) {
       entry.validity = "unavailable";
       entry.error = reason;
       entry.granted = false;
+      entry.media = null;
       entry.observation = null;
       entry.tracking = null;
       entry.trackingValidity = "unavailable";
@@ -110,6 +115,20 @@ export function createObservationStore(maxAgeMs: number) {
           rejectedRetiredResults++;
           changed();
         }
+        return;
+      }
+      if (event.event === "media") {
+        entry.media = event.media;
+        changed();
+        return;
+      }
+      if (
+        (event.event === "tracking" || event.event === "settled") &&
+        event.observation &&
+        event.observation.mediaTime.generation !== entry.media?.generation
+      ) {
+        entry.rejected++;
+        changed();
         return;
       }
       if (event.event === "tracking") {
@@ -180,6 +199,7 @@ export function createObservationStore(maxAgeMs: number) {
       const now = performance.now();
       return [...sources.values()].map((entry) => ({
         source: entry.source,
+        media: entry.media,
         run: entry.run,
         status: entry.status,
         error: entry.error,

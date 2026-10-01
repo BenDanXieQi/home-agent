@@ -1,3 +1,4 @@
+import { usePlaybackSessions } from "../../modules/playback/playback-context";
 import { CameraFullscreen } from "./CameraFullscreen";
 import { CameraHeader } from "./CameraHeader";
 import { twMerge } from "tailwind-merge";
@@ -26,6 +27,7 @@ export function CameraFrame({
   status,
   detail,
   notice,
+  statusAction,
   statusContent,
   loader,
 }: {
@@ -36,6 +38,7 @@ export function CameraFrame({
   status: string;
   detail?: ReactNode;
   notice?: ReactNode;
+  statusAction?: ReactNode;
   statusContent?: ReactNode;
   loader?: ReactNode;
 }) {
@@ -73,7 +76,7 @@ export function CameraFrame({
         ) : null}
       </div>
       <div
-        className="[&[data-waiting='true']_.status-dot]:animate-[camera-wait-pulse_2.4s_ease-in-out_infinite] motion-reduce:[&[data-waiting='true']_.status-dot]:animate-none flex min-h-10 items-center gap-3 overflow-hidden bg-white px-4 py-2 text-muted [&_.status-badge]:shrink-0 [&_.status-badge]:whitespace-nowrap [&_p]:min-w-0 [&_p]:flex-1 [&_p]:truncate [&_p]:text-[11px]"
+        className="[&[data-waiting='true']_.status-dot]:animate-[camera-wait-pulse_2.4s_ease-in-out_infinite] motion-reduce:[&[data-waiting='true']_.status-dot]:animate-none flex min-h-10 items-center gap-3 overflow-hidden bg-white px-1.5 py-1.5 text-muted [&_.status-badge]:shrink-0 [&_.status-badge]:whitespace-nowrap [&_p]:min-w-0 [&_p]:flex-1 [&_p]:truncate [&_p]:text-[11px]"
         data-waiting={waiting}
       >
         {statusContent ?? (
@@ -92,6 +95,11 @@ export function CameraFrame({
             {detail}
           </>
         )}
+        {statusAction ? (
+          <span className="my-1 ml-auto inline-flex shrink-0">
+            {statusAction}
+          </span>
+        ) : null}
       </div>
     </>
   );
@@ -104,9 +112,11 @@ function CameraPlayback({
   channel,
   name,
   notice,
+  statusAction,
 }: Parameters<typeof useMijiaPlayback>[0] & {
   name: string;
   notice?: ReactNode;
+  statusAction?: ReactNode;
 }) {
   const { videoRef, snapshot } = useMijiaPlayback({
     revision,
@@ -119,6 +129,7 @@ function CameraPlayback({
   return (
     <CameraFrame
       notice={notice}
+      statusAction={statusAction}
       waiting={snapshot.phase === "connecting" || snapshot.phase === "waiting"}
       placeholder={
         snapshot.phase === "playing" ||
@@ -154,12 +165,14 @@ export function MijiaPlayer({
   active,
   onEnabledChange,
   notice,
+  statusAction,
 }: ComponentProps<typeof CameraPlayback> & {
   enabled: boolean;
   active: boolean;
   onEnabledChange: (enabled: boolean) => void;
 }) {
   const [attempt, setAttempt] = useState(0);
+  const sessions = usePlaybackSessions();
   return (
     <CameraFullscreen name={name}>
       <CameraHeader title={name}>
@@ -193,6 +206,7 @@ export function MijiaPlayer({
             title={enabled ? "重新播放" : "开始播放"}
             icon={enabled ? <RotateCcw size={15} /> : <Play size={15} />}
             onClick={() => {
+              sessions.invalidate({ deviceId, channel, scope_epoch, revision });
               setAttempt((value) => value + 1);
               onEnabledChange(true);
             }}
@@ -208,10 +222,12 @@ export function MijiaPlayer({
           channel={channel}
           name={name}
           notice={notice}
+          statusAction={statusAction}
         />
       ) : (
         <CameraFrame
           notice={notice}
+          statusAction={statusAction}
           placeholder={enabled ? "画面可见时自动播放" : "已暂停播放"}
           tone="unknown"
           status={enabled ? "等待显示" : "已暂停"}
