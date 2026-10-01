@@ -1,3 +1,4 @@
+import { CameraFullscreen } from "./CameraFullscreen";
 import { CameraHeader } from "./CameraHeader";
 import { twMerge } from "tailwind-merge";
 import { Pause, Play, RotateCcw } from "lucide-react";
@@ -40,7 +41,7 @@ export function CameraFrame({
 }) {
   return (
     <>
-      <div className="relative aspect-video w-full bg-[#111111] [&_video]:block [&_video]:size-full [&_video]:object-cover">
+      <div className="camera-surface relative aspect-video w-full bg-[#111111] [&_video]:block [&_video]:size-full [&_video]:object-contain">
         {children}
         {/* The first frame is revealed by fading the placeholder, not by a cut. */}
         <AnimatePresence initial={false}>
@@ -120,7 +121,8 @@ function CameraPlayback({
       notice={notice}
       waiting={snapshot.phase === "connecting" || snapshot.phase === "waiting"}
       placeholder={
-        snapshot.phase === "playing"
+        snapshot.phase === "playing" ||
+        (snapshot.phase === "hidden" && snapshot.firstFrameAt !== null)
           ? null
           : snapshot.phase === "error"
             ? "暂时无法播放"
@@ -159,9 +161,9 @@ export function MijiaPlayer({
 }) {
   const [attempt, setAttempt] = useState(0);
   return (
-    <>
+    <CameraFullscreen name={name}>
       <CameraHeader title={name}>
-        <div className="flex gap-1 relative shrink-0 flex-nowrap">
+        <div className="flex gap-1 relative shrink-0 flex-nowrap mr-10">
           <AnimatePresence mode="popLayout" initial={false}>
             {enabled ? (
               <Button
@@ -215,6 +217,6 @@ export function MijiaPlayer({
           status={enabled ? "等待显示" : "已暂停"}
         />
       )}
-    </>
+    </CameraFullscreen>
   );
 }
