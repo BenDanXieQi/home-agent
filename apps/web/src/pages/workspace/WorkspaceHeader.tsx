@@ -71,7 +71,13 @@ export function WorkspaceHeader({
           changeKey={current?.to ?? "workspace"}
           className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2"
         >
-          <h1>{current?.label ?? "Home Agent"}</h1>
+          <h1>
+            {path === "/members/new"
+              ? "添加成员"
+              : current?.to === "/members"
+                ? "家庭成员"
+                : (current?.label ?? "Home Agent")}
+          </h1>
           <div
             className="flex min-w-0 items-center empty:hidden max-md:max-w-40"
             ref={detailsRef}

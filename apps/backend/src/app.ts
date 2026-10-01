@@ -1,3 +1,5 @@
+import type { createMemberRepository } from "./household/members/repository";
+import { createMemberRoutes } from "./household/members/routes";
 import { createPerceptionRoutes } from "./perception/routes";
 import type { createPerceptionService } from "./perception/service";
 import { healthSchema } from "@home-agent/api/contracts";
@@ -30,6 +32,7 @@ type AppDependencies = {
   mijiaService: MijiaService;
   deviceLogs: DevicePushLogs;
   roomAnalysis: RoomAnalysisService;
+  memberRepository: ReturnType<typeof createMemberRepository> | undefined;
   contextRepository: ReturnType<typeof createContextRepository> | undefined;
   shutdownSignal: AbortSignal;
   readAgentUrl: () => Promise<string>;
@@ -45,6 +48,7 @@ export function createApp({
   deviceLogs,
   roomAnalysis,
   contextRepository,
+  memberRepository,
   shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
@@ -75,6 +79,10 @@ export function createApp({
           timestamp: new Date().toISOString(),
         }),
       ),
+    )
+    .route(
+      "/api/household-members",
+      createMemberRoutes(environment.BACKEND_PORT, household, memberRepository),
     )
     .route(
       "/api/household-context",

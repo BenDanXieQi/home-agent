@@ -25,6 +25,8 @@ export function createWebRoutes(root: string) {
       [
         "/",
         "/devices",
+        "/members",
+        "/members/new",
         "/cameras",
         "/cameras/:deviceId/:channel",
         "/settings",
