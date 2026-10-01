@@ -34,7 +34,7 @@ export function createMijiaRoutes(
     return { state_version: runtime.version() };
   };
   const app = new Hono();
-  app.use(requireLocalAccess([port, 5173]));
+  app.use(requireLocalAccess([port, 5173], { webEntry: true }));
   app
     .use(
       bodyLimit({

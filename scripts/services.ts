@@ -1,3 +1,4 @@
+import { startWebEntry, stopWebEntry, webEntryRunning } from "./web-entry";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -111,6 +112,9 @@ if (action === "status") {
     `开发应用：${(await devOwners()).length > 0 ? "运行中" : "无受管理运行记录"}`,
   );
   await applicationStatus();
+  console.info(
+    `HTTPS 入口：https://localhost:8443 · ${(await webEntryRunning()) ? "运行中" : "未运行"}`,
+  );
   console.info(`原生 go2rtc：${(await nativeRunning()) ? "运行中" : "未运行"}`);
   await runDocker(["compose", "ps", "-a"]);
   console.info("服务状态不代表摄像头已出帧。");
@@ -129,6 +133,7 @@ try {
 }
 try {
   if (action === "stop") {
+    await stopWebEntry();
     await stopDev();
     await stopNative();
     await runDocker(["compose", "stop"]);
@@ -200,6 +205,7 @@ try {
     console.info(
       `go2rtc: ${mode} · http://127.0.0.1:1984（接口就绪不代表摄像头出帧）`,
     );
+    await startWebEntry("development");
     const pending = await pendingApplications();
     if (pending.length > 0) {
       await runBun(["run", "db:check"]);

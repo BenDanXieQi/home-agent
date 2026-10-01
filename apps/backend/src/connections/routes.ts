@@ -14,7 +14,7 @@ export function createConnectionRoutes(
   connectionStore: ConnectionStore,
 ) {
   return new Hono()
-    .use(requireLocalAccess([port, 5173]))
+    .use(requireLocalAccess([port, 5173], { webEntry: true }))
     .get("/", async (c) => {
       const configuration = await connectionStore.read();
       return c.json({

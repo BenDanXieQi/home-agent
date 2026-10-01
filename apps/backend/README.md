@@ -71,7 +71,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 `GET /api/services/status` 返回 `{ services: { agent, go2rtc } }`，每项包含 `url`、`status`、`checkedAt`、`reasonCode` 和可选 `params`。每次请求直接探测 Agent `/health` 与 go2rtc `/api`，不缓存；每项限时 3 秒、响应最多 16 KiB，支持客户端取消，拒绝重定向并校验 JSON。go2rtc 响应要求 `version`、`revision`、`host` 为字符串，且 `version`、`host` 非空，允许附加字段。Web 保存时取消旧查询，避免旧结果覆盖新地址；状态轮询不覆盖未保存输入。
 
-管理接口同时校验 TCP 对端、Host 与浏览器 Origin。对端必须是 loopback（包含 IPv4 映射的 loopback），无法取得对端信息时拒绝访问。Host 与 Origin 只允许 `localhost`、`127.0.0.1`、`[::1]` 的 backend 端口及 Vite `5173`；不信任转发头，不开放 CORS。Vite 保留浏览器 Host，JSON 修改请求显式校验 Origin。Agent 复用同一规则，仅接受其配置端口对应的本机 Host／Origin。
+管理接口同时校验 TCP 对端、Host 与浏览器 Origin。对端必须是 loopback（包含 IPv4 映射的 loopback），无法取得对端信息时拒绝访问。Host 与 Origin 允许 `localhost`、`127.0.0.1`、`[::1]` 的 backend 端口及内部 Vite `5173`；backend 另显式接纳 Caddy 入口 Host `localhost:8443` 和 Origin `https://localhost:8443`，不放开该端口的 HTTP Origin 或其他域名。不信任转发头，不开放 CORS。Caddy 与 Vite 保留浏览器 Host／Origin，JSON 修改请求显式校验 Origin。Agent 不接纳 Web 入口，仅接受其配置端口对应的本机 Host／Origin。
 
 ## 目录与约定
 

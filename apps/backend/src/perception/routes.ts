@@ -24,7 +24,7 @@ export function createPerceptionRoutes(
     });
   }
   return new Hono()
-    .use(requireLocalAccess([port, 5173]))
+    .use(requireLocalAccess([port, 5173], { webEntry: true }))
     .use(async (c, next) => {
       c.header("Cache-Control", "no-store");
       await next();

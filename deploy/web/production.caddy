@@ -1,0 +1,11 @@
+handle {
+	root * "{$HOME_AGENT_ROOT}/apps/backend/dist/public"
+	@assets path_regexp ^/assets/[^/]+-[\w-]{8}\.[\w]+$
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+	@uncached not path_regexp ^/assets/[^/]+-[\w-]{8}\.[\w]+$
+	header @uncached Cache-Control "no-cache"
+	try_files {path} /index.html
+	file_server {
+		precompressed br gzip
+	}
+}

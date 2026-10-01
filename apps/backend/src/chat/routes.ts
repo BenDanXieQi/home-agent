@@ -18,7 +18,7 @@ export function createChatRoutes({
   readAgentUrl,
 }: ChatDependencies) {
   const app = new Hono();
-  app.use(requireLocalAccess([port, 5173]));
+  app.use(requireLocalAccess([port, 5173], { webEntry: true }));
   const routes = app.post(
     "/",
     bodyLimit({
