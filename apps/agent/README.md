@@ -46,6 +46,12 @@ HTTP 错误使用共享 `{ code, message, params?, issues?, traceId? }` 结构�
 
 依据：[LangGraph JS 持久化](https://docs.langchain.com/oss/javascript/langgraph/persistence)、[官方 PostgreSQL 适配器](https://github.com/langchain-ai/langgraphjs/tree/main/libs/checkpoint-postgres)。
 
+## 语音请求判断
+
+本机 `POST /api/speech-dialogue` 接收 backend 的短时转写证据，由独立、无 checkpoint 的语音图判断是否向助手提出请求、语义是否完整及其依据。它与房间分析共用现有模型配置和家庭切换互斥入口，最多一个在途请求，处理受证据原期限和 11 秒服务期限约束。请求／响应共享契约位于 `packages/api/src/contracts/speech-dialogue.ts`。
+
+该接口只返回结构化判断，不回复用户、不执行设备工具、不将摄像头位置或画面身份当作说话人。backend 拥有逐段交付、来源撤销、去重和调用频率，见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。只有 backend 显式开启 `dialogue.enabled` 才自动调用；默认不因检测到人声而调用语言模型。
+
 ## 验证边界
 
 服务健康检查、连接成功与静态检查只覆盖各自范围，不能证明真实模型多轮对话、重启后的历史恢复、同会话并发拒绝、超时、客户端取消或执行中停机已经通过端到端验证。当前使用边界为可信本机、单 Agent 进程；持久化与取消语义仍需在实际模型和数据库环境下验证。

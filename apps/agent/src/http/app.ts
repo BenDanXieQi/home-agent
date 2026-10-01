@@ -1,3 +1,5 @@
+import { createSpeechDialogueAgent } from "../graph/speech-dialogue";
+import { createSpeechDialogueRoutes } from "./speech-dialogue";
 import { createHouseholdReset } from "../household-reset";
 import { householdResetRequestSchema } from "@home-agent/api/household-reset";
 import { validateJson } from "@home-agent/api/errors/hono";
@@ -43,6 +45,10 @@ export function createApp(config: Config, database?: AgentDatabase) {
       config.AGENT_RUN_TIMEOUT_MS,
       reset,
     ),
+  );
+  app.route(
+    "/api/speech-dialogue",
+    createSpeechDialogueRoutes(createSpeechDialogueAgent(config), reset),
   );
   app.post(
     "/api/household-reset",

@@ -1,3 +1,5 @@
+import { createSpeechRoutes } from "./conversation/routes";
+import type { createSpeechInbox } from "./conversation/speech-inbox";
 import type { createMemberRepository } from "./household/members/repository";
 import { createMemberRoutes } from "./household/members/routes";
 import { createPerceptionRoutes } from "./perception/routes";
@@ -24,6 +26,7 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  speechInbox: ReturnType<typeof createSpeechInbox>;
   perception: ReturnType<typeof createPerceptionService>;
   staticRoot?: string;
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
@@ -39,6 +42,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  speechInbox,
   perception,
   staticRoot,
   environment,
@@ -91,6 +95,10 @@ export function createApp({
         household,
         contextRepository,
       ),
+    )
+    .route(
+      "/api/perception/speech",
+      createSpeechRoutes(speechInbox, environment.BACKEND_PORT, shutdownSignal),
     )
     .route(
       "/api/perception",

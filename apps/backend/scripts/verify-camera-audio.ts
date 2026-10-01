@@ -204,7 +204,7 @@ try {
   const configPath = join(directory, "perception.json");
   await writeFile(
     configPath,
-    JSON.stringify({ sources: selected, cpuRatio: 0.15 }),
+    JSON.stringify({ sources: selected, cpuRatio: 0.5 }),
   );
   service = createPerceptionService({
     configPath,

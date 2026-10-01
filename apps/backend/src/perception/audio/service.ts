@@ -1,3 +1,5 @@
+import type { createSpeechInbox } from "../../conversation/speech-inbox";
+import { speechLimits } from "../speech/limits";
 import { prepareSourceLease } from "../source-lease";
 import type { PerceptionSources } from "../sources";
 import type { perceptionConfigSchema, sourceSelectionSchema } from "../config";
@@ -10,6 +12,10 @@ export function createAudioService(options: {
   sources: PerceptionSources;
   executable: string;
   changed: () => void;
+  speechInbox?: Pick<
+    ReturnType<typeof createSpeechInbox>,
+    "authorize" | "revoke" | "accept"
+  >;
 }) {
   const tracks = new Map<
     string,
@@ -25,6 +31,7 @@ export function createAudioService(options: {
   const cleanup = new Set<Promise<void>>();
   const retryAfter = new Map<string, number>();
   let process: ReturnType<typeof createAudioProcess> | undefined;
+  let speechConfiguration: string | undefined;
   let stopped = false,
     started = false,
     failures = 0;
@@ -47,6 +54,7 @@ export function createAudioService(options: {
     const entry = tracks.get(key);
     if (!entry) return;
     tracks.delete(key);
+    options.speechInbox?.revoke(entry.view.run.trackRunId);
     entry.controller.abort();
     const owned = process;
     const task = entry.pending
@@ -74,6 +82,9 @@ export function createAudioService(options: {
     selected: z.infer<typeof sourceSelectionSchema>[],
   ) {
     if (stopped || !started) return;
+    const requestedSpeech = JSON.stringify(config.speech);
+    if (process && speechConfiguration !== requestedSpeech)
+      restartRequested = true;
     if (selected.length > 8) {
       for (const key of tracks.keys()) retire(key);
       status = "unavailable";
@@ -155,7 +166,19 @@ export function createAudioService(options: {
     if (!process) {
       status = "starting";
       try {
+        speechConfiguration = requestedSpeech;
         process = createAudioProcess({
+          speech(observation) {
+            const entry = tracks.get(observation.run.deviceId);
+            if (
+              !entry ||
+              entry.view.run.trackRunId !== observation.run.trackRunId ||
+              entry.view.run.scopeEpoch !== observation.run.scopeEpoch ||
+              entry.controller.signal.aborted
+            )
+              return false;
+            return options.speechInbox?.accept(observation) ?? false;
+          },
           track(view) {
             const entry = tracks.get(view.run.deviceId);
             if (
@@ -172,8 +195,12 @@ export function createAudioService(options: {
               performance.now() + config.maxFrameAgeMs - Math.max(0, age);
             if (age < -config.maxFrameAgeMs)
               entry.view.validity = "unavailable";
-            if (view.status === "failed" || view.status === "no_track")
+            if (view.speech?.validity === "unavailable")
+              options.speechInbox?.revoke(view.run.trackRunId);
+            if (view.status === "failed" || view.status === "no_track") {
+              options.speechInbox?.revoke(view.run.trackRunId);
               retryAfter.set(view.run.deviceId, performance.now() + 5000);
+            }
             notify();
           },
           failure(reason) {
@@ -181,7 +208,8 @@ export function createAudioService(options: {
             nextProcessAt = performance.now() + 5000;
             status = "unavailable";
             error = reason;
-            for (const entry of tracks.values())
+            for (const entry of tracks.values()) {
+              options.speechInbox?.revoke(entry.view.run.trackRunId);
               entry.view = {
                 ...entry.view,
                 status: "unavailable",
@@ -190,7 +218,17 @@ export function createAudioService(options: {
                 error: reason,
                 energy: [],
                 vad: [],
+                ...(entry.view.speech
+                  ? {
+                      speech: {
+                        ...entry.view.speech,
+                        status: "unavailable",
+                        validity: "unavailable",
+                      },
+                    }
+                  : {}),
               };
+            }
             notify();
           },
         });
@@ -234,6 +272,7 @@ export function createAudioService(options: {
         expiresAt: 0,
       };
       tracks.set(deviceId, entry);
+      options.speechInbox?.authorize(run);
       const owned = process;
       entry.pending = (async () => {
         try {
@@ -285,19 +324,59 @@ export function createAudioService(options: {
           [...tracks.values()].some((entry) => entry.view.vadError))
       )
         restartRequested = true;
+      for (const [key, entry] of tracks) {
+        if (entry.view.speech?.validity === "unavailable") retire(key);
+      }
+      process?.retrySpeech();
       failures = 0;
       nextProcessAt = 0;
       nextCleanupAt = 0;
       retryAfter.clear();
     },
     snapshot() {
+      const inactiveSpeech =
+        status === "closed"
+          ? "closed"
+          : process?.status.error
+            ? "unavailable"
+            : null;
       return {
         status,
         error,
         processId: process?.status.processId,
         model: process?.status.model ?? null,
+        speech: process?.status.speech
+          ? {
+              ...process.status.speech,
+              ...(inactiveSpeech
+                ? {
+                    status: inactiveSpeech,
+                    processId: undefined,
+                    processRssBytes: null,
+                    queueDepth: 0,
+                    queueBytes: 0,
+                    inFlight: false,
+                    error: process.status.error,
+                  }
+                : {}),
+            }
+          : undefined,
         tracks: [...tracks.values()].map((entry) => ({
           ...entry.view,
+          ...(entry.view.speech
+            ? {
+                speech: {
+                  ...entry.view.speech,
+                  validity:
+                    entry.view.speech.validity === "valid" &&
+                    entry.view.speech.latest &&
+                    Date.now() - entry.view.speech.latest.observedEndAt >=
+                      speechLimits.resultAgeMs
+                      ? ("expired" as const)
+                      : entry.view.speech.validity,
+                },
+              }
+            : {}),
           validity:
             entry.view.validity === "valid" &&
             performance.now() >= entry.expiresAt

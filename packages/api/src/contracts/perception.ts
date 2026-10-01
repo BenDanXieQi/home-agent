@@ -116,6 +116,68 @@ const sampleInterval = z.object({
   startSample: z.int().nonnegative(),
   endSample: z.int().positive(),
 });
+export const speechConfigSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  idleUnloadMs: z.int().min(5000).max(3600000).default(60000),
+});
+export const speechObservationSchema = z.object({
+  id: z.string().min(1).max(128),
+  run: audioRunSchema,
+  generation: z.uuid(),
+  startSample: z.int().nonnegative(),
+  endSample: z.int().positive(),
+  speechEndSample: z.int().positive(),
+  boundary: z.enum(["pause", "length_limit"]),
+  observedStartAt: z.number(),
+  observedEndAt: z.number(),
+  completedAt: z.number(),
+  text: z.string().max(4096),
+  modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  processingVersion: z.literal("sensevoice-silero-frame-processor"),
+  inferenceMs: z.number().nonnegative(),
+});
+export const speechTrackSchema = z.object({
+  status: z.enum([
+    "listening",
+    "collecting",
+    "queued",
+    "recognizing",
+    "unavailable",
+  ]),
+  latest: speechObservationSchema.nullable(),
+  validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
+  dropped: z.int().nonnegative(),
+  error: z.string().max(4096).optional(),
+});
+export const speechRuntimeSchema = z.object({
+  status: z.enum([
+    "sleeping",
+    "loading",
+    "ready",
+    "recognizing",
+    "unloading",
+    "recovering",
+    "unavailable",
+    "closed",
+  ]),
+  processId: z.int().positive().optional(),
+  processRssBytes: z.number().nonnegative().nullable(),
+  modelSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable(),
+  idleUnloadMs: z.int().positive(),
+  loads: z.int().nonnegative(),
+  failures: z.int().nonnegative(),
+  queueDepth: z.int().nonnegative().max(8),
+  queueBytes: z.int().nonnegative(),
+  inFlight: z.boolean(),
+  completed: z.int().nonnegative(),
+  dropped: z.int().nonnegative(),
+  cancelled: z.int().nonnegative(),
+  handoffRejected: z.int().nonnegative(),
+  error: z.string().max(4096).optional(),
+});
 export const audioTrackSchema = z.object({
   run: audioRunSchema,
   channels: z
@@ -152,11 +214,21 @@ export const audioTrackSchema = z.object({
     .max(8),
   vadStatus: z.enum(["insufficient_input", "ready", "unavailable"]),
   vadError: z.string().max(4096).optional(),
+  speech: speechTrackSchema.optional(),
   energyRemainder: z.int().min(0).max(479),
   vadRemainder: z.int().min(0).max(511),
   validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
 });
+export const perceptionResourceSchema = z.object({
+  nativeThreads: z.int().positive(),
+  videoWorkers: z.int().positive(),
+  audioThreads: z.int().nonnegative(),
+  speechThreads: z.int().nonnegative(),
+  modelMemoryMiB: z.int().positive(),
+  reservedModelMiB: z.int().positive(),
+});
 export const perceptionSnapshotSchema = z.object({
+  resources: perceptionResourceSchema.nullable().optional(),
   sequence: z.int().nonnegative(),
   householdVersion: stateVersionSchema.nullable(),
   instanceId: z.uuid(),
@@ -165,6 +237,8 @@ export const perceptionSnapshotSchema = z.object({
   error: z.string().optional(),
   settings: z.object({
     cpuRatio: z.number().positive().max(1),
+    modelMemoryMiB: z.int().positive().optional(),
+    speech: speechConfigSchema.optional(),
     sampleFps: z.number(),
     maxFrameAgeMs: z.number(),
     firstFrameTimeoutMs: z.number(),
@@ -204,6 +278,7 @@ export const perceptionSnapshotSchema = z.object({
       .nullable(),
     error: z.string().max(4096).optional(),
     tracks: z.array(audioTrackSchema).max(8),
+    speech: speechRuntimeSchema.optional(),
   }),
   sources: z.array(
     z.object({

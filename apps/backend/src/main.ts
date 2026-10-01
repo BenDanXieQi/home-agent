@@ -1,3 +1,5 @@
+import { createSpeechInbox } from "./conversation/speech-inbox";
+import { createSpeechDialogueClient } from "./conversation/agent-client";
 import { createMemberRepository } from "./household/members/repository";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
@@ -79,7 +81,14 @@ const deviceLogs = new DevicePushLogs(
 mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
+const speechInbox = createSpeechInbox({
+  instanceId: crypto.randomUUID(),
+  analyze: createSpeechDialogueClient(
+    async () => (await connectionStore.read()).services.agent.url,
+  ),
+});
 const perception = createPerceptionService({
+  speechInbox,
   configPath: resolvePath(
     import.meta.dir,
     "../../..",
@@ -102,6 +111,7 @@ const roomAnalysis = new RoomAnalysisService(
   ),
 );
 const app = createApp({
+  speechInbox,
   memberRepository: database ? createMemberRepository(database.db) : undefined,
   contextRepository: database
     ? createContextRepository(database.db)
@@ -136,6 +146,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           Promise.all([
             server.stop(),
             perception.close(),
+            speechInbox.close(),
             deviceLogs.stop("后端停止", "interrupted"),
             household.close().catch(() => {
               console.warn(

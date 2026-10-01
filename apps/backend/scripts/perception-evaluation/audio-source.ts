@@ -8,7 +8,20 @@ import {
 
 // A paced encoded source exercises the production HTTP/FFmpeg/IPC path.
 // Quiet and audible sources are distinct physical inputs, not mocked VAD results.
-export async function createAudioSource(count = 1) {
+export async function createAudioSource(
+  count = 1,
+  options: { speech?: Uint8Array; video?: boolean } = {},
+) {
+  if (
+    options.speech &&
+    (!options.speech.length || options.speech.length > 480000)
+  )
+    throw new Error(
+      "Speech fixture must contain at most 60 seconds of raw 8 kHz A-law",
+    );
+  const videoEncoders = new Set<ReturnType<typeof spawn>>();
+  const videoExits = new Set<Promise<void>>();
+  let videoRequests = 0;
   const encoder = spawn(
     process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
     [
@@ -49,7 +62,12 @@ export async function createAudioSource(count = 1) {
   }));
   const sourceIds = selected.map(() => crypto.randomUUID());
   const sessionId = crypto.randomUUID();
-  const modes = new Map(selected.map(({ deviceId }) => [deviceId, "tone"]));
+  const modes = new Map(
+    selected.map(({ deviceId }) => [
+      deviceId,
+      options.speech ? "speech" : "tone",
+    ]),
+  );
   const readers = new Set<AbortController>();
   let requests = 0;
   const server = Bun.serve({
@@ -63,6 +81,72 @@ export async function createAudioSource(count = 1) {
       const source =
         selected[sourceIds.findIndex((id) => id === input.sourceId)];
       if (!source) return new Response(null, { status: 404 });
+      if (options.video && new URL(request.url).pathname === "/analysis") {
+        videoRequests++;
+        const child = spawn(
+          process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
+          [
+            "-v",
+            "error",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=1280x720:rate=15",
+            "-threads",
+            "1",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-g",
+            "15",
+            "-bf",
+            "0",
+            "-f",
+            "mpegts",
+            "-muxdelay",
+            "0",
+            "pipe:1",
+          ],
+          { stdio: ["ignore", "pipe", "pipe"] },
+        );
+        videoEncoders.add(child);
+        const exit = new Promise<void>((resolveExit) => {
+          child.once("exit", () => {
+            videoEncoders.delete(child);
+            videoExits.delete(exit);
+            resolveExit();
+          });
+          child.once("error", (error) => {
+            console.error("Video fixture encoder failed", error);
+            videoEncoders.delete(child);
+            videoExits.delete(exit);
+            resolveExit();
+          });
+        });
+        videoExits.add(exit);
+        request.signal.addEventListener(
+          "abort",
+          () => {
+            child.kill("SIGKILL");
+          },
+          { once: true },
+        );
+        child.stderr?.on("data", (data: Buffer) => {
+          console.error(data.toString());
+        });
+        return new Response(Readable.toWeb(child.stdout), {
+          headers: {
+            "Content-Type": "video/mp2t",
+            "X-Media-Generation": crypto.randomUUID(),
+            "X-Media-Clock-Rate": "90000",
+            "X-Media-Pts-Origin": "0",
+          },
+        });
+      }
       requests++;
       if (modes.get(source.deviceId) === "missing")
         return Response.json({ code: "audio_track_missing" }, { status: 422 });
@@ -92,7 +176,14 @@ export async function createAudioSource(count = 1) {
               undefined,
               { signal },
             );
-            const bytes = modes.get(source.deviceId) === "quiet" ? quiet : tone;
+            const mode = modes.get(source.deviceId);
+            const bytes =
+              mode === "quiet"
+                ? quiet
+                : mode === "speech"
+                  ? options.speech
+                  : tone;
+            if (!bytes) throw new Error("Speech source has no fixture");
             const offset = samples % bytes.length;
             const chunk = bytes.subarray(
               offset,
@@ -156,6 +247,9 @@ export async function createAudioSource(count = 1) {
     get requests() {
       return requests;
     },
+    get videoRequests() {
+      return videoRequests;
+    },
     revoke() {
       allowed = false;
       lease.abort();
@@ -168,7 +262,9 @@ export async function createAudioSource(count = 1) {
     async close() {
       lease.abort();
       for (const reader of readers) reader.abort();
+      for (const child of videoEncoders) child.kill("SIGKILL");
       await server.stop(true);
+      await Promise.all(videoExits);
     },
   };
 }

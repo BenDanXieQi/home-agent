@@ -2,13 +2,18 @@ import { fork } from "node:child_process";
 import pTimeout from "p-timeout";
 import { audioResponseSchema } from "./protocol";
 import type { audioCommandSchema, audioStartSchema } from "./protocol";
-import type { audioTrackSchema } from "@home-agent/api/contracts";
+import type {
+  audioTrackSchema,
+  speechRuntimeSchema,
+  speechObservationSchema,
+} from "@home-agent/api/contracts";
 import type { z } from "zod";
 
 // One additional native process owns every audio decoder and a single VAD CPU thread.
 export function createAudioProcess(options: {
   track: (track: z.infer<typeof audioTrackSchema>) => void;
   failure: (error: string) => void;
+  speech?: (observation: z.infer<typeof speechObservationSchema>) => boolean;
 }) {
   if (process.platform === "win32")
     throw new Error("Audio supervision requires POSIX process groups");
@@ -34,6 +39,7 @@ export function createAudioProcess(options: {
     closingRequested = false;
   let error: string | undefined;
   let model: z.infer<(typeof audioResponseSchema.options)[0]>["model"] = null;
+  let speech: z.infer<typeof speechRuntimeSchema> | undefined;
   let lastPulse = performance.now(),
     inferenceSince: number | null = null;
   let diagnostic = "";
@@ -105,8 +111,21 @@ export function createAudioProcess(options: {
     } else if (response.kind === "pulse") {
       lastPulse = performance.now();
       inferenceSince = response.inferenceSince;
+      speech = response.speech;
     } else if (response.kind === "track") options.track(response.track);
-    else if (response.kind === "stopped") {
+    else if (response.kind === "speech") {
+      if (!closingRequested) {
+        try {
+          send({
+            kind: "speech_ack",
+            id: response.observation.id,
+            accepted: options.speech?.(response.observation) ?? false,
+          });
+        } catch (cause) {
+          fail(cause);
+        }
+      }
+    } else if (response.kind === "stopped") {
       waiting.get(response.trackRunId)?.resolve();
       waiting.delete(response.trackRunId);
     } else if (response.kind === "closed") closed.resolve();
@@ -136,13 +155,16 @@ export function createAudioProcess(options: {
   });
   return {
     get status() {
-      return { ready, error, model, processId: child.pid };
+      return { ready, error, model, processId: child.pid, speech };
     },
     async start(input: z.infer<typeof audioStartSchema>, signal: AbortSignal) {
       if (closingRequested) throw new Error("Audio closing");
       await pTimeout(initialized.promise, { milliseconds: 30000, signal });
       signal.throwIfAborted();
       send({ kind: "start", input });
+    },
+    retrySpeech() {
+      if (ready && !error && !closingRequested) send({ kind: "retry_speech" });
     },
     async stop(trackRunId: string) {
       if (error || stopped || closingRequested) return;
