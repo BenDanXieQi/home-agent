@@ -426,6 +426,15 @@ export function reduceFacts(
     const key = propertyKey(account, event.did, event.siid, event.piid);
     const prior = projection.latest[key];
     const fact = prior ? { ...prior } : emptyProperty(definition);
+    const ignored =
+      event.kind === "property" &&
+      (event.delivery_kind === "replayed" ||
+        event.delivery_kind === "unknown" ||
+        (event.delivery_kind === "baseline" && fact.has_value) ||
+        (event.observed_at !== null &&
+          prior?.evidence?.observed_at != null &&
+          Date.parse(event.observed_at) <
+            Date.parse(prior.evidence.observed_at)));
     const specQuality = definition.capability
       ? matchesCapability(event.value, definition.capability)
       : "unknown";
@@ -434,7 +443,7 @@ export function reduceFacts(
       specQuality === "invalid"
     ) {
       status.rejected++;
-      if (prior && event.kind !== "read") {
+      if (prior && event.kind !== "read" && !ignored) {
         draft.latest[key] = {
           ...prior,
           quality: "unconfirmed",
@@ -497,15 +506,6 @@ export function reduceFacts(
       spec_id: device.spec_id,
     };
     const candidate = event.kind === "read" && fact.has_value;
-    const ignored =
-      event.kind === "property" &&
-      (event.delivery_kind === "replayed" ||
-        event.delivery_kind === "unknown" ||
-        (event.delivery_kind === "baseline" && fact.has_value) ||
-        (event.observed_at !== null &&
-          prior?.evidence?.observed_at != null &&
-          Date.parse(event.observed_at) <
-            Date.parse(prior.evidence.observed_at)));
     if (ignored) {
       status.accepted++;
       accepted.observation = {
