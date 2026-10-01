@@ -1,3 +1,4 @@
+import { createHouseholdReset } from "../household-reset";
 import type { RunFailedEvent } from "@home-agent/api/contracts";
 import { AppError, errorPayload } from "@home-agent/api/errors";
 import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
@@ -31,6 +32,7 @@ export function createChatRoutes(
   agent: ReturnType<typeof createHomeAgent>,
   timeoutMs: number,
   database?: AgentDatabase,
+  reset = createHouseholdReset(database),
 ) {
   const app = new Hono();
   // Single-process admission guard. Hold until graph execution has settled.
@@ -53,6 +55,7 @@ export function createChatRoutes(
       const threadId = input.threadId ?? crypto.randomUUID();
       if (activeThreads.has(threadId))
         throw new AppError("thread_busy", { params: { threadId } });
+      const leave = reset.enter();
       activeThreads.add(threadId);
       try {
         // Check storage before returning an SSE success status or calling the model.
@@ -61,10 +64,12 @@ export function createChatRoutes(
         });
       } catch (cause) {
         activeThreads.delete(threadId);
+        leave();
         throw new AppError("persistence_unavailable", { cause });
       }
       if (c.req.raw.signal.aborted) {
         activeThreads.delete(threadId);
+        leave();
         throw new AppError("request_cancelled");
       }
       const runId = crypto.randomUUID();
@@ -196,7 +201,10 @@ export function createChatRoutes(
               },
             ),
           )
-          .finally(() => activeThreads.delete(threadId)),
+          .finally(() => {
+            activeThreads.delete(threadId);
+            leave();
+          }),
       );
       response.headers.set("Cache-Control", "no-cache, no-transform");
       return response;

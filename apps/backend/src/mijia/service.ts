@@ -1,3 +1,4 @@
+import type { createAgentHouseholdReset } from "../household/reset-agent";
 import { DirectoryNotifications } from "./devices/directory-notifications";
 import { AccountObservations } from "./account/observations";
 import type { MiotObservation } from "./protocols/miot/messages";
@@ -27,6 +28,7 @@ import { deviceDirectory } from "./devices/directory";
 import type { HomeSelectionStore } from "./homes/store";
 
 export type MijiaDependencies = {
+  resetHomeData?: ReturnType<typeof createAgentHouseholdReset>;
   homeSelectionStore: HomeSelectionStore | undefined;
   readGo2rtcUrl: () => Promise<string>;
   credentialStore: CredentialStore | undefined;
@@ -60,8 +62,10 @@ export class MijiaService {
     readGo2rtcUrl,
     credentialStore,
     homeSelectionStore,
+    resetHomeData,
   }: MijiaDependencies) {
     this.homeSelectionStore = homeSelectionStore;
+    this.resetHomeData = resetHomeData;
     this.credentialStore = credentialStore;
     this.media = new MediaSession({
       readUrl: readGo2rtcUrl,
@@ -131,6 +135,7 @@ export class MijiaService {
   private readGeneration = crypto.randomUUID();
   private readonly propertyReader = new PropertyReader();
   private readonly credentialStore: CredentialStore | undefined;
+  private readonly resetHomeData: MijiaDependencies["resetHomeData"];
   private readonly homeSelectionStore: HomeSelectionStore | undefined;
   private readonly listeners = new Set<() => void>();
   private notificationPending = false;
@@ -278,17 +283,28 @@ export class MijiaService {
       if (previousHomeId === homeId) throw new MijiaError("binding_conflict");
       this.discovery.validateSelection(homeId);
       this.chooseDefaultHome = false;
-      await this.requireHomeStore().write(
-        this.accountKey(account),
-        homeId,
-        assertCurrent,
-        previousHomeId,
-      );
-      assertCurrent();
-      if (!this.activeAccount(account)) throw new MijiaError("stale_session");
-      commitBinding();
-      this.discovery.prepareHomeBinding();
-      this.discovery.acceptHome(homeId);
+      const commit = async (assertReady: () => void) => {
+        await this.requireHomeStore().write(
+          this.accountKey(account),
+          homeId,
+          () => {
+            assertCurrent();
+            assertReady();
+          },
+          previousHomeId,
+        );
+        assertCurrent();
+        if (!this.activeAccount(account)) throw new MijiaError("stale_session");
+        commitBinding();
+        this.discovery.prepareHomeBinding();
+        this.discovery.acceptHome(homeId);
+      };
+      if (previousHomeId !== null) {
+        if (!this.resetHomeData) throw new MijiaError("home_reset_failed");
+        await this.resetHomeData(commit);
+      } else {
+        await commit(assertCurrent);
+      }
     });
   }
 

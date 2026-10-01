@@ -11,8 +11,10 @@
 | 启动、配置、部署排障     | [运行说明](running.md)、[Backend README](../apps/backend/README.md)                                                                                 | [启动脚本](../scripts)、[服务连接](../apps/backend/src/connections)                                                  |
 | 米家授权、属性读取与推送 | [来源契约](contracts/mijia.md)、[Backend 模块职责](../apps/backend/README.md#目录与约定)                                                            | [米家接入](../apps/backend/src/mijia)                                                                                |
 | 家庭绑定、设备清单与订阅 | [家庭运行时](household-runtime.md)、[业务规则](contracts/household-runtime.md)                                                                      | [家庭运行时](../apps/backend/src/household)、[共享契约](../packages/api/src/contracts)                               |
+| 家庭上下文数据库浏览     | [Backend 表结构与接口](../apps/backend/README.md#家庭上下文表)、[Web 浏览页面](../apps/web/README.md#家庭数据库浏览)                                | [只读接口](../apps/backend/src/household-context)、[浏览页面](../apps/web/src/pages/database)                        |
 | 本地检测、音视频证据     | [当前检测](perception.md)，新增能力再读[音视频计划](plans/media-perception.md)                                                                      | [感知模块](../apps/backend/src/perception)、[go2rtc 扩展](../docker/go2rtc)                                          |
 | 感知调试、视频框与定格   | [视频详情与感知调试计划](plans/perception-debug-ui.md)、[Web README](../apps/web/README.md)                                                         | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                           |
+| 房间事实与观测描述       | [设备事实](contracts/device-facts.md)、[房间分析](contracts/room-analysis.md)                                                                       | [事实模块](../apps/backend/src/household)、[分析模块](../apps/backend/src/room-analysis)                             |
 | Agent、情景推理与自动化  | [Agent 当前能力](../apps/agent/README.md)、[领域模型](plans/household-model.md)、[协作实施顺序](plans/household-automation.md#9-实施顺序与改动位置) | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                    |
 | 设备采集、历史和页面增量 | [计划入口](plans/README.md)选择对应能力，再读 [Web README](../apps/web/README.md)                                                                   | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules) |
 
@@ -22,12 +24,14 @@
 
 ## 当前功能
 
-| 文档                               | 回答的问题与维护范围                                           |
-| ---------------------------------- | -------------------------------------------------------------- |
-| [本地运行](running.md)             | 如何启动、配置服务连接、切换 go2rtc 运行方式及停止服务         |
-| [米家接入与摄像头](mijia.md)       | 如何授权、预览、管理媒体资源；米家设备能力与使用限制           |
-| [家庭运行时](household-runtime.md) | 当前家庭绑定、设备清单、规格、公共状态订阅与设备上报日志       |
-| [本地目标检测](perception.md)      | 已实现图片／摄像头检测、人宠跟踪、计算资源、模型契约及验证范围 |
+| 文档                                            | 回答的问题与维护范围                                           |
+| ----------------------------------------------- | -------------------------------------------------------------- |
+| [本地运行](running.md)                          | 如何启动、配置服务连接、切换 go2rtc 运行方式及停止服务         |
+| [米家接入与摄像头](mijia.md)                    | 如何授权、预览、管理媒体资源；米家设备能力与使用限制           |
+| [家庭运行时](household-runtime.md)              | 当前家庭绑定、设备清单、规格、公共状态订阅与设备上报日志       |
+| [设备事实与房间快照](contracts/device-facts.md) | 持续采集、当前值质量、本机策略、房间查询与读取                 |
+| [房间 AI 上下文](contracts/room-analysis.md)    | 观测描述、触发策略、证据接纳、有效性及模型限制                 |
+| [本地目标检测](perception.md)                   | 已实现图片／摄像头检测、人宠跟踪、计算资源、模型契约及验证范围 |
 
 当前家庭运行时不等于完整家庭情景；目标检测不等于身份与活动识别。未来能力交付后，把实际用法和限制更新到所属功能文档，不把规划全文复制过来。
 

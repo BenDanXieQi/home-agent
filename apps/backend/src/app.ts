@@ -16,6 +16,10 @@ import { createMijiaRoutes } from "./mijia/routes";
 import type { HouseholdRuntime } from "./household/runtime";
 import type { MijiaService } from "./mijia/service";
 import type { DevicePushLogs } from "./household/device-logs";
+import type { RoomAnalysisService } from "./room-analysis/service";
+import { createRoomAnalysisRoutes } from "./room-analysis/routes";
+import { createContextRoutes } from "./household-context/routes";
+import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
   perception: ReturnType<typeof createPerceptionService>;
@@ -25,6 +29,8 @@ type AppDependencies = {
   household: HouseholdRuntime;
   mijiaService: MijiaService;
   deviceLogs: DevicePushLogs;
+  roomAnalysis: RoomAnalysisService;
+  contextRepository: ReturnType<typeof createContextRepository> | undefined;
   shutdownSignal: AbortSignal;
   readAgentUrl: () => Promise<string>;
 };
@@ -37,6 +43,8 @@ export function createApp({
   household,
   mijiaService,
   deviceLogs,
+  roomAnalysis,
+  contextRepository,
   shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
@@ -66,6 +74,14 @@ export function createApp({
           runtime: "bun",
           timestamp: new Date().toISOString(),
         }),
+      ),
+    )
+    .route(
+      "/api/household-context",
+      createContextRoutes(
+        environment.BACKEND_PORT,
+        household,
+        contextRepository,
       ),
     )
     .route(
@@ -101,6 +117,10 @@ export function createApp({
         mijiaService,
         shutdownSignal,
       ),
+    )
+    .route(
+      "/api/rooms/analysis",
+      createRoomAnalysisRoutes(environment.BACKEND_PORT, roomAnalysis),
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));

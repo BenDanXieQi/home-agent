@@ -47,7 +47,7 @@ OAuth 与 MQTT 使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，
 
 `MijiaService.observeDevices(deviceIds, onObservation, signal)` 校验当前账号、所选家庭和设备清单中的明确设备集合，按需创建一个 MQTT 采集实例。多个观察者共用连接与 topic，按各观察者的引用计数增加或移除订阅；返回 `cancel()`、`snapshot()` 和 `retry()`。`snapshot()` 提供逐 topic 的期望、确认、在途、获准 QoS、失败原因及接收／丢弃计数；`retry()` 只重试临时失败，包括配额不足等临时 SUBACK 拒绝，不反复尝试权限、topic 或能力不支持等永久拒绝。新 topic 权限拒绝通知账号管理模块刷新设备清单一次，不将 ACL 拒绝误判为 token 失效；永久拒绝跨断线保留，直到授权条件变化。临时拒绝保留原始原因码，等待显式重试或重连，不立即循环订阅。
 
-观察入口本身不自动选择全家庭，不提交家庭 latest 或 availability。设备上报日志通过独立的限时诊断采样调用此入口，并向页面提供 MQTT 记录；诊断日志没有接入家庭实时状态，使用方式见[米家业务](../mijia.md)。
+观察入口本身不自动选择全家庭，不提交家庭 latest 或 availability；家庭采集模块负责全家庭观察、当前值与有效性，见[设备事实与房间快照](device-facts.md)。设备上报日志通过独立的限时诊断采样调用此入口，并向页面提供 MQTT 记录；诊断日志没有接入家庭实时状态，使用方式见[米家业务](../mijia.md)。
 
 `protocols/miot/mqtt.ts` 负责 MQTT 5/TLS 连接、订阅与取消，`messages.ts` 校验和规范化属性及在线消息。连接使用 clean start、60 秒 keepalive 和 15 秒 CONNACK 期限；关闭 MQTT.js 的自动重连和重订（`reconnectPeriod=0`、`resubscribe=false`），恢复由账号观察模块统一管理。每设备请求 QoS 2 的 `device/{did}/up/properties_changed/#` 和 `device/{did}/state/#`；两类 topic 独立接受 QoS 0/1/2 的 SUBACK，连接成功不代替订阅确认。在途操作共用 16 个名额、确认期限 10 秒。订阅确认超时或退订失败／超时关闭当前连接代次，释放 MQTT.js 未确认请求，再由账号观察模块按既有退避恢复活动订阅。迟到确认不能复活旧代次；单项 SUBACK 明确拒绝仍按其临时或永久原因处理。
 
@@ -59,7 +59,7 @@ OAuth 与 MQTT 使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，
 
 每次连接从账号管理模块读取最新 OAuth 凭据；明确认证拒绝停止普通重试并交回账号维护，强制刷新被拒绝的 OAuth token，不因其本地有效期尚未到期而复用；在途续期和 Retry-After 等待保留该拒绝状态，刷新返回认证失败或仍返回被拒绝 token 时使整个接入会话进入重新认证。连接初始化异常按取消、认证和其他故障区分，脱敏原因保留在观察快照与 tracing 中。
 
-最后一个观察（含设备清单通知）取消时关闭连接并清除定时器，当前账号作用域内的永久订阅拒绝仍保留；账号退出或作用域撤销时清除这些记录。空闲时凭据更新仅清除旧拒绝和认证错误，不建立连接。同账号会话续期成功且范围未变时不撤销观察；OAuth token 改变时重建连接，其他账号／家庭范围撤销仍会终止观察。没有自动补读或家庭状态恢复。应用持有一份业务设备清单，MQTT 只保存派生的订阅集合。
+最后一个观察（含设备清单通知）取消时关闭连接并清除定时器，当前账号作用域内的永久订阅拒绝仍保留；账号退出或作用域撤销时清除这些记录。空闲时凭据更新仅清除旧拒绝和认证错误，不建立连接。同账号会话续期成功且范围未变时不撤销观察；OAuth token 改变时重建连接，其他账号／家庭范围撤销仍会终止观察。协议层没有自动补读或家庭状态恢复；应用层可按本机策略在订阅确认后补读，云缓存仍不代表实时值。应用持有一份业务设备清单，MQTT 只保存派生的订阅集合。
 
 ## 设备清单变化通知
 
@@ -71,7 +71,11 @@ OAuth 与 MQTT 使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，
 
 [`MijiaService.readProperties(properties, signal)`](../../apps/backend/src/mijia/service.ts) 接受 `{ did, siid, piid }[]` 和取消信号，按原顺序返回逐项观测。仅允许当前绑定家庭中有资格的设备及适用于当前定义的 readable 属性；设备清单在线标记不单独禁止读取，旧规格展示不能授予读取资格。设备移除、定义变更、取消或运行撤销使旧结果失效；普通局部失败不擦除其他成功项。
 
-入口不提供 HTTP 路由、周期轮询或自动补读，也不维护家庭当前属性值。完整规格的共享、翻译与准备机制见[公开规格说明](../../apps/backend/src/mijia/protocols/spec/README.md)；下文只定义来源请求和观测的契约，不记录内部预检调用顺序。
+请求前、规格预检后、批次执行前及异步返回前均检查当前账号、采集实例和设备清单归属；设备移除、家庭归属／型号／规格引用变化、会话撤销、调用取消或账号失效会拒绝旧结果。此入口只允许读取已选业务家庭的设备，不修改家庭选择，不维护 latest、availability 或属性版本，也不提交家庭状态。
+
+[`preparePropertyRead`](../../apps/backend/src/mijia/properties/read-request.ts) 复制属性请求，按设备分组，同步读取家庭模块已准备的规格并逐设备验证其属性；保留原输入顺序，通过 service 提供的断言核验当前账号、采集实例和设备清单归属，再交给 [`PropertyReader`](../../apps/backend/src/mijia/properties/reader.ts) 按全服务共用的串行队列执行 HTTP 批次。
+
+应用层通过 `POST /api/mijia/properties/read` 提供一次性读取及接纳结果，内部协议入口不变；没有周期属性读取。现有 `/devices/refresh` 按 target 刷新设备清单、规格或两者；扫码授权和连接状态继续使用[现有米家业务接口](../mijia.md#http-与追踪)。
 
 ## 编码、请求限制与逐项结果
 

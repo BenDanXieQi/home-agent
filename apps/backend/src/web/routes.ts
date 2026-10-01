@@ -22,7 +22,15 @@ export function createWebRoutes(root: string) {
     .get("/*", serveStatic(options))
     .on(
       "GET",
-      ["/", "/devices", "/cameras", "/settings", "/device-logs"],
+      [
+        "/",
+        "/devices",
+        "/cameras",
+        "/cameras/:deviceId/:channel",
+        "/settings",
+        "/device-logs",
+        "/data",
+      ],
       serveStatic({ ...options, path: "index.html" }),
     );
 }

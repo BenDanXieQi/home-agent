@@ -2,7 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { twMerge } from "tailwind-merge";
 
 const columns =
-  "grid grid-cols-[minmax(160px,1.5fr)_minmax(100px,1fr)_90px_90px] items-center gap-5 max-md:grid-cols-[minmax(100px,_1fr)_52px] max-md:gap-2 max-md:px-3";
+  "grid grid-cols-[minmax(160px,1.5fr)_minmax(100px,1fr)_70px_24px] items-center gap-5 max-md:grid-cols-[minmax(100px,_1fr)_52px_24px] max-md:gap-2 max-md:px-3";
 
 export function DeviceList({
   showHeader = true,
@@ -16,7 +16,7 @@ export function DeviceList({
       {showHeader ? (
         <div className={`${columns} h-11 px-5 text-xs text-muted`}>
           <span>设备名称</span>
-          <span className="max-md:hidden">型号</span>
+          <span className="max-md:hidden">最近状态</span>
           <span>状态</span>
           <span className="max-md:hidden" />
         </div>
