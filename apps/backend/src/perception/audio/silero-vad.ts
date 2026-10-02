@@ -1,9 +1,10 @@
 import type { SpeechAnalysis } from "./analysis";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { isDeepStrictEqual } from "node:util";
 import { InferenceSession, Tensor } from "onnxruntime-node";
 
-export const vadSha256 =
+const vadSha256 =
   "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f";
 export async function createVad() {
   const bytes = await readFile(
@@ -49,8 +50,6 @@ export async function createVad() {
       metadata: {
         sha256: vadSha256,
         provider: "cpu" as const,
-        inputs: metadata,
-        outputs: session.outputMetadata,
       },
       async evaluate(input: Float32Array, state: Float32Array) {
         const tensors = {
@@ -67,10 +66,10 @@ export async function createVad() {
           if (
             !probability ||
             !(probability.data instanceof Float32Array) ||
-            JSON.stringify(probability.dims) !== "[1,1]" ||
+            !isDeepStrictEqual(probability.dims, [1, 1]) ||
             !next ||
             !(next.data instanceof Float32Array) ||
-            JSON.stringify(next.dims) !== "[2,1,128]" ||
+            !isDeepStrictEqual(next.dims, [2, 1, 128]) ||
             !Number.isFinite(probability.data[0]) ||
             probability.data[0]! < 0 ||
             probability.data[0]! > 1 ||
@@ -97,6 +96,10 @@ export async function createVad() {
 // The supplied evaluator serializes calls to the one process-wide ONNX session.
 export function createSileroTrack(
   evaluate?: Awaited<ReturnType<typeof createVad>>["evaluate"],
+  observe?: (
+    block: Awaited<ReturnType<SpeechAnalysis["accept"]>>["blocks"][number],
+    samples: Float32Array,
+  ) => Promise<void>,
 ) {
   let state = new Float32Array(256);
   const input = new Float32Array(576);
@@ -116,11 +119,14 @@ export function createSileroTrack(
           state = result.state;
           input.copyWithin(0, 512, 576);
           const endSample = startSample + index + 1;
-          blocks.push({
+          const block = {
             startSample: endSample - 512,
             endSample,
             probability: result.probability,
-          });
+          };
+          blocks.push(block);
+          if (observe)
+            await observe(block, Float32Array.from(input.subarray(64)));
         } catch (cause) {
           error = String(cause).slice(0, 4096);
           state.fill(0);

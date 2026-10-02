@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
+import { addAbortListener, once } from "node:events";
 import {
   sourceAccessSchema,
   type PerceptionSources,
@@ -8,7 +9,18 @@ import {
 
 // A paced encoded source exercises the production HTTP/FFmpeg/IPC path.
 // Quiet and audible sources are distinct physical inputs, not mocked VAD results.
-export async function createAudioSource(count = 1) {
+export async function createAudioSource(
+  count = 1,
+  options: { speech?: Uint8Array; video?: boolean } = {},
+) {
+  if (
+    options.speech &&
+    (!options.speech.length || options.speech.length > 480000)
+  )
+    throw new Error(
+      "Speech fixture must contain at most 60 seconds of raw 8 kHz A-law",
+    );
+  const videoEncoders = new Map<ReturnType<typeof spawn>, Promise<void>>();
   const encoder = spawn(
     process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
     [
@@ -27,13 +39,9 @@ export async function createAudioSource(count = 1) {
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
-  const encoderExit = new Promise<number | null>((resolve, reject) => {
-    encoder.once("error", reject);
-    encoder.once("close", resolve);
-  });
-  const [encoded, exitCode, diagnostic] = await Promise.all([
+  const [encoded, [exitCode], diagnostic] = await Promise.all([
     new Response(Readable.toWeb(encoder.stdout)).arrayBuffer(),
-    encoderExit,
+    once(encoder, "close"),
     new Response(Readable.toWeb(encoder.stderr)).text(),
   ]);
   if (exitCode !== 0)
@@ -49,9 +57,13 @@ export async function createAudioSource(count = 1) {
   }));
   const sourceIds = selected.map(() => crypto.randomUUID());
   const sessionId = crypto.randomUUID();
-  const modes = new Map(selected.map(({ deviceId }) => [deviceId, "tone"]));
+  const modes = new Map(
+    selected.map(({ deviceId }) => [
+      deviceId,
+      options.speech ? "speech" : "tone",
+    ]),
+  );
   const readers = new Set<AbortController>();
-  let requests = 0;
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -63,19 +75,72 @@ export async function createAudioSource(count = 1) {
       const source =
         selected[sourceIds.findIndex((id) => id === input.sourceId)];
       if (!source) return new Response(null, { status: 404 });
-      requests++;
+      if (options.video && new URL(request.url).pathname === "/analysis") {
+        const child = spawn(
+          process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
+          [
+            "-v",
+            "error",
+            "-re",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=1280x720:rate=15",
+            "-threads",
+            "1",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-tune",
+            "zerolatency",
+            "-g",
+            "15",
+            "-bf",
+            "0",
+            "-f",
+            "mpegts",
+            "-muxdelay",
+            "0",
+            "pipe:1",
+          ],
+          { stdio: ["ignore", "pipe", "pipe"] },
+        );
+        const cancellation = addAbortListener(request.signal, () => {
+          child.kill("SIGKILL");
+        });
+        const exit = once(child, "close")
+          .then(
+            () => {},
+            (error: unknown) => {
+              console.error("Video fixture encoder failed", error);
+            },
+          )
+          .finally(() => {
+            cancellation[Symbol.dispose]();
+            videoEncoders.delete(child);
+          });
+        videoEncoders.set(child, exit);
+        child.stderr?.on("data", (data: Buffer) => {
+          console.error(data.toString());
+        });
+        return new Response(Readable.toWeb(child.stdout), {
+          headers: {
+            "Content-Type": "video/mp2t",
+            "X-Media-Generation": crypto.randomUUID(),
+            "X-Media-Clock-Rate": "90000",
+            "X-Media-Pts-Origin": "0",
+          },
+        });
+      }
       if (modes.get(source.deviceId) === "missing")
         return Response.json({ code: "audio_track_missing" }, { status: 422 });
       const stopped = new AbortController();
       readers.add(stopped);
       const signal = AbortSignal.any([stopped.signal, request.signal]);
-      signal.addEventListener(
-        "abort",
-        () => {
-          readers.delete(stopped);
-        },
-        { once: true },
-      );
+      addAbortListener(signal, () => {
+        readers.delete(stopped);
+      });
       let samples = 0;
       const started = performance.now();
       const anchor =
@@ -92,7 +157,14 @@ export async function createAudioSource(count = 1) {
               undefined,
               { signal },
             );
-            const bytes = modes.get(source.deviceId) === "quiet" ? quiet : tone;
+            const mode = modes.get(source.deviceId);
+            const bytes =
+              mode === "quiet"
+                ? quiet
+                : mode === "speech"
+                  ? options.speech
+                  : tone;
+            if (!bytes) throw new Error("Speech source has no fixture");
             const offset = samples % bytes.length;
             const chunk = bytes.subarray(
               offset,
@@ -106,7 +178,6 @@ export async function createAudioSource(count = 1) {
         },
         cancel() {
           stopped.abort();
-          readers.delete(stopped);
         },
       });
       return new Response(stream, {
@@ -153,9 +224,6 @@ export async function createAudioSource(count = 1) {
     get activeReaders() {
       return readers.size;
     },
-    get requests() {
-      return requests;
-    },
     revoke() {
       allowed = false;
       lease.abort();
@@ -168,7 +236,9 @@ export async function createAudioSource(count = 1) {
     async close() {
       lease.abort();
       for (const reader of readers) reader.abort();
+      for (const child of videoEncoders.keys()) child.kill("SIGKILL");
       await server.stop(true);
+      await Promise.all(videoEncoders.values());
     },
   };
 }

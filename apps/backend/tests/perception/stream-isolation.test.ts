@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { Hono } from "hono";
 import { EventSourceParserStream } from "eventsource-parser/stream";
 import { setTimeout as delay } from "node:timers/promises";
-import { createPerceptionStream } from "../../src/perception/stream";
+import { createSnapshotStream } from "../../src/http/snapshot-stream";
 
 // A stopped browser must not hold up another observer or make it replay stale facts.
 test("a slow subscriber does not delay a healthy subscriber and both can release their slots", async () => {
@@ -20,7 +20,7 @@ test("a slow subscriber does not delay a healthy subscriber and both can release
   };
   const app = new Hono().get(
     "/",
-    createPerceptionStream(
+    createSnapshotStream(
       service,
       () => ({ sequence, observation: "x".repeat(128 * 1024) }),
       shutdown.signal,
@@ -77,7 +77,7 @@ test("an observer joining after a fact expires sees its current validity without
   const shutdown = new AbortController();
   const app = new Hono().get(
     "/",
-    createPerceptionStream(
+    createSnapshotStream(
       { subscribe: () => () => {} },
       () => ({
         observedAt: 0,
