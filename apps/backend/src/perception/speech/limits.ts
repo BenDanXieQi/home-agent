@@ -17,6 +17,20 @@ export const speechLimits = Object.freeze({
   minSpeechMs: 256,
   redemptionMs: 512,
 });
+
+// Consumers retain history through segmentation, cold loading and delivery.
+export function speechDeliveryDeadline(endedAt: number, maxFrameAgeMs: number) {
+  return (
+    endedAt +
+    (speechLimits.maxSegmentSamples / speechLimits.sampleRate) * 1000 +
+    speechLimits.redemptionMs +
+    speechLimits.initializeTimeoutMs +
+    speechLimits.queueAgeMs +
+    speechLimits.inferenceTimeoutMs +
+    maxFrameAgeMs
+  );
+}
+
 export const senseVoiceModel = Object.freeze({
   sha256: "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51",
   tokensSha256:

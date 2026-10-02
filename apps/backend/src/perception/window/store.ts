@@ -3,15 +3,22 @@ import { type windowSourceSchema } from "@home-agent/api/contracts";
 import type {
   audioTrackSchema,
   windowSummarySchema,
+  speechObservationSchema,
 } from "@home-agent/api/contracts";
 import type { pcmSchema } from "../audio/pcm";
 import {
   createWindowDraft,
   summarizeWindow,
   truncateWindow,
+  windowIdentities,
 } from "./aggregate";
+import { appendWindowSpeech, createWindowSpeech } from "./speech";
 import { appendWindowAudio, recordAudioStatus } from "./audio-coverage";
-import { sourceKey, type sourceSelectionSchema } from "../config";
+import {
+  sourceKey,
+  type sourceSelectionSchema,
+  type perceptionConfigSchema,
+} from "../config";
 import {
   isCurrentRun,
   type runSchema,
@@ -30,6 +37,7 @@ function source(run: z.infer<typeof runSchema>, identity: string, now: number) {
     baseline: null as Parameters<typeof summarizeWindow>[1]["baseline"],
     lastChangeAt: null as number | null,
     audioTrack: null as z.infer<typeof audioTrackSchema> | null,
+    speech: new Map<string, z.infer<typeof speechObservationSchema>>(),
     observations: new Map<
       number,
       z.infer<typeof observationSchema> & { truncated: boolean }
@@ -68,6 +76,7 @@ function retained(
   summary: z.infer<typeof windowSummarySchema>,
   input: ReturnType<typeof createWindowDraft>,
   identity: string,
+  identities: ReturnType<typeof windowIdentities>,
 ) {
   // Closed windows keep only encoder input; gray pixels and live facts belong
   // to aggregation. Freeze the shared metadata once before lending it to encoders.
@@ -87,6 +96,7 @@ function retained(
   );
   return {
     summary,
+    identities,
     input: { frames, audio },
     bytes:
       frames.reduce((total, frame) => total + frame.rgb.byteLength, 0) +
@@ -100,12 +110,22 @@ function retained(
 }
 type RetainedWindow = ReturnType<typeof retained>;
 
+function speechDescriptionBytes(summary: RetainedWindow["summary"]) {
+  const { speech, revision, summaryUntil } = summary;
+  return Buffer.byteLength(JSON.stringify({ speech, revision, summaryUntil }));
+}
+
 export function createWindowStore(options: {
-  retentionMs: () => number;
+  config: () => Pick<
+    z.infer<typeof perceptionConfigSchema>,
+    "window" | "speech" | "maxFrameAgeMs"
+  >;
   authorized: (run: z.infer<typeof runSchema>, identity: string) => boolean;
 }) {
   const sources = new Map<string, ReturnType<typeof source>>();
   const windows = new Map<string, RetainedWindow>();
+  // IDs only: the window remains the sole owner of retained evidence.
+  const speechWindows = new Map<string, Set<string>>();
   const readLeases = new Set<
     Pick<RetainedWindow, "identity" | "authorization"> & {
       run: RetainedWindow["summary"]["run"];
@@ -122,33 +142,58 @@ export function createWindowStore(options: {
     droppedAudio: 0,
     droppedWindows: 0,
     lateObservations: 0,
+    pendingSpeechEvicted: 0,
+    speechAssociations: 0,
   };
   const listeners = new Set<(id: string) => void>();
   let bytes = 0;
   let descriptionBytes = 0;
+  function stopAcceptingSpeech(entry: RetainedWindow) {
+    const runId = entry.summary.audio.run?.trackRunId;
+    if (!runId) return;
+    const ids = speechWindows.get(runId);
+    ids?.delete(entry.summary.id);
+    if (!ids?.size) speechWindows.delete(runId);
+  }
   function release(
     entry: RetainedWindow,
     reason: "expired" | "evicted" | "revoked",
     count = true,
   ) {
-    if (reason === "revoked")
+    if (reason === "revoked") {
       entry.authorization.abort(new Error("Window access revoked"));
-    if (entry.summary.inputState !== "available") {
-      if (reason === "revoked") entry.summary.inputState = reason;
-      return;
+      stopAcceptingSpeech(entry);
     }
+    const previous = entry.summary.inputState;
+    const next =
+      previous === "available" || reason === "revoked" ? reason : previous;
+    // These enum values are ASCII strings; only their value length changes.
+    const addedBytes = next.length - previous.length;
+    entry.descriptionBytes += addedBytes;
+    descriptionBytes += addedBytes;
+    entry.summary.inputState = next;
+    if (previous !== "available") return;
     if (count) counters[reason]++;
-    entry.summary.inputState = reason;
     bytes -= entry.bytes;
     entry.bytes = 0;
     entry.input.frames = [];
     entry.input.audio = [];
   }
   function forget(id: string, entry: RetainedWindow) {
+    stopAcceptingSpeech(entry);
     release(entry, "expired");
     entry.authorization.abort(new Error("Window description removed"));
     descriptionBytes -= entry.descriptionBytes;
     windows.delete(id);
+  }
+  function limitDescriptions() {
+    while (
+      windows.size > windowLimits.summaries ||
+      descriptionBytes > windowLimits.summaryBytes
+    ) {
+      const oldest = windows.keys().next().value!;
+      forget(oldest, windows.get(oldest)!);
+    }
   }
   function room(size: number) {
     for (const entry of windows.values()) {
@@ -191,6 +236,7 @@ export function createWindowStore(options: {
     entry.lastChangeAt = resultSummary.lastChangeAt;
     const summary: z.infer<typeof windowSummarySchema> = {
       id: crypto.randomUUID(),
+      revision: 0,
       run: entry.run,
       videoRun: value.videoRun,
       generation: value.frames[0]?.mediaTime.generation ?? null,
@@ -198,25 +244,49 @@ export function createWindowStore(options: {
       startedAt: value.startedAt,
       endedAt: value.endedAt,
       closedAt: now,
-      readableUntil: now + options.retentionMs(),
+      readableUntil: now + options.config().window.retentionMs,
       summaryUntil:
         now +
         (resultSummary.gate.candidate === "none"
           ? windowLimits.summaryMs
-          : windowLimits.recordingMs),
+          : windowLimits.mediaRetentionMs),
       timeBasis: "host_receive",
       synchronizationAccuracyMs: null,
       incomplete: value.incomplete,
       gaps: [...value.gaps],
       frames: value.frames.map(({ rgb: _rgb, gray: _gray, ...frame }) => frame),
+      speech: createWindowSpeech(options.config(), value.endedAt),
       audio: resultSummary.audio,
       gate: resultSummary.gate,
       crop: resultSummary.crop,
       inputState: "available",
     };
-    const result = retained(summary, value, entry.identity);
+    for (const observation of entry.speech.values())
+      appendWindowSpeech(summary, observation, now);
+    const identities = windowIdentities(summary.frames);
+    summary.summaryUntil = Math.max(
+      summary.summaryUntil,
+      summary.speech.acceptingUntil,
+      summary.speech.segments.length || identities.identityCount
+        ? now + windowLimits.mediaRetentionMs
+        : 0,
+    );
+    const result = retained(summary, value, entry.identity, identities);
     bytes -= value.bytes - result.bytes;
     windows.set(summary.id, result);
+    if (
+      summary.speech.enabled &&
+      now < summary.speech.acceptingUntil &&
+      summary.audio.run &&
+      summary.audio.startedAt !== null &&
+      summary.audio.endedAt !== null
+    ) {
+      const runId = summary.audio.run.trackRunId;
+      const ids = speechWindows.get(runId) ?? new Set<string>();
+      ids.add(summary.id);
+      speechWindows.set(runId, ids);
+    }
+    counters.speechAssociations += summary.speech.segments.length;
     descriptionBytes += result.descriptionBytes;
     if (resultSummary.gate.candidate === "none") {
       counters.skipped++;
@@ -230,13 +300,7 @@ export function createWindowStore(options: {
     );
     while (ready.length > windowLimits.readyPerSource)
       release(ready.shift()!, "evicted");
-    while (
-      windows.size > windowLimits.summaries ||
-      descriptionBytes > windowLimits.summaryBytes
-    ) {
-      const oldest = windows.keys().next().value!;
-      forget(oldest, windows.get(oldest)!);
-    }
+    limitDescriptions();
     entry.lastClosedAt = Math.max(entry.lastClosedAt, value.endedAt);
     if (windows.has(summary.id) && summary.gate.candidate !== "none")
       for (const listener of listeners) listener(summary.id);
@@ -269,6 +333,9 @@ export function createWindowStore(options: {
       for (const [sequence, event] of entry.identityFrames)
         if (event.frame.receivedAt < earliest)
           entry.identityFrames.delete(sequence);
+      for (const [observationId, observation] of entry.speech)
+        if (observation.observedEndAt <= entry.lastClosedAt)
+          entry.speech.delete(observationId);
     }
     for (const [id, entry] of windows) maintain(id, entry, now);
   }
@@ -280,6 +347,11 @@ export function createWindowStore(options: {
       performance.now() >= entry.expiresAt
     )
       release(entry, "expired");
+    if (
+      now >= entry.summary.speech.acceptingUntil ||
+      entry.summary.inputState === "revoked"
+    )
+      stopAcceptingSpeech(entry);
     if (now >= entry.summary.summaryUntil) {
       forget(id, entry);
     }
@@ -316,6 +388,47 @@ export function createWindowStore(options: {
     } else finishDrafts(entry, now);
   }
   return {
+    speech(observation: z.infer<typeof speechObservationSchema>, now: number) {
+      if (!options.config().speech.enabled || !observation.text.trim()) return;
+      for (const entry of sources.values()) {
+        const audio = entry.audioTrack;
+        if (
+          !audio ||
+          entry.run.deviceId !== observation.run.deviceId ||
+          entry.run.scopeEpoch !== observation.run.scopeEpoch ||
+          audio.run.trackRunId !== observation.run.trackRunId ||
+          audio.generation !== observation.generation ||
+          !options.authorized(entry.run, entry.identity)
+        )
+          continue;
+        if (observation.observedEndAt > entry.lastClosedAt) {
+          entry.speech.set(observation.id, structuredClone(observation));
+          if (entry.speech.size > windowLimits.pendingSpeechPerSource) {
+            entry.speech.delete(entry.speech.keys().next().value!);
+            counters.pendingSpeechEvicted++;
+          }
+        }
+      }
+      for (const id of speechWindows.get(observation.run.trackRunId) ?? []) {
+        const entry = windows.get(id)!;
+        maintain(id, entry, now);
+        if (!windows.has(id) || entry.summary.inputState === "revoked")
+          continue;
+        const previousBytes = speechDescriptionBytes(entry.summary);
+        const previousSegments = entry.summary.speech.segments.length;
+        if (!appendWindowSpeech(entry.summary, observation, now)) continue;
+        counters.speechAssociations +=
+          entry.summary.speech.segments.length - previousSegments;
+        entry.summary.revision++;
+        entry.summary.summaryUntil =
+          entry.summary.closedAt + windowLimits.mediaRetentionMs;
+        const addedBytes =
+          speechDescriptionBytes(entry.summary) - previousBytes;
+        descriptionBytes += addedBytes;
+        entry.descriptionBytes += addedBytes;
+      }
+      limitDescriptions();
+    },
     subscribe(listener: (id: string) => void) {
       listeners.add(listener);
       return () => {
@@ -638,12 +751,17 @@ export function createWindowStore(options: {
               summary.run.deviceId === selection.deviceId &&
               summary.run.channel === selection.channel,
           )
-          .map(({ summary }) => ({
+          .map(({ summary, identities }) => ({
             id: summary.id,
+            revision: summary.revision,
             run: { ...summary.run },
             startedAt: summary.startedAt,
             endedAt: summary.endedAt,
             readableUntil: summary.readableUntil,
+            summaryUntil: summary.summaryUntil,
+            speechCount: summary.speech.segments.length,
+            ...identities,
+            identityLabels: [...identities.identityLabels],
             gate: { ...summary.gate },
             incomplete: summary.incomplete,
             inputState: summary.inputState,
@@ -664,6 +782,7 @@ export function createWindowStore(options: {
         release(entry, "revoked");
       }
       windows.clear();
+      speechWindows.clear();
       listeners.clear();
       descriptionBytes = 0;
     },

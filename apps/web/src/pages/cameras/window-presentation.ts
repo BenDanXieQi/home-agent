@@ -23,13 +23,13 @@ export const representations = {
 export function windowTime(time: number) {
   return windowClock.format(time);
 }
-export function candidateLabel(window: WindowListEntry) {
+export function candidateLabel(window: Pick<WindowListEntry, "gate">) {
   return { video: "视觉通过", audio: "声音通过", none: "跳过" }[
     window.gate.candidate
   ];
 }
 
-export const recordingStates = {
+export const mediaStates = {
   queued: "等待生成",
   generating: "正在生成",
   ready: "可播放",

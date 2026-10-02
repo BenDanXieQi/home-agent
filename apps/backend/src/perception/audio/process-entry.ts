@@ -62,7 +62,7 @@ function evaluate(input: Float32Array, state: Float32Array) {
 }
 const tracks = new Map<string, ReturnType<typeof createTrack>>();
 let delivery:
-  | { id: string; runId: string; resolve: (accepted: boolean) => void }
+  | { id: string; runId: string; resolve: (inboxAccepted: boolean) => void }
   | undefined;
 let closing = false;
 let speech: ReturnType<typeof createSpeechRuntime> | undefined;
@@ -79,7 +79,7 @@ await send({
 async function handleCommand(message: unknown) {
   const command = audioCommandSchema.parse(message);
   if (command.kind === "speech_ack") {
-    if (delivery?.id === command.id) delivery.resolve(command.accepted);
+    if (delivery?.id === command.id) delivery.resolve(command.inboxAccepted);
     return;
   }
   if (command.kind === "close") {

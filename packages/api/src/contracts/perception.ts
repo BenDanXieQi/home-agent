@@ -292,7 +292,7 @@ export const speechRuntimeSchema = z.object({
   completed: z.int().nonnegative(),
   dropped: z.int().nonnegative(),
   cancelled: z.int().nonnegative(),
-  handoffRejected: z.int().nonnegative(),
+  inboxUnconfirmed: z.int().nonnegative(),
   error: z.string().max(4096).optional(),
 });
 export const audioTrackSchema = z.object({
@@ -341,6 +341,7 @@ export const perceptionResourceSchema = z.object({
   videoWorkers: z.int().positive(),
   audioThreads: z.int().nonnegative(),
   speechThreads: z.int().nonnegative(),
+  identityThreads: z.int().nonnegative(),
   modelMemoryMiB: z.int().positive(),
   reservedModelMiB: z.int().positive(),
 });

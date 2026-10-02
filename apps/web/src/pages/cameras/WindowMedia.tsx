@@ -10,7 +10,7 @@ import {
 } from "../../modules/perception/windows";
 
 import {
-  recordingStates,
+  mediaStates,
   representations,
   windowTime,
 } from "./window-presentation";
@@ -33,9 +33,9 @@ export function WindowMedia({
   const canGenerate = useWindowInputState(window) === "available";
   const [representation, setRepresentation] = useState<
     WindowMediaSelection["representation"]
-  >(window.recording?.selection.representation ?? "video");
+  >(window.sampledMedia?.selection.representation ?? "video");
   const [includeAudio, setIncludeAudio] = useState(
-    window.recording?.selection.includeAudio ?? false,
+    window.sampledMedia?.selection.includeAudio ?? false,
   );
   const selection = {
     representation,
@@ -46,6 +46,7 @@ export function WindowMedia({
       aria-label="窗口媒体"
       className="space-y-3 border-t border-line pt-4"
     >
+      <h4 className="text-sm font-medium">后台采样媒体</h4>
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 whitespace-nowrap text-sm">
           媒体类型
@@ -148,7 +149,7 @@ function MediaRequest({
         <>
           {state ? (
             <p className="text-xs text-muted">
-              {recordingStates[state]} · 最晚保留至{" "}
+              {mediaStates[state]} · 最晚保留至{" "}
               {windowTime(media.readableUntil)}
             </p>
           ) : null}

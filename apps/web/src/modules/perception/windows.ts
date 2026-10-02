@@ -60,8 +60,8 @@ export function windowListOptions(source: WindowSource) {
         ? false
         : query.state.data?.windows.some(
               (entry) =>
-                entry.recording?.state === "queued" ||
-                entry.recording?.state === "generating",
+                entry.sampledMedia?.state === "queued" ||
+                entry.sampledMedia?.state === "generating",
             )
           ? 1000
           : 4000,

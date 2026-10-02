@@ -120,7 +120,7 @@ function CameraDetailModes({
       </div>
       <p className="text-sm text-muted">
         {mode === "windows"
-          ? "查看后台筛选出的短片段，不影响摄像头持续分析。"
+          ? "查看窗口中的语音文字、人物判断和采样片段，不影响摄像头持续分析。"
           : mode === "recordings"
             ? "按日期查看摄像头 SD 卡中的完整录像。"
             : "查看摄像头当前画面、检测框和实时分析结果。"}

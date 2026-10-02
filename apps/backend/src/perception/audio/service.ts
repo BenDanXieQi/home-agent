@@ -14,6 +14,11 @@ export function createAudioService(options: {
   executable: string;
   changed: () => void;
   media?: Parameters<typeof createAudioProcess>[0]["track"];
+  retainSpeech?: (
+    observation: Parameters<
+      NonNullable<Parameters<typeof createAudioProcess>[0]["speech"]>
+    >[0],
+  ) => void;
   speechInbox?: Pick<
     ReturnType<typeof createSpeechInbox>,
     "authorize" | "revoke" | "accept"
@@ -174,6 +179,7 @@ export function createAudioService(options: {
         process = createAudioProcess({
           speech(observation) {
             if (!currentTrack(observation.run)) return false;
+            options.retainSpeech?.(observation);
             return options.speechInbox?.accept(observation) ?? false;
           },
           track(view, pcm) {

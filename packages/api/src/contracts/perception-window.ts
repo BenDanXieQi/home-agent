@@ -4,8 +4,11 @@ import {
   detectionSchema,
   audioRunSchema,
   identityFrameSnapshotSchema,
+  speechObservationSchema,
 } from "./perception";
 import { mediaFrameTimeSchema, frameFingerprintSchema } from "./media";
+
+export const windowSpeechSegmentLimit = 16;
 
 export const windowPolicySchema = z.strictObject({
   retentionMs: z.int().min(1000).max(60_000).default(12_000),
@@ -56,6 +59,7 @@ export const windowFrameSchema = z.object({
 });
 export const windowSummarySchema = z.object({
   id: z.uuid(),
+  revision: z.int().nonnegative(),
   run: trackingObservationSchema.shape.run,
   videoRun: trackingObservationSchema.shape.run.nullable(),
   generation: z.uuid().nullable(),
@@ -70,6 +74,12 @@ export const windowSummarySchema = z.object({
   incomplete: z.boolean(),
   gaps: z.array(z.string()).max(32),
   frames: z.array(windowFrameSchema).max(5),
+  speech: z.object({
+    enabled: z.boolean(),
+    acceptingUntil: z.number(),
+    segments: z.array(speechObservationSchema).max(windowSpeechSegmentLimit),
+    truncated: z.boolean(),
+  }),
   audio: z.object({
     status: z.enum([
       "available",
@@ -104,26 +114,38 @@ export const windowSourceSchema = windowSummarySchema.shape.run.pick({
   deviceId: true,
   channel: true,
 });
-export const windowRecordingSchema = z.object({
+export const windowSampledMediaSchema = z.object({
   selection: mediaSelectionSchema,
   state: mediaStateSchema,
   readableUntil: z.number(),
   error: z.string().max(1024).nullable(),
 });
 export const windowDetailSchema = windowSummarySchema.extend({
-  recording: windowRecordingSchema.nullable(),
+  sampledMedia: windowSampledMediaSchema.nullable(),
 });
-export const windowListEntrySchema = windowDetailSchema.pick({
-  id: true,
-  run: true,
-  startedAt: true,
-  endedAt: true,
-  readableUntil: true,
-  gate: true,
-  incomplete: true,
-  inputState: true,
-  recording: true,
-});
+export const windowListEntrySchema = windowDetailSchema
+  .pick({
+    id: true,
+    revision: true,
+    run: true,
+    startedAt: true,
+    endedAt: true,
+    readableUntil: true,
+    summaryUntil: true,
+    gate: true,
+    incomplete: true,
+    inputState: true,
+    sampledMedia: true,
+  })
+  .extend({
+    speechCount: z.int().nonnegative(),
+    identityCount: z.int().nonnegative(),
+    identityLabels: z
+      .array(
+        identityFrameSnapshotSchema.shape.tracks.element.shape.label.unwrap(),
+      )
+      .max(40),
+  });
 export const windowListSchema = z.object({
   windows: z.array(windowListEntrySchema),
 });

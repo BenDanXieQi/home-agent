@@ -17,6 +17,7 @@ export function createAudioProcess(options: {
     pcm?: z.infer<typeof pcmSchema>,
   ) => void;
   failure: (error: string) => void;
+  // The return value acknowledges inbox delivery, independently of window history.
   speech?: (observation: z.infer<typeof speechObservationSchema>) => boolean;
 }) {
   if (process.platform === "win32")
@@ -124,7 +125,7 @@ export function createAudioProcess(options: {
           send({
             kind: "speech_ack",
             id: response.observation.id,
-            accepted: options.speech?.(response.observation) ?? false,
+            inboxAccepted: options.speech?.(response.observation) ?? false,
           });
         } catch (cause) {
           fail(cause);

@@ -18,6 +18,24 @@ type Frame = z.infer<typeof sampledFrameSchema> &
     z.infer<typeof windowSummarySchema>["frames"][number],
     "detections" | "tracks" | "identity"
   >;
+
+export function windowIdentities(
+  frames: z.infer<typeof windowSummarySchema>["frames"],
+) {
+  const tracks = frames.flatMap((frame) => frame.identity?.tracks ?? []);
+  return {
+    identityCount: new Set(tracks.map((track) => track.trackId)).size,
+    identityLabels: [
+      ...new Set(
+        tracks.flatMap((track) =>
+          track.state === "confirmed" && track.label !== null
+            ? [track.label]
+            : [],
+        ),
+      ),
+    ],
+  };
+}
 export function createWindowDraft(
   startedAt: number,
   endedAt: number,

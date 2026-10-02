@@ -16,6 +16,7 @@ import {
 import { WindowMedia } from "./WindowMedia";
 import { WindowIdentity } from "./WindowIdentity";
 import { WindowRecording } from "./WindowRecording";
+import { WindowSpeech } from "./WindowSpeech";
 
 export const WindowDetail = memo(function WindowDetail({
   entry,
@@ -30,18 +31,25 @@ export const WindowDetail = memo(function WindowDetail({
     ...windowDetailOptions(scope, entry.id),
     enabled: (cached) =>
       active && !windowRequestUnavailable(cached.state.error),
+    refetchInterval: (cached) =>
+      !cached.state.error &&
+      cached.state.data &&
+      cached.state.data.revision < entry.revision
+        ? 500
+        : false,
   });
-  // Closed-window facts are immutable; the polled list owns their current availability.
+  // Frame judgments are frozen. Only completed speech can add historical evidence.
   const window = useMemo(
     () =>
       query.data
         ? {
             ...query.data,
             inputState: entry.inputState,
-            recording: entry.recording,
+            sampledMedia: entry.sampledMedia,
+            summaryUntil: entry.summaryUntil,
           }
         : undefined,
-    [query.data, entry.inputState, entry.recording],
+    [query.data, entry.inputState, entry.sampledMedia, entry.summaryUntil],
   );
   const [jsonOpen, setJsonOpen] = useState(false);
   const json = useMemo(
@@ -50,7 +58,7 @@ export const WindowDetail = memo(function WindowDetail({
   );
   if (windowRequestUnavailable(query.error))
     return <StatusNotice>此窗口已不可读取，请选择新的片段。</StatusNotice>;
-  if (query.isError)
+  if (query.isError && !query.data)
     return (
       <Notice tone="error">
         窗口详情读取失败：{requestErrorMessage(query.error)}
@@ -135,8 +143,24 @@ export const WindowDetail = memo(function WindowDetail({
       ) : (
         <WindowMedia window={window} scope={scope} active={active} />
       )}
-      <WindowRecording window={window} active={active} />
+      <WindowSpeech window={window} />
       <WindowIdentity frames={window.frames} />
+      <WindowRecording window={window} active={active} />
+      {query.isError ? (
+        <Notice tone="warning">
+          新增转写暂未更新：{requestErrorMessage(query.error)}
+          <Button
+            disabled={!active}
+            onClick={() => {
+              // Refetch exposes any failure through query.error.
+              // oxlint-disable-next-line typescript/no-floating-promises
+              query.refetch();
+            }}
+          >
+            重新读取
+          </Button>
+        </Notice>
+      ) : null}
       <details
         open={jsonOpen}
         onToggle={(event) => setJsonOpen(event.currentTarget.open)}
