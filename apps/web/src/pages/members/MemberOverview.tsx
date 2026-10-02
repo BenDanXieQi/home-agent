@@ -73,7 +73,7 @@ export function MemberOverview({
             </Button>
           </header>
           <div className="mt-5 flex min-h-52 flex-1 items-center rounded-xl bg-white px-6 py-8 shadow-surface">
-            <div className="max-w-xl">
+            <div className="min-w-0 flex-1">
               <h3 className="text-sm font-medium">还没有成员画像</h3>
               <p className="mt-2 text-sm leading-7 text-muted">
                 成员画像生成尚未接入。接入后可在这里主动生成总结，查看日常习惯、行为特征及其观察依据。
