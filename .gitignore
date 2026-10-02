@@ -14,3 +14,5 @@ coverage/
 .DS_Store
 data/
 *.log
+
+/apps/backend/src/perception/identity/__pycache__/

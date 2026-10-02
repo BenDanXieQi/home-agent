@@ -4,7 +4,10 @@ import {
 } from "../window/protocol";
 import {
   sourceMediaSchema,
+  identityObservationSchema,
+  identityFrameSnapshotSchema,
   trackingObservationSchema,
+  windowFrameSchema,
 } from "@home-agent/api/contracts";
 import { z } from "zod";
 import { runSchema, observationSchema } from "../observations";
@@ -13,6 +16,23 @@ import { videoMetricsSchema } from "./metrics";
 export const videoEventSchema = z.discriminatedUnion("event", [
   windowFrameEventSchema,
   windowGapEventSchema,
+  z.object({
+    event: z.literal("identity_frame"),
+    run: runSchema,
+    frame: windowFrameSchema.pick({
+      sequence: true,
+      receivedAt: true,
+      mediaTime: true,
+      width: true,
+      height: true,
+    }),
+    identity: identityFrameSnapshotSchema,
+  }),
+  z.object({
+    event: z.literal("identity"),
+    run: runSchema,
+    observation: identityObservationSchema,
+  }),
   z.object({
     event: z.literal("media"),
     run: runSchema,

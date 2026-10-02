@@ -1,0 +1,11 @@
+{
+  "tracksPerRun": 8,
+  "samplesPerTrack": 5,
+  "facesPerFrame": 4,
+  "recentTracks": 32,
+  "members": 32,
+  "referencesPerMember": 10,
+  "labelLength": 128,
+  "featureDimensions": 128,
+  "galleryBytes": 4194304
+}

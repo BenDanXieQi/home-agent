@@ -1,0 +1,9 @@
+{
+  "width": 848,
+  "height": 480,
+  "detectorScore": 0.7,
+  "minimumFaceSide": 56,
+  "nms": 0.3,
+  "topK": 5000,
+  "minimumSharpness": 50
+}

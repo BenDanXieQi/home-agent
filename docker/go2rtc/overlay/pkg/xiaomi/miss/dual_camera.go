@@ -27,6 +27,7 @@ type DualCamera struct {
 	resolveURL func() (string, error)
 	mu         sync.Mutex
 	current    atomic.Pointer[dualSession]
+	qualities  [2]string // guarded by mu; empty retains the existing model default
 }
 
 func NewDualCamera(resolveURL func() (string, error)) *DualCamera {
@@ -41,18 +42,31 @@ func (c *DualCamera) Close() {
 	}
 }
 
-func (c *DualCamera) Open(channel int) (core.Producer, error) {
-	if channel < 1 || channel > 2 {
-		return nil, errors.New("xiaomi: invalid channel")
+func (c *DualCamera) Open(ctx context.Context, channel int, quality string) (core.Producer, error) {
+	if channel < 1 || channel > 2 || (quality != "" && quality != "1" && quality != "2" && quality != "3") {
+		return nil, errors.New("xiaomi: invalid channel or quality")
 	}
 	// Serialize initialization, including cloud key exchange. Parallel channels
 	// must never open competing camera connections before choosing a winner.
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// A retired logical source may have waited behind a newer source here.
+	// Check its ownership before it can change the shared session profile.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if c.ctx.Err() != nil {
 		return nil, c.ctx.Err()
 	}
 	session := c.current.Load()
+	if quality != "" && c.qualities[channel-1] != quality {
+		c.qualities[channel-1] = quality
+		// A profile belongs to the shared physical session. Its replacement
+		// ends both old readers before either lens can publish the new profile.
+		if session != nil {
+			session.close()
+		}
+	}
 	if session == nil || session.closed() {
 		rawURL, err := c.resolveURL()
 		if err != nil {
@@ -73,7 +87,7 @@ func (c *DualCamera) Open(channel int) (core.Producer, error) {
 			return nil, c.ctx.Err()
 		}
 		stop := context.AfterFunc(c.ctx, session.close)
-		err = session.prepare()
+		err = session.prepare(c.qualities)
 		if err != nil {
 			session.close()
 			stop()
@@ -82,6 +96,9 @@ func (c *DualCamera) Open(channel int) (core.Producer, error) {
 		}
 		diagnostic.Report("dual_camera_session", nil)
 		go func() { defer stop(); session.run() }()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	return session.producer(channel - 1), nil
 }
@@ -115,10 +132,11 @@ func (s *dualSession) close() {
 	})
 }
 
-func (s *dualSession) prepare() error {
+func (s *dualSession) prepare(qualities [2]string) error {
 	data := binary.BigEndian.AppendUint32(nil, cmdVideoStart)
-	quality := s.client.videoQuality("")
-	data = fmt.Appendf(data, `{"videoquality":%s,"videoquality2":%s,"enableaudio":1}`, quality, quality)
+	primary := s.client.videoQuality(qualities[0])
+	secondary := s.client.videoQuality(qualities[1])
+	data = fmt.Appendf(data, `{"videoquality":%s,"videoquality2":%s,"enableaudio":1}`, primary, secondary)
 	if err := s.client.WriteCommand(data); err != nil {
 		return err
 	}
@@ -162,6 +180,7 @@ func (s *dualSession) prepare() error {
 			audioDeadline = time.Now().Add(time.Second)
 		}
 	}
+	_ = s.client.SetDeadline(time.Time{})
 	return nil
 }
 
@@ -181,7 +200,7 @@ func (s *dualSession) producer(channel int) *dualProducer {
 func (s *dualSession) run() {
 	defer s.close()
 	for {
-		_ = s.client.SetDeadline(time.Now().Add(10 * time.Second))
+		_ = s.client.SetReadDeadline(time.Now().Add(10 * time.Second))
 		packet, err := s.client.ReadPacket()
 		if err != nil {
 			if !s.stopping.Load() {

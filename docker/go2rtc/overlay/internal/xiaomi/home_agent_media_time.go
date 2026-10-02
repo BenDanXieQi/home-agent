@@ -2,6 +2,7 @@ package xiaomi
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/google/uuid"
@@ -21,7 +22,8 @@ type homeAgentMediaTime struct {
 type homeAgentTimedProducer struct {
 	core.Producer
 	camera   *homeAgentCameraState
-	timeline *homeAgentMediaTime
+	timeline atomic.Pointer[homeAgentMediaTime]
+	tracksMu sync.Mutex
 	tracks   map[*core.Receiver]bool
 }
 
@@ -36,7 +38,9 @@ func homeAgentTimeProducer(camera *homeAgentCameraState, producer core.Producer)
 		}
 	}
 	homeAgentMu.Unlock()
-	return &homeAgentTimedProducer{Producer: producer, camera: camera, timeline: timeline, tracks: make(map[*core.Receiver]bool)}
+	p := &homeAgentTimedProducer{Producer: producer, camera: camera, tracks: make(map[*core.Receiver]bool)}
+	p.timeline.Store(timeline)
+	return p
 }
 
 // Caller holds homeAgentMu. It never waits for stream attachment or network IO.
@@ -51,8 +55,13 @@ func homeAgentRetireMedia(camera *homeAgentCameraState) {
 
 func (p *homeAgentTimedProducer) GetTrack(media *core.Media, codec *core.Codec) (*core.Receiver, error) {
 	track, err := p.Producer.GetTrack(media, codec)
-	if err != nil || media.Kind != core.KindVideo || p.tracks[track] {
+	if err != nil || media.Kind != core.KindVideo {
 		return track, err
+	}
+	p.tracksMu.Lock()
+	defer p.tracksMu.Unlock()
+	if p.tracks[track] {
+		return track, nil
 	}
 	if track.Codec.ClockRate != 90000 {
 		return nil, core.ErrCantGetTrack
@@ -60,18 +69,25 @@ func (p *homeAgentTimedProducer) GetTrack(media *core.Media, codec *core.Codec) 
 	p.tracks[track] = true
 	input := track.Input
 	track.Input = func(packet *rtp.Packet) {
-		timeline := p.timeline
+		timeline := p.timeline.Load()
 		if p.camera.timeline.Load() != timeline {
 			return
 		}
 		timeline.mu.Lock()
-		if timeline.seen && packet.Timestamp < timeline.last {
-			// Includes uint32 wrap. New readers get a new generation, not an
-			// ambiguous timestamp correction inferred independently per branch.
+		changed := timeline.seen && packet.Timestamp < timeline.last
+		if changed {
+			// Includes uint32 wrap. Each branch uses the same source generation
+			// rather than independently reconstructing an earlier clock cycle.
 			homeAgentMu.Lock()
-			replacement := &homeAgentMediaTime{Generation: uuid.NewString(), ClockRate: 90000, last: packet.Timestamp, seen: true}
+			if p.camera.timeline.Load() != timeline {
+				homeAgentMu.Unlock()
+				timeline.mu.Unlock()
+				return
+			}
+			replacement := &homeAgentMediaTime{Generation: uuid.NewString(), ClockRate: 90000,
+				last: packet.Timestamp, seen: true}
 			p.camera.timeline.Store(replacement)
-			p.timeline = replacement
+			p.timeline.Store(replacement)
 			homeAgentRetireMedia(p.camera)
 			homeAgentMu.Unlock()
 		}
@@ -81,6 +97,24 @@ func (p *homeAgentTimedProducer) GetTrack(media *core.Media, codec *core.Codec) 
 		input(packet)
 	}
 	return track, nil
+}
+
+func (p *homeAgentTimedProducer) retireTimeline() {
+	homeAgentMu.Lock()
+	defer homeAgentMu.Unlock()
+	if p.camera.timeline.CompareAndSwap(p.timeline.Load(), nil) {
+		homeAgentRetireMedia(p.camera)
+	}
+}
+
+func (p *homeAgentTimedProducer) Start() error {
+	defer p.retireTimeline()
+	return p.Producer.Start()
+}
+
+func (p *homeAgentTimedProducer) Stop() error {
+	p.retireTimeline()
+	return p.Producer.Stop()
 }
 
 func homeAgentMediaGeneration(camera *homeAgentCameraState) string {

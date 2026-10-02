@@ -1,13 +1,12 @@
-import type { mediaFrameTimeSchema } from "@home-agent/api/contracts";
+import type { windowFrameSchema } from "@home-agent/api/contracts";
 import type { z } from "zod";
 import type { frameSchema } from "../detection/frame";
 
-export type VideoFrame = z.infer<typeof frameSchema> & {
-  sequence: number;
-  receivedAt: number;
-  availableAt: number;
-  mediaTime: z.infer<typeof mediaFrameTimeSchema>;
-};
+export type VideoFrame = z.infer<typeof frameSchema> &
+  Pick<
+    z.infer<typeof windowFrameSchema>,
+    "sequence" | "receivedAt" | "mediaTime"
+  > & { availableAt: number };
 export function createLatestFrame() {
   let current: VideoFrame | undefined;
   return {

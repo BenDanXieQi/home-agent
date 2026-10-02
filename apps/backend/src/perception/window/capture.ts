@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import sharp from "sharp";
 import type { z } from "zod";
 import type { runSchema } from "../observations";
@@ -92,6 +93,12 @@ export function createWindowCapture(
               sequence: frame.sequence,
               receivedAt: frame.receivedAt,
               mediaTime: frame.mediaTime,
+              fingerprint: {
+                algorithm: "md5_rgb24",
+                value: createHash("md5").update(rgb).digest("hex"),
+                width: frame.width,
+                height: frame.height,
+              },
               width: frame.width,
               height: frame.height,
               retainedWidth: retained.info.width,

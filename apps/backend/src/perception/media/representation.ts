@@ -65,6 +65,7 @@ export function representationParameters(
     selected.at(-1)?.receivedAt ?? -Infinity,
     audioIncluded ? (summary.audio.endedAt ?? -Infinity) : -Infinity,
   );
+  const basis = mappedCrop ?? { x: 0, y: 0, w: 1, h: 1 };
   return {
     shortSide: 512 as const,
     sampleFps: 1 as const,
@@ -80,9 +81,9 @@ export function representationParameters(
     frames: selected.map((frame) => ({
       sequence: frame.sequence,
       offsetMs: frame.receivedAt - startedAt,
+      identity: frame.identity,
       detections:
         frame.detections?.flatMap((box) => {
-          const basis = mappedCrop ?? { x: 0, y: 0, w: 1, h: 1 };
           const x = Math.max(
             0,
             Math.floor(((box.x / frame.width - basis.x) / basis.w) * width!),

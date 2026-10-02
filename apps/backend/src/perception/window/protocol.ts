@@ -4,7 +4,7 @@ import { runSchema } from "../observations";
 import { windowLimits } from "./limits";
 
 export const sampledFrameSchema = windowFrameSchema
-  .omit({ detections: true, tracks: true })
+  .omit({ detections: true, tracks: true, identity: true })
   .extend({
     rgb: z
       .instanceof(Uint8Array)
@@ -20,6 +20,13 @@ export const sampledFrameSchema = windowFrameSchema
   .refine(
     (frame) =>
       frame.rgb.byteLength === frame.retainedWidth * frame.retainedHeight * 3,
+  )
+  .refine(
+    (frame) =>
+      !frame.fingerprint ||
+      (frame.fingerprint.width === frame.width &&
+        frame.fingerprint.height === frame.height),
+    { message: "Fingerprint dimensions must match the original decoded frame" },
   );
 export const windowFrameEventSchema = z.object({
   event: z.literal("window_frame"),

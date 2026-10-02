@@ -3,8 +3,9 @@ import {
   trackingObservationSchema,
   detectionSchema,
   audioRunSchema,
+  identityFrameSnapshotSchema,
 } from "./perception";
-import { mediaFrameTimeSchema } from "./media";
+import { mediaFrameTimeSchema, frameFingerprintSchema } from "./media";
 
 export const windowPolicySchema = z.strictObject({
   retentionMs: z.int().min(1000).max(60_000).default(12_000),
@@ -24,6 +25,7 @@ export const mediaRequestSchema = mediaSelectionSchema.extend({
   retry: z.boolean().default(false),
 });
 export const mediaStateSchema = z.enum([
+  "queued",
   "not_generated",
   "generating",
   "ready",
@@ -42,12 +44,15 @@ export const windowFrameSchema = z.object({
   sequence: z.int().positive(),
   receivedAt: z.number(),
   mediaTime: mediaFrameTimeSchema,
+  fingerprint: frameFingerprintSchema.optional(),
   width: z.int().positive(),
   height: z.int().positive(),
   retainedWidth: z.int().positive(),
   retainedHeight: z.int().positive(),
   detections: z.array(detectionSchema).max(128).nullable(),
   tracks: trackingObservationSchema.shape.tracks.nullable(),
+  // Null means no matching frame snapshot; disabled is an explicit snapshot.
+  identity: identityFrameSnapshotSchema.nullable(),
 });
 export const windowSummarySchema = z.object({
   id: z.uuid(),
@@ -94,6 +99,35 @@ export const windowSummarySchema = z.object({
   crop: windowBoxSchema.nullable(),
   inputState: z.enum(["available", "expired", "evicted", "revoked"]),
 });
+export const windowSourceSchema = windowSummarySchema.shape.run.pick({
+  scopeEpoch: true,
+  deviceId: true,
+  channel: true,
+});
+export const windowRecordingSchema = z.object({
+  selection: mediaSelectionSchema,
+  state: mediaStateSchema,
+  readableUntil: z.number(),
+  error: z.string().max(1024).nullable(),
+});
+export const windowDetailSchema = windowSummarySchema.extend({
+  recording: windowRecordingSchema.nullable(),
+});
+export const windowListEntrySchema = windowDetailSchema.pick({
+  id: true,
+  run: true,
+  startedAt: true,
+  endedAt: true,
+  readableUntil: true,
+  gate: true,
+  incomplete: true,
+  inputState: true,
+  recording: true,
+});
+export const windowListSchema = z.object({
+  windows: z.array(windowListEntrySchema),
+});
+
 export const mediaViewSchema = z.object({
   windowId: z.uuid(),
   representation: mediaRepresentationSchema,
@@ -128,6 +162,7 @@ export const mediaViewSchema = z.object({
           sequence: z.int().positive(),
           offsetMs: z.number().nonnegative(),
           detections: z.array(detectionSchema).max(128).nullable(),
+          identity: windowFrameSchema.shape.identity,
         }),
       )
       .max(5),

@@ -54,6 +54,14 @@ export class MediaSession {
   private configurationTask: Promise<void> | undefined;
   private queue: Promise<unknown> = Promise.resolve();
   private closing: Promise<void> | undefined;
+  private recordingReadScope = new AbortController();
+  private readonly recordingReads = new Map<
+    string,
+    {
+      query: Parameters<Go2RtcAdapter["readRecordings"]>[1];
+      promise: ReturnType<Go2RtcAdapter["readRecordings"]>;
+    }
+  >();
 
   constructor(private readonly dependencies: MediaDependencies) {}
 
@@ -106,6 +114,7 @@ export class MediaSession {
     // Ending the current household run revokes viewers even if credential
     // deletion fails. Keep resident sources available for a confirmed recovery.
     this.revision = crypto.randomUUID();
+    this.invalidateRecordingReads();
     this.playback.invalidate();
     this.cameraSources?.pause();
     this.dependencies.onChange();
@@ -218,8 +227,14 @@ export class MediaSession {
     return adapter;
   }
 
+  private invalidateRecordingReads() {
+    this.recordingReadScope.abort();
+    this.recordingReadScope = new AbortController();
+  }
+
   private invalidateMedia() {
     this.revision = crypto.randomUUID();
+    this.invalidateRecordingReads();
     this.dependencies.onChange();
     this.cameraSources?.dispose();
     this.cameraSources = undefined;
@@ -259,6 +274,10 @@ export class MediaSession {
   private async releaseAdapter() {
     const adapter = this.mediaAdapter;
     if (!adapter) return;
+    // Index requests own their physical reads until their bounded cleanup finishes.
+    await Promise.allSettled(
+      [...this.recordingReads.values()].map((read) => read.promise),
+    );
     // Retain the previous instance until cleanup succeeds, even if YAML changed.
     try {
       await mijiaOperation("cleanup", "go2rtc_cleanup", () => adapter.close());
@@ -470,12 +489,14 @@ export class MediaSession {
     deviceId: string,
     channel: 1 | 2,
     signal: AbortSignal,
+    videoQuality?: Parameters<CameraSourceManager["prepare"]>[2],
   ) {
     const camera = await this.preparePlaybackCamera(
       revision,
       deviceId,
       channel,
       signal,
+      videoQuality,
     );
     return {
       access: camera.adapter.analysisAccess(camera.sourceId),
@@ -484,6 +505,83 @@ export class MediaSession {
         channel,
         camera.sourceId,
       ),
+    };
+  }
+
+  recordingAccess(revision: string, deviceId: string, channel: 1 | 2) {
+    const { cameras, adapter } = this.requireReady(revision);
+    const source = cameras.existing(deviceId, channel);
+    const assertCurrent = () => {
+      if (source.signal.aborted) throw new MijiaError("cancelled");
+      if (
+        this.requireReady(revision).cameras !== cameras ||
+        cameras.existing(deviceId, channel).sourceId !== source.sourceId
+      )
+        throw new MijiaError("stale_session");
+    };
+    assertCurrent();
+    return {
+      access: adapter.recordingDownloadAccess(source.sourceId),
+      signal: source.signal,
+      assertCurrent,
+    };
+  }
+
+  async readRecordings(
+    revision: string,
+    deviceId: string,
+    channel: 1 | 2,
+    query: Parameters<Go2RtcAdapter["readRecordings"]>[1],
+    signal: AbortSignal,
+    scopeSignal: AbortSignal,
+  ) {
+    const { cameras, adapter } = this.requireReady(revision);
+    const source = cameras.existing(deviceId, channel);
+    const physicalSignal = AbortSignal.any([
+      scopeSignal,
+      source.signal,
+      this.recordingReadScope.signal,
+    ]);
+    if (signal.aborted || physicalSignal.aborted)
+      throw new MijiaError("cancelled");
+    const key = `${revision}:${source.sourceId}`;
+    let pending = this.recordingReads.get(key);
+    if (!pending) {
+      const read = {
+        query: { ...query },
+        promise: mijiaOperation("camera.recordings", "camera_failed", () =>
+          adapter.readRecordings(source.sourceId, query, physicalSignal),
+        ).finally(() => {
+          if (this.recordingReads.get(key) === read)
+            this.recordingReads.delete(key);
+        }),
+      };
+      this.recordingReads.set(key, read);
+      pending = read;
+    }
+    // A caller may stop waiting without cancelling the unnumbered device reply.
+    // Only the source/scope owner can revoke the shared, bounded physical read.
+    const result =
+      pending.query.afterMs === query.afterMs &&
+      pending.query.limit === query.limit
+        ? await pending.promise
+        : ({ status: "unavailable", reason: "busy" } as const);
+    if (signal.aborted || physicalSignal.aborted)
+      throw new MijiaError("cancelled");
+    if (
+      this.requireReady(revision).cameras !== cameras ||
+      cameras.existing(deviceId, channel).sourceId !== source.sourceId
+    )
+      throw new MijiaError("stale_session");
+    return {
+      source: "sd_card" as const,
+      deviceId,
+      channel,
+      revision,
+      timeUnit: "unix_ms" as const,
+      timeBasis: "device_recording" as const,
+      queriedAt: Date.now(),
+      ...result,
     };
   }
 
@@ -497,7 +595,9 @@ export class MediaSession {
     deviceId: string,
     channel: 1 | 2,
     signal: AbortSignal,
+    videoQuality?: Parameters<CameraSourceManager["prepare"]>[2],
   ) {
+    if (signal.aborted) throw new MijiaError("cancelled");
     const { adapter, cameras } = this.requireReady(revision);
     // Both operations belong to the resident session and can run independently.
     // No viewer is offered until renewal and source preparation both succeed.
@@ -506,7 +606,7 @@ export class MediaSession {
         adapter.renewSessionLease(signal),
       ),
       mijiaOperation("camera.prepare", "camera_failed", () =>
-        cameras.prepare(deviceId, channel),
+        cameras.prepare(deviceId, channel, videoQuality),
       ),
     ]);
     if (signal.aborted) throw new MijiaError("cancelled");

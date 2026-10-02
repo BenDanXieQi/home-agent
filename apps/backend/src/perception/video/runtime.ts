@@ -1,4 +1,5 @@
 import { createWindowCapture } from "../window/capture";
+import type { createIdentityRuntime } from "../identity/runtime";
 import { ComputeBusyError } from "../compute/protocol";
 import type { createTrackingRuntime } from "../tracking/runtime";
 import type { z } from "zod";
@@ -10,6 +11,7 @@ import { createVideoScheduler } from "./scheduler";
 
 // Dependencies are composed by process-entry; video does not import a pool implementation.
 export function createVideoRuntime(dependencies: {
+  identity: ReturnType<typeof createIdentityRuntime>;
   tracking: ReturnType<typeof createTrackingRuntime>;
   compute: {
     readonly available: boolean;
@@ -42,6 +44,31 @@ export function createVideoRuntime(dependencies: {
         source.run,
         frame,
         source.maxFrameAgeMs,
+        (observation, rgb) => {
+          if (sources.get(id) === source && source.health === "reading") {
+            const identity = dependencies.identity.observe(
+              observation,
+              rgb,
+              frame.availableAt,
+              source.maxFrameAgeMs,
+            );
+            if (identity)
+              dependencies
+                .emit({
+                  event: "identity_frame",
+                  run: observation.run,
+                  frame: {
+                    sequence: observation.sequence,
+                    receivedAt: observation.receivedAt,
+                    mediaTime: observation.mediaTime,
+                    width: observation.width,
+                    height: observation.height,
+                  },
+                  identity,
+                })
+                .catch(dependencies.fatal);
+          }
+        },
       );
       let trackingStarted = false;
       const pending = (async () => {
@@ -119,6 +146,7 @@ export function createVideoRuntime(dependencies: {
         throw new ComputeBusyError("Video source capacity unavailable");
       const captured = capture(input.run);
       captures.set(input.run.runId, captured);
+      dependencies.identity.start(input.run, input.config.identity);
       const source = createVideoSource({
         frame: (frame) => {
           captured.accept(frame);
@@ -135,7 +163,10 @@ export function createVideoRuntime(dependencies: {
         failure: (error) => {
           captured.stop();
           scheduler.remove(input.run.runId);
-          dependencies.tracking.stop(input.run.runId).catch(dependencies.fatal);
+          Promise.all([
+            dependencies.tracking.stop(input.run.runId),
+            dependencies.identity.stop(input.run.runId),
+          ]).catch(dependencies.fatal);
           dependencies
             .emit({
               event: "health",
@@ -159,7 +190,11 @@ export function createVideoRuntime(dependencies: {
       captures.get(id)?.stop();
       captures.delete(id);
       scheduler.remove(id);
-      await Promise.all([dependencies.tracking.stop(id), source.close()]);
+      await Promise.all([
+        dependencies.tracking.stop(id),
+        dependencies.identity.stop(id),
+        source.close(),
+      ]);
       // Retiring instances still consume decoder capacity until exit is confirmed.
       if (sources.get(id) === source) sources.delete(id);
     },
@@ -171,9 +206,14 @@ export function createVideoRuntime(dependencies: {
       unsubscribe();
       const owned = [...sources.values()];
       sources.clear();
-      await Promise.all(owned.map((source) => source.close()));
-      await Promise.all(pendingDispatches);
-      await dependencies.tracking.close();
+      await Promise.all([
+        dependencies.identity.close(),
+        (async () => {
+          await Promise.all(owned.map((source) => source.close()));
+          await Promise.all(pendingDispatches);
+          await dependencies.tracking.close();
+        })(),
+      ]);
     },
   };
 }

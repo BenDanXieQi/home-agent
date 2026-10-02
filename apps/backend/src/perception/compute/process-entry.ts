@@ -2,6 +2,7 @@ import {
   windowAcknowledgementSchema,
   type windowFrameEventSchema,
 } from "../window/protocol";
+import { createIdentityRuntime } from "../identity/runtime";
 import { createReidProcess } from "../tracking/reid-process";
 import { createTrackingRuntime } from "../tracking/runtime";
 import { createVideoRuntime } from "../video/runtime";
@@ -54,8 +55,24 @@ async function run(task: z.infer<typeof commandSchema>) {
     pool = createInferencePool(fail, task.budget);
     const result = await pool.submit(task);
     video = createVideoRuntime({
+      identity: createIdentityRuntime({
+        fatal: fail,
+        reserveCompute: () => pool!.reserveIdentity(),
+        releaseCompute: () => {
+          pool!.releaseIdentity();
+        },
+        emit: (observation) =>
+          send({
+            kind: "video",
+            payload: { event: "identity", run: observation.run, observation },
+          }),
+        failure: (error) => {
+          console.error("Identity analysis failed", error);
+        },
+      }),
       tracking: createTrackingRuntime({
         createModel: createReidProcess,
+
         reserveCompute: () => pool!.reserveTracking(),
         releaseCompute: () => {
           pool!.releaseTracking();

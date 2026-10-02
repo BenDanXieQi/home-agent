@@ -83,10 +83,27 @@ export class CameraSourceManager {
     } satisfies CameraSourceSpec;
   }
 
-  async prepare(deviceId: string, channel: 1 | 2) {
+  async prepare(
+    deviceId: string,
+    channel: 1 | 2,
+    videoQuality?: CameraSourceSpec["videoQuality"],
+  ) {
     if (this.paused) throw new MijiaError("cancelled");
-    const sourceId = await this.ensure(deviceId, channel, true);
+    const sourceId = await this.ensure(deviceId, channel, true, videoQuality);
     return { adapter: this.adapter, sourceId };
+  }
+
+  existing(deviceId: string, channel: 1 | 2) {
+    if (this.paused) throw new MijiaError("cancelled");
+    this.validate(deviceId, channel);
+    const stream = this.streams.get(`${deviceId}:${channel}`);
+    if (!stream || !stream.prepared || stream.retiring || stream.error)
+      throw new MijiaError("camera_failed");
+    return {
+      adapter: this.adapter,
+      sourceId: stream.id,
+      signal: stream.controller.signal,
+    };
   }
 
   sourceSignal(deviceId: string, channel: 1 | 2, sourceId: string) {
@@ -96,16 +113,28 @@ export class CameraSourceManager {
     return stream.controller.signal;
   }
 
-  private async ensure(deviceId: string, channel: 1 | 2, retryFailed = false) {
-    const device = this.validate(deviceId, channel);
+  private async ensure(
+    deviceId: string,
+    channel: 1 | 2,
+    retryFailed = false,
+    requestedQuality?: CameraSourceSpec["videoQuality"],
+  ) {
     const key = `${deviceId}:${channel}`;
     let stream = this.streams.get(key);
+    // Only an explicit preparation request changes the selected profile.
+    // Ordinary preview and discovery reconciliation reuse the source's choice.
+    const videoQuality = requestedQuality ?? stream?.device.videoQuality;
+    const device = {
+      ...this.validate(deviceId, channel),
+      ...(videoQuality === undefined ? {} : { videoQuality }),
+    };
     if (
       !stream ||
       stream.retiring ||
       stream.device.model !== device.model ||
       stream.device.channelCount !== device.channelCount ||
-      stream.device.localIp !== device.localIp
+      stream.device.localIp !== device.localIp ||
+      stream.device.videoQuality !== device.videoQuality
     ) {
       const removed = stream ? this.retire(key, stream) : Promise.resolve();
       const next: CameraSourceEntry = {
