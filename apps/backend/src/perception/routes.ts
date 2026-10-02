@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
 import { perceptionSnapshotSchema } from "@home-agent/api/contracts";
 import type { createPerceptionService } from "./service";
-import { createPerceptionStream } from "./stream";
+import { createSnapshotStream } from "../http/snapshot-stream";
 import { createImageUpload } from "./image-upload";
 
 export function createPerceptionRoutes(
@@ -23,6 +23,7 @@ export function createPerceptionRoutes(
       rejectedRetiredResults: view.rejectedRetiredResults,
       error: view.error,
       settings: view.config,
+      resources: view.resources,
       compute: view.compute,
       model: view.model
         ? { sha256: view.model.sha256, provider: view.model.provider }
@@ -33,12 +34,8 @@ export function createPerceptionRoutes(
   }
   return new Hono()
     .use(requireLocalAccess([port, 5173], { webEntry: true }))
-    .use(async (c, next) => {
-      c.header("Cache-Control", "no-store");
-      await next();
-    })
     .get("/", (c) => c.json(snapshot()))
-    .get("/stream", createPerceptionStream(service, snapshot, shutdown))
+    .get("/stream", createSnapshotStream(service, snapshot, shutdown))
     .post("/images/detect", async (c) => c.json(await uploadImage(c.req.raw)))
     .post("/retry", async (c) => {
       await service.retry();

@@ -1,10 +1,10 @@
 # Backend
 
-基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测、音频能量与人声分析和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
+基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测、音频能量、人声分析、本地语音转写和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析及 P4 窗口筛选／自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和独立 Agent 请求判断及 P4 窗口筛选／自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -43,6 +43,8 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `POST /api/mijia/cameras/recordings`                | 读取当前来源的 SD 卡录像索引，保留设备时间依据                                      |
 | `PUT/GET/DELETE /api/mijia/recordings/playback/:id` | 申请、查询或释放经校验的 SD 卡回放资源                                              |
 | `GET/HEAD /api/mijia/recordings/playback/:id/media` | 受控 MP4 读取，支持单段字节范围请求                                                 |
+| `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                          |
+| `GET /api/perception/speech/stream`                 | 订阅同一语音收件箱                                                                  |
 | `POST /api/perception/retry`                        | 显式重试检测与音频计算，重新准入失败音轨                                            |
 
 SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像生成与对外状态；窗口和 SD 回放各自使用 `src/media/resources.ts` 的独立实例管理队列、文件、容量预留、期限、读取和清理。两者的预算与队列不混用，SD 下载不会占用窗口编码名额。`mijia/media/recording-file.ts` 负责内部传输边界，`recordings/media.ts` 使用现有媒体库处理容器与编码，`src/media/ffmpeg.ts` 统一进程执行与退出等待；`recordings/alignment.ts` 保持帧匹配规则独立于 HTTP 和文件存储。接口、容量、取消与验证边界见 [SD 卡录像回放](../../docs/mijia.md#sd-卡录像读取与回放)。
@@ -152,7 +154,11 @@ src/
 │   ├── audio/              # 连续分块、Silero 适配、解码与音频进程监督
 │   ├── window/             # 窗口聚合、历史身份快照、覆盖判定与有限期输入
 │   ├── gate/               # 场景筛选和裁切区域规则
-│   └── media/              # 媒体解码、表示参数、编码与受控读取
+│   ├── media/              # 媒体解码、表示参数、编码与受控读取
+│   └── speech/             # 单一 VAD 结果切段、语音证据、ASR 子进程与空闲释放
+├── conversation/          # 短时语音片段交付、判断状态、Agent 客户端和读取接口
+├── http/                  # backend 内跨业务复用的 HTTP 传输适配
+│   └── snapshot-stream.ts  # 当前快照 SSE、通知合并、连接容量与关闭
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验
@@ -169,7 +175,11 @@ src/
 
 业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../packages/api/README.md#错误响应)。
 
-`main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据。
+`main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据；应用入口独立创建语音收件箱和 Agent 客户端，感知只接收证据交付与来源失效端口。
+
+语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语义模型归 Agent。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
+
+`src/http/snapshot-stream.ts` 负责感知与语音接口共用的当前快照 SSE 传输，只接收变更订阅、快照读取和应用关闭信号；快照内容及有效性仍由各业务模块维护。
 
 聊天路由只接收 Agent 地址读取函数、端口与超时；米家服务接收 go2rtc 地址读取函数、凭据仓库和家庭选择存储模块。地址函数由启动入口连接到配置仓库，调用时读取当前配置，业务模块不依赖 YAML 存储结构。数据库连接由存储模块使用，不放入 HTTP 请求上下文。`environment.ts` 负责读取和校验进程环境变量。
 

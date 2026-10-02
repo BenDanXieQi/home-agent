@@ -1,45 +1,52 @@
-import type { createHouseholdReset } from "../household-reset";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
 import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
 import {
-  analysisRequestSchema,
-  roomAnalysisLimits,
-} from "@home-agent/api/room-analysis";
-import type { createRoomAnalysisInterpreter } from "../room-analysis";
+  speechDialogueRequestSchema,
+  speechDialogueLimits,
+  validSpeechDialogueRequest,
+} from "@home-agent/api/speech-dialogue";
+import type { createSpeechDialogueInterpreter } from "../speech-dialogue";
+import type { createHouseholdReset } from "../household-reset";
 
-export function createRoomAnalysisRoutes(
-  interpret: ReturnType<typeof createRoomAnalysisInterpreter>,
-  timeoutMs: number,
+export function createSpeechDialogueRoutes(
+  interpret: ReturnType<typeof createSpeechDialogueInterpreter>,
   reset: ReturnType<typeof createHouseholdReset>,
 ) {
-  let active = 0;
+  let active = false;
   return new Hono().post(
     "/",
     bodyLimit({
-      maxSize: roomAnalysisLimits.contextBytes + 1024,
+      maxSize: speechDialogueLimits.requestBytes,
       onError: (c) => errorResponse(c, new AppError("request_too_large")),
     }),
-    validateJson(analysisRequestSchema),
+    validateJson(speechDialogueRequestSchema),
     async (c) => {
       if (!interpret) throw new AppError("model_not_configured");
-      if (active >= roomAnalysisLimits.concurrent)
-        throw new AppError("thread_busy");
+      if (active) throw new AppError("thread_busy");
       const input = c.req.valid("json");
-      if (!input.context.facts.length) throw new AppError("invalid_request");
+      const now = Date.now();
+      if (!validSpeechDialogueRequest(input, now))
+        throw new AppError("invalid_request");
       const timeout = AbortSignal.timeout(
-        Math.min(timeoutMs, roomAnalysisLimits.timeoutMs - 1000),
+        Math.max(
+          1,
+          Math.min(
+            speechDialogueLimits.agentTimeoutMs,
+            Math.floor(input.expiresAt - now),
+          ),
+        ),
       );
-      const signal = AbortSignal.any([c.req.raw.signal, timeout]);
+      const signal = AbortSignal.any([timeout, c.req.raw.signal]);
       const leave = reset.enter();
-      active++;
+      active = true;
       try {
         const result = await interpret(input, signal);
         signal.throwIfAborted();
         if (
           Buffer.byteLength(JSON.stringify(result)) >
-          roomAnalysisLimits.responseBytes
+          speechDialogueLimits.responseBytes
         )
           throw new AppError("agent_execution_failed");
         return c.json(result);
@@ -53,7 +60,7 @@ export function createRoomAnalysisRoutes(
           { cause },
         );
       } finally {
-        active--;
+        active = false;
         leave();
       }
     },

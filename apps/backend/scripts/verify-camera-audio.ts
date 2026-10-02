@@ -1,4 +1,5 @@
-import { parseArgs } from "node:util";
+import { parseArgs, promisify } from "node:util";
+import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -20,7 +21,7 @@ import { createPerceptionService } from "../src/perception/service";
 import { createPerceptionRoutes } from "../src/perception/routes";
 import { sourceSelectionSchema, sourceKey } from "../src/perception/config";
 import type { PerceptionSources } from "../src/perception/sources";
-import { audioResources } from "./perception-evaluation/audio-resources";
+import { createAudioResourceSampler } from "./perception-evaluation/audio-resources";
 
 const { values } = parseArgs({
   options: {
@@ -35,16 +36,11 @@ const key = z.string().min(1).parse(values.key);
 const seconds = z.coerce.number().int().min(30).max(3600).parse(values.seconds);
 const databaseUrl = z.string().min(1).parse(process.env.DATABASE_URL);
 // Refuse an occupied API port instead of adopting another instance's session.
-await new Promise<void>((resolve, reject) => {
-  const probe = createServer();
-  probe.once("error", reject);
-  probe.listen(1986, "127.0.0.1", () => {
-    probe.close((error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
-});
+const probe = createServer();
+const listening = once(probe, "listening");
+probe.listen(1986, "127.0.0.1");
+await listening;
+await promisify(probe.close.bind(probe))();
 const native = spawn(
   binary,
   [
@@ -64,17 +60,11 @@ const native = spawn(
   { stdio: ["ignore", "ignore", "inherit"] },
 );
 let nativeFailure: unknown;
-const nativeExit = new Promise<void>((resolve) => {
-  native.once("exit", () => {
-    resolve();
-  });
-  native.once("error", (error) => {
-    nativeFailure = error;
-    resolve();
-  });
+const nativeExit = once(native, "exit").catch((error: unknown) => {
+  nativeFailure = error;
 });
-const directory = await mkdtemp(join(tmpdir(), "camera-audio-"));
-const db = createDatabase(databaseUrl);
+let directory: string | undefined;
+let db: ReturnType<typeof createDatabase> | undefined;
 const shutdown = new AbortController();
 process.once("SIGINT", () => {
   shutdown.abort();
@@ -97,6 +87,8 @@ let cloud: ReturnType<typeof MiCloud.restoreSession> | undefined;
 let service: ReturnType<typeof createPerceptionService> | undefined;
 let server: ReturnType<typeof Bun.serve> | undefined;
 try {
+  directory = await mkdtemp(join(tmpdir(), "camera-audio-"));
+  db = createDatabase(databaseUrl);
   for (let attempt = 0; ; attempt++) {
     if (nativeFailure || native.exitCode !== null)
       throw nativeFailure ?? new Error("Owned go2rtc exited during startup");
@@ -212,7 +204,7 @@ try {
   const configPath = join(directory, "perception.json");
   await writeFile(
     configPath,
-    JSON.stringify({ sources: selected, cpuRatio: 0.15 }),
+    JSON.stringify({ sources: selected, cpuRatio: 0.5 }),
   );
   service = createPerceptionService({
     configPath,
@@ -290,10 +282,11 @@ setInterval(async()=>{const results=[];for(const item of peers){const stats=awai
     }),
   );
   await delay(15000, undefined, { signal: shutdown.signal });
-  const baseline = await audioResources();
+  const resourceSampler = createAudioResourceSampler();
+  const baseline = await resourceSampler.sample();
   const initialView = service.snapshot();
-  const audioRuns = initialView.audio.tracks.map(
-    (track) => track.run.trackRunId,
+  const audioRuns = new Set(
+    initialView.audio.tracks.map((track) => track.run.trackRunId),
   );
   let invalidAudioSamples = 0,
     invalidVideoSamples = 0,
@@ -311,14 +304,13 @@ setInterval(async()=>{const results=[];for(const item of peers){const stats=awai
       view.audio.tracks.length !== devices.length ||
       view.audio.tracks.some(
         (track) =>
-          track.validity !== "valid" ||
-          !audioRuns.includes(track.run.trackRunId),
+          track.validity !== "valid" || !audioRuns.has(track.run.trackRunId),
       )
     )
       invalidAudioSamples++;
     if (view.sources.some((source) => source.validity !== "valid"))
       invalidVideoSamples++;
-    const resources = await audioResources();
+    const resources = await resourceSampler.sample();
     maxRss = Math.max(maxRss, resources.rssMiB);
     if ((second + 5) % 60 === 0)
       console.log(
@@ -332,7 +324,7 @@ setInterval(async()=>{const results=[];for(const item of peers){const stats=awai
         }),
       );
   }
-  const end = await audioResources();
+  const end = await resourceSampler.sample();
   const view = service.snapshot();
   if (invalidAudioSamples || invalidVideoSamples || failures.length)
     process.exitCode = 1;
@@ -361,12 +353,32 @@ setInterval(async()=>{const results=[];for(const item of peers){const stats=awai
   );
 } finally {
   shutdown.abort();
-  await service?.close();
-  await server?.stop(true);
-  await adapter.close();
-  cloud?.dispose();
-  await db.close();
-  native.kill("SIGTERM");
-  await nativeExit;
-  await rm(directory, { recursive: true, force: true });
+  const cleanupErrors: unknown[] = [];
+  for (const close of [
+    () => service?.close(),
+    () => server?.stop(true),
+    () => adapter.close(),
+    () => {
+      cloud?.dispose();
+    },
+    () => db?.close(),
+    async () => {
+      native.kill("SIGTERM");
+      await nativeExit;
+    },
+    () =>
+      directory ? rm(directory, { recursive: true, force: true }) : undefined,
+  ]) {
+    try {
+      await Promise.resolve(close());
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  if (cleanupErrors.length) {
+    process.exitCode = 1;
+    console.error(
+      new AggregateError(cleanupErrors, "Camera verification cleanup failed"),
+    );
+  }
 }

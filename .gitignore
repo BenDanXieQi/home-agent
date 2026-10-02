@@ -16,3 +16,5 @@ data/
 *.log
 
 /apps/backend/src/perception/identity/__pycache__/
+# Optional local ASR weights; source and fingerprints are documented in models/README.md.
+/apps/backend/models/sensevoice/

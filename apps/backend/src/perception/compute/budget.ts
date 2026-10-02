@@ -21,9 +21,9 @@ export const computeBudgetSchema = z
   })
   .refine(
     (budget) =>
-      budget.workersPerProcess ===
+      budget.workersPerProcess <=
       Math.max(1, Math.floor(budget.availableCpus * budget.cpuRatio)),
-    "Worker count must match the startup CPU budget",
+    "Worker count must not exceed the startup CPU budget",
   );
 
 export function resolveComputeBudget(
