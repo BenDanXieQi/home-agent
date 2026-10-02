@@ -40,6 +40,7 @@ export function SidebarFrame({
     <m.aside
       // Keep navigation measurements relative to the viewport when page scrolling changes.
       layoutRoot
+      layoutScroll
       className="fixed inset-y-3 left-3 z-20 flex w-[100px] flex-col bg-white select-none [&_img]:[-webkit-user-drag:none] max-md:inset-x-0 max-md:bottom-0 max-md:top-auto max-md:w-auto max-md:flex-row max-md:items-center max-md:px-2 max-md:shadow-[0_-4px_20px_#00000008] max-md:pb-[env(safe-area-inset-bottom)]"
     >
       {brand}
