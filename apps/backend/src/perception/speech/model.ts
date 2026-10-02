@@ -2,7 +2,7 @@ import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { OfflineRecognizer } from "sherpa-onnx-node/non-streaming-asr.js";
-import { z } from "zod";
+import { speechObservationSchema } from "@home-agent/api/contracts";
 import { senseVoiceModel, speechLimits } from "./limits";
 
 async function verify(path: URL, expected: string) {
@@ -11,7 +11,6 @@ async function verify(path: URL, expected: string) {
   if (hash.digest("hex") !== expected)
     throw new Error(`Speech asset fingerprint mismatch: ${path.pathname}`);
 }
-const modelResultSchema = z.object({ text: z.string().max(4096) });
 export async function createSpeechModel() {
   const modelPath = new URL(
     "../../../models/sensevoice/model.int8.onnx",
@@ -43,8 +42,10 @@ export async function createSpeechModel() {
       const stream = recognizer.createStream();
       stream.acceptWaveform({ sampleRate: speechLimits.sampleRate, samples });
       recognizer.decode(stream);
-      const result = modelResultSchema.parse(recognizer.getResult(stream));
-      return { text: result.text, elapsedMs: performance.now() - start };
+      const text = speechObservationSchema.shape.text.parse(
+        recognizer.getResult(stream).text,
+      );
+      return { text, elapsedMs: performance.now() - start };
     },
   };
 }

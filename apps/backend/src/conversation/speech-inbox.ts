@@ -3,10 +3,9 @@ import { AppError, errorPayload } from "@home-agent/api/errors";
 import {
   speechDialogueLimits,
   speechDialogueConfigSchema,
-  speechInboxEntrySchema,
+  type speechInboxEntrySchema,
   speechInboxSchema,
-  speechDialogueResponseSchema,
-  validSpeechDecision,
+  type speechDialogueResponseSchema,
   validSpeechDialogueRequest,
   type speechDialogueRequestSchema,
 } from "@home-agent/api/speech-dialogue";
@@ -19,17 +18,18 @@ import type { z } from "zod";
 // Owns short-lived speech handoff and interpretation. Never executes an action.
 export function createSpeechInbox(options: {
   instanceId: string;
-  changed?: () => void;
   analyze?: (
     request: z.infer<typeof speechDialogueRequestSchema>,
     signal: AbortSignal,
   ) => Promise<z.infer<typeof speechDialogueResponseSchema>>;
 }) {
+  const instanceId = speechInboxSchema.shape.instanceId.parse(
+    options.instanceId,
+  );
   let revision = 0;
   const listeners = new Set<() => void>();
   function notify() {
     revision++;
-    options.changed?.();
     for (const listener of listeners) listener();
   }
   const runs = new Map<
@@ -42,14 +42,19 @@ export function createSpeechInbox(options: {
     rejected = 0;
   let closed = false;
   let operation: Promise<void> | undefined;
-  let active: { runId: string; controller: AbortController } | undefined;
+  let active:
+    | {
+        entry: z.infer<typeof speechInboxEntrySchema>;
+        controller: AbortController;
+      }
+    | undefined;
   const calls: number[] = [];
   function expire() {
     const now = Date.now();
     let removed = false;
     for (const [id, entry] of entries) {
       if (now >= entry.expiresAt) {
-        if (entry.status === "analyzing")
+        if (active?.entry === entry)
           active?.controller.abort(new Error("Speech evidence expired"));
         entries.delete(id);
         removed = true;
@@ -59,7 +64,6 @@ export function createSpeechInbox(options: {
   }
   async function drain() {
     if (closed) return;
-    expire();
     if (!config.enabled) return;
     while (calls.length && performance.now() - calls[0]! >= 60000)
       calls.shift();
@@ -97,7 +101,7 @@ export function createSpeechInbox(options: {
       return;
     }
     const controller = new AbortController();
-    active = { runId: observation.run.trackRunId, controller };
+    active = { entry, controller };
     const signal = AbortSignal.any([
       controller.signal,
       AbortSignal.timeout(
@@ -105,45 +109,40 @@ export function createSpeechInbox(options: {
           1,
           Math.min(
             speechDialogueLimits.timeoutMs,
-            entry.expiresAt - Date.now(),
+            Math.floor(entry.expiresAt - Date.now()),
           ),
         ),
       ),
     ]);
     entry.status = "analyzing";
     calls.push(performance.now());
-    notify();
     try {
-      const response = speechDialogueResponseSchema.parse(
-        await pTimeout(options.analyze(request, signal), {
+      notify();
+      const response = await pTimeout(
+        options.analyze(structuredClone(request), signal),
+        {
           milliseconds: speechDialogueLimits.timeoutMs,
           signal,
-        }),
+        },
       );
       signal.throwIfAborted();
-      if (
-        closed ||
-        entries.get(observation.id) !== entry ||
-        !runs.has(observation.run.trackRunId) ||
-        Date.now() >= entry.expiresAt
-      )
-        return;
+      expire();
+      if (entries.get(observation.id) !== entry) return;
       if (
         response.id !== request.id ||
-        response.observationId !== observation.id ||
-        !validSpeechDecision(response.decision)
+        response.observationId !== observation.id
       )
         throw new AppError("agent_execution_failed");
-      entry.decision = response.decision;
+      entry.decision = structuredClone(response.decision);
       entry.status = response.decision.needsResponse
         ? response.decision.isComplete
           ? "ready"
           : "incomplete"
         : "ignored";
     } catch (cause) {
+      expire();
       if (entries.get(observation.id) === entry) {
-        entry.status =
-          Date.now() >= entry.expiresAt ? "expired" : "unavailable";
+        entry.status = "unavailable";
         const error = signal.aborted
           ? new AppError(
               signal.reason instanceof Error &&
@@ -172,9 +171,7 @@ export function createSpeechInbox(options: {
     if (closed || operation) return;
     operation = drain()
       .catch(() => {
-        // A boundary failure stops this attempt; future speech has an independent identity.
-        rejected++;
-        notify();
+        console.error("Speech inbox operation failed");
       })
       .finally(() => {
         operation = undefined;
@@ -193,17 +190,17 @@ export function createSpeechInbox(options: {
     },
     configure(value: z.infer<typeof speechDialogueConfigSchema>) {
       if (closed) return;
-      config = value;
+      config = structuredClone(value);
       notify();
     },
     authorize(run: z.infer<typeof audioRunSchema>) {
       if (closed) return;
-      runs.set(run.trackRunId, { run, lastEndSample: 0 });
+      runs.set(run.trackRunId, { run: structuredClone(run), lastEndSample: 0 });
     },
     revoke(runId: string) {
       if (!runs.has(runId)) return;
       runs.delete(runId);
-      if (active?.runId === runId)
+      if (active?.entry.observation.run.trackRunId === runId)
         active.controller.abort(new Error("Speech source revoked"));
       for (const [id, entry] of entries)
         if (entry.observation.run.trackRunId === runId) entries.delete(id);
@@ -232,7 +229,7 @@ export function createSpeechInbox(options: {
         notify();
         return false;
       }
-      const entry = speechInboxEntrySchema.parse({
+      const entry = structuredClone({
         sequence: ++sequence,
         observation,
         expiresAt: observation.observedEndAt + speechDialogueLimits.lifetimeMs,
@@ -243,7 +240,7 @@ export function createSpeechInbox(options: {
             : "captured",
         decision: null,
         error: null,
-      });
+      } satisfies z.infer<typeof speechInboxEntrySchema>);
       entries.set(observation.id, entry);
       notify();
       kick();
@@ -251,14 +248,14 @@ export function createSpeechInbox(options: {
     },
     snapshot() {
       expire();
-      return speechInboxSchema.parse({
-        instanceId: options.instanceId,
+      return structuredClone({
+        instanceId,
         settings: config,
         revision,
         sequence,
         rejected,
         entries: [...entries.values()],
-      });
+      } satisfies z.infer<typeof speechInboxSchema>);
     },
     async close() {
       closed = true;

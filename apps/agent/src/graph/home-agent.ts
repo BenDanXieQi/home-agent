@@ -1,11 +1,15 @@
-import { SystemMessage, type UsageMetadata } from "@langchain/core/messages";
+import {
+  SystemMessage,
+  type AIMessageChunk,
+  type StandardMessageStructure,
+} from "@langchain/core/messages";
 import {
   END,
   MessagesAnnotation,
   START,
   StateGraph,
 } from "@langchain/langgraph";
-import { ChatOpenAI } from "@langchain/openai";
+import { createAgentModel } from "../model";
 import { telemetryStatus, withSpan } from "@home-agent/observability";
 import type { Config } from "../config";
 import type { AgentDatabase } from "../db";
@@ -14,22 +18,14 @@ export function createHomeAgent(
   config: Config,
   checkpointer?: AgentDatabase["checkpointer"],
 ) {
-  if (!config.OPENAI_API_KEY || !config.AGENT_MODEL) return undefined;
-  const modelName = config.AGENT_MODEL;
-  const model = new ChatOpenAI({
-    model: modelName,
-    apiKey: config.OPENAI_API_KEY,
+  const model = createAgentModel(config, {
     streaming: true,
     streamUsage: true,
     maxRetries: 1,
     timeout: 60_000,
-    ...(config.AGENT_THINKING
-      ? { modelKwargs: { thinking: { type: config.AGENT_THINKING } } }
-      : {}),
-    ...(config.OPENAI_BASE_URL
-      ? { configuration: { baseURL: config.OPENAI_BASE_URL } }
-      : {}),
   });
+  if (!model) return undefined;
+  const modelName = model.model;
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("model", async (state, options) => {
@@ -62,8 +58,9 @@ export function createHomeAgent(
               }),
             );
           }
-          const response = await model.invoke(messages, options);
-          const usage = response.usage_metadata as UsageMetadata | undefined;
+          const response: AIMessageChunk<StandardMessageStructure> =
+            await model.invoke(messages, options);
+          const usage = response.usage_metadata;
           if (usage) {
             span.setAttribute("gen_ai.usage.input_tokens", usage.input_tokens);
             span.setAttribute(

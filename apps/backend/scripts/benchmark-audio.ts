@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import { EventSourceParserStream } from "eventsource-parser/stream";
 import { z } from "zod";
 import { createAudioSource } from "./perception-evaluation/audio-source";
-import { audioResources } from "./perception-evaluation/audio-resources";
+import { createAudioResourceSampler } from "./perception-evaluation/audio-resources";
 import { createLibavAudioDecoder } from "./perception-evaluation/audio-libav";
 import { createAudioDecoder } from "../src/perception/audio/decoder";
 import { createAudioAnalysis } from "../src/perception/audio/analysis";
@@ -16,7 +16,7 @@ import {
   createVad,
 } from "../src/perception/audio/silero-vad";
 import { createAudioService } from "../src/perception/audio/service";
-import { createPerceptionStream } from "../src/perception/stream";
+import { createSnapshotStream } from "../src/http/snapshot-stream";
 import { readAudioStream } from "../src/mijia/media/audio-stream";
 import { perceptionConfigSchema } from "../src/perception/config";
 
@@ -65,14 +65,17 @@ let pcmBatches = 0,
   sseMessages = 0,
   sseBytes = 0;
 const listeners = new Set<() => void>();
-const service = createAudioService({
-  sources: source.sources,
-  executable: process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
-  changed() {
-    notifications++;
-    for (const listener of listeners) listener();
-  },
-});
+const service =
+  variant === "service"
+    ? createAudioService({
+        sources: source.sources,
+        executable,
+        changed() {
+          notifications++;
+          for (const listener of listeners) listener();
+        },
+      })
+    : undefined;
 const decoders: (
   | ReturnType<typeof createAudioDecoder>
   | ReturnType<typeof createLibavAudioDecoder>
@@ -86,7 +89,7 @@ function record(error: unknown) {
   if (!stop.signal.aborted && errors.length < 20) errors.push(String(error));
 }
 try {
-  if (variant === "service") {
+  if (service) {
     service.start();
     const reconcile = () => {
       service.reconcile(config, source.selected);
@@ -95,7 +98,7 @@ try {
     reconcileTimer = setInterval(reconcile, 500);
     const app = new Hono().get(
       "/stream",
-      createPerceptionStream(
+      createSnapshotStream(
         {
           subscribe(listener) {
             listeners.add(listener);
@@ -152,7 +155,7 @@ try {
         variant === "ffmpeg" ? createAudioDecoder : createLibavAudioDecoder;
       const decoder = create({
         config,
-        executable: process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
+        executable,
         open: (signal) => readAudioStream(prepared.access, signal),
         onMedia() {},
         async onPcm(pcm, observedAt) {
@@ -167,19 +170,22 @@ try {
     }
   }
   await delay(5000);
-  const totals = () =>
-    variant === "service"
+  const totals = () => {
+    const tracks = service?.snapshot().tracks;
+    return tracks
       ? source.selected.map(
-          (selected) =>
-            service
-              .snapshot()
-              .tracks.find((track) => track.run.deviceId === selected.deviceId)
-              ?.samples ?? 0,
+          ({ deviceId }) =>
+            tracks.find((track) => track.run.deviceId === deviceId)?.samples ??
+            0,
         )
       : [...decoded];
+  };
   const before = totals();
-  const resourceStart = await audioResources();
-  const resources = [resourceStart];
+  const resourceSampler = createAudioResourceSampler();
+  const resourceStart = await resourceSampler.sample();
+  let resourceEnd = resourceStart;
+  let maxRss = resourceStart.rssMiB;
+  let maxProcesses = resourceStart.processes;
   const started = performance.now();
   const initialEvents = {
     pcmBatches,
@@ -188,22 +194,24 @@ try {
     sseMessages,
     sseBytes,
   };
-  const initialRuns = service
-    .snapshot()
-    .tracks.map((track) => track.run.trackRunId);
+  const initialRuns = new Set(
+    service?.snapshot().tracks.map((track) => track.run.trackRunId),
+  );
   let invalid = 0;
   loop.enable();
   for (let second = 0; second < seconds; second++) {
     await delay(Math.max(0, started + (second + 1) * 1000 - performance.now()));
-    resources.push(await audioResources());
-    if (variant === "service") {
+    resourceEnd = await resourceSampler.sample();
+    maxRss = Math.max(maxRss, resourceEnd.rssMiB);
+    maxProcesses = Math.max(maxProcesses, resourceEnd.processes);
+    if (service) {
       const tracks = service.snapshot().tracks;
       if (
         tracks.length !== count ||
         tracks.some(
           (track) =>
             track.validity !== "valid" ||
-            !initialRuns.includes(track.run.trackRunId),
+            !initialRuns.has(track.run.trackRunId),
         )
       )
         invalid++;
@@ -219,7 +227,7 @@ try {
           progressSeconds: second + 1,
           variant,
           sources: count,
-          rssMiB: resources.at(-1)!.rssMiB,
+          rssMiB: resourceEnd.rssMiB,
           invalid,
           errors,
         }),
@@ -228,7 +236,6 @@ try {
   loop.disable();
   const elapsedMs = performance.now() - started;
   const after = totals();
-  const end = resources.at(-1)!;
   if (
     errors.length ||
     invalid ||
@@ -248,14 +255,14 @@ try {
       sourceFormat: "PCMA 8kHz mono",
       sampleDeltas: after.map((value, index) => value - before[index]!),
       cpuPercentOfOneCore:
-        ((end.cpuMs - resourceStart.cpuMs) / elapsedMs) * 100,
+        ((resourceEnd.cpuMs - resourceStart.cpuMs) / elapsedMs) * 100,
       rssMiB: {
         start: resourceStart.rssMiB,
-        end: end.rssMiB,
-        max: Math.max(...resources.map((row) => row.rssMiB)),
-        growth: end.rssMiB - resourceStart.rssMiB,
+        end: resourceEnd.rssMiB,
+        max: maxRss,
+        growth: resourceEnd.rssMiB - resourceStart.rssMiB,
       },
-      maxProcesses: Math.max(...resources.map((row) => row.processes)),
+      maxProcesses,
       ageMs: {
         p50: age.percentile(50) / 1000,
         p95: age.percentile(95) / 1000,
@@ -275,12 +282,23 @@ try {
   stop.abort();
   clearInterval(reconcileTimer);
   loop.disable();
-  await Promise.all([
-    service.close(),
+  const closed = await Promise.allSettled([
+    service?.close(),
     ...decoders.map((decoder) => decoder.close()),
+    ...readers,
+    server?.stop(true),
+    source.close(),
   ]);
-  await Promise.all(readers);
-  await server?.stop(true);
-  await model?.close();
-  await source.close();
+  closed.push(
+    ...(await Promise.allSettled([inference.then(() => model?.close())])),
+  );
+  const failures = closed
+    .filter((result) => result.status === "rejected")
+    .map((result) => result.reason);
+  if (failures.length) {
+    process.exitCode = 1;
+    console.error(
+      new AggregateError(failures, "Audio benchmark cleanup failed"),
+    );
+  }
 }

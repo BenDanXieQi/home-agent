@@ -22,9 +22,7 @@ export function createSpeechProcess() {
       env: { ...process.env, ORT_DISABLE_TELEMETRY: "1" },
     },
   );
-  const initialized = Promise.withResolvers<
-    { ready: true } | { ready: false; error: Error }
-  >();
+  const initialized = Promise.withResolvers<Error | undefined>();
   const exited = Promise.withResolvers<void>();
   let waiting:
     | (ReturnType<
@@ -45,7 +43,7 @@ export function createSpeechProcess() {
     if (error) return;
     error = cause instanceof Error ? cause : new Error(String(cause));
     ready = false;
-    initialized.resolve({ ready: false, error });
+    initialized.resolve(error);
     waiting?.reject(error);
   }
   const watchdog = setInterval(() => {
@@ -84,28 +82,37 @@ export function createSpeechProcess() {
     if (result.kind === "ready") {
       ready = true;
       modelSha256 = result.modelSha256;
-      initialized.resolve({ ready: true });
+      initialized.resolve(undefined);
     } else if (result.kind === "result") {
       if (waiting?.id === result.id) waiting.resolve(result);
       else fail(new Error("Speech result identity mismatch"));
     }
   });
+  function terminate(message: string) {
+    closingRequested = true;
+    clearInterval(watchdog);
+    fail(new Error(message));
+    child.kill("SIGKILL");
+  }
   return {
     get status() {
-      return { ready, error, processId: child.pid, rssBytes, modelSha256 };
+      return { error, processId: child.pid, rssBytes, modelSha256 };
     },
     async initialize() {
       const result = await pTimeout(initialized.promise, {
         milliseconds: speechLimits.initializeTimeoutMs,
       });
-      if (!result.ready) throw result.error;
+      if (result) throw result;
     },
-    async recognize(input: z.infer<typeof speechJobSchema>) {
+    async recognize(input: {
+      id: z.infer<typeof speechJobSchema>["id"];
+      samples: Float32Array;
+    }) {
       if (!ready || error || closingRequested)
         throw error ?? new Error("Speech process unavailable");
       if (waiting)
         throw new Error("Speech process already has an in-flight request");
-      const job = speechJobSchema.parse(input);
+      const job = { id: input.id, samples: input.samples };
       const pending =
         Promise.withResolvers<
           z.infer<(typeof speechResponseSchema.options)[1]>
@@ -124,17 +131,11 @@ export function createSpeechProcess() {
       }
     },
     interrupt() {
-      closingRequested = true;
-      fail(new Error("Speech operation cancelled"));
-      child.kill("SIGKILL");
+      terminate("Speech operation cancelled");
     },
     close() {
-      closingRequested = true;
-      ready = false;
-      clearInterval(watchdog);
       closing ??= (async () => {
-        fail(new Error("Speech closed"));
-        child.kill("SIGKILL");
+        terminate("Speech closed");
         await pTimeout(exited.promise, {
           milliseconds: speechLimits.closeTimeoutMs,
           message: "Speech process exit unconfirmed",

@@ -120,22 +120,30 @@ export const speechConfigSchema = z.strictObject({
   enabled: z.boolean().default(false),
   idleUnloadMs: z.int().min(5000).max(3600000).default(60000),
 });
-export const speechObservationSchema = z.object({
-  id: z.string().min(1).max(128),
-  run: audioRunSchema,
-  generation: z.uuid(),
-  startSample: z.int().nonnegative(),
-  endSample: z.int().positive(),
-  speechEndSample: z.int().positive(),
-  boundary: z.enum(["pause", "length_limit"]),
-  observedStartAt: z.number(),
-  observedEndAt: z.number(),
-  completedAt: z.number(),
-  text: z.string().max(4096),
-  modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
-  processingVersion: z.literal("sensevoice-silero-frame-processor"),
-  inferenceMs: z.number().nonnegative(),
-});
+export const speechObservationSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    run: audioRunSchema,
+    generation: z.uuid(),
+    startSample: z.int().nonnegative(),
+    endSample: z.int().positive(),
+    speechEndSample: z.int().positive(),
+    boundary: z.enum(["pause", "length_limit"]),
+    observedStartAt: z.number(),
+    observedEndAt: z.number(),
+    completedAt: z.number(),
+    text: z.string().max(4096),
+    modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    processingVersion: z.literal("sensevoice-silero-frame-processor"),
+    inferenceMs: z.number().nonnegative(),
+  })
+  .refine(
+    (speech) =>
+      speech.startSample < speech.speechEndSample &&
+      speech.speechEndSample <= speech.endSample &&
+      speech.observedStartAt <= speech.observedEndAt,
+    "Inconsistent speech observation interval",
+  );
 export const speechTrackSchema = z.object({
   status: z.enum([
     "listening",
@@ -228,7 +236,7 @@ export const perceptionResourceSchema = z.object({
   reservedModelMiB: z.int().positive(),
 });
 export const perceptionSnapshotSchema = z.object({
-  resources: perceptionResourceSchema.nullable().optional(),
+  resources: perceptionResourceSchema.nullable(),
   sequence: z.int().nonnegative(),
   householdVersion: stateVersionSchema.nullable(),
   instanceId: z.uuid(),
@@ -237,8 +245,8 @@ export const perceptionSnapshotSchema = z.object({
   error: z.string().optional(),
   settings: z.object({
     cpuRatio: z.number().positive().max(1),
-    modelMemoryMiB: z.int().positive().optional(),
-    speech: speechConfigSchema.optional(),
+    modelMemoryMiB: z.int().positive(),
+    speech: speechConfigSchema,
     sampleFps: z.number(),
     maxFrameAgeMs: z.number(),
     firstFrameTimeoutMs: z.number(),

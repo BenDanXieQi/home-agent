@@ -1,5 +1,5 @@
-import { z } from "zod";
-import {
+import type { z } from "zod";
+import type {
   audioRunSchema,
   speechConfigSchema,
   speechObservationSchema,
@@ -9,20 +9,6 @@ import {
 import { createUtterances } from "./utterance";
 import { createSpeechProcess } from "./process";
 import { senseVoiceModel, speechLimits } from "./limits";
-import { speechJobSchema } from "./protocol";
-
-const taskSchema = speechObservationSchema
-  .omit({
-    text: true,
-    completedAt: true,
-    modelSha256: true,
-    processingVersion: true,
-    inferenceMs: true,
-  })
-  .extend({
-    samples: speechJobSchema.shape.samples,
-    queuedAt: z.number(),
-  });
 
 // Lives exclusively in audio/process-entry; only small validated views leave that process.
 export function createSpeechRuntime(options: {
@@ -34,15 +20,20 @@ export function createSpeechRuntime(options: {
   ) => Promise<boolean>;
 }) {
   const tracks = new Map<string, ReturnType<typeof createTrack>>();
-  const queue: z.infer<typeof taskSchema>[] = [];
+  const queue: (Omit<
+    z.infer<typeof speechObservationSchema>,
+    "text" | "completedAt" | "modelSha256" | "processingVersion" | "inferenceMs"
+  > &
+    Parameters<ReturnType<typeof createSpeechProcess>["recognize"]>[0] & {
+      queuedAt: number;
+    })[] = [];
   let worker: ReturnType<typeof createSpeechProcess> | undefined;
   let interrupted: typeof worker;
   let operation: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
-  let closed = false,
-    warmRequested = false;
-  let lastVoiceAt = 0,
-    nextLoadAt = 0;
+  let closed = false;
+  let lastVoiceAt: number | undefined;
+  let nextLoadAt = 0;
   let status: z.infer<typeof speechRuntimeSchema>["status"] = "sleeping";
   let lastError: string | undefined;
   let loads = 0,
@@ -51,7 +42,7 @@ export function createSpeechRuntime(options: {
     dropped = 0,
     cancelled = 0,
     handoffRejected = 0;
-  let inFlight: z.infer<typeof taskSchema> | undefined;
+  let inFlight: (typeof queue)[number] | undefined;
   function publish(runId: string) {
     const track = tracks.get(runId);
     if (!track) return;
@@ -74,7 +65,7 @@ export function createSpeechRuntime(options: {
   function publishAll() {
     for (const runId of tracks.keys()) publish(runId);
   }
-  function drop(job: z.infer<typeof taskSchema>) {
+  function drop(job: (typeof queue)[number]) {
     dropped++;
     const track = tracks.get(job.run.trackRunId);
     if (track) {
@@ -85,10 +76,9 @@ export function createSpeechRuntime(options: {
   function wake() {
     if (closed || failures >= speechLimits.maxFailures) return;
     lastVoiceAt = performance.now();
-    warmRequested = true;
     kick();
   }
-  function enqueue(job: z.infer<typeof taskSchema>) {
+  function enqueue(job: (typeof queue)[number]) {
     if (closed || failures >= speechLimits.maxFailures) {
       drop(job);
       return;
@@ -108,16 +98,14 @@ export function createSpeechRuntime(options: {
     publish(job.run.trackRunId);
   }
   function createTrack(run: z.infer<typeof audioRunSchema>) {
-    const view = speechTrackSchema.parse({
+    const view: z.infer<typeof speechTrackSchema> = {
       status: "listening",
       latest: null,
       validity: "no_data",
       dropped: 0,
-    });
+    };
     let published: typeof view | undefined;
-    let generation: string | undefined,
-      anchor: number | undefined,
-      failed = false;
+    let generation: string | undefined, anchor: number | undefined;
     const utterances = createUtterances({
       speech: wake,
       activity() {
@@ -126,26 +114,22 @@ export function createSpeechRuntime(options: {
       segment(segment) {
         if (generation === undefined || anchor === undefined)
           throw new Error("Speech evidence has no media clock");
-        enqueue(
-          taskSchema.parse({
-            ...segment,
-            samples: segment.samples,
-            id: `${run.trackRunId}:${segment.startSample}:${segment.endSample}`,
-            run,
-            generation,
-            observedStartAt: anchor + segment.startSample / 16,
-            observedEndAt: anchor + segment.speechEndSample / 16,
-            queuedAt: performance.now(),
-          }),
-        );
+        enqueue({
+          ...segment,
+          id: `${run.trackRunId}:${segment.startSample}:${segment.endSample}`,
+          run,
+          generation,
+          observedStartAt: anchor + segment.startSample / 16,
+          observedEndAt: anchor + segment.speechEndSample / 16,
+          queuedAt: performance.now(),
+        });
       },
     });
     return {
-      run,
       view,
       utterances,
       get failed() {
-        return failed;
+        return view.validity === "unavailable";
       },
       publish() {
         if (
@@ -161,8 +145,7 @@ export function createSpeechRuntime(options: {
         options.update(run.trackRunId, published);
       },
       unavailable(reason: string) {
-        if (failed) return;
-        failed = true;
+        if (view.validity === "unavailable") return;
         utterances.reset();
         view.error = reason.slice(0, 4096);
         view.validity = "unavailable";
@@ -183,7 +166,7 @@ export function createSpeechRuntime(options: {
         samples: Float32Array,
         origin: number,
       ) {
-        if (failed) return;
+        if (view.validity === "unavailable") return;
         try {
           anchor ??= origin;
           if (Math.abs(anchor - origin) > 2)
@@ -192,7 +175,7 @@ export function createSpeechRuntime(options: {
           if (
             utterances.speaking &&
             block.probability >= speechLimits.positiveThreshold &&
-            warmRequested
+            lastVoiceAt !== undefined
           )
             lastVoiceAt = performance.now();
         } catch (error) {
@@ -232,7 +215,7 @@ export function createSpeechRuntime(options: {
           ? "sleeping"
           : "recovering";
     if (status === "unavailable") {
-      warmRequested = false;
+      lastVoiceAt = undefined;
       for (const job of queue.splice(0)) drop(job);
     }
     publishAll();
@@ -245,9 +228,10 @@ export function createSpeechRuntime(options: {
     if (
       ![...tracks.values()].some((track) => !track.failed) ||
       (!queue.length &&
-        performance.now() - lastVoiceAt >= options.config.idleUnloadMs)
+        (lastVoiceAt === undefined ||
+          performance.now() - lastVoiceAt >= options.config.idleUnloadMs))
     ) {
-      warmRequested = false;
+      lastVoiceAt = undefined;
       await release();
       status =
         failures >= speechLimits.maxFailures ? "unavailable" : "sleeping";
@@ -255,7 +239,7 @@ export function createSpeechRuntime(options: {
       return;
     }
     if (
-      (!warmRequested && !queue.length) ||
+      (lastVoiceAt === undefined && !queue.length) ||
       failures >= speechLimits.maxFailures ||
       performance.now() < nextLoadAt
     )
@@ -294,14 +278,22 @@ export function createSpeechRuntime(options: {
         status = "ready";
         const track = tracks.get(job.run.trackRunId);
         if (!closed && track && !track.failed) {
-          track.view.latest = speechObservationSchema.parse({
-            ...job,
+          track.view.latest = {
+            id: job.id,
+            run: job.run,
+            generation: job.generation,
+            startSample: job.startSample,
+            endSample: job.endSample,
+            speechEndSample: job.speechEndSample,
+            boundary: job.boundary,
+            observedStartAt: job.observedStartAt,
+            observedEndAt: job.observedEndAt,
             text: result.text,
             completedAt: Date.now(),
             inferenceMs: result.elapsedMs,
             modelSha256: senseVoiceModel.sha256,
             processingVersion: senseVoiceModel.processingVersion,
-          });
+          } satisfies z.infer<typeof speechObservationSchema>;
           track.view.validity =
             Date.now() - job.observedEndAt < speechLimits.resultAgeMs
               ? "valid"
@@ -358,7 +350,7 @@ export function createSpeechRuntime(options: {
     const hasAvailableTracks = [...tracks.values()].some(
       (item) => !item.failed,
     );
-    if (!hasAvailableTracks) warmRequested = false;
+    if (!hasAvailableTracks) lastVoiceAt = undefined;
     if ((inFlight?.run.trackRunId === runId || !hasAvailableTracks) && worker) {
       interrupted = worker;
       worker.interrupt();
@@ -379,13 +371,13 @@ export function createSpeechRuntime(options: {
     media(runId: string, generation: string) {
       tracks.get(runId)?.media(generation);
     },
-    async accept(
+    accept(
       runId: string,
       block: Parameters<ReturnType<typeof createUtterances>["accept"]>[0],
       samples: Float32Array,
       origin: number,
     ) {
-      await tracks.get(runId)?.accept(block, samples, origin);
+      return tracks.get(runId)?.accept(block, samples, origin);
     },
     end,
     unavailable,
@@ -399,7 +391,7 @@ export function createSpeechRuntime(options: {
       kick();
     },
     snapshot() {
-      return speechRuntimeSchema.parse({
+      return {
         status,
         processId: worker?.status.processId,
         processRssBytes: worker?.status.rssBytes ?? null,
@@ -415,7 +407,7 @@ export function createSpeechRuntime(options: {
         queueBytes: queue.reduce((sum, job) => sum + job.samples.byteLength, 0),
         inFlight: inFlight !== undefined,
         error: lastError,
-      });
+      } satisfies z.infer<typeof speechRuntimeSchema>;
     },
     close() {
       closing ??= (async () => {

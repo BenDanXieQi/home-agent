@@ -20,10 +20,10 @@ function fatal(error: unknown) {
   if (failed) return;
   failed = true;
   send({ kind: "fatal", error: String(error).slice(0, 4096) })
-    .finally(() => process.exit(1))
     .catch((cause: unknown) => {
       console.error("Speech fatal publication failed", cause);
-    });
+    })
+    .finally(() => process.exit(1));
 }
 process.on("disconnect", () => {
   process.exit(0);

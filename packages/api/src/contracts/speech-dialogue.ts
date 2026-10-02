@@ -7,41 +7,43 @@ export const speechDialogueLimits = Object.freeze({
   contextSegments: 3,
   lifetimeMs: 45000,
   timeoutMs: 12000,
+  agentTimeoutMs: 11000,
   requestBytes: 98304,
   responseBytes: 24576,
 });
+const assistantNamesSchema = z
+  .array(z.string().trim().min(1).max(32))
+  .min(1)
+  .max(8);
 export const speechDialogueConfigSchema = z.strictObject({
   enabled: z.boolean().default(false),
-  assistantNames: z
-    .array(z.string().trim().min(1).max(32))
-    .min(1)
-    .max(8)
-    .default(["家庭助手"]),
+  assistantNames: assistantNamesSchema.default(["家庭助手"]),
   callsPerMinute: z.int().min(1).max(30).default(6),
 });
-export const speechDecisionSchema = z.object({
-  needsResponse: z.boolean(),
-  isComplete: z.boolean(),
-  category: z.enum(["assistant_request", "conversation", "media", "uncertain"]),
-  requestText: z.string().trim().min(1).max(4096).nullable(),
-  reason: z.string().min(1).max(512),
-});
-export function validSpeechDecision(
-  decision: z.infer<typeof speechDecisionSchema>,
-) {
-  const request =
-    decision.needsResponse &&
-    decision.isComplete &&
-    decision.category === "assistant_request";
-  return (
-    (decision.requestText !== null) === request &&
-    decision.needsResponse === (decision.category === "assistant_request")
+export const speechDecisionSchema = z
+  .object({
+    needsResponse: z.boolean(),
+    isComplete: z.boolean(),
+    category: z.enum([
+      "assistant_request",
+      "conversation",
+      "media",
+      "uncertain",
+    ]),
+    requestText: z.string().trim().min(1).max(4096).nullable(),
+    reason: z.string().min(1).max(512),
+  })
+  .refine(
+    (decision) =>
+      decision.needsResponse === (decision.category === "assistant_request") &&
+      (decision.requestText !== null) ===
+        (decision.needsResponse && decision.isComplete),
+    "Inconsistent speech interpretation",
   );
-}
 export const speechDialogueRequestSchema = z.object({
   id: z.uuid(),
   expiresAt: z.number(),
-  assistantNames: speechDialogueConfigSchema.shape.assistantNames,
+  assistantNames: assistantNamesSchema,
   current: speechObservationSchema,
   preceding: z
     .array(speechObservationSchema)
@@ -52,22 +54,16 @@ export function validSpeechDialogueRequest(
   now: number,
 ) {
   const current = input.current;
-  const coherent = (item: typeof current) =>
-    item.startSample < item.speechEndSample &&
-    item.speechEndSample <= item.endSample &&
-    item.observedStartAt <= item.observedEndAt;
   return (
     input.expiresAt > now &&
     input.expiresAt <=
       current.observedEndAt + speechDialogueLimits.lifetimeMs &&
     current.observedEndAt <= now + 2000 &&
     Boolean(current.text.trim()) &&
-    coherent(current) &&
     new Set([current.id, ...input.preceding.map((item) => item.id)]).size ===
       input.preceding.length + 1 &&
     input.preceding.every(
       (item) =>
-        coherent(item) &&
         item.run.trackRunId === current.run.trackRunId &&
         item.run.scopeEpoch === current.run.scopeEpoch &&
         item.run.deviceId === current.run.deviceId &&
@@ -94,7 +90,6 @@ export const speechInboxEntrySchema = z.object({
     "ignored",
     "incomplete",
     "unavailable",
-    "expired",
   ]),
   decision: speechDecisionSchema.nullable(),
   error: apiErrorSchema.nullable(),

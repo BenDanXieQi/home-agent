@@ -7,12 +7,12 @@ import {
   speechDialogueLimits,
   validSpeechDialogueRequest,
 } from "@home-agent/api/speech-dialogue";
-import type { createSpeechDialogueAgent } from "../graph/speech-dialogue";
-import { createHouseholdReset } from "../household-reset";
+import type { createSpeechDialogueInterpreter } from "../speech-dialogue";
+import type { createHouseholdReset } from "../household-reset";
 
 export function createSpeechDialogueRoutes(
-  agent: ReturnType<typeof createSpeechDialogueAgent>,
-  reset = createHouseholdReset(),
+  interpret: ReturnType<typeof createSpeechDialogueInterpreter>,
+  reset: ReturnType<typeof createHouseholdReset>,
 ) {
   let active = false;
   return new Hono().post(
@@ -23,7 +23,7 @@ export function createSpeechDialogueRoutes(
     }),
     validateJson(speechDialogueRequestSchema),
     async (c) => {
-      if (!agent) throw new AppError("model_not_configured");
+      if (!interpret) throw new AppError("model_not_configured");
       if (active) throw new AppError("thread_busy");
       const input = c.req.valid("json");
       const now = Date.now();
@@ -33,8 +33,8 @@ export function createSpeechDialogueRoutes(
         Math.max(
           1,
           Math.min(
-            speechDialogueLimits.timeoutMs - 1000,
-            input.expiresAt - now,
+            speechDialogueLimits.agentTimeoutMs,
+            Math.floor(input.expiresAt - now),
           ),
         ),
       );
@@ -42,15 +42,14 @@ export function createSpeechDialogueRoutes(
       const leave = reset.enter();
       active = true;
       try {
-        const result = await agent.graph.invoke({ input }, { signal });
+        const result = await interpret(input, signal);
         signal.throwIfAborted();
         if (
-          !result.output ||
-          Buffer.byteLength(JSON.stringify(result.output)) >
-            speechDialogueLimits.responseBytes
+          Buffer.byteLength(JSON.stringify(result)) >
+          speechDialogueLimits.responseBytes
         )
           throw new AppError("agent_execution_failed");
-        return c.json(result.output);
+        return c.json(result);
       } catch (cause) {
         throw new AppError(
           c.req.raw.signal.aborted
