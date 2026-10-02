@@ -8,7 +8,7 @@ import { speechLimits } from "./limits";
 // Existing Silero probabilities are the only model input to this segmenter.
 export function createUtterances(options: {
   speech: () => void;
-  activity: (active: boolean) => void;
+  activity: () => void;
   segment: (segment: {
     startSample: number;
     endSample: number;
@@ -41,30 +41,35 @@ export function createUtterances(options: {
     (speechLimits.frameSamples / speechLimits.sampleRate) * 1000,
   );
   const event: Parameters<FrameProcessor["process"]>[1] = (value) => {
-    if (value.msg === Message.SpeechRealStart) options.speech();
-    if (value.msg === Message.SpeechStart) {
-      segmentLimit =
-        Math.max(
-          resetSample,
-          endSample - speechLimits.frameSamples - preSpeechSamples,
-        ) + speechLimits.maxSegmentSamples;
-      options.activity(true);
+    switch (value.msg) {
+      case Message.SpeechRealStart:
+        options.speech();
+        break;
+      case Message.SpeechStart:
+        segmentLimit =
+          Math.max(
+            resetSample,
+            endSample - speechLimits.frameSamples - preSpeechSamples,
+          ) + speechLimits.maxSegmentSamples;
+        options.activity();
+        break;
+      case Message.SpeechEnd:
+      case Message.VADMisfire:
+        segmentLimit = undefined;
+        resetSample = endSample;
+        if (value.msg === Message.SpeechEnd) {
+          const startSample = endSample - value.audio.length;
+          options.segment({
+            startSample,
+            endSample,
+            speechEndSample: Math.max(startSample + 1, speechEndSample),
+            boundary: forced ? "length_limit" : "pause",
+            samples: value.audio,
+          });
+        }
+        options.activity();
+        break;
     }
-    if (value.msg === Message.SpeechEnd || value.msg === Message.VADMisfire) {
-      segmentLimit = undefined;
-      resetSample = endSample;
-    }
-    if (value.msg === Message.SpeechEnd) {
-      const startSample = endSample - value.audio.length;
-      options.segment({
-        startSample,
-        endSample,
-        speechEndSample: Math.max(startSample + 1, speechEndSample),
-        boundary: forced ? "length_limit" : "pause",
-        samples: value.audio,
-      });
-      options.activity(false);
-    } else if (value.msg === Message.VADMisfire) options.activity(false);
   };
   processor.resume();
   return {

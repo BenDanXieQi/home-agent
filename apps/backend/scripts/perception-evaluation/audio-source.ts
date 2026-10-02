@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { spawn } from "node:child_process";
 import { Readable } from "node:stream";
+import { addAbortListener, once } from "node:events";
 import {
   sourceAccessSchema,
   type PerceptionSources,
@@ -19,9 +20,7 @@ export async function createAudioSource(
     throw new Error(
       "Speech fixture must contain at most 60 seconds of raw 8 kHz A-law",
     );
-  const videoEncoders = new Set<ReturnType<typeof spawn>>();
-  const videoExits = new Set<Promise<void>>();
-  let videoRequests = 0;
+  const videoEncoders = new Map<ReturnType<typeof spawn>, Promise<void>>();
   const encoder = spawn(
     process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
     [
@@ -40,13 +39,9 @@ export async function createAudioSource(
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
   );
-  const encoderExit = new Promise<number | null>((resolve, reject) => {
-    encoder.once("error", reject);
-    encoder.once("close", resolve);
-  });
-  const [encoded, exitCode, diagnostic] = await Promise.all([
+  const [encoded, [exitCode], diagnostic] = await Promise.all([
     new Response(Readable.toWeb(encoder.stdout)).arrayBuffer(),
-    encoderExit,
+    once(encoder, "close"),
     new Response(Readable.toWeb(encoder.stderr)).text(),
   ]);
   if (exitCode !== 0)
@@ -69,7 +64,6 @@ export async function createAudioSource(
     ]),
   );
   const readers = new Set<AbortController>();
-  let requests = 0;
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -82,7 +76,6 @@ export async function createAudioSource(
         selected[sourceIds.findIndex((id) => id === input.sourceId)];
       if (!source) return new Response(null, { status: 404 });
       if (options.video && new URL(request.url).pathname === "/analysis") {
-        videoRequests++;
         const child = spawn(
           process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg",
           [
@@ -113,28 +106,21 @@ export async function createAudioSource(
           ],
           { stdio: ["ignore", "pipe", "pipe"] },
         );
-        videoEncoders.add(child);
-        const exit = new Promise<void>((resolveExit) => {
-          child.once("exit", () => {
-            videoEncoders.delete(child);
-            videoExits.delete(exit);
-            resolveExit();
-          });
-          child.once("error", (error) => {
-            console.error("Video fixture encoder failed", error);
-            videoEncoders.delete(child);
-            videoExits.delete(exit);
-            resolveExit();
-          });
+        const cancellation = addAbortListener(request.signal, () => {
+          child.kill("SIGKILL");
         });
-        videoExits.add(exit);
-        request.signal.addEventListener(
-          "abort",
-          () => {
-            child.kill("SIGKILL");
-          },
-          { once: true },
-        );
+        const exit = once(child, "close")
+          .then(
+            () => {},
+            (error: unknown) => {
+              console.error("Video fixture encoder failed", error);
+            },
+          )
+          .finally(() => {
+            cancellation[Symbol.dispose]();
+            videoEncoders.delete(child);
+          });
+        videoEncoders.set(child, exit);
         child.stderr?.on("data", (data: Buffer) => {
           console.error(data.toString());
         });
@@ -147,19 +133,14 @@ export async function createAudioSource(
           },
         });
       }
-      requests++;
       if (modes.get(source.deviceId) === "missing")
         return Response.json({ code: "audio_track_missing" }, { status: 422 });
       const stopped = new AbortController();
       readers.add(stopped);
       const signal = AbortSignal.any([stopped.signal, request.signal]);
-      signal.addEventListener(
-        "abort",
-        () => {
-          readers.delete(stopped);
-        },
-        { once: true },
-      );
+      addAbortListener(signal, () => {
+        readers.delete(stopped);
+      });
       let samples = 0;
       const started = performance.now();
       const anchor =
@@ -197,7 +178,6 @@ export async function createAudioSource(
         },
         cancel() {
           stopped.abort();
-          readers.delete(stopped);
         },
       });
       return new Response(stream, {
@@ -244,12 +224,6 @@ export async function createAudioSource(
     get activeReaders() {
       return readers.size;
     },
-    get requests() {
-      return requests;
-    },
-    get videoRequests() {
-      return videoRequests;
-    },
     revoke() {
       allowed = false;
       lease.abort();
@@ -262,9 +236,9 @@ export async function createAudioSource(
     async close() {
       lease.abort();
       for (const reader of readers) reader.abort();
-      for (const child of videoEncoders) child.kill("SIGKILL");
+      for (const child of videoEncoders.keys()) child.kill("SIGKILL");
       await server.stop(true);
-      await Promise.all(videoExits);
+      await Promise.all(videoEncoders.values());
     },
   };
 }

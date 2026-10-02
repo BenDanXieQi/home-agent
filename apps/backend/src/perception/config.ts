@@ -12,7 +12,7 @@ export const perceptionConfigSchema = z
     cpuRatio: cpuRatioSchema,
     dialogue: speechDialogueConfigSchema.prefault({}),
     modelMemoryMiB: z.int().min(512).max(131072).default(4096),
-    speech: speechConfigSchema.default({ enabled: false, idleUnloadMs: 60000 }),
+    speech: speechConfigSchema.prefault({}),
     sources: z
       .union([z.literal("household"), z.array(sourceSelectionSchema).max(8)])
       .default([]),

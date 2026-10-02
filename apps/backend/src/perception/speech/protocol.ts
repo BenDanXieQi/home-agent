@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { speechObservationSchema } from "@home-agent/api/contracts";
 import { speechLimits, senseVoiceModel } from "./limits";
 export const speechJobSchema = z.object({
-  id: z.string().min(1).max(128),
+  id: speechObservationSchema.shape.id,
   samples: z
     .instanceof(Float32Array)
     .refine(
@@ -20,8 +21,8 @@ export const speechResponseSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("result"),
     id: speechJobSchema.shape.id,
-    text: z.string().max(4096),
-    elapsedMs: z.number().nonnegative(),
+    text: speechObservationSchema.shape.text,
+    elapsedMs: speechObservationSchema.shape.inferenceMs,
     rssBytes: z.number().positive(),
   }),
   z.object({ kind: z.literal("pulse"), rssBytes: z.number().positive() }),

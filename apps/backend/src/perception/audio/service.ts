@@ -1,4 +1,5 @@
 import type { createSpeechInbox } from "../../conversation/speech-inbox";
+import { isDeepStrictEqual } from "node:util";
 import { speechLimits } from "../speech/limits";
 import { prepareSourceLease } from "../source-lease";
 import type { PerceptionSources } from "../sources";
@@ -17,21 +18,13 @@ export function createAudioService(options: {
     "authorize" | "revoke" | "accept"
   >;
 }) {
-  const tracks = new Map<
-    string,
-    {
-      identity: string;
-      channel: z.infer<typeof sourceSelectionSchema>["channel"];
-      controller: AbortController;
-      view: ReturnType<typeof initialAudioTrack>;
-      pending: Promise<void>;
-      expiresAt: number;
-    }
-  >();
+  const tracks = new Map<string, ReturnType<typeof startTrack>>();
   const cleanup = new Set<Promise<void>>();
   const retryAfter = new Map<string, number>();
   let process: ReturnType<typeof createAudioProcess> | undefined;
-  let speechConfiguration: string | undefined;
+  let speechConfiguration:
+    | z.infer<typeof perceptionConfigSchema>["speech"]
+    | undefined;
   let stopped = false,
     started = false,
     failures = 0;
@@ -50,6 +43,31 @@ export function createAudioService(options: {
       options.changed();
     }, 100);
   }
+  function trackCleanup(operation: Promise<unknown>) {
+    const task = operation
+      .then(
+        () => {},
+        (cause: unknown) => {
+          error = String(cause).slice(0, 4096);
+        },
+      )
+      .finally(() => {
+        cleanup.delete(task);
+        notify();
+      });
+    cleanup.add(task);
+  }
+  function currentTrack(run: ReturnType<typeof initialAudioTrack>["run"]) {
+    const entry = tracks.get(run.deviceId);
+    if (
+      entry &&
+      entry.view.run.trackRunId === run.trackRunId &&
+      entry.view.run.scopeEpoch === run.scopeEpoch &&
+      !entry.controller.signal.aborted
+    )
+      return entry;
+    return undefined;
+  }
   function retire(key: string) {
     const entry = tracks.get(key);
     if (!entry) return;
@@ -57,24 +75,8 @@ export function createAudioService(options: {
     options.speechInbox?.revoke(entry.view.run.trackRunId);
     entry.controller.abort();
     const owned = process;
-    const task = entry.pending
-      .then(async () => {
-        await owned?.stop(entry.view.run.trackRunId);
-      })
-      .catch((cause) => {
-        error = String(cause).slice(0, 4096);
-        notify();
-      });
-    cleanup.add(task);
-    task.then(
-      () => {
-        cleanup.delete(task);
-        notify();
-      },
-      (cause: unknown) => {
-        error = String(cause).slice(0, 4096);
-        notify();
-      },
+    trackCleanup(
+      entry.pending.then(() => owned?.stop(entry.view.run.trackRunId)),
     );
   }
   function reconcile(
@@ -82,8 +84,7 @@ export function createAudioService(options: {
     selected: z.infer<typeof sourceSelectionSchema>[],
   ) {
     if (stopped || !started) return;
-    const requestedSpeech = JSON.stringify(config.speech);
-    if (process && speechConfiguration !== requestedSpeech)
+    if (process && !isDeepStrictEqual(speechConfiguration, config.speech))
       restartRequested = true;
     if (selected.length > 8) {
       for (const key of tracks.keys()) retire(key);
@@ -102,7 +103,11 @@ export function createAudioService(options: {
       if (!grouped.has(key)) retryAfter.delete(key);
     for (const [key, entry] of tracks) {
       const group = grouped.get(key);
-      const source = group?.find(
+      if (!group) {
+        retire(key);
+        continue;
+      }
+      const source = group.find(
         (candidate) => candidate.channel === entry.channel,
       );
       if (
@@ -112,7 +117,7 @@ export function createAudioService(options: {
         retire(key);
         continue;
       }
-      entry.view.channels = group!.map((candidate) => candidate.channel);
+      entry.view.channels = group.map((candidate) => candidate.channel);
       if (
         entry.view.validity === "valid" &&
         performance.now() >= entry.expiresAt
@@ -135,28 +140,19 @@ export function createAudioService(options: {
       for (const key of tracks.keys()) retire(key);
       const owned = process;
       if (!cleanup.size && performance.now() >= nextCleanupAt) {
-        const task = owned
-          .close()
-          .then(() => {
-            if (process === owned) process = undefined;
-            restartRequested = false;
-            nextCleanupAt = 0;
-          })
-          .catch((cause) => {
-            nextCleanupAt = performance.now() + 5000;
-            status = "unavailable";
-            error = String(cause).slice(0, 4096);
-          });
-        cleanup.add(task);
-        task.then(
-          () => {
-            cleanup.delete(task);
-            notify();
-          },
-          (cause: unknown) => {
-            error = String(cause).slice(0, 4096);
-            notify();
-          },
+        trackCleanup(
+          owned
+            .close()
+            .then(() => {
+              if (process === owned) process = undefined;
+              restartRequested = false;
+              nextCleanupAt = 0;
+            })
+            .catch((cause) => {
+              nextCleanupAt = performance.now() + 5000;
+              status = "unavailable";
+              throw cause;
+            }),
         );
       }
       return;
@@ -166,27 +162,15 @@ export function createAudioService(options: {
     if (!process) {
       status = "starting";
       try {
-        speechConfiguration = requestedSpeech;
+        speechConfiguration = { ...config.speech };
         process = createAudioProcess({
           speech(observation) {
-            const entry = tracks.get(observation.run.deviceId);
-            if (
-              !entry ||
-              entry.view.run.trackRunId !== observation.run.trackRunId ||
-              entry.view.run.scopeEpoch !== observation.run.scopeEpoch ||
-              entry.controller.signal.aborted
-            )
-              return false;
+            if (!currentTrack(observation.run)) return false;
             return options.speechInbox?.accept(observation) ?? false;
           },
           track(view) {
-            const entry = tracks.get(view.run.deviceId);
-            if (
-              !entry ||
-              entry.view.run.trackRunId !== view.run.trackRunId ||
-              entry.view.run.scopeEpoch !== view.run.scopeEpoch
-            )
-              return;
+            const entry = currentTrack(view.run);
+            if (!entry) return;
             if (view.sequence < entry.view.sequence) return;
             entry.view = { ...view, channels: entry.view.channels };
             const age =
@@ -218,15 +202,11 @@ export function createAudioService(options: {
                 error: reason,
                 energy: [],
                 vad: [],
-                ...(entry.view.speech
-                  ? {
-                      speech: {
-                        ...entry.view.speech,
-                        status: "unavailable",
-                        validity: "unavailable",
-                      },
-                    }
-                  : {}),
+                speech: entry.view.speech && {
+                  ...entry.view.speech,
+                  status: "unavailable",
+                  validity: "unavailable",
+                },
               };
             }
             notify();
@@ -250,68 +230,80 @@ export function createAudioService(options: {
         performance.now() < (retryAfter.get(deviceId) ?? 0)
       )
         continue;
-      const source = group.find((candidate) =>
-        options.sources.eligibility(candidate),
-      );
-      if (!source) continue;
-      const access = options.sources.eligibility(source)!;
-      const run = {
-        deviceId,
-        scopeEpoch: access.scopeEpoch,
-        trackRunId: crypto.randomUUID(),
-      };
-      const entry = {
-        identity: access.identity,
-        channel: source.channel,
-        controller: new AbortController(),
-        view: initialAudioTrack({
-          run,
-          channels: group.map((candidate) => candidate.channel),
-        }),
-        pending: Promise.resolve(),
-        expiresAt: 0,
-      };
-      tracks.set(deviceId, entry);
-      options.speechInbox?.authorize(run);
-      const owned = process;
-      entry.pending = (async () => {
-        try {
-          const mediaAccess = await prepareSourceLease(
-            options.sources,
-            source,
-            entry.controller.signal,
-            () => {
-              if (tracks.get(deviceId) === entry) retire(deviceId);
-            },
-          );
-          if (tracks.get(deviceId) !== entry || entry.controller.signal.aborted)
-            return;
-          await owned.start(
-            {
-              run,
-              channels: entry.view.channels,
-              config,
-              access: mediaAccess,
-              executable: options.executable,
-            },
-            entry.controller.signal,
-          );
-        } catch (cause) {
-          if (tracks.get(deviceId) !== entry || entry.controller.signal.aborted)
-            return;
-          entry.view = {
-            ...entry.view,
-            status: "failed",
-            validity: "unavailable",
-            vadStatus: "unavailable",
-            error: String(cause).slice(0, 4096),
-          };
-          retryAfter.set(deviceId, performance.now() + 5000);
-          notify();
+      for (const source of group) {
+        const access = options.sources.eligibility(source);
+        if (access) {
+          startTrack(source, group, access, config, process);
+          break;
         }
-      })();
+      }
     }
   }
+  function startTrack(
+    source: z.infer<typeof sourceSelectionSchema>,
+    group: z.infer<typeof sourceSelectionSchema>[],
+    access: NonNullable<ReturnType<typeof options.sources.eligibility>>,
+    config: z.infer<typeof perceptionConfigSchema>,
+    owned: ReturnType<typeof createAudioProcess>,
+  ) {
+    const deviceId = source.deviceId;
+    const run = {
+      deviceId,
+      scopeEpoch: access.scopeEpoch,
+      trackRunId: crypto.randomUUID(),
+    };
+    const entry = {
+      identity: access.identity,
+      channel: source.channel,
+      controller: new AbortController(),
+      view: initialAudioTrack({
+        run,
+        channels: group.map((candidate) => candidate.channel),
+      }),
+      pending: Promise.resolve(),
+      expiresAt: 0,
+    };
+    tracks.set(deviceId, entry);
+    options.speechInbox?.authorize(run);
+    entry.pending = (async () => {
+      try {
+        const mediaAccess = await prepareSourceLease(
+          options.sources,
+          source,
+          entry.controller.signal,
+          () => {
+            if (tracks.get(deviceId) === entry) retire(deviceId);
+          },
+        );
+        if (tracks.get(deviceId) !== entry || entry.controller.signal.aborted)
+          return;
+        await owned.start(
+          {
+            run,
+            channels: entry.view.channels,
+            config,
+            access: mediaAccess,
+            executable: options.executable,
+          },
+          entry.controller.signal,
+        );
+      } catch (cause) {
+        if (tracks.get(deviceId) !== entry || entry.controller.signal.aborted)
+          return;
+        entry.view = {
+          ...entry.view,
+          status: "failed",
+          validity: "unavailable",
+          vadStatus: "unavailable",
+          error: String(cause).slice(0, 4096),
+        };
+        retryAfter.set(deviceId, performance.now() + 5000);
+        notify();
+      }
+    })();
+    return entry;
+  }
+
   return {
     start() {
       started = true;
@@ -334,54 +326,45 @@ export function createAudioService(options: {
       retryAfter.clear();
     },
     snapshot() {
+      const state = process?.status;
+      const speech = state?.speech;
       const inactiveSpeech =
-        status === "closed"
-          ? "closed"
-          : process?.status.error
-            ? "unavailable"
-            : null;
+        status === "closed" ? "closed" : state?.error ? "unavailable" : null;
       return {
         status,
         error,
-        processId: process?.status.processId,
-        model: process?.status.model ?? null,
-        speech: process?.status.speech
-          ? {
-              ...process.status.speech,
-              ...(inactiveSpeech
-                ? {
-                    status: inactiveSpeech,
-                    processId: undefined,
-                    processRssBytes: null,
-                    queueDepth: 0,
-                    queueBytes: 0,
-                    inFlight: false,
-                    error: process.status.error,
-                  }
-                : {}),
-            }
-          : undefined,
-        tracks: [...tracks.values()].map((entry) => ({
-          ...entry.view,
-          ...(entry.view.speech
+        processId: state?.processId,
+        model: state?.model ?? null,
+        speech: speech && {
+          ...speech,
+          ...(inactiveSpeech
             ? {
-                speech: {
-                  ...entry.view.speech,
-                  validity:
-                    entry.view.speech.validity === "valid" &&
-                    entry.view.speech.latest &&
-                    Date.now() - entry.view.speech.latest.observedEndAt >=
-                      speechLimits.resultAgeMs
-                      ? ("expired" as const)
-                      : entry.view.speech.validity,
-                },
+                status: inactiveSpeech,
+                processId: undefined,
+                processRssBytes: null,
+                queueDepth: 0,
+                queueBytes: 0,
+                inFlight: false,
+                error: state.error,
               }
             : {}),
+        },
+        tracks: [...tracks.values()].map(({ view, expiresAt }) => ({
+          ...view,
+          speech: view.speech && {
+            ...view.speech,
+            validity:
+              view.speech.validity === "valid" &&
+              view.speech.latest &&
+              Date.now() - view.speech.latest.observedEndAt >=
+                speechLimits.resultAgeMs
+                ? ("expired" as const)
+                : view.speech.validity,
+          },
           validity:
-            entry.view.validity === "valid" &&
-            performance.now() >= entry.expiresAt
+            view.validity === "valid" && performance.now() >= expiresAt
               ? ("expired" as const)
-              : entry.view.validity,
+              : view.validity,
         })),
       };
     },

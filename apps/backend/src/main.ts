@@ -33,6 +33,9 @@ try {
   );
 }
 
+const readAgentUrl = async () =>
+  (await connectionStore.read()).services.agent.url;
+
 const database = environment.DATABASE_URL
   ? createDatabase(environment.DATABASE_URL)
   : undefined;
@@ -47,9 +50,7 @@ const credentialStore = database
 const mijiaService = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
-  resetHomeData: createAgentHouseholdReset(
-    async () => (await connectionStore.read()).services.agent.url,
-  ),
+  resetHomeData: createAgentHouseholdReset(readAgentUrl),
   homeSelectionStore: database
     ? createHomeSelectionStore(database.db)
     : undefined,
@@ -83,9 +84,7 @@ mijiaService.initialize().catch(() => {
 });
 const speechInbox = createSpeechInbox({
   instanceId: crypto.randomUUID(),
-  analyze: createSpeechDialogueClient(
-    async () => (await connectionStore.read()).services.agent.url,
-  ),
+  analyze: createSpeechDialogueClient(readAgentUrl),
 });
 const perception = createPerceptionService({
   speechInbox,
@@ -106,9 +105,7 @@ const { createRoomAnalysisClient } =
   await import("./room-analysis/agent-client");
 const roomAnalysis = new RoomAnalysisService(
   household,
-  createRoomAnalysisClient(
-    async () => (await connectionStore.read()).services.agent.url,
-  ),
+  createRoomAnalysisClient(readAgentUrl),
 );
 const app = createApp({
   speechInbox,
@@ -125,7 +122,7 @@ const app = createApp({
   deviceLogs,
   roomAnalysis,
   shutdownSignal: shutdown.signal,
-  readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
+  readAgentUrl,
 });
 const server = Bun.serve({
   hostname: environment.BACKEND_HOST,

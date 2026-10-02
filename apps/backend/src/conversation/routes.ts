@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
-import { createPerceptionStream } from "../perception/stream";
+import { createSnapshotStream } from "../http/snapshot-stream";
 import type { createSpeechInbox } from "./speech-inbox";
 
 export function createSpeechRoutes(
@@ -10,13 +10,9 @@ export function createSpeechRoutes(
 ) {
   return new Hono()
     .use(requireLocalAccess([port, 5173], { webEntry: true }))
-    .use(async (c, next) => {
-      c.header("Cache-Control", "no-store");
-      await next();
-    })
     .get("/", (c) => c.json(inbox.snapshot()))
     .get(
       "/stream",
-      createPerceptionStream(inbox, () => inbox.snapshot(), shutdown),
+      createSnapshotStream(inbox, () => inbox.snapshot(), shutdown),
     );
 }

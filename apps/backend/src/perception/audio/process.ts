@@ -44,7 +44,7 @@ export function createAudioProcess(options: {
     inferenceSince: number | null = null;
   let diagnostic = "";
   const exited = Promise.withResolvers<void>();
-  const initialized = Promise.withResolvers<void>();
+  const initialized = Promise.withResolvers<Error | undefined>();
   const waiting = new Map<
     string,
     ReturnType<typeof Promise.withResolvers<void>>
@@ -73,7 +73,7 @@ export function createAudioProcess(options: {
     error = String(cause).slice(0, 4096);
     ready = false;
     clearInterval(watchdogTimer);
-    initialized.reject(new Error(error));
+    initialized.resolve(new Error(error));
     for (const pending of waiting.values()) pending.reject(new Error(error));
     waiting.clear();
     const cleanupError = kill();
@@ -107,7 +107,7 @@ export function createAudioProcess(options: {
       ready = true;
       model = response.model;
       lastPulse = performance.now();
-      initialized.resolve();
+      initialized.resolve(undefined);
     } else if (response.kind === "pulse") {
       lastPulse = performance.now();
       inferenceSince = response.inferenceSince;
@@ -149,17 +149,17 @@ export function createAudioProcess(options: {
     )
       fail("Audio native processing deadline exceeded");
   }, 100);
-  // The service owns startup failure and recovery; suppress no errors in its callback.
-  initialized.promise.catch((cause) => {
-    if (!error && !stopped && !closingRequested) fail(cause);
-  });
   return {
     get status() {
       return { ready, error, model, processId: child.pid, speech };
     },
     async start(input: z.infer<typeof audioStartSchema>, signal: AbortSignal) {
       if (closingRequested) throw new Error("Audio closing");
-      await pTimeout(initialized.promise, { milliseconds: 30000, signal });
+      const failure = await pTimeout(initialized.promise, {
+        milliseconds: 30000,
+        signal,
+      });
+      if (failure) throw failure;
       signal.throwIfAborted();
       send({ kind: "start", input });
     },
@@ -169,9 +169,10 @@ export function createAudioProcess(options: {
     async stop(trackRunId: string) {
       if (error || stopped || closingRequested) return;
       const pending = Promise.withResolvers<void>();
-      waiting.set(trackRunId, pending);
-      send({ kind: "stop", trackRunId });
       try {
+        send({ kind: "stop", trackRunId });
+        if (error) throw new Error(error);
+        waiting.set(trackRunId, pending);
         await pTimeout(pending.promise, {
           milliseconds: 5000,
           message: "Audio track cleanup timed out",
@@ -187,7 +188,7 @@ export function createAudioProcess(options: {
       closingRequested = true;
       closing ??= (async () => {
         clearInterval(watchdogTimer);
-        initialized.reject(new Error("Audio closed"));
+        initialized.resolve(new Error("Audio closed"));
         if (!error && child.connected && ready) {
           try {
             send({ kind: "close" });

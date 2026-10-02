@@ -117,6 +117,10 @@ export async function createDetectionPool(
   let activeRgbBytes = 0;
   let activeImageRequests = 0;
   let activeControls = 0;
+  function recordHealthy(now = performance.now()) {
+    healthySince ??= now;
+    if (now - healthySince >= options.recoveryResetMs) consecutiveRestarts = 0;
+  }
 
   async function retire(
     generation: ReturnType<typeof createDetectionProcess>,
@@ -129,11 +133,7 @@ export async function createDetectionPool(
     const generation = createDetectionProcess(options.taskTimeoutMs);
     generation.events.on("video", (event: z.infer<typeof videoEventSchema>) => {
       if (current === generation && status === "ready") {
-        if (event.event === "settled") {
-          healthySince ??= performance.now();
-          if (performance.now() - healthySince >= options.recoveryResetMs)
-            consecutiveRestarts = 0;
-        }
+        if (event.event === "settled") recordHealthy();
         for (const listener of videoListeners) listener(event);
       }
     });
@@ -301,9 +301,7 @@ export async function createDetectionPool(
             "unavailable",
             "Result belongs to a retired process",
           );
-        healthySince ??= acceptedAt;
-        if (acceptedAt - healthySince >= options.recoveryResetMs)
-          consecutiveRestarts = 0;
+        recordHealthy(acceptedAt);
         const totalMs = acceptedAt - submitted;
         const processingMs =
           result.timing.readMs +

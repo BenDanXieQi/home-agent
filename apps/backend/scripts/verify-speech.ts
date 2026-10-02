@@ -5,12 +5,12 @@ import { readFile, writeFile, appendFile, mkdir } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import {
-  speechObservationSchema,
-  perceptionSnapshotSchema,
-} from "@home-agent/api/contracts";
+import { Hono } from "hono";
+import { speechInboxSchema } from "@home-agent/api/speech-dialogue";
+import { perceptionSnapshotSchema } from "@home-agent/api/contracts";
+import { speechLimits } from "../src/perception/speech/limits";
 import { createAudioSource } from "./perception-evaluation/audio-source";
-import { audioResources } from "./perception-evaluation/audio-resources";
+import { createAudioResourceSampler } from "./perception-evaluation/audio-resources";
 import { createAudioService } from "../src/perception/audio/service";
 import { createPerceptionService } from "../src/perception/service";
 import { createPerceptionRoutes } from "../src/perception/routes";
@@ -80,116 +80,175 @@ process.once("SIGTERM", () => {
   stopping.abort();
 });
 const errors: string[] = [];
-const records: z.infer<typeof speechObservationSchema>[] = [];
-const seen = new Set<string>();
-const resources: (Awaited<ReturnType<typeof audioResources>> & {
+const resourceSampler = createAudioResourceSampler();
+const sampleResources = resourceSampler.sample;
+const resources: (Awaited<ReturnType<typeof sampleResources>> & {
   elapsed: number;
 })[] = [];
-const observedProcesses = new Map<
-  number,
-  Awaited<ReturnType<typeof audioResources>>["members"][number]
->();
-async function sampleResources() {
-  const snapshot = await audioResources(observedProcesses);
-  for (const member of snapshot.members) observedProcesses.set(member.pid, member);
-  return snapshot;
-}
-const actions: { kind: string; elapsed: number; detail?: unknown }[] = [];
+const deliveries: {
+  observation: Parameters<typeof speechInbox.accept>[0];
+  accepted: boolean;
+  expectedRejection: boolean;
+}[] = [];
+const actions = new Map<string, { elapsed: number; detail?: unknown }>();
 let videoFrames = 0,
-  httpSnapshots = 0;
+  httpSnapshots = 0,
+  speechHttpSnapshots = 0;
 let topology = false,
-  unloaded = false,
   wokeAgain = false,
   cancelledScope = false,
   recoveredModel = false;
-let stalled = false,
-  restored = false,
-  revoked = false,
-  granted = false,
-  frozen = false,
-  quiet = false,
-  resumed = false;
-let revokedAt = 0,
-  sleepingLoads = 0,
+let sleepingLoads = 0,
   frozenFailures = 0;
 let frozenCheckpoint: ReturnType<typeof speechCheckpoint> | undefined;
 let resumedCheckpoint: ReturnType<typeof speechCheckpoint> | undefined;
 let firstRunId: string | undefined,
   newRunAfterStall = false;
-let quietAudioId: number | undefined,
-  captureContinuous = false;
-const quietRuns = new Map<string, { runId: string; samples: number }>();
-let revokedScope: string | undefined;
+let quietCheckpoint: ReturnType<typeof speechCheckpoint> | undefined;
+let captureContinuous = false;
+let revocationHandoff:
+  | {
+      scopeEpoch: string;
+      runIds: string[];
+      startedAt: number;
+      endedAt?: number;
+      rejectedBefore: number;
+      rejectedAfter?: number;
+    }
+  | undefined;
 let lastHandoff: ReturnType<typeof speechInbox.snapshot> | undefined;
 let lastSnapshot:
   | ReturnType<ReturnType<typeof createAudioService>["snapshot"]>
   | undefined;
 const configPath = output + ".config.json";
-let cleanup: Awaited<ReturnType<typeof audioResources>> | undefined;
+let cleanup: Awaited<ReturnType<typeof sampleResources>> | undefined;
 let started = 0;
+let journalIndex = 0;
+const observedInbox = {
+  ...speechInbox,
+  accept(observation: Parameters<typeof speechInbox.accept>[0]) {
+    const accepted = speechInbox.accept(observation);
+    const expectedRejection =
+      !accepted &&
+      input.lifecycle &&
+      ((revocationHandoff?.scopeEpoch === observation.run.scopeEpoch &&
+        revocationHandoff.runIds.includes(observation.run.trackRunId)) ||
+        (actions.has("stall") && observation.run.trackRunId === firstRunId));
+    deliveries.push({ observation, accepted, expectedRejection });
+    if (
+      accepted &&
+      observation.run.scopeEpoch === revocationHandoff?.scopeEpoch
+    )
+      errors.push("A revoked scope delivered a new transcription");
+    return accepted;
+  },
+};
+async function flushJournal() {
+  while (journalIndex < deliveries.length) {
+    await appendFile(
+      journal,
+      JSON.stringify({ result: deliveries[journalIndex]!.observation }) + "\n",
+    );
+    journalIndex++;
+  }
+}
 function speechCheckpoint(
   view: ReturnType<ReturnType<typeof createAudioService>["snapshot"]>,
 ) {
   return {
     at: Date.now(),
-    completed: view.speech?.completed ?? 0,
-    samples: new Map(
-      view.tracks.map((track) => [track.run.trackRunId, track.samples]),
-    ),
+    deliveryCount: deliveries.length,
+    processId: view.processId,
+    runs: view.tracks.map(({ run, samples }) => ({
+      deviceId: run.deviceId,
+      runId: run.trackRunId,
+      samples,
+    })),
   };
 }
 function hasNewSpeech(
   view: ReturnType<ReturnType<typeof createAudioService>["snapshot"]>,
   checkpoint: ReturnType<typeof speechCheckpoint>,
 ) {
-  return (
-    view.speech !== undefined &&
-    view.speech.completed > checkpoint.completed &&
-    view.tracks.some((track) => {
-      const before = checkpoint.samples.get(track.run.trackRunId);
-      const result = track.speech?.latest;
-      return (
-        before !== undefined &&
-        result !== undefined &&
-        result !== null &&
-        track.speech?.validity === "valid" &&
-        result.completedAt >= checkpoint.at &&
-        result.speechEndSample > before
-      );
-    })
-  );
+  return deliveries.some(({ observation, accepted }, index) => {
+    const before = checkpoint.runs.find(
+      (run) => run.runId === observation.run.trackRunId,
+    );
+    return (
+      index >= checkpoint.deliveryCount &&
+      accepted &&
+      before !== undefined &&
+      observation.completedAt >= checkpoint.at &&
+      observation.speechEndSample > before.samples &&
+      Date.now() - observation.observedEndAt < speechLimits.resultAgeMs &&
+      view.tracks.some(
+        (track) =>
+          track.run.trackRunId === observation.run.trackRunId &&
+          track.speech?.validity === "valid",
+      )
+    );
+  });
 }
 async function createService() {
-  if (input.video) {
-    await writeFile(configPath, JSON.stringify(config));
-    const service = createPerceptionService({
-      speechInbox,
-      configPath,
-      executable: "ffmpeg",
-      sources: source.sources,
-    });
-    const server = Bun.serve({
+  const options = {
+    speechInbox: observedInbox,
+    sources: source.sources,
+    executable: "ffmpeg",
+  };
+  const capture = input.video
+    ? createPerceptionService({ ...options, configPath })
+    : createAudioService({ ...options, changed() {} });
+  let reconcileTimer: ReturnType<typeof setInterval> | undefined;
+  let server: ReturnType<typeof Bun.serve> | undefined;
+  async function close() {
+    clearInterval(reconcileTimer);
+    try {
+      await capture.close();
+    } finally {
+      await server?.stop(true);
+    }
+  }
+  try {
+    if ("reconcile" in capture) {
+      capture.start();
+      const reconcile = () => capture.reconcile(config, selected);
+      reconcileTimer = setInterval(reconcile, 50);
+      reconcile();
+    } else {
+      await writeFile(configPath, JSON.stringify(config));
+      await capture.start();
+    }
+    const app = new Hono();
+    const endpoint = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: () => new Response(null, { status: 503 }),
+      fetch: app.fetch,
     });
-    if (!server.port) throw new Error("Unable to bind verification endpoint");
-    const app = createPerceptionRoutes(
-      service,
-      server.port,
-      stopping.signal,
-      30000,
-    );
+    server = endpoint;
+    const port = endpoint.port;
+    if (!port) throw new Error("Unable to bind verification endpoint");
     app.route(
       "/speech",
-      createSpeechRoutes(speechInbox, server.port, stopping.signal),
+      createSpeechRoutes(speechInbox, port, stopping.signal),
     );
-    server.reload({ fetch: app.fetch });
-    await service.start();
+    if (!("reconcile" in capture))
+      app.route(
+        "/",
+        createPerceptionRoutes(capture, port, stopping.signal, 30000),
+      );
     return {
-      audio: () => service.snapshot().audio,
+      audio: () =>
+        "reconcile" in capture ? capture.snapshot() : capture.snapshot().audio,
       async sampleHttp() {
-        const response = await fetch(server.url, {
+        const speechResponse = await fetch(new URL("speech", endpoint.url), {
+          signal: AbortSignal.timeout(2000),
+        });
+        if (!speechResponse.ok)
+          throw new Error(`Speech HTTP ${speechResponse.status}`);
+        speechInboxSchema.parse(await speechResponse.json());
+        speechHttpSnapshots++;
+        if (!input.video) return;
+        const response = await fetch(endpoint.url, {
           signal: AbortSignal.timeout(2000),
         });
         if (!response.ok) throw new Error(`Perception HTTP ${response.status}`);
@@ -200,32 +259,20 @@ async function createService() {
           0,
         );
       },
-      async close() {
-        await service.close();
-        await server.stop(true);
-      },
+      close,
     };
+  } catch (error) {
+    try {
+      await close();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Verification startup failed",
+        { cause: cleanupError },
+      );
+    }
+    throw error;
   }
-  const service = createAudioService({
-    speechInbox,
-    sources: source.sources,
-    executable: "ffmpeg",
-    changed() {},
-  });
-  service.start();
-  const reconcile = () => {
-    service.reconcile(config, selected);
-  };
-  const timer = setInterval(reconcile, 50);
-  reconcile();
-  return {
-    audio: () => service.snapshot(),
-    sampleHttp: () => Promise.resolve(),
-    async close() {
-      clearInterval(timer);
-      await service.close();
-    },
-  };
 }
 let service: Awaited<ReturnType<typeof createService>> | undefined;
 try {
@@ -244,53 +291,67 @@ try {
     );
     firstRunId ??= first?.run.trackRunId;
     if (
-      restored &&
+      actions.has("restore") &&
       first &&
       first.run.trackRunId !== firstRunId &&
       first.samples > 8000
     )
       newRunAfterStall = true;
-    for (const track of view.tracks) {
-      const result = track.speech?.latest;
-      if (result && !seen.has(result.id)) {
-        if (result.run.scopeEpoch === revokedScope)
-          errors.push("A revoked scope published a new transcription");
-        seen.add(result.id);
-        records.push(result);
-        await appendFile(journal, JSON.stringify({ result }) + "\n");
-      }
-    }
+    await flushJournal();
     if (input.lifecycle) {
-      if (elapsed >= 12 && !stalled) {
-        stalled = true;
+      if (elapsed >= 12 && !actions.has("stall")) {
         source.modes.set(source.selected[0]!.deviceId, "stalled");
-        actions.push({ kind: "stall", elapsed });
+        actions.set("stall", { elapsed });
       }
-      if (elapsed >= 17 && !restored) {
-        restored = true;
+      if (elapsed >= 17 && !actions.has("restore")) {
         source.modes.set(source.selected[0]!.deviceId, "speech");
-        actions.push({ kind: "restore", elapsed });
+        actions.set("restore", { elapsed });
       }
       if (
         elapsed >= 30 &&
-        !revoked &&
+        !actions.has("revoke") &&
+        first &&
+        speechInbox
+          .snapshot()
+          .entries.some(
+            (entry) =>
+              entry.observation.run.scopeEpoch === first.run.scopeEpoch,
+          ) &&
         view.tracks.some((track) => track.speech?.status === "recognizing")
       ) {
-        revoked = true;
-        revokedAt = elapsed;
-        revokedScope = first?.run.scopeEpoch;
+        const before = speechInbox.snapshot();
+        revocationHandoff = {
+          scopeEpoch: first.run.scopeEpoch,
+          runIds: view.tracks.map((track) => track.run.trackRunId),
+          startedAt: elapsed,
+          rejectedBefore: view.speech?.handoffRejected ?? 0,
+        };
         source.revoke();
-        cancelledScope = service.audio().tracks.length === 0;
-        actions.push({ kind: "revoke", elapsed, detail: view.speech });
+        const after = speechInbox.snapshot();
+        cancelledScope =
+          service.audio().tracks.length === 0 &&
+          after.entries.every(
+            (entry) =>
+              entry.observation.run.scopeEpoch !== first.run.scopeEpoch,
+          );
+        actions.set("revoke", {
+          elapsed,
+          detail: { speech: view.speech, before, after },
+        });
       }
-      if (revoked && elapsed - revokedAt >= 5 && !granted) {
-        granted = true;
+      if (
+        revocationHandoff &&
+        elapsed - revocationHandoff.startedAt >= 5 &&
+        !actions.has("grant")
+      ) {
+        revocationHandoff.endedAt = elapsed;
+        revocationHandoff.rejectedAfter = view.speech?.handoffRejected ?? 0;
         source.grant();
-        actions.push({ kind: "grant", elapsed });
+        actions.set("grant", { elapsed });
       }
       if (
         elapsed >= 50 &&
-        !frozen &&
+        !actions.has("freeze_asr") &&
         view.speech?.processId &&
         view.tracks.some((track) => track.speech?.status === "recognizing")
       ) {
@@ -303,11 +364,10 @@ try {
           child.parent === view.processId &&
           child.group === view.processId
         ) {
-          frozen = true;
           frozenFailures = view.speech.failures;
           frozenCheckpoint = speechCheckpoint(service.audio());
           process.kill(child.pid, "SIGSTOP");
-          actions.push({ kind: "freeze_asr", elapsed, detail: child });
+          actions.set("freeze_asr", { elapsed, detail: child });
         }
       }
       if (
@@ -317,35 +377,27 @@ try {
         hasNewSpeech(view, frozenCheckpoint)
       )
         recoveredModel = true;
-      if (elapsed >= 72 && !quiet) {
-        quiet = true;
-        quietAudioId = view.processId;
-        for (const track of view.tracks)
-          quietRuns.set(track.run.deviceId, {
-            runId: track.run.trackRunId,
-            samples: track.samples,
-          });
+      if (elapsed >= 72 && !actions.has("quiet")) {
+        quietCheckpoint = speechCheckpoint(view);
         for (const device of source.selected)
           source.modes.set(device.deviceId, "quiet");
-        actions.push({ kind: "quiet", elapsed });
+        actions.set("quiet", { elapsed });
       }
       if (
-        quiet &&
-        !resumed &&
+        actions.has("quiet") &&
+        !actions.has("resume_speech") &&
         view.speech?.status === "sleeping" &&
         view.speech.processId === undefined
       ) {
-        if (!unloaded)
-          actions.push({ kind: "unloaded", elapsed, detail: view.speech });
-        unloaded = true;
+        if (!actions.has("unloaded"))
+          actions.set("unloaded", { elapsed, detail: view.speech });
         sleepingLoads = view.speech.loads;
       }
-      if (elapsed >= 87 && !resumed) {
-        resumed = true;
+      if (elapsed >= 87 && !actions.has("resume_speech")) {
         resumedCheckpoint = speechCheckpoint(view);
         for (const device of source.selected)
           source.modes.set(device.deviceId, "speech");
-        actions.push({ kind: "resume_speech", elapsed });
+        actions.set("resume_speech", { elapsed });
       }
       if (
         resumedCheckpoint &&
@@ -354,11 +406,15 @@ try {
         hasNewSpeech(view, resumedCheckpoint)
       ) {
         wokeAgain = true;
+        const quiet = quietCheckpoint;
         captureContinuous =
-          view.processId === quietAudioId &&
+          quiet !== undefined &&
+          view.processId === quiet.processId &&
           view.tracks.length === input.sources &&
           view.tracks.every((track) => {
-            const before = quietRuns.get(track.run.deviceId);
+            const before = quiet.runs.find(
+              (run) => run.deviceId === track.run.deviceId,
+            );
             return (
               before &&
               before.runId === track.run.trackRunId &&
@@ -397,7 +453,7 @@ try {
             status: track.status,
             speech: track.speech?.status,
           })),
-          results: records.length,
+          deliveries: deliveries.length,
           rssMiB: resource.rssMiB,
           videoFrames,
         }),
@@ -408,6 +464,7 @@ try {
   }
   lastSnapshot = service.audio();
   lastHandoff = speechInbox.snapshot();
+  await flushJournal();
 } catch (error) {
   errors.push(String(error));
 } finally {
@@ -417,32 +474,58 @@ try {
   } catch (error) {
     errors.push(String(error));
   }
-  try {
-    await service?.close();
-  } catch (error) {
-    errors.push(String(error));
-  }
-  try {
-    await source.close();
-  } catch (error) {
-    errors.push(String(error));
-  }
+  const closed = await Promise.allSettled([service?.close(), source.close()]);
+  for (const result of closed)
+    if (result.status === "rejected") errors.push(String(result.reason));
+  lastHandoff = speechInbox.snapshot();
   await speechInbox.close();
   cleanup = await sampleResources();
 }
-const latencies = records
-  .map((item) => item.completedAt - item.observedEndAt)
+await flushJournal();
+const latencies = deliveries
+  .map(({ observation }) => observation.completedAt - observation.observedEndAt)
   .toSorted((a, b) => a - b);
+if (
+  new Set(deliveries.map(({ observation }) => observation.id)).size !==
+  deliveries.length
+)
+  errors.push("A transcription was delivered more than once");
+const rejectedDeliveries = deliveries.filter(({ accepted }) => !accepted);
+const acceptedCount = deliveries.length - rejectedDeliveries.length;
+// During this window every source is withdrawn, so a late handoff can only
+// belong to the recorded revoked runs. The 1-second handoff deadline ends
+// before the script grants a new scope after at least 5 seconds.
+const revokedHandoffRejections =
+  revocationHandoff?.rejectedAfter !== undefined
+    ? revocationHandoff.rejectedAfter - revocationHandoff.rejectedBefore
+    : 0;
 const conditions = {
   noUnexpectedErrors: errors.length === 0,
   sourceProgress:
     lastSnapshot?.tracks.length === input.sources &&
     lastSnapshot.tracks.every((track) => track.samples > 8000),
-  speechResults: input["expect-silence"]
-    ? records.length === 0
+  segmentHandoff: input["expect-silence"]
+    ? deliveries.length === 0
     : source.selected.every((device) =>
-        records.some((item) => item.run.deviceId === device.deviceId),
+        deliveries.some(
+          ({ observation, accepted }) =>
+            observation.run.deviceId === device.deviceId && accepted,
+        ),
       ),
+  handoffCounters:
+    lastHandoff !== undefined &&
+    lastHandoff.sequence === acceptedCount &&
+    lastHandoff.rejected === rejectedDeliveries.length &&
+    rejectedDeliveries.every((attempt) => attempt.expectedRejection) &&
+    (lastSnapshot?.speech?.handoffRejected ?? Infinity) ===
+      rejectedDeliveries.length + revokedHandoffRejections,
+  speechHttp: speechHttpSnapshots > 0,
+  cumulativeCpu:
+    resources.length > 1 &&
+    resources.every(
+      (resource, index) =>
+        index === 0 || resource.cpuMs >= resources[index - 1]!.cpuMs,
+    ),
   processTopology: input["expect-silence"]
     ? lastSnapshot?.speech?.loads === 0
     : topology,
@@ -450,11 +533,14 @@ const conditions = {
     lastSnapshot?.speech !== undefined &&
     lastSnapshot.speech.status !== "unavailable",
   captureContinuous: !input.lifecycle || captureContinuous,
-  idleRelease: !input.lifecycle || unloaded,
+  idleRelease: !input.lifecycle || actions.has("unloaded"),
   wakeAgain: !input.lifecycle || wokeAgain,
   sourceRecovery: !input.lifecycle || newRunAfterStall,
-  scopeRevocation: !input.lifecycle || (revoked && granted && cancelledScope),
-  asrRecovery: !input.lifecycle || (frozen && recoveredModel),
+  scopeRevocation:
+    !input.lifecycle ||
+    (actions.has("revoke") && actions.has("grant") && cancelledScope),
+  asrRecovery:
+    !input.lifecycle || (actions.has("freeze_asr") && recoveredModel),
   video: !input.video || (httpSnapshots > 0 && videoFrames > 0),
   cleanup: cleanup.processes === 1,
 };
@@ -463,16 +549,19 @@ const report = {
   config,
   conditions,
   handoff: lastHandoff,
+  deliveries,
+  revocationHandoff,
+  revokedHandoffRejections,
   passed: Object.values(conditions).every(Boolean),
   errors,
   parentPid: process.pid,
-  actions,
-  records,
+  actions: [...actions].map(([kind, action]) => ({ kind, ...action })),
   lastSnapshot,
   resources,
-  observedProcesses: [...observedProcesses.values()],
+  observedProcesses: resourceSampler.observedProcesses(),
   cleanup,
   httpSnapshots,
+  speechHttpSnapshots,
   videoFrames,
   latencyMs: {
     count: latencies.length,
@@ -484,6 +573,7 @@ const report = {
     "Idle timeout set to 5 seconds for lifecycle verification; production default is 60 seconds",
     "Orphan detection retains observed PID, process group and ps start time; start times have one-second precision",
     "Processes that became orphaned before their ownership was sampled cannot be attributed to this run",
+    "CPU accumulates the last observed values of owned processes; work between their final sample and exit is not counted",
   ],
 };
 await writeFile(output, JSON.stringify(report, null, 2) + "\n");
