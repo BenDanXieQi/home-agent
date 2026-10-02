@@ -4,6 +4,7 @@ import {
   initialSpecification,
   snapshotSchema,
 } from "@home-agent/api/household";
+import { initialCollectionStatus } from "@home-agent/api/observations";
 
 export const epoch = "a1000000-0000-4000-8000-000000000001";
 export const otherEpoch = "a1000000-0000-4000-8000-000000000002";
@@ -54,6 +55,10 @@ export function householdSnapshot() {
       home: {},
       room: {},
       device: {},
+      latest: {},
+      source_health: {},
+      device_coverage: {},
+      collection: { collection: initialCollectionStatus() },
     },
   });
 }

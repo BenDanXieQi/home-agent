@@ -38,7 +38,7 @@ function expectLifecycle(
 }
 
 describe("semantic household lifecycle", () => {
-  test("a bound household rejects another binding without changing its running scope", () => {
+  test("a committed home change replaces the scope and waits for a new directory", () => {
     const { actor } = running();
     const previous = actor.getSnapshot().context;
     actor.send({
@@ -46,7 +46,24 @@ describe("semantic household lifecycle", () => {
       scope_epoch: previous.scope_epoch,
       home_id: "home-b",
     });
-    expect(actor.getSnapshot().context).toBe(previous);
+    const changed = expectLifecycle(actor, "initializing");
+    expect(changed.scope_epoch).not.toBe(previous.scope_epoch);
+    expect(changed.projection.account).toEqual(previous.projection.account);
+    expect(changed.projection.household.household).toMatchObject({
+      home_id: "home-b",
+      homes: { selectedHomeId: "home-b", status: "selected" },
+      sync_status: "syncing",
+    });
+    expect(changed.projection.home).toEqual({});
+    expect(changed.projection.room).toEqual({});
+    expect(changed.projection.device).toEqual({});
+    actor.send({
+      type: "directory",
+      scope_epoch: previous.scope_epoch,
+      projection: previous.projection,
+    });
+    expect(actor.getSnapshot().context).toBe(changed);
+    commitMachineDirectory(actor, "home-b");
     expectLifecycle(actor, "running");
   });
 

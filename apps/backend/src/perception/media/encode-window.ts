@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
-import { mkdtemp, writeFile, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { z } from "zod";
-import type { mediaSelectionSchema } from "@home-agent/api/contracts";
+import { once } from "node:events";
+import { mkdtemp, writeFile, rename, rm, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type { WindowEncodingInput } from "./encoding-input";
 import { windowLimits } from "../window/limits";
-import { representationParameters } from "./representation";
+
+export class MediaCleanupError extends Error {}
 
 async function ffmpeg(executable: string, args: string[], signal: AbortSignal) {
   signal.throwIfAborted();
@@ -34,13 +33,8 @@ async function ffmpeg(executable: string, args: string[], signal: AbortSignal) {
   signal.addEventListener("abort", abort, { once: true });
   if (signal.aborted) abort();
   try {
-    await new Promise<void>((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (code) => {
-        if (code === 0) resolve();
-        else reject(new Error(`Media encoding failed: ${diagnostic}`));
-      });
-    });
+    const [code] = await once(child, "close");
+    if (code !== 0) throw new Error(`Media encoding failed: ${diagnostic}`);
     signal.throwIfAborted();
   } finally {
     signal.removeEventListener("abort", abort);
@@ -49,21 +43,19 @@ async function ffmpeg(executable: string, args: string[], signal: AbortSignal) {
 
 export async function encodeWindow(
   entry: WindowEncodingInput,
-  selection: z.infer<typeof mediaSelectionSchema>,
   executable: string,
   signal: AbortSignal,
+  destination: string,
 ) {
-  const { representation } = selection;
-  const parameters = representationParameters(entry.summary, selection);
+  const { representation, parameters, audio } = entry;
   const image = representation.endsWith("image");
-  const frames = image ? entry.input.frames.slice(-1) : entry.input.frames;
-  const audio = entry.input.audio;
+  const frames = image ? entry.frames.slice(-1) : entry.frames;
   signal.throwIfAborted();
   if (representation === "audio" && !parameters.audioIncluded)
     throw new Error("Continuous audio input unavailable");
   if (representation !== "audio" && !frames.length)
     throw new Error("Video input unavailable");
-  const directory = await mkdtemp(join(tmpdir(), "home-agent-media-"));
+  const directory = await mkdtemp(join(dirname(destination), ".encoding-"));
   try {
     const args: string[] = [];
     if (representation !== "audio") {
@@ -78,7 +70,7 @@ export async function encodeWindow(
         throw new Error("Window frame dimensions changed");
       await writeFile(
         join(directory, "frames.rgb"),
-        Buffer.concat(frames.map((frame) => frame.rgb)),
+        frames.map((frame) => frame.rgb),
         { signal },
       );
       args.push(
@@ -95,16 +87,13 @@ export async function encodeWindow(
       );
     }
     if (parameters.audioIncluded) {
-      const data = Buffer.concat(
-        audio.map((block) =>
-          Buffer.from(
-            block.pcm.buffer,
-            block.pcm.byteOffset,
-            block.pcm.byteLength,
-          ),
+      await writeFile(
+        join(directory, "audio.pcm"),
+        audio.map(({ pcm }) =>
+          Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
         ),
+        { signal },
       );
-      await writeFile(join(directory, "audio.pcm"), data, { signal });
 
       args.push(
         "-f",
@@ -206,18 +195,23 @@ export async function encodeWindow(
     const metadata = await stat(output);
     if (metadata.size >= windowLimits.productBytes)
       throw new Error("Media product exceeded byte budget");
-    const data = await readFile(output, { signal });
     signal.throwIfAborted();
+    await rename(output, destination);
     return {
-      data,
+      bytes: metadata.size,
       contentType: image
         ? "image/jpeg"
         : representation === "audio"
           ? "audio/mp4"
           : "video/mp4",
-      parameters,
     };
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await rm(directory, { recursive: true, force: true }).catch(
+      (cause: unknown) => {
+        throw new MediaCleanupError("Media temporary file cleanup failed", {
+          cause,
+        });
+      },
+    );
   }
 }

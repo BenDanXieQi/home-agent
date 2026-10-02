@@ -71,6 +71,9 @@ export async function runningHousehold(
     homeId: string | null;
     saveError?: Error;
     automaticBinding?: boolean;
+    resetHomeData?: ConstructorParameters<
+      typeof MijiaService
+    >[0]["resetHomeData"];
   } = { homeId: "home-a" },
 ) {
   const mqtt = interceptMqtt();
@@ -125,6 +128,7 @@ export async function runningHousehold(
     credentialStore: store,
     homeSelectionStore: homes,
     readGo2rtcUrl: () => Promise.resolve(peer.adapter.url),
+    ...(binding.resetHomeData ? { resetHomeData: binding.resetHomeData } : {}),
   });
   const runtime = createMijiaHousehold(
     service,

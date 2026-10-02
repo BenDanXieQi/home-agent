@@ -24,6 +24,7 @@ export const mediaRequestSchema = mediaSelectionSchema.extend({
   retry: z.boolean().default(false),
 });
 export const mediaStateSchema = z.enum([
+  "queued",
   "not_generated",
   "generating",
   "ready",
@@ -94,6 +95,35 @@ export const windowSummarySchema = z.object({
   crop: windowBoxSchema.nullable(),
   inputState: z.enum(["available", "expired", "evicted", "revoked"]),
 });
+export const windowSourceSchema = windowSummarySchema.shape.run.pick({
+  scopeEpoch: true,
+  deviceId: true,
+  channel: true,
+});
+export const windowRecordingSchema = z.object({
+  selection: mediaSelectionSchema,
+  state: mediaStateSchema,
+  readableUntil: z.number(),
+  error: z.string().max(1024).nullable(),
+});
+export const windowDetailSchema = windowSummarySchema.extend({
+  recording: windowRecordingSchema.nullable(),
+});
+export const windowListEntrySchema = windowDetailSchema.pick({
+  id: true,
+  run: true,
+  startedAt: true,
+  endedAt: true,
+  readableUntil: true,
+  gate: true,
+  incomplete: true,
+  inputState: true,
+  recording: true,
+});
+export const windowListSchema = z.object({
+  windows: z.array(windowListEntrySchema),
+});
+
 export const mediaViewSchema = z.object({
   windowId: z.uuid(),
   representation: mediaRepresentationSchema,

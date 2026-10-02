@@ -4,7 +4,7 @@
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、音频分析及 P4 窗口筛选／按需媒体已接入；身份确认与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、音频分析及 P4 窗口筛选／自动回看及按需媒体已接入；身份确认与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -38,7 +38,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `GET /api/perception`                    | 本地检测、人宠跟踪与音频的健康及最新观测                                            |
 | `GET /api/perception/stream`             | 订阅本地感知当前状态，不传输媒体片段                                                |
 | `POST /api/perception/images/detect`     | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
-| `GET /api/perception/windows`            | 有界窗口、筛选事实、候选摘要和媒体资源用量                                          |
+| `GET /api/perception/windows`            | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量           |
 | `POST /api/perception/windows/:id/media` | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
 | `POST /api/perception/retry`             | 显式重试检测与音频计算，重新准入失败音轨                                            |
 
@@ -59,6 +59,8 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。浏览器预览视频不经过 backend；本地感知另从 go2rtc 私有分析出口读取视频，在 backend 的计算子进程内解码。官方能力列表声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道能力列表生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 
 `AccountMaintenance` 调度完整账号会话的恢复续期，通过回调交由 `MijiaService` 保存并启用新会话。`DeviceDiscovery` 维护设备快照、合并并发刷新与周期设备发现，`MediaSession` 维护 go2rtc 地址巡检、绑定重试、媒体运行标识和相机／观看资源；`Go2RtcAdapter` 维护独立的 go2rtc 运行时会话和心跳租约。米家会话续期与 go2rtc 租约续期是两种不同操作。媒体运行标识 `revision` 在媒体失效或重新绑定时更换，用于拒绝旧播放请求；它不用于配置并发修改检测。源注册失败的重试由 `CameraSourceManager` 管理，媒体收包监测和取流恢复由 go2rtc 管理，网页出帧检测由浏览器管理。
+
+`mijia/perception-source.ts` 将当前已提交的家庭与设备访问资格交给感知模块，同一家庭快照复用来源访问表，快照或家庭运行状态变化后重建。历史窗口查询不重复遍历设备清单或克隆米家状态；每次访问仍检查当前家庭快照。媒体连接的运行标识只在准备实时采集时核对，其失效信号结束对应采集；已保存片段的访问期限与撤权规则见[感知媒体说明](../../docs/perception.md#容量停止与访问期限)。
 
 米家协议适配位于 `src/mijia/protocols/`：`micloud/` 负责扫码、设备清单与属性读取，`oauth/` 负责授权及 token 续期，`miot/` 负责 MQTT 连接与消息解析。下游通过 `src/mijia/media/go2rtc-adapter.ts` 调用 go2rtc 内部接口。资源定义、状态含义与释放规则见[米家与摄像头](../../docs/mijia.md#组件与资源)。
 

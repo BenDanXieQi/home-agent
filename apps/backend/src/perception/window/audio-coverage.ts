@@ -40,38 +40,46 @@ export function appendWindowAudio(
   end: number,
   at: number,
 ) {
-  const before = value.audio.length;
   const startSample = track.samples - pcm.length;
   const previous = value.audio.at(-1);
   if (
     value.audioTrack &&
     (value.audioTrack.run.trackRunId !== track.run.trackRunId ||
       value.audioTrack.generation !== track.generation)
-  )
+  ) {
     value.gaps.add("audio_generation_changed");
-  else if (previous && at < previous.endedAt - 0.1)
-    value.gaps.add("audio_overlap");
-  else {
-    if (previous && at - previous.endedAt > 1) value.gaps.add("audio_gap");
-    value.audioTrack = track;
-    value.audio.push({
-      pcm: pcm.slice(offset, end),
-      startedAt: at,
-      endedAt: at + (end - offset) / 16,
-      startSample: startSample + offset,
-      energy: track.energy.filter(
-        (block) =>
-          block.endSample > startSample + offset &&
-          block.endSample <= startSample + end,
-      ),
-      vad: track.vad.filter(
-        (block) =>
-          block.endSample > startSample + offset &&
-          block.endSample <= startSample + end,
-      ),
-    });
+    return 0;
   }
-  return value.audio.length > before ? (end - offset) * 2 : 0;
+  if (previous && at < previous.endedAt - 0.1) {
+    value.gaps.add("audio_overlap");
+    return 0;
+  }
+  if (previous && at - previous.endedAt > 1) value.gaps.add("audio_gap");
+  value.audioTrack = track;
+  value.audio.push({
+    // Full IPC-owned blocks can be shared by both camera channels. Split views
+    // need compact storage so retained-byte accounting includes their backing buffer.
+    pcm:
+      offset === 0 &&
+      end === pcm.length &&
+      pcm.byteLength === pcm.buffer.byteLength
+        ? pcm
+        : pcm.slice(offset, end),
+    startedAt: at,
+    endedAt: at + (end - offset) / 16,
+    startSample: startSample + offset,
+    energy: track.energy.filter(
+      (block) =>
+        block.endSample > startSample + offset &&
+        block.endSample <= startSample + end,
+    ),
+    vad: track.vad.filter(
+      (block) =>
+        block.endSample > startSample + offset &&
+        block.endSample <= startSample + end,
+    ),
+  });
+  return (end - offset) * 2;
 }
 export function summarizeWindowAudio(
   value: AudioWindow,

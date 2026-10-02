@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { type windowSourceSchema } from "@home-agent/api/contracts";
 import type {
   audioTrackSchema,
   windowSummarySchema,
@@ -29,7 +30,10 @@ function source(run: z.infer<typeof runSchema>, identity: string, now: number) {
     baseline: null as Parameters<typeof summarizeWindow>[1]["baseline"],
     lastChangeAt: null as number | null,
     audioTrack: null as z.infer<typeof audioTrackSchema> | null,
-    observations: new Map<number, z.infer<typeof observationSchema>>(),
+    observations: new Map<
+      number,
+      z.infer<typeof observationSchema> & { truncated: boolean }
+    >(),
     tracking: new Map<
       number,
       Extract<
@@ -45,11 +49,31 @@ function retained(
   input: ReturnType<typeof createWindowDraft>,
   identity: string,
 ) {
+  // Closed windows keep only encoder input; gray pixels and live facts belong
+  // to aggregation. Freeze the shared metadata once before lending it to encoders.
+  const frames = Object.freeze(
+    summary.gate.candidate === "video"
+      ? input.frames.map(({ rgb, retainedWidth, retainedHeight }) =>
+          Object.freeze({ rgb, retainedWidth, retainedHeight }),
+        )
+      : [],
+  );
+  const audio = Object.freeze(
+    summary.audio.status === "available"
+      ? input.audio.map(({ pcm, startedAt }) =>
+          Object.freeze({ pcm, startedAt }),
+        )
+      : [],
+  );
   return {
     summary,
-    input,
+    input: { frames, audio },
+    bytes:
+      frames.reduce((total, frame) => total + frame.rgb.byteLength, 0) +
+      audio.reduce((total, block) => total + block.pcm.byteLength, 0),
     identity,
-    controller: new AbortController(),
+    authorization: new AbortController(),
+    descriptionBytes: Buffer.byteLength(JSON.stringify(summary)),
     expiresAt:
       performance.now() + Math.max(0, summary.readableUntil - summary.closedAt),
   };
@@ -62,6 +86,11 @@ export function createWindowStore(options: {
 }) {
   const sources = new Map<string, ReturnType<typeof source>>();
   const windows = new Map<string, RetainedWindow>();
+  const readLeases = new Set<
+    Pick<RetainedWindow, "identity" | "authorization"> & {
+      run: RetainedWindow["summary"]["run"];
+    }
+  >();
   const counters = {
     closed: 0,
     candidates: 0,
@@ -74,23 +103,32 @@ export function createWindowStore(options: {
     droppedWindows: 0,
     lateObservations: 0,
   };
+  const listeners = new Set<(id: string) => void>();
   let bytes = 0;
+  let descriptionBytes = 0;
   function release(
     entry: RetainedWindow,
     reason: "expired" | "evicted" | "revoked",
     count = true,
   ) {
+    if (reason === "revoked")
+      entry.authorization.abort(new Error("Window access revoked"));
     if (entry.summary.inputState !== "available") {
       if (reason === "revoked") entry.summary.inputState = reason;
       return;
     }
     if (count) counters[reason]++;
     entry.summary.inputState = reason;
-    entry.controller.abort(new Error(`Window ${reason}`));
-    bytes -= entry.input.bytes;
-    entry.input.bytes = 0;
+    bytes -= entry.bytes;
+    entry.bytes = 0;
     entry.input.frames = [];
     entry.input.audio = [];
+  }
+  function forget(id: string, entry: RetainedWindow) {
+    release(entry, "expired");
+    entry.authorization.abort(new Error("Window description removed"));
+    descriptionBytes -= entry.descriptionBytes;
+    windows.delete(id);
   }
   function room(size: number) {
     for (const entry of windows.values()) {
@@ -141,7 +179,11 @@ export function createWindowStore(options: {
       endedAt: value.endedAt,
       closedAt: now,
       readableUntil: now + options.retentionMs(),
-      summaryUntil: now + windowLimits.summaryMs,
+      summaryUntil:
+        now +
+        (resultSummary.gate.candidate === "none"
+          ? windowLimits.summaryMs
+          : windowLimits.recordingMs),
       timeBasis: "host_receive",
       synchronizationAccuracyMs: null,
       incomplete: value.incomplete,
@@ -152,17 +194,10 @@ export function createWindowStore(options: {
       crop: resultSummary.crop,
       inputState: "available",
     };
-    if (resultSummary.gate.candidate === "audio") {
-      const videoBytes = value.frames.reduce(
-        (sum, frame) => sum + frame.rgb.byteLength + frame.gray.byteLength,
-        0,
-      );
-      value.frames = [];
-      value.bytes -= videoBytes;
-      bytes -= videoBytes;
-    }
     const result = retained(summary, value, entry.identity);
+    bytes -= value.bytes - result.bytes;
     windows.set(summary.id, result);
+    descriptionBytes += result.descriptionBytes;
     if (resultSummary.gate.candidate === "none") {
       counters.skipped++;
       release(result, "evicted", false);
@@ -175,14 +210,21 @@ export function createWindowStore(options: {
     );
     while (ready.length > windowLimits.readyPerSource)
       release(ready.shift()!, "evicted");
-    while (windows.size > windowLimits.summaries) {
+    while (
+      windows.size > windowLimits.summaries ||
+      descriptionBytes > windowLimits.summaryBytes
+    ) {
       const oldest = windows.keys().next().value!;
-      release(windows.get(oldest)!, "evicted");
-      windows.delete(oldest);
+      forget(oldest, windows.get(oldest)!);
     }
     entry.lastClosedAt = Math.max(entry.lastClosedAt, value.endedAt);
+    if (windows.has(summary.id) && summary.gate.candidate !== "none")
+      for (const listener of listeners) listener(summary.id);
   }
   function tick(now: number) {
+    for (const lease of readLeases)
+      if (!options.authorized(lease.run, lease.identity))
+        lease.authorization.abort(new Error("Window access revoked"));
     for (const [id, entry] of sources) {
       if (!options.authorized(entry.run, entry.identity)) {
         stop(id, true, now);
@@ -200,12 +242,10 @@ export function createWindowStore(options: {
           counters.droppedWindows++;
         } else finalize(entry, value, now);
       }
-      for (const [sequence, observation] of entry.observations)
-        if (observation.receivedAt < now - 4500)
-          entry.observations.delete(sequence);
-      for (const [sequence, observation] of entry.tracking)
-        if (observation.receivedAt < now - 4500)
-          entry.tracking.delete(sequence);
+      const earliest = now - windowLimits.durationMs - windowLimits.graceMs;
+      for (const results of [entry.observations, entry.tracking])
+        for (const [sequence, observation] of results)
+          if (observation.receivedAt < earliest) results.delete(sequence);
     }
     for (const [id, entry] of windows) maintain(id, entry, now);
   }
@@ -218,8 +258,7 @@ export function createWindowStore(options: {
     )
       release(entry, "expired");
     if (now >= entry.summary.summaryUntil) {
-      release(entry, "expired");
-      windows.delete(id);
+      forget(id, entry);
     }
   }
 
@@ -254,6 +293,12 @@ export function createWindowStore(options: {
     } else finishDrafts(entry, now);
   }
   return {
+    subscribe(listener: (id: string) => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     tick,
     reconcile(
       selected: {
@@ -370,14 +415,19 @@ export function createWindowStore(options: {
         }
         const observation = entry.observations.get(frame.sequence);
         const tracking = entry.tracking.get(frame.sequence);
+        entry.observations.delete(frame.sequence);
+        entry.tracking.delete(frame.sequence);
+        const detections =
+          observation?.mediaTime.pts === frame.mediaTime.pts &&
+          observation.mediaTime.generation === frame.mediaTime.generation
+            ? observation.detections
+            : null;
+        if (detections && observation?.truncated)
+          value.gaps.add("detections_truncated");
         value.videoRun = event.run;
         value.frames.push({
           ...frame,
-          detections:
-            observation?.mediaTime.pts === frame.mediaTime.pts &&
-            observation.mediaTime.generation === frame.mediaTime.generation
-              ? observation.detections.slice(0, 128)
-              : null,
+          detections,
           tracks:
             tracking?.mediaTime.pts === frame.mediaTime.pts &&
             tracking.mediaTime.generation === frame.mediaTime.generation
@@ -391,7 +441,6 @@ export function createWindowStore(options: {
         event.observation
       ) {
         const observation = event.observation;
-        let found = false;
         for (const value of entry.drafts.values()) {
           if (!value.videoRun || !isCurrentRun(value.videoRun, event.run))
             continue;
@@ -409,11 +458,13 @@ export function createWindowStore(options: {
               if (event.observation.detections.length > 128)
                 value.gaps.add("detections_truncated");
             }
-            found = true;
+            return;
           }
         }
-        if (!found && observation.receivedAt < entry.lastClosedAt)
+        if (observation.receivedAt < entry.lastClosedAt) {
           counters.lateObservations++;
+          return;
+        }
         if (event.event === "tracking") {
           entry.tracking.set(observation.sequence, event.observation);
           if (entry.tracking.size > 16)
@@ -422,6 +473,7 @@ export function createWindowStore(options: {
           entry.observations.set(observation.sequence, {
             ...event.observation,
             detections: event.observation.detections.slice(0, 128),
+            truncated: event.observation.detections.length > 128,
           });
           if (entry.observations.size > 16)
             entry.observations.delete(entry.observations.keys().next().value!);
@@ -483,49 +535,75 @@ export function createWindowStore(options: {
       return entry
         ? {
             inputState: entry.summary.inputState,
-            readableUntil: entry.summary.readableUntil,
-            signal: entry.controller.signal,
           }
         : undefined;
+    },
+    acquireRead(id: string, now: number) {
+      const entry = lookup(id, now);
+      if (!entry || entry.summary.inputState === "revoked") return undefined;
+      // An admitted read retains authorization independently of the window summary.
+      const lease = {
+        run: entry.summary.run,
+        identity: entry.identity,
+        authorization: new AbortController(),
+      };
+      readLeases.add(lease);
+      return {
+        signal: lease.authorization.signal,
+        release() {
+          readLeases.delete(lease);
+        },
+      };
     },
     acquire(id: string, now: number) {
       const entry = lookup(id, now);
       if (!entry || entry.summary.inputState !== "available") return undefined;
       // Borrow only encoder pixels; the signal never exposes revocation authority.
       return {
-        summary: structuredClone(entry.summary),
-        signal: entry.controller.signal,
-        input: {
-          frames: entry.input.frames.map(
-            ({ rgb, retainedWidth, retainedHeight }) => ({
-              rgb,
-              retainedWidth,
-              retainedHeight,
-            }),
-          ),
-          audio: entry.input.audio.map(({ pcm, startedAt }) => ({
-            pcm,
-            startedAt,
-          })),
-        },
+        authorizationSignal: entry.authorization.signal,
+        bytes: entry.bytes,
+        input: { ...entry.input },
       };
     },
-    snapshot(now: number) {
+    snapshot(now: number, selection: z.infer<typeof windowSourceSchema>) {
       tick(now);
       return {
         windows: [...windows.values()]
-          .filter((entry) => entry.summary.inputState !== "revoked")
-          .map((entry) => structuredClone(entry.summary))
+          .filter(
+            ({ summary }) =>
+              summary.inputState !== "revoked" &&
+              summary.run.scopeEpoch === selection.scopeEpoch &&
+              summary.run.deviceId === selection.deviceId &&
+              summary.run.channel === selection.channel,
+          )
+          .map(({ summary }) => ({
+            id: summary.id,
+            run: { ...summary.run },
+            startedAt: summary.startedAt,
+            endedAt: summary.endedAt,
+            readableUntil: summary.readableUntil,
+            gate: { ...summary.gate },
+            incomplete: summary.incomplete,
+            inputState: summary.inputState,
+          }))
           .toReversed(),
         counters: { ...counters },
         retainedBytes: bytes,
+        summaryBytes: descriptionBytes,
         limits: windowLimits,
       };
     },
     close() {
+      for (const lease of readLeases)
+        lease.authorization.abort(new Error("Window store closed"));
+      readLeases.clear();
       for (const id of sources.keys()) stop(id, true, Date.now());
-      for (const entry of windows.values()) release(entry, "revoked");
+      for (const entry of windows.values()) {
+        release(entry, "revoked");
+      }
       windows.clear();
+      listeners.clear();
+      descriptionBytes = 0;
     },
   };
 }

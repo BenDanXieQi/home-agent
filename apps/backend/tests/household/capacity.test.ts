@@ -54,6 +54,8 @@ describe("bounded immutable household commits", () => {
     const original = initialProjectionState(initialProjection());
     const candidate = {
       ...original.projection,
+      spec: { private: "internal specification" },
+      rule_status: { private: "unpublished rule state" },
       login: {
         login: {
           ...original.projection.login.login,
@@ -65,8 +67,15 @@ describe("bounded immutable household commits", () => {
     const accepted = prepareProjection(original, candidate);
     expect(accepted.projection.login.login).not.toHaveProperty("token");
     expect(Object.isFrozen(accepted.projection.login.login)).toBe(true);
-    for (const key of ["spec", "latest", "source_health", "rule_status"])
+    for (const key of ["spec", "rule_status"])
       expect(accepted.projection).not.toHaveProperty(key);
+    for (const key of [
+      "latest",
+      "source_health",
+      "device_coverage",
+      "collection",
+    ] as const)
+      expect(accepted.projection[key]).toBe(original.projection[key]);
     expect(accepted.projection.household.household.homes).not.toHaveProperty(
       "items",
     );

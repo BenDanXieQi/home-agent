@@ -29,7 +29,6 @@ export function createVideoRuntime(dependencies: {
 }) {
   const sources = new Map<string, ReturnType<typeof createVideoSource>>();
   const capture = createWindowCapture(dependencies.emit);
-  const captures = new Map<string, ReturnType<typeof capture>>();
   let closing = false;
   const pendingDispatches = new Set<Promise<void>>();
   const scheduler = createVideoScheduler(
@@ -117,12 +116,8 @@ export function createVideoRuntime(dependencies: {
     ) {
       if (closing || sources.size >= 8 || sources.has(input.run.runId))
         throw new ComputeBusyError("Video source capacity unavailable");
-      const captured = capture(input.run);
-      captures.set(input.run.runId, captured);
       const source = createVideoSource({
-        frame: (frame) => {
-          captured.accept(frame);
-        },
+        capture: capture(input.run),
         run: input.run,
         config: input.config,
         decoder: input.decoder,
@@ -133,7 +128,6 @@ export function createVideoRuntime(dependencies: {
         },
         ready: () => scheduler.ready(input.run.runId),
         failure: (error) => {
-          captured.stop();
           scheduler.remove(input.run.runId);
           dependencies.tracking.stop(input.run.runId).catch(dependencies.fatal);
           dependencies
@@ -156,8 +150,6 @@ export function createVideoRuntime(dependencies: {
     async stop(id: string) {
       const source = sources.get(id);
       if (!source) return;
-      captures.get(id)?.stop();
-      captures.delete(id);
       scheduler.remove(id);
       await Promise.all([dependencies.tracking.stop(id), source.close()]);
       // Retiring instances still consume decoder capacity until exit is confirmed.
@@ -165,8 +157,6 @@ export function createVideoRuntime(dependencies: {
     },
     async close() {
       closing = true;
-      for (const captured of captures.values()) captured.stop();
-      captures.clear();
       clearInterval(timer);
       unsubscribe();
       const owned = [...sources.values()];
