@@ -75,8 +75,8 @@ export function WindowRecording({
         按日期查看 SD 录像
       </Link>
       <p className="text-xs leading-5 text-muted">
-        下方身份记录属于窗口当时保留的采样帧，不代表整段 SD
-        录像中每个时刻的人物身份。
+        语音文字和人物判断来自窗口采集，不是对整段 SD 录像的重新分析。
+        未对齐的候选录像不能直接套用这些记录。
       </p>
     </div>
   );

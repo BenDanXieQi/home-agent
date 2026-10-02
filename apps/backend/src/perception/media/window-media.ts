@@ -40,6 +40,9 @@ class WindowProduct {
       this.view.state = reason === "cancelled" ? "revoked" : reason;
     });
   }
+  get state() {
+    return mediaExpired(this.media) ? ("expired" as const) : this.view.state;
+  }
 }
 function key(
   summary: Pick<
@@ -59,13 +62,13 @@ function key(
     normalized.endsWith("video") &&
     includeAudio &&
     summary.audio.status === "available";
-  const recording = recordingSelection(summary);
-  return normalized === recording.representation &&
-    audio === (normalized === "video" && recording.includeAudio)
-    ? `${summary.id}:recording`
+  const sampled = defaultSelection(summary);
+  return normalized === sampled.representation &&
+    audio === (normalized === "video" && sampled.includeAudio)
+    ? `${summary.id}:sampled`
     : `${summary.id}:${normalized}:${audio}`;
 }
-function recordingSelection(
+function defaultSelection(
   summary: Pick<z.infer<typeof windowSummarySchema>, "gate" | "audio">,
 ) {
   return {
@@ -114,7 +117,7 @@ export function createWindowMedia(
       windowId: entry.id,
       representation: selection.representation,
       state: "not_generated",
-      readableUntil: entry.closedAt + windowLimits.recordingMs,
+      readableUntil: entry.closedAt + windowLimits.mediaRetentionMs,
       mediaId: null,
       bytes: 0,
       contentType: null,
@@ -124,15 +127,13 @@ export function createWindowMedia(
     return {
       ...result,
       representation: selection.representation,
-      state: (
-        existing
-          ? mediaExpired(existing.media)
-          : Date.now() >= result.readableUntil
-      )
-        ? ("expired" as const)
-        : !existing && entry.inputState !== "available"
-          ? entry.inputState
-          : result.state,
+      state: existing
+        ? existing.state
+        : Date.now() >= result.readableUntil
+          ? ("expired" as const)
+          : entry.inputState !== "available"
+            ? entry.inputState
+            : result.state,
     };
   }
   function prune() {
@@ -259,7 +260,7 @@ export function createWindowMedia(
   }
   function capture(id: string) {
     const entry = window(id);
-    const selection = recordingSelection(entry);
+    const selection = defaultSelection(entry);
     try {
       request(id, { ...selection, retry: false });
     } catch (cause) {
@@ -281,8 +282,8 @@ export function createWindowMedia(
       return view(window(id), selection);
     },
     request,
-    recording(id: string) {
-      const item = products.get(`${id}:recording`);
+    sampledMedia(id: string) {
+      const item = products.get(`${id}:sampled`);
       if (!item) return null;
       const access = store.access(id, Date.now());
       if (!access || access.inputState === "revoked") return null;
@@ -291,9 +292,7 @@ export function createWindowMedia(
           representation: item.view.representation,
           includeAudio: item.view.parameters.audioIncluded,
         },
-        state: mediaExpired(item.media)
-          ? ("expired" as const)
-          : item.view.state,
+        state: item.state,
         readableUntil: item.view.readableUntil,
         error: item.view.error,
       };
@@ -348,7 +347,7 @@ export function createWindowMedia(
         productBytes: state.bytes,
         reservedBytes: state.reservedBytes,
         products: products.size,
-        retentionMs: windowLimits.recordingMs,
+        retentionMs: windowLimits.mediaRetentionMs,
         maxBytes: windowLimits.productsBytes,
         error: storageError ?? state.error,
       };

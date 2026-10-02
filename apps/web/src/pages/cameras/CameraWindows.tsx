@@ -15,7 +15,7 @@ import { useWindowMediaState } from "../../modules/perception/use-window-input-s
 import {
   windowTime,
   visualReasons,
-  recordingStates,
+  mediaStates,
   candidateLabel,
 } from "./window-presentation";
 import { WindowDetail } from "./WindowDetail";
@@ -43,13 +43,17 @@ export function CameraWindows({
     client.cancelQueries({ queryKey: windowQueryScope(scope) });
   }, [active, client, scope]);
   const [selection, select] = useState<WindowListEntry>();
-  const [onlyPassed, setOnlyPassed] = useState(true);
+  const [onlyEvidence, setOnlyEvidence] = useState(true);
   const [visibleCount, setVisibleCount] = useState(50);
   const windows = query.data?.windows ?? [];
   const selected =
     windows.find((entry) => entry.id === selection?.id) ?? selection;
   const visibleWindows = windows.filter(
-    (entry) => !onlyPassed || entry.gate.candidate !== "none",
+    (entry) =>
+      !onlyEvidence ||
+      entry.gate.candidate !== "none" ||
+      entry.speechCount > 0 ||
+      entry.identityCount > 0,
   );
   return (
     <section aria-label="筛选片段" className="space-y-4">
@@ -64,16 +68,17 @@ export function CameraWindows({
           秒一段。通过仅表示本地筛选结果，不代表识别出活动。通过的片段自动保存，最长保留
           30 分钟、全部摄像头合计最多 1
           GiB，超限先清理最旧片段。已打开的片段不会被新片段打断。
+          语音文字与采样帧的人物判断归入对应窗口，有记录的摘要最长保留 30 分钟。
         </p>
       </div>
       <label className="flex min-h-10 items-center gap-2 text-sm">
         <input
           type="checkbox"
           className="size-4 shrink-0 rounded-sm p-0 accent-ink"
-          checked={onlyPassed}
-          onChange={(event) => setOnlyPassed(event.target.checked)}
+          checked={onlyEvidence}
+          onChange={(event) => setOnlyEvidence(event.target.checked)}
         />
-        <span>只看通过筛选的片段</span>
+        <span>只看有媒体、语音或人物记录的窗口</span>
       </label>
       {!active ? (
         <StatusNotice>
@@ -99,8 +104,8 @@ export function CameraWindows({
       ) : null}
       {!query.isPending && !query.isError && visibleWindows.length === 0 ? (
         <StatusNotice>
-          {onlyPassed
-            ? "当前没有通过筛选的片段。可取消勾选查看被跳过的片段。"
+          {onlyEvidence
+            ? "当前没有媒体、语音或人物记录。可取消勾选查看其他窗口。"
             : "当前镜头暂无保留的片段摘要。"}
         </StatusNotice>
       ) : null}
@@ -149,7 +154,7 @@ const WindowRow = memo(function WindowRow({
   selected: boolean;
   select: (entry: WindowListEntry) => void;
 }) {
-  const state = useWindowMediaState(entry.recording);
+  const state = useWindowMediaState(entry.sampledMedia);
   return (
     <li>
       <button
@@ -172,10 +177,23 @@ const WindowRow = memo(function WindowRow({
           {entry.gate.candidate === "none"
             ? "未通过筛选，不保留媒体"
             : state
-              ? recordingStates[state]
+              ? mediaStates[state]
               : "尚未生成"}
           {entry.incomplete ? " · 不完整窗口" : ""}
         </span>
+        {entry.speechCount > 0 ? (
+          <span className="mt-1 block text-xs">
+            语音文字 {entry.speechCount} 段
+          </span>
+        ) : null}
+        {entry.identityCount > 0 ? (
+          <span className="mt-1 block break-words text-xs">
+            人物判断 {entry.identityCount} 条
+            {entry.identityLabels.length
+              ? ` · 本地已确认：${entry.identityLabels.join("、")}`
+              : " · 身份未确认"}
+          </span>
+        ) : null}
       </button>
     </li>
   );

@@ -324,7 +324,7 @@ try {
           scopeEpoch: first.run.scopeEpoch,
           runIds: view.tracks.map((track) => track.run.trackRunId),
           startedAt: elapsed,
-          rejectedBefore: view.speech?.handoffRejected ?? 0,
+          rejectedBefore: view.speech?.inboxUnconfirmed ?? 0,
         };
         source.revoke();
         const after = speechInbox.snapshot();
@@ -345,7 +345,7 @@ try {
         !actions.has("grant")
       ) {
         revocationHandoff.endedAt = elapsed;
-        revocationHandoff.rejectedAfter = view.speech?.handoffRejected ?? 0;
+        revocationHandoff.rejectedAfter = view.speech?.inboxUnconfirmed ?? 0;
         source.grant();
         actions.set("grant", { elapsed });
       }
@@ -517,7 +517,7 @@ const conditions = {
     lastHandoff.sequence === acceptedCount &&
     lastHandoff.rejected === rejectedDeliveries.length &&
     rejectedDeliveries.every((attempt) => attempt.expectedRejection) &&
-    (lastSnapshot?.speech?.handoffRejected ?? Infinity) ===
+    (lastSnapshot?.speech?.inboxUnconfirmed ?? Infinity) ===
       rejectedDeliveries.length + revokedHandoffRejections,
   speechHttp: speechHttpSnapshots > 0,
   cumulativeCpu:

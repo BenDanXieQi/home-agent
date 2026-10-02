@@ -23,7 +23,7 @@ export const audioCommandSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("speech_ack"),
     id: speechObservationSchema.shape.id,
-    accepted: z.boolean(),
+    inboxAccepted: z.boolean(),
   }),
 ]);
 export const audioResponseSchema = z.discriminatedUnion("kind", [

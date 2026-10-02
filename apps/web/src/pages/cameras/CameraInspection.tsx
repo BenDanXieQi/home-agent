@@ -41,7 +41,7 @@ export function CameraInspection({
         onExpanded={setAudioExpanded}
       >
         <p className="text-xs leading-6 text-muted">
-          检测声音强度和是否有人声，不识别说话内容或说话人。与视频共用定格操作，声音区间独立于视频帧。
+          此面板展示声音强度和人声检测。开启语音转写后，可在“筛选片段”查看文字；不判断说话人。与视频共用定格操作，声音区间独立于视频帧。
         </p>
         {source?.audio ? (
           <>

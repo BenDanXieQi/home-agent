@@ -70,7 +70,7 @@ export function createPerceptionService(options: {
     for (const listener of listeners) listener();
   };
   const windows = createWindowStore({
-    retentionMs: () => config.window.retentionMs,
+    config: () => config,
     authorized: (run, identity) => {
       const access = options.sources.eligibility(run);
       return (
@@ -85,6 +85,9 @@ export function createPerceptionService(options: {
   );
   const unsubscribeWindows = windows.subscribe(media.capture);
   const audio = createAudioService({
+    retainSpeech(observation) {
+      windows.speech(observation, Date.now());
+    },
     media: (track, pcm) => {
       windows.audio(track, pcm);
     },
@@ -329,7 +332,7 @@ export function createPerceptionService(options: {
         ...snapshot,
         windows: snapshot.windows.map((entry) => ({
           ...entry,
-          recording: media.recording(entry.id),
+          sampledMedia: media.sampledMedia(entry.id),
         })),
         media: media.snapshot(),
       };
@@ -338,7 +341,7 @@ export function createPerceptionService(options: {
       const entry = windows.describe(id, Date.now());
       return !entry || entry.inputState === "revoked"
         ? undefined
-        : { ...entry, recording: media.recording(id) };
+        : { ...entry, sampledMedia: media.sampledMedia(id) };
     },
     media,
     async detectImage(

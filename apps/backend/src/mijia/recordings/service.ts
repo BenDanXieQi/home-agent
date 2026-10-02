@@ -22,6 +22,7 @@ import { prepareClipDirectory } from "../../media/clip-files";
 import {
   createMediaResources,
   MediaCapacityError,
+  MediaCleanupError,
 } from "../../media/resources";
 
 const limits = Object.freeze({
@@ -241,7 +242,10 @@ export function createRecordingService(options: {
       0,
       Math.min(nearest - 1, nearby.length - limits.clips),
     );
-    return nearby.slice(first, first + limits.clips);
+    // Download the nearest clip first so optional neighbours cannot prevent playback.
+    return nearby
+      .slice(first, first + limits.clips)
+      .toSorted((a, b) => distance(a) - distance(b));
   }
   async function download(
     item: RecordingResource,
@@ -322,41 +326,69 @@ export function createRecordingService(options: {
         await chmod(directory, 0o700);
         signal.throwIfAborted();
         const recorded = [];
+        let completeCandidates = true;
         for (const [index, clip] of clips.entries()) {
           const path = join(directory, `segment-${index}.mp4`);
-          failure = "download_failed";
-          await download(item, clip.startAt, path, signal);
-          failure = "invalid_media";
-          const metadata = await tools.inspectRecording(path, signal);
-          const matchingDimensions = item.window?.frames.some(
-            (frame) =>
-              frame.fingerprint?.width === metadata.width &&
-              frame.fingerprint.height === metadata.height,
-          );
-          const frames = matchingDimensions
-            ? await tools.fingerprintRecording(
-                path,
-                metadata,
-                executable,
-                signal,
-              )
-            : [];
-          recorded.push({ clip, path, media: metadata, frames });
+          try {
+            failure = "download_failed";
+            await download(item, clip.startAt, path, signal);
+            failure = "invalid_media";
+            const metadata = await tools.inspectRecording(path, signal);
+            const matchingDimensions = item.window?.frames.some(
+              (frame) =>
+                frame.fingerprint?.width === metadata.width &&
+                frame.fingerprint.height === metadata.height,
+            );
+            let frames: Awaited<ReturnType<typeof tools.fingerprintRecording>> =
+              [];
+            if (matchingDimensions) {
+              try {
+                frames = await tools.fingerprintRecording(
+                  path,
+                  metadata,
+                  executable,
+                  signal,
+                );
+              } catch (cause) {
+                if (cause instanceof MediaCleanupError) throw cause;
+                signal.throwIfAborted();
+                assertCurrent(item);
+                completeCandidates = false;
+              }
+            }
+            recorded.push({ clip, path, media: metadata, frames });
+          } catch (cause) {
+            if (cause instanceof MediaCleanupError) throw cause;
+            signal.throwIfAborted();
+            assertCurrent(item);
+            if (item.input.selection.kind === "clip") throw cause;
+            completeCandidates = false;
+            await rm(path, { force: true }).catch((cleanup: unknown) => {
+              throw new MediaCleanupError(
+                "Recording candidate cleanup failed",
+                { cause: cleanup },
+              );
+            });
+          }
         }
+        if (!recorded.length) throw new RecordingGenerationError(failure);
+        recorded.sort((a, b) => a.clip.startAt - b.clip.startAt);
         let position = 0;
         const alignment = item.window
-          ? alignRecordingFrames(
-              item.window,
-              recorded.map((candidate) => {
-                const mediaStartMs = position;
-                position += candidate.media.actualDurationMs;
-                return {
-                  startAt: candidate.clip.startAt,
-                  mediaStartMs,
-                  frames: candidate.frames,
-                };
-              }),
-            )
+          ? completeCandidates
+            ? alignRecordingFrames(
+                item.window,
+                recorded.map((candidate) => {
+                  const mediaStartMs = position;
+                  position += candidate.media.actualDurationMs;
+                  return {
+                    startAt: candidate.clip.startAt,
+                    mediaStartMs,
+                    frames: candidate.frames,
+                  };
+                }),
+              )
+            : { type: "unknown" as const, reason: "no_frame_mapping" as const }
           : { type: "unknown" as const, reason: "clip_selected" as const };
         let selected = recorded;
         if (alignment.type === "confirmed") {

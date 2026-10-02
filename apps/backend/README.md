@@ -4,7 +4,7 @@
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和独立 Agent 请求判断及 P4 窗口筛选／自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和独立 Agent 请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -46,6 +46,8 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                          |
 | `GET /api/perception/speech/stream`                 | 订阅同一语音收件箱                                                                  |
 | `POST /api/perception/retry`                        | 显式重试检测与音频计算，重新准入失败音轨                                            |
+
+窗口详情的 `speech.segments` 保存关联转写，`frames[].identity` 保存采样帧当时的身份判断，`sampledMedia` 表示 backend 生成的采样产物。迟到转写只更新窗口历史与版本，不改写帧身份或重新编码媒体；声音与人物标签不构成说话人身份识别。
 
 SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像生成与对外状态；窗口和 SD 回放各自使用 `src/media/resources.ts` 的独立实例管理队列、文件、容量预留、期限、读取和清理。两者的预算与队列不混用，SD 下载不会占用窗口编码名额。`mijia/media/recording-file.ts` 负责内部传输边界，`recordings/media.ts` 使用现有媒体库处理容器与编码，`src/media/ffmpeg.ts` 统一进程执行与退出等待；`recordings/alignment.ts` 保持帧匹配规则独立于 HTTP 和文件存储。接口、容量、取消与验证边界见 [SD 卡录像回放](../../docs/mijia.md#sd-卡录像读取与回放)。
 

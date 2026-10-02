@@ -24,7 +24,10 @@ export function useWindowInputState({
 
 export function useWindowMediaState(
   media:
-    | Pick<NonNullable<WindowListEntry["recording"]>, "state" | "readableUntil">
+    | Pick<
+        NonNullable<WindowListEntry["sampledMedia"]>,
+        "state" | "readableUntil"
+      >
     | null
     | undefined,
 ) {

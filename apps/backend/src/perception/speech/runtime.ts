@@ -41,7 +41,7 @@ export function createSpeechRuntime(options: {
     completed = 0,
     dropped = 0,
     cancelled = 0,
-    handoffRejected = 0;
+    inboxUnconfirmed = 0;
   let inFlight: (typeof queue)[number] | undefined;
   function publish(runId: string) {
     const track = tracks.get(runId);
@@ -299,7 +299,7 @@ export function createSpeechRuntime(options: {
               ? "valid"
               : "expired";
           completed++;
-          if (!(await options.deliver(track.view.latest))) handoffRejected++;
+          if (!(await options.deliver(track.view.latest))) inboxUnconfirmed++;
         } else cancelled++;
         publish(job.run.trackRunId);
       }
@@ -402,7 +402,7 @@ export function createSpeechRuntime(options: {
         completed,
         dropped,
         cancelled,
-        handoffRejected,
+        inboxUnconfirmed,
         queueDepth: queue.length,
         queueBytes: queue.reduce((sum, job) => sum + job.samples.byteLength, 0),
         inFlight: inFlight !== undefined,
