@@ -29,7 +29,7 @@ export function createHomeAgent(
     ...(config.OPENAI_BASE_URL
       ? { configuration: { baseURL: config.OPENAI_BASE_URL } }
       : {}),
-  }).bindTools(tools, { parallel_tool_calls: false });
+  }).bindTools(tools);
 
   const graph = new StateGraph(MessagesAnnotation)
     .addNode("model", async (state, options) => {
