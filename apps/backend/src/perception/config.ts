@@ -1,15 +1,21 @@
-import { windowPolicySchema } from "@home-agent/api/contracts";
+import {
+  windowPolicySchema,
+  cameraVideoQualitySchema,
+} from "@home-agent/api/contracts";
+import { identityConfigSchema } from "./identity/config";
 import { cpuRatioSchema } from "./compute/budget";
 import { z } from "zod";
 
 export const sourceSelectionSchema = z.strictObject({
   deviceId: z.string().regex(/^[0-9]{1,32}$/),
   channel: z.union([z.literal(1), z.literal(2)]),
+  videoQuality: cameraVideoQualitySchema.optional(),
 });
 export const perceptionConfigSchema = z
   .strictObject({
     cpuRatio: cpuRatioSchema,
     window: windowPolicySchema.default(() => windowPolicySchema.parse({})),
+    identity: identityConfigSchema.nullable().default(null),
     sources: z
       .union([z.literal("household"), z.array(sourceSelectionSchema).max(8)])
       .default([]),

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -14,22 +15,26 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
+	"github.com/AlexxIT/go2rtc/pkg/xiaomi/miss"
 	"github.com/google/uuid"
 	"github.com/pion/rtp"
 )
 
 // One private stream per camera channel, shared by its resident consumer and viewers.
 type homeAgentCameraState struct {
-	stream        *streams.Stream
-	ctx           context.Context
-	cancel        context.CancelFunc
-	gate          chan struct{}
-	playbacks     map[string]*homeAgentPlaybackState
-	analyses      map[*homeAgentAnalysisConsumer]context.CancelFunc
-	audioAnalyses map[*homeAgentAudioConsumer]context.CancelFunc
-	activity      atomic.Pointer[homeAgentPacketActivity]
-	timeline      atomic.Pointer[homeAgentMediaTime]
-	releaseSource func()
+	stream          *streams.Stream
+	ctx             context.Context
+	cancel          context.CancelFunc
+	gate            chan struct{}
+	playbacks       map[string]*homeAgentPlaybackState
+	analyses        map[*homeAgentAnalysisConsumer]context.CancelFunc
+	audioAnalyses   map[*homeAgentAudioConsumer]context.CancelFunc
+	activity        atomic.Pointer[homeAgentPacketActivity]
+	timeline        atomic.Pointer[homeAgentMediaTime]
+	releaseSource   func()
+	singleLens      bool
+	recordingsReady bool
+	recordings      *miss.Producer
 }
 
 var homeAgentModel = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
@@ -52,6 +57,7 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		ChannelCount int    `json:"channelCount"`
 		Model        string `json:"model"`
 		LocalIP      string `json:"localip"`
+		VideoQuality *int   `json:"videoQuality,omitempty"`
 	}
 	if !homeAgentRead(w, r, &body) {
 		return
@@ -77,14 +83,18 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ip := net.ParseIP(body.LocalIP)
-	if body.ChannelCount < 1 || body.ChannelCount > 2 || body.Channel < 1 || body.Channel > body.ChannelCount || !homeAgentIdentifier.MatchString(body.Did) || !homeAgentModel.MatchString(body.Model) ||
+	if (body.VideoQuality != nil && (*body.VideoQuality < 1 || *body.VideoQuality > 3)) || body.ChannelCount < 1 || body.ChannelCount > 2 || body.Channel < 1 || body.Channel > body.ChannelCount || !homeAgentIdentifier.MatchString(body.Did) || !homeAgentModel.MatchString(body.Model) ||
 		(!strings.Contains(body.Model, ".camera.") && !strings.Contains(body.Model, ".cateye.")) ||
 		ip == nil || !ip.IsPrivate() || ip.To4() == nil {
 		homeAgentError(w, "camera_unavailable", http.StatusBadRequest)
 		return
 	}
 	source := url.URL{Scheme: "xiaomi", User: url.UserPassword(session.alias, session.region), Host: body.LocalIP}
-	source.RawQuery = url.Values{"did": {body.Did}, "model": {body.Model}, "audio": {"1"}}.Encode()
+	query := url.Values{"did": {body.Did}, "model": {body.Model}, "audio": {"1"}}
+	if body.VideoQuality != nil {
+		query.Set("subtype", strconv.Itoa(*body.VideoQuality))
+	}
+	source.RawQuery = query.Encode()
 	if body.Channel == 2 {
 		query := source.Query()
 		query.Set("channel", "2")
@@ -94,6 +104,7 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	camera := &homeAgentCameraState{
 		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
+		singleLens:    body.ChannelCount == 1,
 		playbacks:     make(map[string]*homeAgentPlaybackState),
 		analyses:      make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
 		audioAnalyses: make(map[*homeAgentAudioConsumer]context.CancelFunc),
@@ -103,6 +114,10 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
+		homeAgentMu.Lock()
+		camera.recordings, _ = producer.(*miss.Producer)
+		camera.recordingsReady = true
+		homeAgentMu.Unlock()
 		return homeAgentTimeProducer(camera, producer), nil
 	})
 	if body.ChannelCount == 2 {

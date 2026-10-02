@@ -17,7 +17,7 @@ export function createInferencePool(
   const active = new Set<Promise<unknown>>();
   let failure: Error | undefined;
   let initialized = false;
-  let reservedTracking = 0;
+  const auxiliary = new Set<"tracking" | "identity">();
   let closing:
     | Promise<Extract<Awaited<ReturnType<typeof run>>, { kind: "closed" }>>
     | undefined;
@@ -60,7 +60,7 @@ export function createInferencePool(
   function dispatchQueued() {
     const idle =
       workers.reduce((sum, worker) => sum + worker.active, 0) <
-      workers.length - reservedTracking
+      workers.length - auxiliary.size
         ? workers.find((worker) => worker.active === 0)
         : undefined;
     if (!failure && queued && idle) {
@@ -140,14 +140,14 @@ export function createInferencePool(
       );
     if (
       active.size >=
-      workers.length - reservedTracking + detectionComputeBudget.pendingTasks
+      workers.length - auxiliary.size + detectionComputeBudget.pendingTasks
     )
       return Promise.reject(
         new ComputeBusyError("Detection compute capacity busy"),
       );
     const idle =
       workers.reduce((sum, worker) => sum + worker.active, 0) <
-      workers.length - reservedTracking
+      workers.length - auxiliary.size
         ? workers.find((worker) => worker.active === 0)
         : undefined;
     if (!idle && (queued || onAdmitted))
@@ -226,14 +226,28 @@ export function createInferencePool(
         return false;
       // Stop refilling this slot immediately, but let admitted detections drain.
       // A later request can start ReID as soon as the reserved CPU is free.
-      reservedTracking = 1;
+      auxiliary.add("tracking");
       return (
         workers.reduce((sum, worker) => sum + worker.active, 0) <=
-        workers.length - reservedTracking
+        workers.length - auxiliary.size
       );
     },
     releaseTracking() {
-      reservedTracking = 0;
+      auxiliary.delete("tracking");
+      dispatchQueued();
+      for (const listener of availableListeners.keys()) listener();
+    },
+    reserveIdentity() {
+      if (closing || failure || !initialized || workers.length < 3)
+        return false;
+      auxiliary.add("identity");
+      return (
+        workers.reduce((sum, worker) => sum + worker.active, 0) <=
+        workers.length - auxiliary.size
+      );
+    },
+    releaseIdentity() {
+      auxiliary.delete("identity");
       dispatchQueued();
       for (const listener of availableListeners.keys()) listener();
     },
@@ -243,7 +257,7 @@ export function createInferencePool(
         !failure &&
         initialized &&
         workers.reduce((sum, worker) => sum + worker.active, 0) <
-          workers.length - reservedTracking
+          workers.length - auxiliary.size
       );
     },
     subscribeAvailable(

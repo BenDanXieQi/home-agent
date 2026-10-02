@@ -23,11 +23,13 @@ type homeAgentAnalysisConsumer struct {
 	mu      sync.Mutex
 	bytes   int
 	muxer   *mpegts.Muxer
+	camera  *homeAgentCameraState
 }
 
 type homeAgentAnalysisPacket struct {
 	payload   []byte
 	timestamp uint32
+	timeline  *homeAgentMediaTime
 }
 
 func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, track *core.Receiver) error {
@@ -40,11 +42,19 @@ func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, t
 	default:
 		return errors.New("unsupported_analysis_codec")
 	}
+	timeline := c.camera.timeline.Load()
+	if timeline == nil {
+		return errors.New("media_clock_unavailable")
+	}
 	pid := c.muxer.AddTrack(kind)
 	sender := core.NewSender(media, track.Codec)
 	var origin uint32
 	anchored := false
 	sender.Handler = func(packet *rtp.Packet) {
+		if c.camera.timeline.Load() != timeline {
+			c.cancel()
+			return
+		}
 		if !anchored {
 			origin, anchored = packet.Timestamp, true
 		}
@@ -58,7 +68,7 @@ func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, t
 			return
 		}
 		select {
-		case c.packets <- homeAgentAnalysisPacket{append([]byte(nil), payload...), packet.Timestamp}:
+		case c.packets <- homeAgentAnalysisPacket{payload: append([]byte(nil), payload...), timestamp: packet.Timestamp, timeline: timeline}:
 			c.bytes += len(payload)
 		default:
 			c.cancel()
@@ -101,6 +111,7 @@ func homeAgentAnalysis(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(camera.ctx)
 	consumer := &homeAgentAnalysisConsumer{
 		Connection: core.Connection{ID: core.NewID(), FormatName: "home-agent/analysis", Medias: []*core.Media{{Kind: core.KindVideo, Direction: core.DirectionSendonly, Codecs: []*core.Codec{{Name: core.CodecH264}, {Name: core.CodecH265}}}}},
+		camera:     camera,
 		cancel:     cancel, packets: make(chan homeAgentAnalysisPacket, 32), muxer: mpegts.NewMuxer(),
 	}
 	camera.analyses[consumer] = cancel
@@ -142,12 +153,15 @@ func homeAgentAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	case first = <-consumer.packets:
 	}
+	if ctx.Err() != nil || camera.timeline.Load() != first.timeline {
+		return
+	}
 	controller := http.NewResponseController(w)
 	// Cancellation interrupts a blocked network write; it never takes the global lock.
 	stopWrite := context.AfterFunc(ctx, func() { _ = controller.SetWriteDeadline(time.Now()) })
 	defer stopWrite()
 	w.Header().Set("Content-Type", "video/mp2t")
-	w.Header().Set("X-Media-Generation", homeAgentMediaGeneration(camera))
+	w.Header().Set("X-Media-Generation", first.timeline.Generation)
 	w.Header().Set("X-Media-Clock-Rate", "90000")
 	w.Header().Set("X-Media-PTS-Origin", strconv.FormatUint(uint64(first.timestamp), 10))
 	write := func(data []byte) bool {

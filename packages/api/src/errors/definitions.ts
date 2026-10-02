@@ -83,4 +83,20 @@ export const errorDefinitions = {
   },
   perception_timeout: { status: 504, message: "Image analysis timed out." },
   perception_failed: { status: 500, message: "Image analysis failed." },
+  perception_media_unavailable: {
+    status: 410,
+    message: "The window media is no longer available.",
+  },
+  perception_media_ineligible: {
+    status: 409,
+    message: "The window cannot produce the requested media.",
+  },
+  perception_media_not_ready: {
+    status: 409,
+    message: "The window media is not ready.",
+  },
+  perception_media_capacity: {
+    status: 429,
+    message: "Window media processing is at capacity. Try again shortly.",
+  },
 } as const satisfies Record<ErrorCode, { status: number; message: string }>;
