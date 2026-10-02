@@ -1,3 +1,4 @@
+import { dirname, resolve } from "node:path";
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { perceptionConfigSchema } from "./config";
@@ -21,9 +22,19 @@ export async function readPerceptionConfig(path: string) {
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     if (bytesRead > 65_536)
       throw new Error("Perception configuration exceeds 64 KiB");
-    return perceptionConfigSchema.parse(
+    const config = perceptionConfigSchema.parse(
       JSON.parse(buffer.toString("utf8", 0, bytesRead)),
     );
+    if (config.identity) {
+      const base = dirname(path);
+      const identity = config.identity;
+      identity.modelDirectory = resolve(base, identity.modelDirectory);
+      if (identity.galleryFile)
+        identity.galleryFile = resolve(base, identity.galleryFile);
+      if (identity.python.includes("/") || identity.python.includes("\\"))
+        identity.python = resolve(base, identity.python);
+    }
+    return config;
   } finally {
     await file.close();
   }

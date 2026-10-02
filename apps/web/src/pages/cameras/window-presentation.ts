@@ -39,3 +39,29 @@ export const recordingStates = {
   evicted: "已清理",
   revoked: "访问已撤销",
 };
+
+export const historicalIdentityStatuses = {
+  idle: "当时未采样",
+  starting: "当时模型尚未就绪",
+  unloading: "当时模型在释放中",
+  collecting: "当时仅采集人脸证据",
+  recognizing: "当时已启用参考匹配",
+  unavailable: "当时身份分析不可用",
+  disabled: "当时未启用身份分析",
+};
+
+export const identityStates = {
+  unknown: "未知",
+  candidate: "候选",
+  confirmed: "本地已确认",
+  conflict: "证据冲突",
+};
+
+export const identityReasons = new Map([
+  ["no_reference_gallery", "未配置参考资料"],
+  ["conflicting_face_evidence", "人脸证据互相冲突"],
+  ["repeated_face_support", "多次人脸证据支持同一标签"],
+  ["insufficient_support", "支持证据尚不足"],
+  ["below_identity_threshold", "身份分数或分差未达到阈值"],
+  ["no_fresh_face", "缺少有效的人脸证据"],
+]);

@@ -1,3 +1,5 @@
+import { createRecordingService } from "./mijia/recordings/service";
+import { createRecordingRoutes } from "./mijia/recordings/routes";
 import type { createMemberRepository } from "./household/members/repository";
 import { createMemberRoutes } from "./household/members/routes";
 import { createPerceptionRoutes } from "./perception/routes";
@@ -26,6 +28,10 @@ import type { createContextRepository } from "./household-context/repository";
 type AppDependencies = {
   perception: ReturnType<typeof createPerceptionService>;
   staticRoot?: string;
+  recordings?: Pick<
+    Parameters<typeof createRecordingService>[0],
+    "directory" | "executable" | "resolveWindow"
+  >;
   environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
   connectionStore: ConnectionStore;
   household: HouseholdRuntime;
@@ -41,6 +47,7 @@ type AppDependencies = {
 export function createApp({
   perception,
   staticRoot,
+  recordings,
   environment,
   connectionStore,
   household,
@@ -52,6 +59,13 @@ export function createApp({
   shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
+  const recordingService = createRecordingService({
+    ...recordings,
+    household,
+    mijia: mijiaService,
+    shutdown: shutdownSignal,
+    resolveWindow: recordings?.resolveWindow ?? perception.window,
+  });
   const app = new Hono();
   app.use(httpTracing());
   app.use(async (c, next) => {
@@ -118,6 +132,10 @@ export function createApp({
       }),
     )
     .route(
+      "/api/mijia/recordings",
+      createRecordingRoutes(recordingService, environment.BACKEND_PORT),
+    )
+    .route(
       "/api/mijia",
       createMijiaRoutes(
         environment.BACKEND_PORT,
@@ -136,5 +154,5 @@ export function createApp({
   if (staticRoot) app.route("/", createWebRoutes(staticRoot));
   app.notFound((c) => errorResponse(c, new AppError("not_found")));
   app.onError(handleHttpError);
-  return routes;
+  return Object.assign(routes, { closeRecordings: recordingService.close });
 }

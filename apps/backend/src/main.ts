@@ -108,6 +108,14 @@ const app = createApp({
     : undefined,
   perception,
   staticRoot: join(import.meta.dir, "public"),
+  recordings: {
+    executable: environment.PERCEPTION_FFMPEG_PATH,
+    directory: resolvePath(
+      import.meta.dir,
+      "../../..",
+      "data/recording-playback",
+    ),
+  },
   environment,
   connectionStore,
   household,
@@ -136,6 +144,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           Promise.all([
             server.stop(),
             perception.close(),
+            app.closeRecordings(),
             deviceLogs.stop("后端停止", "interrupted"),
             household.close().catch(() => {
               console.warn(

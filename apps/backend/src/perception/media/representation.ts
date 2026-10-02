@@ -81,6 +81,7 @@ export function representationParameters(
     frames: selected.map((frame) => ({
       sequence: frame.sequence,
       offsetMs: frame.receivedAt - startedAt,
+      identity: frame.identity,
       detections:
         frame.detections?.flatMap((box) => {
           const x = Math.max(

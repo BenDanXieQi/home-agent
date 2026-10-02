@@ -12,7 +12,8 @@ export async function prepareClipDirectory(directory: string) {
   for (const entry of entries) {
     if (
       (entry.isFile() && /^[0-9a-f-]{36}\.(mp4|jpg)$/.test(entry.name)) ||
-      (entry.isDirectory() && /^\.encoding-[A-Za-z0-9]+$/.test(entry.name))
+      (entry.isDirectory() &&
+        /^(?:\.encoding-|instance-)[A-Za-z0-9]+$/.test(entry.name))
     )
       await rm(join(directory, entry.name), {
         recursive: entry.isDirectory(),

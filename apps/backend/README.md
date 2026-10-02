@@ -4,7 +4,7 @@
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、音频分析及 P4 窗口筛选／自动回看及按需媒体已接入；身份确认与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析及 P4 窗口筛选／自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -28,19 +28,24 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 ## 接口
 
-| 接口                                     | 职责                                                                                |
-| ---------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GET /api/health`                        | backend 存活状态，不检查外围服务或数据库                                            |
-| `GET /api/config`                        | 读取连接配置及可写状态                                                              |
-| `PUT /api/config`                        | 校验并保存完整连接配置                                                              |
-| `GET /api/services/status`               | 检查 Agent 与 go2rtc 的接口是否可用                                                 |
-| `POST /api/chat`                         | 将 JSON 请求转发至 Agent，透传响应与 SSE                                            |
-| `GET /api/perception`                    | 本地检测、人宠跟踪与音频的健康及最新观测                                            |
-| `GET /api/perception/stream`             | 订阅本地感知当前状态，不传输媒体片段                                                |
-| `POST /api/perception/images/detect`     | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
-| `GET /api/perception/windows`            | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量           |
-| `POST /api/perception/windows/:id/media` | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
-| `POST /api/perception/retry`             | 显式重试检测与音频计算，重新准入失败音轨                                            |
+| 接口                                                | 职责                                                                                |
+| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| `GET /api/health`                                   | backend 存活状态，不检查外围服务或数据库                                            |
+| `GET /api/config`                                   | 读取连接配置及可写状态                                                              |
+| `PUT /api/config`                                   | 校验并保存完整连接配置                                                              |
+| `GET /api/services/status`                          | 检查 Agent 与 go2rtc 的接口是否可用                                                 |
+| `POST /api/chat`                                    | 将 JSON 请求转发至 Agent，透传响应与 SSE                                            |
+| `GET /api/perception`                               | 本地检测、人宠跟踪、人物身份与音频的健康及最新观测                                  |
+| `GET /api/perception/stream`                        | 订阅本地感知当前状态，不传输媒体片段                                                |
+| `POST /api/perception/images/detect`                | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
+| `GET /api/perception/windows`                       | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量           |
+| `POST /api/perception/windows/:id/media`            | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
+| `POST /api/mijia/cameras/recordings`                | 读取当前来源的 SD 卡录像索引，保留设备时间依据                                      |
+| `PUT/GET/DELETE /api/mijia/recordings/playback/:id` | 申请、查询或释放经校验的 SD 卡回放资源                                              |
+| `GET/HEAD /api/mijia/recordings/playback/:id/media` | 受控 MP4 读取，支持单段字节范围请求                                                 |
+| `POST /api/perception/retry`                        | 显式重试检测与音频计算，重新准入失败音轨                                            |
+
+SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像生成与对外状态；窗口和 SD 回放各自使用 `src/media/resources.ts` 的独立实例管理队列、文件、容量预留、期限、读取和清理。两者的预算与队列不混用，SD 下载不会占用窗口编码名额。`mijia/media/recording-file.ts` 负责内部传输边界，`recordings/media.ts` 使用现有媒体库处理容器与编码，`src/media/ffmpeg.ts` 统一进程执行与退出等待；`recordings/alignment.ts` 保持帧匹配规则独立于 HTTP 和文件存储。接口、容量、取消与验证边界见 [SD 卡录像回放](../../docs/mijia.md#sd-卡录像读取与回放)。
 
 图片上传接口只要求本机访问及模型可用，不要求家庭或媒体就绪；输入限额、临时文件、等待与共享计算行为见[图片上传分析](../../docs/perception.md#独立图片上传分析)。`perception/image-upload.ts` 负责 HTTP 字节与临时输入，感知服务按需准备、复用和恢复已有检测池，视频禁用不阻止图片计算恢复。
 
@@ -87,6 +92,10 @@ src/
 ├── main.ts                 # 启动、资源初始化与关闭
 ├── app.ts                  # 中间件、子路由与错误处理的组装
 ├── environment.ts          # 环境变量解析
+├── media/
+│   ├── resources.ts         # 媒体任务、文件、读取、容量与回收的唯一所有者
+│   ├── ffmpeg.ts            # 有界进程输出、取消与退出确认
+│   └── clip-files.ts        # 独占缓存目录准备及中断遗留清理
 ├── web/
 │   └── routes.ts           # Web 预压缩文件、缓存与页面回退
 ├── connections/
@@ -120,19 +129,28 @@ src/
 │   │   ├── camera-source-spec.ts    # 单路摄像头共享流规格
 │   │   ├── camera-source-manager.ts # 共享流注册、重试、离线保留与释放
 │   │   ├── audio-stream.ts          # 米家音轨 HTTP 接入与编码流边界转换
+│   │   ├── recording-file.ts        # 有界 SD 卡文件传输与元数据校验
 │   │   ├── playback-manager.ts      # 播放预约、观看资源、取消与记录回收
 │   │   └── go2rtc-adapter.ts        # 专用 go2rtc 协议、心跳与超时
+│   ├── recordings/
+│   │   ├── service.ts     # 回放资源、准备队列、缓存预算、期限与撤权
+│   │   ├── routes.ts      # 回放资源 HTTP 与受控文件读取
+│   │   ├── alignment.ts   # 原帧指纹与媒体时间的对齐规则
+│   │   └── media.ts       # 实际容器校验、原帧指纹与浏览器 MP4 编码
 │   └── protocols/
 │       ├── micloud/       # 扫码、Cookie、设备清单及 RC4 属性请求
 │       │   └── properties.ts # 属性地址类型、每批数量上限及请求超时
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、SSE 与限时设备推送日志
-├── perception/            # 本地检测、来源协调、人宠跟踪、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
+├── perception/            # 本地检测、来源协调、人宠跟踪、轨迹身份证据、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
 │   ├── source-lease.ts     # 音视频共用的来源资格撤销与取消联动
+│   ├── video/              # 视频采集调度与跟踪、身份模块协作
+│   ├── tracking/           # 人体与猫狗轨迹、有界原帧借用
+│   ├── identity/           # 轨迹人物身份证据、判断与人脸模型适配
 │   ├── audio/              # 连续分块、Silero 适配、解码与音频进程监督
-│   ├── window/             # 窗口聚合、覆盖判定、有限期输入与访问接口
+│   ├── window/             # 窗口聚合、历史身份快照、覆盖判定与有限期输入
 │   ├── gate/               # 场景筛选和裁切区域规则
 │   └── media/              # 媒体解码、表示参数、编码与受控读取
 ├── credentials/
@@ -145,11 +163,13 @@ src/
 
 按功能组织代码，子路由使用 `new Hono()` 创建，由 `app.route()` 挂载。backend 与 Agent 通过 `@home-agent/api/local-access` 复用本机访问限制；前后端数据契约位于 `packages/api/src/contracts`。
 
+`perception/identity/analysis.ts` 拥有单次来源运行中的人物身份证据与判断；`runtime.ts` 协调原帧采样、证据期限和资源，`process.ts` 与 Python 入口适配 OpenCV。`video/runtime.ts` 统一协调跟踪和身份模块的启停，`tracking/` 通过本帧回调交付结果与像素。跟踪完成时冻结的紧凑身份快照经 `identity_frame` 交给窗口，只接纳到准确对应帧的未关闭窗口；当前身份广播继续独立合并。窗口媒体保存、字节预算及读取权限复用 `media/window-media.ts`，身份模块只增加历史元数据。人体轨迹仍由 `tracking/` 拥有，家庭成员资料与权威身份归家庭领域。配置与判断规则见[持续人物身份分析](../../docs/perception.md#持续人物身份分析)，历史语义及独立保留期限见[窗口中的历史身份](../../docs/perception.md#窗口中的历史身份)。
+
 普通 TypeScript 文件和目录使用小写短横线命名，类与类型使用 PascalCase，变量和方法使用 camelCase。对外错误码使用小写下划线；上游协议的原始字段和错误标识在适配边界转换。定时器句柄使用 `*Timer`，时间戳使用 `*At`，毫秒时长使用 `*Ms`。
 
 业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../packages/api/README.md#错误响应)。
 
-`main.ts` 是应用级依赖的唯一装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数和静态资源位置，只组装 HTTP 应用，不读取环境或隐式创建资源。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭。本地感知服务不接收 Agent 客户端或模型凭据。
+`main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据。
 
 聊天路由只接收 Agent 地址读取函数、端口与超时；米家服务接收 go2rtc 地址读取函数、凭据仓库和家庭选择存储模块。地址函数由启动入口连接到配置仓库，调用时读取当前配置，业务模块不依赖 YAML 存储结构。数据库连接由存储模块使用，不放入 HTTP 请求上下文。`environment.ts` 负责读取和校验进程环境变量。
 
