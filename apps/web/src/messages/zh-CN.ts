@@ -42,6 +42,7 @@ const errorMessages = {
   model_not_configured: "请配置 AGENT_MODEL 和 OPENAI_API_KEY。",
   database_not_configured: "请配置 Agent 数据库并运行 db:migrate。",
   persistence_unavailable: "会话存储不可用，请检查数据库并运行 db:migrate。",
+  thread_incomplete: "这个会话有未完成的执行，请新建对话。",
   thread_busy: "当前会话仍在运行，请等待结束后再发送。",
   request_cancelled: "请求已取消。",
   run_timeout: "Agent 执行超时。",

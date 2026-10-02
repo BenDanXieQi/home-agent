@@ -24,6 +24,7 @@ export const errorCodeSchema = z.enum([
   "database_not_configured",
   "persistence_unavailable",
   "thread_busy",
+  "thread_incomplete",
   "request_cancelled",
   "run_timeout",
   "agent_execution_failed",

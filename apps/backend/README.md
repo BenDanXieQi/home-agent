@@ -34,7 +34,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `GET /api/config`                    | 读取连接配置及可写状态                         |
 | `PUT /api/config`                    | 校验并保存完整连接配置                         |
 | `GET /api/services/status`           | 检查 Agent 与 go2rtc 的接口是否可用            |
-| `POST /api/chat`                     | 将 JSON 请求转发至 Agent，透传响应与 SSE       |
+| `POST /api/chat`                     | 绑定家庭范围后转发至 Agent，透传响应与 SSE     |
 | `GET /api/perception`                | 本地检测、人宠跟踪与音频的健康及最新观测       |
 | `GET /api/perception/stream`         | 订阅本地感知当前状态，不传输媒体片段           |
 | `POST /api/perception/images/detect` | 接收图片字节并返回该输入的检测结果，复用共享池 |
@@ -62,9 +62,28 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 聊天请求最多 32 KiB，超时由 `BACKEND_REQUEST_TIMEOUT_MS` 控制，默认 130 秒；客户端取消会传递到 Agent。`threadId` 与 `X-Thread-Id` 原样透传，backend 不读写 Agent 的 checkpoint 表。
 
+`POST /api/chat/history/list` 和 `POST /api/chat/history/read` 将历史查询转发给 Agent，校验返回结构并限制响应最多 4 MiB、请求最多 4 KiB、上游等待最多 45 秒；不直接访问 Agent 数据库。读取前后家庭运行范围变化时拒绝返回，客户端取消传递到上游。分页与未完成会话的含义见 [Agent 历史会话](../agent/README.md#历史会话)。
+
 聊天代理要求上游为本项目 Agent；响应体原样透传，错误连接到其他服务时不会将其 HTML 等响应转换为本项目错误格式。
 
 收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
+
+## 家庭只读查询
+
+`src/household/queries/` 为聊天及其他本机调用方提供精简查询，复用家庭运行时和成员仓库。原有 `GET /api/mijia/state`、`POST /api/mijia/facts/query` 和 `POST /api/household-members/list` 仍服务已有页面；查询接口不读取完整原始数据库表，不触发设备刷新、属性补读或模型分析。
+
+| POST 接口                             | 除 `scope_epoch` 外的参数                   | 返回内容                                                       |
+| ------------------------------------- | ------------------------------------------- | -------------------------------------------------------------- |
+| `/api/household/queries/overview`     | `offset?`、`limit?`                         | 分页房间清单、设备总数、未分配设备数、类别数量及人物／宠物数量 |
+| `/api/household/queries/devices`      | `query?`、`room_id?`、`category?`、分页参数 | 设备 ID、名称、别名、型号、房间、类别及可用状态                |
+| `/api/household/queries/device-state` | `device_id`、分页参数                       | 最近属性报告、枚举说明、质量与时间、采集覆盖                   |
+| `/api/household/queries/members`      | `query?`、`kind?`、分页参数                 | 登记的人物及宠物资料，不含位置或活动                           |
+
+请求必须携带当前 `scope_epoch`，范围变化或家庭未就绪时拒绝；数据库查询前后核验访问资格及实际家庭绑定。Agent 的范围由 backend 聊天入口注入，不由模型选择。概览和成员查询需要成员数据库可用，数据库错误不会当作零成员返回。
+
+列表默认 20 项、最多 50 项，`total` 为筛选后的总数，`next_offset` 为下一页起点，无下一页时为 `null`；概览分页仅作用于房间列表。设备文字查询对名称、别名、型号和类别做不区分大小写的子串匹配；成员文字查询匹配名字、物种和描述。`category` 精确匹配概览返回的类别代码；省略 `room_id` 查询全部，`null` 仅查询未分配房间。各页独立读取，返回 `state_version` 与 `queried_at`，不保证多次请求之间设备清单不变。
+
+设备状态返回原始值及有效性，枚举值附 `value_label`；缺少可用规格时标签为空，不猜数字含义。属性分页保留缺值项，不能用空列表判断设备关闭。接口沿用本机访问校验，禁用缓存，请求最多 4 KiB、响应最多 128 KiB；超过响应限额返回容量错误，调用方可缩小分页大小。共享契约位于 `packages/api/src/contracts/household-queries.ts`。
 
 ## 连接配置与探测
 
@@ -90,7 +109,7 @@ src/
 │   ├── store.ts            # YAML 路径、校验与读写
 │   └── status.ts           # 服务探测与状态接口
 ├── chat/
-│   └── routes.ts           # 聊天转发与流取消
+│   └── routes.ts           # 绑定家庭范围、聊天转发与流取消
 ├── mijia/
 │   ├── routes.ts           # 米家 HTTP 输入、响应与取消信号
 │   ├── service.ts          # 账号生命周期、凭据串行提交与跨模块协调

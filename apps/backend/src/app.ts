@@ -1,3 +1,5 @@
+import { createHouseholdQueries } from "./household/queries/service";
+import { createHouseholdQueryRoutes } from "./household/queries/routes";
 import type { createMemberRepository } from "./household/members/repository";
 import { createMemberRoutes } from "./household/members/routes";
 import { createPerceptionRoutes } from "./perception/routes";
@@ -81,6 +83,13 @@ export function createApp({
       ),
     )
     .route(
+      "/api/household/queries",
+      createHouseholdQueryRoutes(
+        environment.BACKEND_PORT,
+        createHouseholdQueries(household, memberRepository),
+      ),
+    )
+    .route(
       "/api/household-members",
       createMemberRoutes(environment.BACKEND_PORT, household, memberRepository),
     )
@@ -115,6 +124,7 @@ export function createApp({
         port: environment.BACKEND_PORT,
         timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
         readAgentUrl,
+        readHouseholdScope: () => household.epoch,
       }),
     )
     .route(

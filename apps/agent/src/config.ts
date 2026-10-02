@@ -35,6 +35,16 @@ const environment = z.object({
   ),
   AGENT_HOST: z.string().min(1).default("127.0.0.1"),
   AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(1811),
+  BACKEND_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  AGENT_BACKEND_URL: optionalText.pipe(
+    httpUrl
+      .refine(
+        (value) =>
+          ["localhost", "127.0.0.1", "[::1]"].includes(new URL(value).hostname),
+        "Use a loopback backend URL",
+      )
+      .optional(),
+  ),
   AGENT_MODEL: optionalText,
   AGENT_THINKING: optionalText.pipe(z.enum(["enabled", "disabled"]).optional()),
   OPENAI_API_KEY: optionalText,

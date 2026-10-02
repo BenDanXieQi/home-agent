@@ -1,5 +1,6 @@
 import {
   Database,
+  Bot,
   LayoutGrid,
   Users,
   ScrollText,
@@ -8,6 +9,13 @@ import {
 } from "lucide-react";
 
 export const navigation = [
+  {
+    to: "/agent",
+    label: "Agent",
+    icon: Bot,
+    cornerRadius: 14,
+    mobilePrimary: false,
+  },
   {
     to: "/devices",
     label: "房间",

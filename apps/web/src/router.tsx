@@ -45,6 +45,12 @@ const indexRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/",
 });
+const agentRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/agent",
+  staticData: { contentLayout: "viewport" },
+  component: lazyRouteComponent(() => import("./pages/agent/index")),
+});
 const devicesRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/devices",
@@ -109,6 +115,7 @@ export const router = createRouter({
   routeTree: rootRoute.addChildren([
     accountRoute.addChildren([
       indexRoute,
+      agentRoute,
       devicesRoute,
       membersRoute,
       addMemberRoute,

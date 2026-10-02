@@ -73,3 +73,11 @@ bun run --cwd packages/api test -- tests/contracts/household.test.ts
 ```
 
 消费方只测试自己如何使用契约和处理校验失败，不重复枚举这些共享规则。
+
+## 家庭只读查询
+
+`@home-agent/api/household-queries` 定义四个家庭查询的模型输入、含 `scope_epoch` 的 HTTP 请求和响应结构。输入分页及筛选边界由 Agent 工具和 backend 共用，设备和成员字段从已有领域 schema 派生。接口语义见 [backend 家庭只读查询](../../apps/backend/README.md#家庭只读查询)。公共聊天输入不接受范围参数，内部 `agentChatInputSchema` 要求 backend 注入 `household_scope`。
+
+## 聊天历史
+
+`chatHistoryListInputSchema`／`chatHistoryListSchema` 定义历史会话游标分页，`chatHistoryInputSchema`／`chatHistorySchema` 定义固定检查点的消息分页。`chatTurnSchema` 与 `chatToolCallSchema` 是实时聊天和历史展示共用的视图结构，不复制 LangGraph 存储格式。未完成会话不能直接追加输入，返回 `thread_incomplete`。
