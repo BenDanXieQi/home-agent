@@ -62,6 +62,11 @@ export const errorDefinitions = {
     status: 503,
     message: "Check the Agent database and run db:migrate.",
   },
+  thread_incomplete: {
+    status: 409,
+    message:
+      "This conversation has an unfinished run. Start a new conversation.",
+  },
   thread_busy: {
     status: 409,
     message: "This conversation already has an active run.",

@@ -1,3 +1,8 @@
+import {
+  createChatHistory,
+  canContinueChat,
+  messageText,
+} from "../chat/history";
 import { createHouseholdReset } from "../household-reset";
 import type { RunFailedEvent } from "@home-agent/api/contracts";
 import { AppError, errorPayload } from "@home-agent/api/errors";
@@ -8,25 +13,22 @@ import {
   recordFailure,
   currentTraceId,
 } from "@home-agent/observability";
-import { HumanMessage } from "@langchain/core/messages";
+import { HumanMessage, isToolMessage } from "@langchain/core/messages";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
-import { chatInputSchema } from "@home-agent/api/contracts";
+import {
+  agentChatInputSchema,
+  chatToolNameSchema,
+  chatToolPreviewLimit,
+  chatHistoryListInputSchema,
+  chatHistoryListSchema,
+  chatHistoryInputSchema,
+  chatHistorySchema,
+  chatHistoryResponseBytes,
+} from "@home-agent/api/contracts";
 import type { createHomeAgent } from "../graph/home-agent";
 import type { AgentDatabase } from "../db";
-
-function textContent(content: unknown) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block: unknown) => {
-      if (typeof block !== "object" || block === null || !("text" in block))
-        return "";
-      return typeof block.text === "string" ? block.text : "";
-    })
-    .join("");
-}
 
 export function createChatRoutes(
   agent: ReturnType<typeof createHomeAgent>,
@@ -37,17 +39,69 @@ export function createChatRoutes(
   const app = new Hono();
   // Single-process admission guard. Hold until graph execution has settled.
   const activeThreads = new Set<string>();
+  async function readHistory<T>(
+    operation: (history: ReturnType<typeof createChatHistory>) => Promise<T>,
+    signal: AbortSignal,
+  ) {
+    if (!database) throw new AppError("database_not_configured");
+    const leave = reset.enter();
+    try {
+      const result = await operation(
+        createChatHistory(database, activeThreads, signal),
+      );
+      if (Buffer.byteLength(JSON.stringify(result)) > chatHistoryResponseBytes)
+        throw new AppError("request_too_large");
+      return result;
+    } catch (cause) {
+      if (signal.aborted) throw new AppError("request_cancelled");
+      if (cause instanceof AppError) throw cause;
+      throw new AppError("persistence_unavailable", { cause });
+    } finally {
+      leave();
+    }
+  }
+  app.use(
+    "/history/*",
+    bodyLimit({
+      maxSize: 4096,
+      onError: (c) => errorResponse(c, new AppError("request_too_large")),
+    }),
+  );
+  app.post(
+    "/history/list",
+    validateJson(chatHistoryListInputSchema),
+    async (c) =>
+      c.json(
+        chatHistoryListSchema.parse(
+          await readHistory(
+            (history) => history.list(c.req.valid("json")),
+            c.req.raw.signal,
+          ),
+        ),
+      ),
+  );
+  app.post("/history/read", validateJson(chatHistoryInputSchema), async (c) =>
+    c.json(
+      chatHistorySchema.parse(
+        await readHistory(
+          (history) => history.detail(c.req.valid("json")),
+          c.req.raw.signal,
+        ),
+      ),
+    ),
+  );
   app.post(
     "/",
     bodyLimit({
-      maxSize: 32_768,
+      // The backend adds the trusted household scope to the public 32 KiB body.
+      maxSize: 33_792,
       onError: (c) =>
         errorResponse(
           c,
-          new AppError("request_too_large", { params: { maxBytes: 32768 } }),
+          new AppError("request_too_large", { params: { maxBytes: 33792 } }),
         ),
     }),
-    validateJson(chatInputSchema),
+    validateJson(agentChatInputSchema),
     async (c) => {
       const input = c.req.valid("json");
       if (!agent) throw new AppError("model_not_configured");
@@ -59,12 +113,15 @@ export function createChatRoutes(
       activeThreads.add(threadId);
       try {
         // Check storage before returning an SSE success status or calling the model.
-        await database.checkpointer.getTuple({
+        const saved = await database.checkpointer.getTuple({
           configurable: { thread_id: threadId },
         });
+        if (input.threadId && !saved) throw new AppError("not_found");
+        if (!canContinueChat(saved)) throw new AppError("thread_incomplete");
       } catch (cause) {
         activeThreads.delete(threadId);
         leave();
+        if (cause instanceof AppError) throw cause;
         throw new AppError("persistence_unavailable", { cause });
       }
       if (c.req.raw.signal.aborted) {
@@ -162,12 +219,39 @@ export function createChatRoutes(
                       runName: "home-agent-chat",
                       recursionLimit: 12,
                       signal,
-                      configurable: { thread_id: threadId },
+                      configurable: {
+                        thread_id: threadId,
+                        household_scope: input.household_scope,
+                      },
                       durability: "sync",
                     },
                   )) {
+                    const toolName = chatToolNameSchema.safeParse(event.name);
+                    if (toolName.success && event.event === "on_tool_start") {
+                      await emit("tool_started", {
+                        runId,
+                        threadId,
+                        callId: event.run_id,
+                        name: toolName.data,
+                        input: event.data.input,
+                      });
+                    }
+                    if (toolName.success && event.event === "on_tool_end") {
+                      const output: unknown = event.data.output;
+                      const content = messageText(
+                        isToolMessage(output) ? output.content : output,
+                      );
+                      await emit("tool_completed", {
+                        runId,
+                        threadId,
+                        callId: event.run_id,
+                        name: toolName.data,
+                        output: content.slice(0, chatToolPreviewLimit),
+                        truncated: content.length > chatToolPreviewLimit,
+                      });
+                    }
                     if (event.event === "on_chat_model_stream") {
-                      const text = textContent(event.data.chunk?.content);
+                      const text = messageText(event.data.chunk?.content);
                       if (text) {
                         if (firstToken) {
                           span.setAttribute(
