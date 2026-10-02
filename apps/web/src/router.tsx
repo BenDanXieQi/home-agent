@@ -76,6 +76,9 @@ const camerasIndexRoute = createRoute({
 const cameraDetailRoute = createRoute({
   getParentRoute: () => camerasRoute,
   path: "$deviceId/$channel",
+  validateSearch: (search: Record<string, unknown>) => ({
+    mode: search.mode === "windows" ? ("windows" as const) : undefined,
+  }),
   component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
 });
 const cameraViewRoute = createRoute({

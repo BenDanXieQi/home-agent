@@ -48,11 +48,12 @@ export function homeSelectionStore(
       return selection;
     }),
     write: mock<HomeSelectionStore["write"]>(
-      async (account, homeId, assert) => {
+      async (account, homeId, assert, previousHomeId = null) => {
         assert();
         if (
-          selection &&
-          (accountKey !== account || selection.homeId !== homeId)
+          (accountKey !== null && accountKey !== account) ||
+          (selection?.homeId !== homeId &&
+            (selection?.homeId ?? null) !== previousHomeId)
         )
           throw new MijiaError("binding_conflict");
         accountKey = account;

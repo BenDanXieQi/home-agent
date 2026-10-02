@@ -1,3 +1,4 @@
+import { dirname, join } from "node:path";
 import { createWindowStore } from "./window/store";
 import { createWindowMedia } from "./media/window-media";
 import { prepareSourceLease } from "./source-lease";
@@ -70,7 +71,12 @@ export function createPerceptionService(options: {
       );
     },
   });
-  const media = createWindowMedia(windows, options.executable);
+  const media = createWindowMedia(
+    windows,
+    options.executable,
+    join(dirname(options.configPath), "runtime", "perception-clips"),
+  );
+  const unsubscribeWindows = windows.subscribe(media.capture);
   const audio = createAudioService({
     media: (track, pcm) => {
       windows.audio(track, pcm);
@@ -112,7 +118,7 @@ export function createPerceptionService(options: {
   function reconcile() {
     if (stopped) return;
     windows.tick(Date.now());
-    media.snapshot();
+    media.prune();
     const selected =
       config.sources === "household" ? options.sources.list() : config.sources;
     windows.reconcile(
@@ -300,10 +306,23 @@ export function createPerceptionService(options: {
   }
   return {
     start: initialize,
-    windows: () => ({
-      ...windows.snapshot(Date.now()),
-      media: media.snapshot(),
-    }),
+    windows: (selection: Parameters<typeof windows.snapshot>[1]) => {
+      const snapshot = windows.snapshot(Date.now(), selection);
+      return {
+        ...snapshot,
+        windows: snapshot.windows.map((entry) => ({
+          ...entry,
+          recording: media.recording(entry.id),
+        })),
+        media: media.snapshot(),
+      };
+    },
+    window: (id: string) => {
+      const entry = windows.describe(id, Date.now());
+      return !entry || entry.inputState === "revoked"
+        ? undefined
+        : { ...entry, recording: media.recording(id) };
+    },
     media,
     async detectImage(
       input: Parameters<
@@ -359,6 +378,7 @@ export function createPerceptionService(options: {
     close() {
       if (closing) return closing;
       stopped = true;
+      unsubscribeWindows();
       shutdown.abort();
       clearInterval(timer);
       unsubscribeSources();

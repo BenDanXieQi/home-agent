@@ -135,7 +135,7 @@ process.on("message", (message: unknown) => {
             await send({
               kind: "track",
               track: view,
-              pcm: new Int16Array(pcm),
+              pcm,
             });
           },
         }),

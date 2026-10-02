@@ -14,6 +14,7 @@ export const sourceAccessSchema = z.strictObject({
 // committed household access and own the lifetime of their prepared media.
 export type PerceptionSources = {
   list: () => z.infer<typeof sourceSelectionSchema>[];
+  // Household/device permission, independent of live media connection generations.
   eligibility: (source: z.infer<typeof sourceSelectionSchema>) => {
     scopeEpoch: z.infer<typeof stateVersionSchema>["scope_epoch"];
     householdVersion: z.infer<typeof stateVersionSchema>;
@@ -22,6 +23,7 @@ export type PerceptionSources = {
   subscribe: (
     listener: (version: z.infer<typeof stateVersionSchema>) => void,
   ) => () => void;
+  // Acquires the current media connection; its signal retires only that live lease.
   prepare: (
     source: z.infer<typeof sourceSelectionSchema>,
     signal: AbortSignal,
