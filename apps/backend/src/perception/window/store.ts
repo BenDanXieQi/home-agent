@@ -41,8 +41,28 @@ function source(run: z.infer<typeof runSchema>, identity: string, now: number) {
         { event: "tracking" }
       >["observation"]
     >(),
+    identityFrames: new Map<
+      number,
+      Extract<z.infer<typeof videoEventSchema>, { event: "identity_frame" }>
+    >(),
     lastClosedAt: -Infinity,
   };
+}
+function sameIdentityFrame(
+  frame: Extract<
+    z.infer<typeof videoEventSchema>,
+    { event: "identity_frame" }
+  >["frame"],
+  other: typeof frame,
+) {
+  return (
+    frame.sequence === other.sequence &&
+    frame.receivedAt === other.receivedAt &&
+    frame.mediaTime.generation === other.mediaTime.generation &&
+    frame.mediaTime.pts === other.mediaTime.pts &&
+    frame.width === other.width &&
+    frame.height === other.height
+  );
 }
 function retained(
   summary: z.infer<typeof windowSummarySchema>,
@@ -246,6 +266,9 @@ export function createWindowStore(options: {
       for (const results of [entry.observations, entry.tracking])
         for (const [sequence, observation] of results)
           if (observation.receivedAt < earliest) results.delete(sequence);
+      for (const [sequence, event] of entry.identityFrames)
+        if (event.frame.receivedAt < earliest)
+          entry.identityFrames.delete(sequence);
     }
     for (const [id, entry] of windows) maintain(id, entry, now);
   }
@@ -342,6 +365,7 @@ export function createWindowStore(options: {
       if (entry.videoRun && isCurrentRun(entry.videoRun, run)) return;
       entry.observations.clear();
       entry.tracking.clear();
+      entry.identityFrames.clear();
       entry.videoRun = run;
     },
     stopVideo(runId: string) {
@@ -349,6 +373,7 @@ export function createWindowStore(options: {
         if (entry.videoRun?.runId !== runId) continue;
         entry.observations.clear();
         entry.tracking.clear();
+        entry.identityFrames.clear();
         entry.videoRun = null;
       }
     },
@@ -415,6 +440,7 @@ export function createWindowStore(options: {
         }
         const observation = entry.observations.get(frame.sequence);
         const tracking = entry.tracking.get(frame.sequence);
+        const identity = entry.identityFrames.get(frame.sequence);
         entry.observations.delete(frame.sequence);
         entry.tracking.delete(frame.sequence);
         const detections =
@@ -433,9 +459,45 @@ export function createWindowStore(options: {
             tracking.mediaTime.generation === frame.mediaTime.generation
               ? tracking.tracks
               : null,
+          identity:
+            identity &&
+            isCurrentRun(identity.run, event.run) &&
+            sameIdentityFrame(identity.frame, frame)
+              ? identity.identity
+              : null,
         });
         value.bytes += size;
         bytes += size;
+      } else if (event.event === "identity_frame") {
+        const frame = event.frame;
+        const deadline =
+          (Math.floor(frame.receivedAt / windowLimits.durationMs) + 1) *
+            windowLimits.durationMs +
+          windowLimits.graceMs;
+        if (frame.receivedAt > now) return;
+        if (frame.receivedAt < entry.lastClosedAt || now >= deadline) {
+          counters.lateObservations++;
+          return;
+        }
+        // A frame owns its first frozen judgment; later inference cannot revise it.
+        if (entry.identityFrames.has(frame.sequence)) return;
+        const snapshot = structuredClone(event);
+        for (const value of entry.drafts.values()) {
+          if (!value.videoRun || !isCurrentRun(value.videoRun, event.run))
+            continue;
+          for (const retainedFrame of value.frames) {
+            if (
+              retainedFrame.identity === null &&
+              sameIdentityFrame(frame, retainedFrame)
+            )
+              retainedFrame.identity = snapshot.identity;
+          }
+        }
+        entry.identityFrames.set(frame.sequence, snapshot);
+        if (entry.identityFrames.size > 16)
+          entry.identityFrames.delete(
+            entry.identityFrames.keys().next().value!,
+          );
       } else if (
         (event.event === "settled" || event.event === "tracking") &&
         event.observation

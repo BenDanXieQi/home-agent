@@ -16,7 +16,7 @@ import { windowLimits } from "./limits";
 type Frame = z.infer<typeof sampledFrameSchema> &
   Pick<
     z.infer<typeof windowSummarySchema>["frames"][number],
-    "detections" | "tracks"
+    "detections" | "tracks" | "identity"
   >;
 export function createWindowDraft(
   startedAt: number,

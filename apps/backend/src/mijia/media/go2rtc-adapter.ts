@@ -1,3 +1,7 @@
+import {
+  cameraRecordingIndexSchema,
+  type mijiaRecordingQuerySchema,
+} from "@home-agent/api/mijia-recordings";
 import { sourceMediaSchema } from "@home-agent/api/contracts";
 import type { CameraSourceSpec } from "./camera-source-spec";
 import { createHash } from "node:crypto";
@@ -178,6 +182,9 @@ export class Go2RtcAdapter {
         channelCount: camera.channelCount,
         model: camera.model,
         localip: camera.localIp,
+        ...(camera.videoQuality === undefined
+          ? {}
+          : { videoQuality: camera.videoQuality }),
       },
       mijiaTimeouts.upstream,
       signal,
@@ -189,6 +196,34 @@ export class Go2RtcAdapter {
       sessionId: this.requireSession(),
       sourceId,
     });
+  }
+
+  async readRecordings(
+    sourceId: string,
+    query: Pick<z.infer<typeof mijiaRecordingQuerySchema>, "afterMs" | "limit">,
+    signal: AbortSignal,
+  ) {
+    const sessionId = this.requireSession();
+    const payload = await this.request(
+      "recordings",
+      "POST",
+      { sessionId, sourceId, ...query },
+      20_000,
+      signal,
+    );
+    if (this.requireSession() !== sessionId)
+      throw new Go2RtcError("session_expired");
+    const result = cameraRecordingIndexSchema.safeParse(payload);
+    if (!result.success) throw new Go2RtcError("invalid_response");
+    return result.data;
+  }
+
+  recordingDownloadAccess(sourceId: string) {
+    return {
+      endpoint: `${this.url}/api/home-agent/mijia/recording-download`,
+      sessionId: this.requireSession(),
+      sourceId,
+    };
   }
 
   analysisAccess(sourceId: string) {
@@ -400,7 +435,13 @@ export class Go2RtcAdapter {
   }
 
   private request(
-    action: "session" | "camera" | "playback" | "heartbeat",
+    action:
+      | "session"
+      | "camera"
+      | "playback"
+      | "heartbeat"
+      | "recordings"
+      | "clock",
     method: "PUT" | "POST" | "DELETE",
     body: object,
     timeoutMs: number = mijiaTimeouts.upstream,

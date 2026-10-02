@@ -22,6 +22,7 @@ import { cameraTileClassName, cameraTransitionName } from "./camera-styles";
 import { useCameraReturn } from "./use-camera-return";
 import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 import { CameraWindows } from "./CameraWindows";
+import { CameraRecordings } from "./CameraRecordings";
 
 export default function CameraDetailPage() {
   useCameraReturn();
@@ -96,7 +97,7 @@ function CameraDetailModes({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CameraBackLink />
         <nav aria-label="分析内容" className="flex gap-2">
-          {([undefined, "windows"] as const).map((value) => (
+          {([undefined, "windows", "recordings"] as const).map((value) => (
             <Link
               key={value ?? "live"}
               to="/cameras/$deviceId/$channel"
@@ -108,7 +109,11 @@ function CameraDetailModes({
               aria-current={mode === value ? "page" : undefined}
               className="rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface focus-visible:outline-2 aria-[current=page]:bg-surface aria-[current=page]:text-ink"
             >
-              {value === "windows" ? "筛选片段" : "实时检测"}
+              {value === "windows"
+                ? "筛选片段"
+                : value === "recordings"
+                  ? "SD 录像"
+                  : "实时检测"}
             </Link>
           ))}
         </nav>
@@ -116,10 +121,14 @@ function CameraDetailModes({
       <p className="text-sm text-muted">
         {mode === "windows"
           ? "查看后台筛选出的短片段，不影响摄像头持续分析。"
-          : "查看摄像头当前画面、检测框和实时分析结果。"}
+          : mode === "recordings"
+            ? "按日期查看摄像头 SD 卡中的完整录像。"
+            : "查看摄像头当前画面、检测框和实时分析结果。"}
       </p>
       {mode === "windows" ? (
         <CameraWindows source={source} scope={scope} />
+      ) : mode === "recordings" ? (
+        <CameraRecordings source={source} />
       ) : (
         <CameraDetailContent source={source} />
       )}

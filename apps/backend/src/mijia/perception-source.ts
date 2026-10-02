@@ -103,6 +103,7 @@ export function createPerceptionSources(
         source.deviceId,
         source.channel,
         signal,
+        source.videoQuality,
       );
       signal.throwIfAborted();
       if (eligibility(source)?.identity !== granted.identity)

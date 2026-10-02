@@ -14,6 +14,8 @@ import {
   candidateLabel,
 } from "./window-presentation";
 import { WindowMedia } from "./WindowMedia";
+import { WindowIdentity } from "./WindowIdentity";
+import { WindowRecording } from "./WindowRecording";
 
 export const WindowDetail = memo(function WindowDetail({
   entry,
@@ -133,6 +135,8 @@ export const WindowDetail = memo(function WindowDetail({
       ) : (
         <WindowMedia window={window} scope={scope} active={active} />
       )}
+      <WindowRecording window={window} active={active} />
+      <WindowIdentity frames={window.frames} />
       <details
         open={jsonOpen}
         onToggle={(event) => setJsonOpen(event.currentTarget.open)}

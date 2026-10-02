@@ -1,45 +1,10 @@
-import { spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdtemp, writeFile, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { WindowEncodingInput } from "./encoding-input";
 import { windowLimits } from "../window/limits";
 
-export class MediaCleanupError extends Error {}
-
-async function ffmpeg(executable: string, args: string[], signal: AbortSignal) {
-  signal.throwIfAborted();
-  const child = spawn(
-    executable,
-    [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-nostdin",
-      "-y",
-      "-threads",
-      "1",
-      ...args,
-    ],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
-  let diagnostic = "";
-  child.stderr.on("data", (chunk: Buffer) => {
-    diagnostic = (diagnostic + chunk.toString()).slice(-1024);
-  });
-  const abort = () => {
-    child.kill("SIGKILL");
-  };
-  signal.addEventListener("abort", abort, { once: true });
-  if (signal.aborted) abort();
-  try {
-    const [code] = await once(child, "close");
-    if (code !== 0) throw new Error(`Media encoding failed: ${diagnostic}`);
-    signal.throwIfAborted();
-  } finally {
-    signal.removeEventListener("abort", abort);
-  }
-}
+import { MediaCleanupError } from "../../media/resources";
+import { runFfmpeg } from "../../media/ffmpeg";
 
 export async function encodeWindow(
   entry: WindowEncodingInput,
@@ -56,6 +21,7 @@ export async function encodeWindow(
   if (representation !== "audio" && !frames.length)
     throw new Error("Video input unavailable");
   const directory = await mkdtemp(join(dirname(destination), ".encoding-"));
+  let cleanupSafe = true;
   try {
     const args: string[] = [];
     if (representation !== "audio") {
@@ -191,7 +157,7 @@ export async function encodeWindow(
         "mp4",
       );
     args.push(output);
-    await ffmpeg(executable, args, signal);
+    await runFfmpeg(executable, args, signal, 1024);
     const metadata = await stat(output);
     if (metadata.size >= windowLimits.productBytes)
       throw new Error("Media product exceeded byte budget");
@@ -205,13 +171,17 @@ export async function encodeWindow(
           ? "audio/mp4"
           : "video/mp4",
     };
+  } catch (cause) {
+    if (cause instanceof MediaCleanupError) cleanupSafe = false;
+    throw cause;
   } finally {
-    await rm(directory, { recursive: true, force: true }).catch(
-      (cause: unknown) => {
-        throw new MediaCleanupError("Media temporary file cleanup failed", {
-          cause,
-        });
-      },
-    );
+    if (cleanupSafe)
+      await rm(directory, { recursive: true, force: true }).catch(
+        (cause: unknown) => {
+          throw new MediaCleanupError("Media temporary file cleanup failed", {
+            cause,
+          });
+        },
+      );
   }
 }

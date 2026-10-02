@@ -91,6 +91,9 @@ export {
   audioRunSchema,
   audioTrackSchema,
   trackingObservationSchema,
+  identityObservationSchema,
+  identityFrameSnapshotSchema,
+  identityCapacity,
   imageLimits,
   frameLimits,
   detectionLabels,
@@ -99,6 +102,11 @@ export {
   imageDetectionResponseSchema,
 } from "./perception";
 
-export { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
+export {
+  sourceMediaSchema,
+  mediaFrameTimeSchema,
+  frameFingerprintSchema,
+  cameraVideoQualitySchema,
+} from "./media";
 
 export * from "./perception-window";

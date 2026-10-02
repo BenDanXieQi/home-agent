@@ -1,5 +1,7 @@
 import { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
 import { z } from "zod";
+import identityCapacity from "./identity-capacity.json";
+export { identityCapacity };
 import { stateVersionSchema } from "./household";
 
 export const imageLimits = { maxFileBytes: 32 * 1024 * 1024 } as const;
@@ -106,6 +108,113 @@ export const trackingObservationSchema = z.object({
       }),
     )
     .max(16),
+});
+// These are local face-reference observations, not authoritative household identities.
+const identityTrackSchema = z.object({
+  trackId: z.int().positive(),
+  state: z.enum(["unknown", "candidate", "confirmed", "conflict"]),
+  label: z.string().max(identityCapacity.labelLength).nullable(),
+  reason: z.string().max(256),
+  samples: z.int().nonnegative().max(identityCapacity.samplesPerTrack),
+  supportingSamples: z
+    .int()
+    .nonnegative()
+    .max(identityCapacity.samplesPerTrack),
+  score: z.number().min(-1).max(1).nullable(),
+  margin: z.number().min(0).max(2).nullable(),
+  firstSeenAt: z.number(),
+  lastSeenAt: z.number(),
+  lastEvidenceAt: z.number().nullable(),
+  evidence: z
+    .array(
+      z.object({
+        observedAt: z.number(),
+        label: z.string().max(identityCapacity.labelLength).nullable(),
+        score: z.number().min(-1).max(1).nullable(),
+        margin: z.number().min(0).max(2).nullable(),
+        detectionScore: z.number().min(0).max(1),
+        sharpness: z.number().nonnegative(),
+      }),
+    )
+    .max(identityCapacity.samplesPerTrack),
+  confirmedAt: z.number().nullable(),
+  expiresAt: z.number().nullable(),
+});
+export const identityObservationSchema = trackingObservationSchema
+  .pick({
+    run: true,
+    sequence: true,
+    receivedAt: true,
+    sampledAt: true,
+    mediaTime: true,
+    ageMs: true,
+    width: true,
+    height: true,
+    coordinateBasis: true,
+  })
+  .extend({
+    revision: z.int().positive(),
+    status: z.enum([
+      "idle",
+      "starting",
+      "unloading",
+      "collecting",
+      "recognizing",
+      "unavailable",
+    ]),
+    error: z.string().max(4096).optional(),
+    referenceRevision: z.string().nullable(),
+    model: z
+      .object({
+        processId: z.int().positive().optional(),
+        engine: z.literal("opencv"),
+        provider: z.literal("cpu"),
+        version: z.string(),
+        yunetSha256: z.string(),
+        sfaceSha256: z.string(),
+      })
+      .nullable(),
+    tracks: z.array(identityTrackSchema).max(identityCapacity.tracksPerRun),
+    recent: z
+      .array(identityTrackSchema.extend({ endedAt: z.number() }))
+      .max(identityCapacity.recentTracks),
+    statistics: z.object({
+      frames: z.int().nonnegative(),
+      sampledFrames: z.int().nonnegative(),
+      skippedBusy: z.int().nonnegative(),
+      skippedNoPixels: z.int().nonnegative(),
+      skippedIncompleteTracking: z.int().nonnegative(),
+      acceptedSamples: z.int().nonnegative(),
+      duplicateSamples: z.int().nonnegative(),
+      qualityRejected: z.int().nonnegative(),
+      conflicts: z.int().nonnegative(),
+      tracksSeen: z.int().nonnegative(),
+      confirmedTracks: z.int().nonnegative(),
+      confirmationDelayMsTotal: z.number().nonnegative(),
+    }),
+  });
+// Frozen at tracking completion; pending describes that moment, not live work.
+export const identityFrameSnapshotSchema = z.object({
+  status: identityObservationSchema.shape.status.or(z.literal("disabled")),
+  evaluatedAt: z.number(),
+  inference: z.enum(["not_requested", "pending"]),
+  referenceRevision: identityObservationSchema.shape.referenceRevision,
+  tracks: z
+    .array(
+      identityTrackSchema.pick({
+        trackId: true,
+        state: true,
+        label: true,
+        reason: true,
+        supportingSamples: true,
+        score: true,
+        margin: true,
+        lastEvidenceAt: true,
+        confirmedAt: true,
+        expiresAt: true,
+      }),
+    )
+    .max(identityCapacity.tracksPerRun),
 });
 export const audioRunSchema = z.object({
   deviceId: z.string().regex(/^[0-9]{1,32}$/),
@@ -217,6 +326,8 @@ export const perceptionSnapshotSchema = z.object({
       validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       observation: observation.nullable(),
       tracking: trackingObservationSchema.nullable(),
+      identity: identityObservationSchema.nullable(),
+      identityValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       trackingValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       metrics: z.record(z.string(), z.number()),
     }),
