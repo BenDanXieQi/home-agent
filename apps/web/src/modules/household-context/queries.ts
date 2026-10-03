@@ -10,8 +10,9 @@ export function contextBrowseOptions(
 ) {
   return queryOptions({
     queryKey: ["household-context", input],
-    queryFn: ({ signal }) =>
-      requestJson(
+    queryFn: async ({ signal }) => ({
+      request: input,
+      ...(await requestJson(
         (client, options) =>
           client.api["household-context"].browse.$post(
             { json: input },
@@ -19,7 +20,8 @@ export function contextBrowseOptions(
           ),
         contextBrowseResponseSchema,
         { signal },
-      ),
+      )),
+    }),
     gcTime: 0,
     retry: false,
   });
