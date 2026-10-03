@@ -23,12 +23,14 @@ const kinds = [
 export function MemberForm({
   member,
   pending,
+  disabled = false,
   onSave,
   onCancel,
   onDelete,
 }: {
   member: Member | null;
   pending: boolean;
+  disabled?: boolean;
   onSave: (
     id: string,
     profile: ReturnType<typeof memberProfileSchema.parse>,
@@ -48,7 +50,7 @@ export function MemberForm({
       className="mx-auto w-full max-w-3xl"
       onSubmit={(event) => {
         event.preventDefault();
-        if (pending) return;
+        if (pending || disabled) return;
         const profile = memberProfileSchema.safeParse({
           kind,
           name,
@@ -74,13 +76,13 @@ export function MemberForm({
         </p>
       </div>
       <fieldset
-        disabled={pending}
+        disabled={pending || disabled}
         className="min-w-0 rounded-2xl bg-surface p-2"
       >
         <legend className="sr-only">{member ? "编辑成员" : "添加成员"}</legend>
         <div className="divide-y divide-line/70 rounded-xl bg-white px-5 shadow-surface md:px-7">
           <fieldset
-            disabled={pending || !!member}
+            disabled={pending || disabled || !!member}
             className="grid min-w-0 gap-4 py-6 md:grid-cols-[128px_minmax(0,1fr)] md:gap-6"
           >
             <legend className="sr-only">成员类型</legend>
@@ -197,7 +199,7 @@ export function MemberForm({
           <Button
             type="button"
             variant="ghost"
-            disabled={pending}
+            disabled={pending || disabled}
             className="mr-auto text-danger"
             onClick={onDelete}
           >
@@ -215,6 +217,7 @@ export function MemberForm({
         <Button
           type="submit"
           variant="primary"
+          disabled={disabled}
           status={pending ? "pending" : "idle"}
         >
           {member ? "保存修改" : "添加成员"}

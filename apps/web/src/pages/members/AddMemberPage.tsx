@@ -1,35 +1,17 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
 import { BackLink } from "../../components/BackLink";
-import { saveMember, memberListOptions } from "../../modules/members/queries";
+import { useMemberMutation } from "../../modules/members/use-member-mutation";
+import { memberReadyAtom } from "../../modules/members/state";
 import { Notice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import { MemberAccess } from "./MemberAccess";
 import { MemberForm } from "./MemberForm";
 
 function AddMember({ scope }: { scope: string }) {
-  const client = useQueryClient();
+  const ready = useAtomValue(memberReadyAtom);
   const navigate = useNavigate();
-  const mutation = useMutation({
-    mutationFn: saveMember,
-    onMutate: async () => {
-      await client.cancelQueries({
-        queryKey: memberListOptions(scope).queryKey,
-      });
-    },
-    onSuccess: async (data, command) => {
-      await client.cancelQueries({
-        queryKey: memberListOptions(scope).queryKey,
-      });
-      client.setQueryData(memberListOptions(scope).queryKey, data);
-      await client.invalidateQueries({ queryKey: ["household-context"] });
-      await navigate({
-        to: "/members",
-        search: { member: command.id },
-        replace: true,
-      });
-    },
-  });
+  const mutation = useMemberMutation(scope);
   function cancel() {
     navigate({ to: "/members", search: { member: undefined } }).catch(
       (error: unknown) => {
@@ -56,13 +38,27 @@ function AddMember({ scope }: { scope: string }) {
       <MemberForm
         member={null}
         pending={mutation.isPending}
+        disabled={!ready}
         onSave={(id, profile) => {
-          mutation.mutate({
-            scope_epoch: scope,
-            id,
-            profile,
-            operation: "create",
-          });
+          mutation.mutate(
+            {
+              scope_epoch: scope,
+              id,
+              profile,
+              operation: "create",
+            },
+            {
+              onSuccess: (_data, command) => {
+                navigate({
+                  to: "/members",
+                  search: { member: command.id },
+                  replace: true,
+                }).catch((error: unknown) => {
+                  console.error("Member navigation failed", error);
+                });
+              },
+            },
+          );
         }}
         onCancel={cancel}
         onDelete={undefined}

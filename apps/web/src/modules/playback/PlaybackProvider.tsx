@@ -4,7 +4,7 @@ import { useStore } from "jotai";
 import { createPlaybackSessions } from "./sessions";
 import { canStartPlaybackAtom } from "./access";
 import { mediaStateAtom } from "./state";
-import { householdSnapshotAtom, householdSyncedAtom } from "../household/state";
+import { householdSnapshotAtom } from "../household/state";
 import { playbackPageActiveAtom } from "./page-activity";
 import { devicesAtom } from "../devices/state";
 
@@ -26,8 +26,7 @@ export function PlaybackProvider({
     const reconcile = () => {
       if (
         !store.get(playbackPageActiveAtom) ||
-        !store.get(canStartPlaybackAtom) ||
-        !store.get(householdSyncedAtom)
+        !store.get(canStartPlaybackAtom)
       ) {
         sessions.close();
         return;
@@ -49,7 +48,6 @@ export function PlaybackProvider({
     };
     const unsubscribe = [
       householdSnapshotAtom,
-      householdSyncedAtom,
       canStartPlaybackAtom,
       playbackPageActiveAtom,
     ].map((state) => store.sub(state, reconcile));
