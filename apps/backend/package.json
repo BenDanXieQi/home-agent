@@ -7,7 +7,7 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
-    "dev": "ORT_DISABLE_TELEMETRY=1 bun --env-file=../../.env --watch src/main.ts",
+    "dev": "ORT_DISABLE_TELEMETRY=1 nodemon",
     "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external && bun run build:perception && bun scripts/copy-web.ts",
     "start": "ORT_DISABLE_TELEMETRY=1 bun --env-file=../../.env dist/main.js",
     "lint": "oxlint --type-aware --max-warnings 0 .",
@@ -59,6 +59,7 @@
     "@types/write-file-atomic": "catalog:",
     "drizzle-kit": "catalog:",
     "eventsource-parser": "4.1.1",
+    "nodemon": "^3.1.14",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:"
