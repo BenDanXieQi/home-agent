@@ -9,7 +9,6 @@ export const windowLimits = Object.freeze({
   windowBytes: 12 * 1024 * 1024,
   summaries: 4096,
   pendingSpeechPerSource: 64,
-  summaryMs: 60_000,
   summaryBytes: 64 * 1024 * 1024,
   mediaRetentionMs: 30 * 60_000,
   encodingQueue: 8,

@@ -1,15 +1,7 @@
 import { useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  ChevronRight,
-  ImagePlus,
-  RotateCcw,
-  Scan,
-  X,
-} from "lucide-react";
+import { ChevronRight, ImagePlus, RotateCcw, Scan, X } from "lucide-react";
 import { Button } from "../../components/Button";
-import { buttonStyles } from "../../components/button-styles";
+import { BackLink } from "../../components/BackLink";
 import { Notice, StatusNotice } from "../../components/Notice";
 import { useImageAnalysis } from "../../modules/perception/use-image-analysis";
 import { cameraTileClassName } from "./camera-styles";
@@ -44,12 +36,9 @@ export default function ImageAnalysisPage() {
   const ActionIcon = action.icon;
   return (
     <section className="space-y-3" aria-labelledby="image-analysis-title">
-      <Link
-        to="/cameras"
-        className={`${buttonStyles.base} ${buttonStyles.ghost} -ml-2 min-h-8 gap-1 rounded-[10px] border-0 px-2 py-1.5 text-xs font-normal`}
-      >
-        <ArrowLeft size={14} aria-hidden="true" /> 返回视频列表
-      </Link>
+      <BackLink activeOptions={{ exact: true }} to="/cameras" className="-ml-2">
+        返回看家
+      </BackLink>
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <article className={`${cameraTileClassName} space-y-3 p-4`}>
           <div className="flex flex-wrap items-center justify-between gap-3">

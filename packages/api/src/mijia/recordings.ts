@@ -47,22 +47,6 @@ export const cameraRecordingIndexSchema = z.discriminatedUnion("status", [
   }),
 ]);
 
-const indexContext = {
-  source: z.literal("sd_card"),
-  deviceId: mijiaPlaybackReservationInputSchema.shape.deviceId,
-  channel: mijiaPlaybackReservationInputSchema.shape.channel,
-  revision: mijiaPlaybackReservationInputSchema.shape.revision,
-  timeUnit: z.literal("unix_ms"),
-  // This describes the device's reported values, not verified UTC accuracy.
-  timeBasis: z.literal("device_recording"),
-  queriedAt: timestamp,
-};
-
-export const mijiaRecordingIndexSchema = z.discriminatedUnion("status", [
-  cameraRecordingIndexSchema.options[0].extend(indexContext),
-  cameraRecordingIndexSchema.options[1].extend(indexContext),
-]);
-
 export const mijiaRecordingPlaybackInputSchema =
   mijiaPlaybackReservationInputSchema.safeExtend({
     id: z.uuid(),

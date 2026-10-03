@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useAtomValue } from "jotai";
-import { Link } from "@tanstack/react-router";
 import { Button } from "../../components/Button";
 import { StatusNotice } from "../../components/Notice";
 import { createPerceptionSourceState } from "../../modules/perception/source-state";
@@ -56,24 +55,11 @@ export function WindowRecording({
         </Button>
       ) : null}
       {!summaryAvailable ? (
-        <StatusNotice>
-          窗口摘要已过期，可前往“SD 录像”按设备时间查找。
-        </StatusNotice>
+        <StatusNotice>片段摘要已过期，无法再查找对应的 SD 录像。</StatusNotice>
       ) : !authorized ? (
         <StatusNotice>等待当前家庭与摄像头连接就绪后查找。</StatusNotice>
       ) : null}
       <RecordingPlayer playback={playback} />
-      <Link
-        to="/cameras/$deviceId/$channel"
-        params={{
-          deviceId: window.run.deviceId,
-          channel: String(window.run.channel),
-        }}
-        search={{ mode: "recordings" }}
-        className="inline-block rounded text-xs underline underline-offset-4 focus-visible:outline-2"
-      >
-        按日期查看 SD 录像
-      </Link>
       <p className="text-xs leading-5 text-muted">
         语音文字和人物判断来自窗口采集，不是对整段 SD 录像的重新分析。
         未对齐的候选录像不能直接套用这些记录。

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button } from "../../components/Button";
-import { Notice, StatusNotice } from "../../components/Notice";
+import { Notice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import type { RecordingPlaybackState } from "./api";
 import type { useRecordingPlayback } from "./use-recording-playback";
@@ -27,23 +27,27 @@ export function RecordingPlayer({
             : "关闭录像"}
         </Button>
       </div>
-      {expired || state?.state === "expired" ? (
-        <StatusNotice>本次回看已到保留期限，请重新申请。</StatusNotice>
-      ) : state?.state === "revoked" ? (
-        <StatusNotice>这段录像的访问资格已失效。</StatusNotice>
-      ) : state?.state === "unavailable" ? (
-        <StatusNotice>{recordingUnavailableText[state.reason]}</StatusNotice>
-      ) : state?.state === "ready" ? (
+      {!expired && state?.state === "ready" ? (
         <ReadyRecording
           key={state.id}
           resource={state}
           refresh={playback.refresh}
         />
-      ) : playback.pending || state?.state === "preparing" ? (
-        <StatusNotice>
-          正在从摄像头准备录像，可随时取消。较长录像需要更多时间。
-        </StatusNotice>
-      ) : null}
+      ) : (
+        <RecordingSurface>
+          <output className="max-h-full overflow-auto p-4 text-center text-sm text-white/70">
+            {expired || state?.state === "expired"
+              ? "本次回看已到保留期限，请重新申请。"
+              : state?.state === "revoked"
+                ? "这段录像的访问资格已失效。"
+                : state?.state === "unavailable"
+                  ? recordingUnavailableText[state.reason]
+                  : playback.error
+                    ? "录像暂时无法读取，请重试。"
+                    : "正在从摄像头准备录像，可随时取消。"}
+          </output>
+        </RecordingSurface>
+      )}
       {playback.error ? (
         <Notice tone="error">
           录像状态读取失败：{requestErrorMessage(playback.error)}
@@ -60,6 +64,14 @@ export function RecordingPlayer({
         </Notice>
       ) : null}
     </section>
+  );
+}
+
+function RecordingSurface({ children }: { children: ReactNode }) {
+  return (
+    <div className="grid aspect-video max-h-[65dvh] place-items-center overflow-hidden rounded-xl bg-black">
+      {children}
+    </div>
   );
 }
 
@@ -101,32 +113,34 @@ function ReadyRecording({
 
   return (
     <div className="space-y-3">
+      <RecordingSurface>
+        {/* Camera recordings have no verified transcript; do not invent captions. */}
+        {/* oxlint-disable-next-line jsx-a11y/media-has-caption */}
+        <video
+          ref={video}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label="摄像头 SD 录像"
+          className="size-full object-contain"
+          onLoadedMetadata={() => {
+            if (alignment.type === "confirmed") seek(alignment.seekOffsetMs);
+          }}
+          onError={() => {
+            setFailure(
+              "录像读取或解码失败，可能已过期、连接中断或浏览器不支持当前编码。",
+            );
+            // refetch owns request failures and reports the current resource state.
+            // oxlint-disable-next-line typescript/no-floating-promises
+            refresh();
+          }}
+        />
+      </RecordingSurface>
       <p className="text-xs leading-5 text-muted">
         来源：摄像头 SD 卡 · 录像长度{" "}
         {recordingDuration(resource.actualDurationMs)}
         {" · "}本次回看保留至 {recordingTime(resource.expiresAt)}
       </p>
-      {/* Camera recordings have no verified transcript; do not invent captions. */}
-      {/* oxlint-disable-next-line jsx-a11y/media-has-caption */}
-      <video
-        ref={video}
-        controls
-        playsInline
-        preload="metadata"
-        aria-label="摄像头 SD 录像"
-        className="max-h-[65dvh] w-full rounded-xl bg-black"
-        onLoadedMetadata={() => {
-          if (alignment.type === "confirmed") seek(alignment.seekOffsetMs);
-        }}
-        onError={() => {
-          setFailure(
-            "录像读取或解码失败，可能已过期、连接中断或浏览器不支持当前编码。",
-          );
-          // refetch owns request failures and reports the current resource state.
-          // oxlint-disable-next-line typescript/no-floating-promises
-          refresh();
-        }}
-      />
       {failure ? <Notice tone="error">{failure}</Notice> : null}
       {alignment.type === "confirmed" ? (
         <div className="space-y-2">

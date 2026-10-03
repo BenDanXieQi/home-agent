@@ -11,6 +11,8 @@ import {
   summarizeWindow,
   truncateWindow,
   windowIdentities,
+  canCompareWindowFrames,
+  windowComparisonInterval,
 } from "./aggregate";
 import { appendWindowSpeech, createWindowSpeech } from "./speech";
 import { appendWindowAudio, recordAudioStatus } from "./audio-coverage";
@@ -34,8 +36,10 @@ function source(run: z.infer<typeof runSchema>, identity: string, now: number) {
     identity,
     startedAt: now,
     drafts: new Map<number, ReturnType<typeof createWindowDraft>>(),
-    baseline: null as Parameters<typeof summarizeWindow>[1]["baseline"],
-    lastChangeAt: null as number | null,
+    context: null as {
+      frame: ReturnType<typeof createWindowDraft>["frames"][number];
+      runId: string;
+    } | null,
     audioTrack: null as z.infer<typeof audioTrackSchema> | null,
     speech: new Map<string, z.infer<typeof speechObservationSchema>>(),
     observations: new Map<
@@ -88,7 +92,7 @@ function retained(
       : [],
   );
   const audio = Object.freeze(
-    summary.audio.status === "available"
+    summary.gate.candidate !== "none" && summary.audio.status === "available"
       ? input.audio.map(({ pcm, startedAt }) =>
           Object.freeze({ pcm, startedAt }),
         )
@@ -118,7 +122,7 @@ function speechDescriptionBytes(summary: RetainedWindow["summary"]) {
 export function createWindowStore(options: {
   config: () => Pick<
     z.infer<typeof perceptionConfigSchema>,
-    "window" | "speech" | "maxFrameAgeMs"
+    "window" | "speech" | "maxFrameAgeMs" | "sampleFps"
   >;
   authorized: (run: z.infer<typeof runSchema>, identity: string) => boolean;
 }) {
@@ -148,6 +152,12 @@ export function createWindowStore(options: {
   const listeners = new Set<(id: string) => void>();
   let bytes = 0;
   let descriptionBytes = 0;
+  function clearContext(entry: ReturnType<typeof source>) {
+    if (!entry.context) return;
+    bytes -=
+      entry.context.frame.rgb.byteLength + entry.context.frame.gray.byteLength;
+    entry.context = null;
+  }
   function stopAcceptingSpeech(entry: RetainedWindow) {
     const runId = entry.summary.audio.run?.trackRunId;
     if (!runId) return;
@@ -231,9 +241,34 @@ export function createWindowStore(options: {
     now: number,
   ) {
     counters.closed++;
-    const resultSummary = summarizeWindow(value, entry);
-    entry.baseline = resultSummary.baseline;
-    entry.lastChangeAt = resultSummary.lastChangeAt;
+    const sampleFps = options.config().sampleFps;
+    const firstFrame = value.frames[0];
+    const lastFrame = value.frames.at(-1);
+    const context = entry.context;
+    if (
+      firstFrame &&
+      context &&
+      context.runId === value.videoRun?.runId &&
+      canCompareWindowFrames(context.frame, firstFrame, sampleFps) &&
+      !value.gaps.has("capture_failed")
+    ) {
+      const size = context.frame.rgb.byteLength + context.frame.gray.byteLength;
+      if (value.bytes + size <= windowLimits.windowBytes && room(size)) {
+        value.frames.unshift(context.frame);
+        value.bytes += size;
+        bytes += size;
+      } else value.gaps.add("video_context_capacity");
+    }
+    if (value.gaps.has("capture_failed")) clearContext(entry);
+    else if (lastFrame && value.videoRun) {
+      clearContext(entry);
+      const size = lastFrame.rgb.byteLength + lastFrame.gray.byteLength;
+      if (room(size)) {
+        entry.context = { frame: lastFrame, runId: value.videoRun.runId };
+        bytes += size;
+      }
+    }
+    const resultSummary = summarizeWindow(value, entry, sampleFps);
     const summary: z.infer<typeof windowSummarySchema> = {
       id: crypto.randomUUID(),
       revision: 0,
@@ -245,11 +280,7 @@ export function createWindowStore(options: {
       endedAt: value.endedAt,
       closedAt: now,
       readableUntil: now + options.config().window.retentionMs,
-      summaryUntil:
-        now +
-        (resultSummary.gate.candidate === "none"
-          ? windowLimits.summaryMs
-          : windowLimits.mediaRetentionMs),
+      summaryUntil: now + windowLimits.mediaRetentionMs,
       timeBasis: "host_receive",
       synchronizationAccuracyMs: null,
       incomplete: value.incomplete,
@@ -263,14 +294,36 @@ export function createWindowStore(options: {
     };
     for (const observation of entry.speech.values())
       appendWindowSpeech(summary, observation, now);
+    if (
+      summary.gate.candidate === "none" &&
+      summary.speech.segments.length > 0 &&
+      summary.audio.status === "available"
+    )
+      summary.gate.candidate = "audio";
+    const admitted =
+      summary.gate.visual === "changed" || summary.speech.segments.length > 0;
+    entry.lastClosedAt = Math.max(entry.lastClosedAt, value.endedAt);
+    if (!admitted) {
+      counters.skipped++;
+      // Keep only bounded correlation metadata while speech is still being
+      // recognized. Rejected windows never retain media or become history.
+      if (
+        !summary.speech.enabled ||
+        now >= summary.speech.acceptingUntil ||
+        !summary.audio.run ||
+        summary.audio.startedAt === null ||
+        summary.audio.endedAt === null
+      ) {
+        bytes -= value.bytes;
+        return;
+      }
+      summary.frames = [];
+      summary.crop = null;
+      summary.gaps = [];
+      summary.gate.comparisons = [];
+      summary.summaryUntil = summary.speech.acceptingUntil;
+    } else counters.candidates++;
     const identities = windowIdentities(summary.frames);
-    summary.summaryUntil = Math.max(
-      summary.summaryUntil,
-      summary.speech.acceptingUntil,
-      summary.speech.segments.length || identities.identityCount
-        ? now + windowLimits.mediaRetentionMs
-        : 0,
-    );
     const result = retained(summary, value, entry.identity, identities);
     bytes -= value.bytes - result.bytes;
     windows.set(summary.id, result);
@@ -288,10 +341,9 @@ export function createWindowStore(options: {
     }
     counters.speechAssociations += summary.speech.segments.length;
     descriptionBytes += result.descriptionBytes;
-    if (resultSummary.gate.candidate === "none") {
-      counters.skipped++;
+    if (summary.gate.candidate === "none") {
       release(result, "evicted", false);
-    } else counters.candidates++;
+    }
     const ready = [...windows.values()].filter(
       (window) =>
         window.summary.run.deviceId === entry.run.deviceId &&
@@ -301,7 +353,6 @@ export function createWindowStore(options: {
     while (ready.length > windowLimits.readyPerSource)
       release(ready.shift()!, "evicted");
     limitDescriptions();
-    entry.lastClosedAt = Math.max(entry.lastClosedAt, value.endedAt);
     if (windows.has(summary.id) && summary.gate.candidate !== "none")
       for (const listener of listeners) listener(summary.id);
   }
@@ -314,6 +365,15 @@ export function createWindowStore(options: {
         stop(id, true, now);
         continue;
       }
+      if (
+        entry.context &&
+        now >
+          entry.context.frame.receivedAt +
+            windowComparisonInterval(options.config().sampleFps) +
+            windowLimits.durationMs +
+            windowLimits.graceMs
+      )
+        clearContext(entry);
       // Empty windows are facts about missing input, never an absence judgment.
       getDraft(entry, now);
       const ready = [...entry.drafts.entries()]
@@ -360,7 +420,12 @@ export function createWindowStore(options: {
   function lookup(id: string, now: number) {
     const entry = windows.get(id);
     if (entry) maintain(id, entry, now);
-    return windows.get(id);
+    const retainedEntry = windows.get(id);
+    return retainedEntry &&
+      (retainedEntry.summary.gate.visual === "changed" ||
+        retainedEntry.summary.speech.segments.length > 0)
+      ? retainedEntry
+      : undefined;
   }
 
   function finishDrafts(entry: ReturnType<typeof source>, now: number) {
@@ -386,6 +451,7 @@ export function createWindowStore(options: {
         if (window.summary.run.runId === entry.run.runId)
           release(window, "revoked");
     } else finishDrafts(entry, now);
+    clearContext(entry);
   }
   return {
     speech(observation: z.infer<typeof speechObservationSchema>, now: number) {
@@ -417,6 +483,10 @@ export function createWindowStore(options: {
         const previousBytes = speechDescriptionBytes(entry.summary);
         const previousSegments = entry.summary.speech.segments.length;
         if (!appendWindowSpeech(entry.summary, observation, now)) continue;
+        if (previousSegments === 0 && entry.summary.gate.visual !== "changed") {
+          counters.candidates++;
+          counters.skipped--;
+        }
         counters.speechAssociations +=
           entry.summary.speech.segments.length - previousSegments;
         entry.summary.revision++;
@@ -476,6 +546,7 @@ export function createWindowStore(options: {
       const entry = sources.get(sourceKey(run));
       if (!entry || entry.run.scopeEpoch !== run.scopeEpoch) return;
       if (entry.videoRun && isCurrentRun(entry.videoRun, run)) return;
+      clearContext(entry);
       entry.observations.clear();
       entry.tracking.clear();
       entry.identityFrames.clear();
@@ -484,6 +555,7 @@ export function createWindowStore(options: {
     stopVideo(runId: string) {
       for (const entry of sources.values()) {
         if (entry.videoRun?.runId !== runId) continue;
+        clearContext(entry);
         entry.observations.clear();
         entry.tracking.clear();
         entry.identityFrames.clear();
@@ -746,6 +818,8 @@ export function createWindowStore(options: {
         windows: [...windows.values()]
           .filter(
             ({ summary }) =>
+              (summary.gate.visual === "changed" ||
+                summary.speech.segments.length > 0) &&
               summary.inputState !== "revoked" &&
               summary.run.scopeEpoch === selection.scopeEpoch &&
               summary.run.deviceId === selection.deviceId &&
@@ -762,7 +836,7 @@ export function createWindowStore(options: {
             speechCount: summary.speech.segments.length,
             ...identities,
             identityLabels: [...identities.identityLabels],
-            gate: { ...summary.gate },
+            gate: structuredClone(summary.gate),
             incomplete: summary.incomplete,
             inputState: summary.inputState,
           }))

@@ -42,12 +42,16 @@ export function WindowMedia({
     includeAudio: representation.endsWith("video") && includeAudio,
   };
   return (
-    <section
-      aria-label="窗口媒体"
-      className="space-y-3 border-t border-line pt-4"
-    >
-      <h4 className="text-sm font-medium">后台采样媒体</h4>
-      <div className="flex flex-wrap items-center gap-3">
+    <section aria-label="窗口媒体" className="space-y-3 pb-4 [&>p]:px-4">
+      <MediaRequest
+        key={`${representation}:${selection.includeAudio}`}
+        scope={scope}
+        id={window.id}
+        selection={selection}
+        canGenerate={canGenerate}
+        active={active}
+      />
+      <div className="flex flex-wrap items-center gap-3 px-4">
         <label className="flex items-center gap-2 whitespace-nowrap text-sm">
           媒体类型
           <select
@@ -90,14 +94,6 @@ export function WindowMedia({
           原始输入已释放；仍可切换查看已保存的媒体，不能生成新的媒体。
         </p>
       ) : null}
-      <MediaRequest
-        key={`${representation}:${selection.includeAudio}`}
-        scope={scope}
-        id={window.id}
-        selection={selection}
-        canGenerate={canGenerate}
-        active={active}
-      />
     </section>
   );
 }
@@ -123,17 +119,37 @@ function MediaRequest({
   );
   const media = query.data;
   const state = useWindowMediaState(media);
-  if (windowRequestUnavailable(error))
-    return <StatusNotice>此媒体已不可读取，请选择新的片段。</StatusNotice>;
+  const unavailable = windowRequestUnavailable(error);
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 [&>p]:px-4">
+      <div className="grid aspect-video max-h-[65dvh] place-items-center overflow-hidden bg-[#111111] text-white/70">
+        {unavailable ? (
+          <span className="px-4 text-center text-sm">
+            此媒体已不可读取，请选择新的片段。
+          </span>
+        ) : media?.state === "ready" && media.mediaId ? (
+          <WindowMediaPreview
+            key={media.mediaId}
+            scope={scope}
+            id={id}
+            selection={selection}
+            mediaId={media.mediaId}
+            available={state === "ready"}
+            active={active}
+          />
+        ) : (
+          <span className="text-sm">
+            {state ? mediaStates[state] : "正在加载片段…"}
+          </span>
+        )}
+      </div>
       {active && query.isPending ? (
         <StatusNotice>正在查询媒体状态…</StatusNotice>
       ) : null}
       {error ? (
         <Notice tone="error">{requestErrorMessage(error)}</Notice>
       ) : null}
-      {query.isError ? (
+      {query.isError && !unavailable ? (
         <Button
           disabled={!active}
           onClick={() => {
@@ -176,17 +192,7 @@ function MediaRequest({
               已完整加载到本页的副本仍可播放，切换媒体或离开后释放。
             </StatusNotice>
           ) : null}
-          {media.state === "ready" && media.mediaId ? (
-            <WindowMediaPreview
-              key={media.mediaId}
-              scope={scope}
-              id={id}
-              selection={selection}
-              mediaId={media.mediaId}
-              available={state === "ready"}
-              active={active}
-            />
-          ) : null}
+
           {media.state === "ready" ? (
             <p className="text-xs leading-5 text-muted">
               {media.parameters.width && media.parameters.height

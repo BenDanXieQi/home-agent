@@ -1,56 +1,26 @@
-import { memo, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
 import { Button } from "../../components/Button";
 import { Notice, StatusNotice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
-import {
-  windowDetailOptions,
-  windowRequestUnavailable,
-  type WindowListEntry,
-} from "../../modules/perception/windows";
+import { windowRequestUnavailable } from "../../modules/perception/windows";
+import type { useWindowDetail } from "../../modules/perception/use-window-detail";
 import {
   windowTime,
   visualReasons,
   candidateLabel,
 } from "./window-presentation";
-import { WindowMedia } from "./WindowMedia";
 import { WindowIdentity } from "./WindowIdentity";
 import { WindowRecording } from "./WindowRecording";
 import { WindowSpeech } from "./WindowSpeech";
 
-export const WindowDetail = memo(function WindowDetail({
-  entry,
-  scope,
+export function WindowDetail({
+  detail,
   active,
 }: {
-  entry: WindowListEntry;
-  scope: string;
+  detail: ReturnType<typeof useWindowDetail>;
   active: boolean;
 }) {
-  const query = useQuery({
-    ...windowDetailOptions(scope, entry.id),
-    enabled: (cached) =>
-      active && !windowRequestUnavailable(cached.state.error),
-    refetchInterval: (cached) =>
-      !cached.state.error &&
-      cached.state.data &&
-      cached.state.data.revision < entry.revision
-        ? 500
-        : false,
-  });
-  // Frame judgments are frozen. Only completed speech can add historical evidence.
-  const window = useMemo(
-    () =>
-      query.data
-        ? {
-            ...query.data,
-            inputState: entry.inputState,
-            sampledMedia: entry.sampledMedia,
-            summaryUntil: entry.summaryUntil,
-          }
-        : undefined,
-    [query.data, entry.inputState, entry.sampledMedia, entry.summaryUntil],
-  );
+  const { query, window } = detail;
   const [jsonOpen, setJsonOpen] = useState(false);
   const json = useMemo(
     () => (jsonOpen && window ? JSON.stringify(window, null, 2) : null),
@@ -61,11 +31,11 @@ export const WindowDetail = memo(function WindowDetail({
   if (query.isError && !query.data)
     return (
       <Notice tone="error">
-        窗口详情读取失败：{requestErrorMessage(query.error)}
+        片段详情读取失败：{requestErrorMessage(query.error)}
         <Button
           disabled={!active}
           onClick={() => {
-            // refetch owns request failures and exposes them through query.error.
+            // Refetch reports failures through query.error.
             // oxlint-disable-next-line typescript/no-floating-promises
             query.refetch();
           }}
@@ -75,7 +45,7 @@ export const WindowDetail = memo(function WindowDetail({
       </Notice>
     );
   if (!window)
-    return active ? <StatusNotice>正在读取窗口详情…</StatusNotice> : null;
+    return active ? <StatusNotice>正在读取片段详情…</StatusNotice> : null;
   return (
     <article
       aria-label="所选窗口"
@@ -138,11 +108,6 @@ export const WindowDetail = memo(function WindowDetail({
           </ul>
         </Notice>
       ) : null}
-      {window.gate.candidate === "none" ? (
-        <StatusNotice>该窗口未通过筛选，没有可申请的媒体。</StatusNotice>
-      ) : (
-        <WindowMedia window={window} scope={scope} active={active} />
-      )}
       <WindowSpeech window={window} />
       <WindowIdentity frames={window.frames} />
       <WindowRecording window={window} active={active} />
@@ -176,4 +141,4 @@ export const WindowDetail = memo(function WindowDetail({
       </details>
     </article>
   );
-});
+}
