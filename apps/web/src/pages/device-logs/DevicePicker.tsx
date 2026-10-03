@@ -91,6 +91,8 @@ export const DevicePicker = memo(function DevicePicker({
   );
   // oxlint-disable-next-line react/incompatible-library -- Read live virtual measurements directly rather than compiler-memoizing them.
   const deviceVirtualizer = useVirtualizer({
+    // Panel resizing can notify during a React commit; let React batch that update.
+    useFlushSync: false,
     count: devices.length,
     getScrollElement: () => deviceList.current,
     estimateSize: () => 71,
@@ -115,7 +117,7 @@ export const DevicePicker = memo(function DevicePicker({
   return (
     <aside
       id="log-devices"
-      className="flex min-h-0 min-w-0 flex-col bg-paper p-3 min-[901px]:h-full"
+      className="flex h-full min-h-0 min-w-0 flex-col bg-paper p-3"
       data-open={devicesOpen}
       aria-label="设备列表"
     >
