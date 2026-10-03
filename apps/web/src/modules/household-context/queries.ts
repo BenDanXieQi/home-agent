@@ -7,11 +7,12 @@ import { requestJson } from "../../api/client";
 
 export function contextBrowseOptions(
   input: ReturnType<typeof contextBrowseQuerySchema.parse>,
+  page = 0,
 ) {
   return queryOptions({
-    queryKey: ["household-context", input],
+    queryKey: ["household-context", input, page],
     queryFn: async ({ signal }) => ({
-      request: input,
+      request: { ...input, page },
       ...(await requestJson(
         (client, options) =>
           client.api["household-context"].browse.$post(

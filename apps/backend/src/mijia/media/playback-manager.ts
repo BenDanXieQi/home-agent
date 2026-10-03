@@ -12,7 +12,7 @@ import {
 import type { Go2RtcAdapter } from "./go2rtc-adapter";
 import type { CameraSourceManager } from "./camera-source-manager";
 import type { CameraSourceSpec } from "./camera-source-spec";
-import { MijiaError } from "../errors";
+import { MijiaError, safeMijiaError } from "../errors";
 import { mijiaOperation } from "../operation";
 
 type CameraTarget = Awaited<ReturnType<CameraSourceManager["prepare"]>>;
@@ -66,7 +66,7 @@ export class PlaybackManager {
     const id = crypto.randomUUID();
     const timer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
-        this.release(id).catch(() => {});
+        this.releaseInBackground(id);
       }, 30_000),
     );
     timer.unref();
@@ -112,20 +112,20 @@ export class PlaybackManager {
   /** A successful heartbeat supplies the next opportunity to retry revoked viewers. */
   retryReleases(adapter: Go2RtcAdapter) {
     for (const [id, release] of this.releases) {
-      if (release.target.adapter === adapter) this.release(id).catch(() => {});
+      if (release.target.adapter === adapter) this.releaseInBackground(id);
     }
   }
 
   invalidate() {
     for (const id of this.entries.keys()) {
-      this.release(id).catch(() => {});
+      this.releaseInBackground(id);
     }
   }
 
   releaseForDevices(ids: readonly string[]) {
     const revoked = new Set(ids);
     for (const entry of this.entries.values())
-      if (revoked.has(entry.deviceId)) this.release(entry.id).catch(() => {});
+      if (revoked.has(entry.deviceId)) this.releaseInBackground(entry.id);
   }
 
   releaseForSource(adapter: Go2RtcAdapter, sourceId: string) {
@@ -135,7 +135,7 @@ export class PlaybackManager {
         entry.target?.adapter === adapter &&
         entry.target.sourceId === sourceId
       )
-        this.release(entry.id).catch(() => {});
+        this.releaseInBackground(entry.id);
     }
   }
 
@@ -163,7 +163,7 @@ export class PlaybackManager {
     // another request to recover the accepted offer with the same SDP.
     const timer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
-        this.release(id).catch(() => {});
+        this.releaseInBackground(id);
       }, mijiaTimeouts.playback),
     );
     timer.unref();
@@ -234,7 +234,7 @@ export class PlaybackManager {
         },
       );
     } catch (error) {
-      if (this.entries.get(id) === playback) this.release(id).catch(() => {});
+      if (this.entries.get(id) === playback) this.releaseInBackground(id);
       throw error;
     } finally {
       clearTimeout(playback.timer);
@@ -271,6 +271,15 @@ export class PlaybackManager {
         });
     }
     await release.pending;
+  }
+
+  private releaseInBackground(id: string) {
+    this.release(id).catch((cause: unknown) => {
+      console.warn(
+        "Playback cleanup remains pending",
+        safeMijiaError(cause).code,
+      );
+    });
   }
 
   private log(entry: Playback, message: string) {

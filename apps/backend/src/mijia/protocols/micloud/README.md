@@ -6,12 +6,11 @@
 
 上游固定 commit：`8d27204423a569e11c468830e3df324d278954ee`。
 
-| 移植来源                                                                                                                                             | 本地模块                    | 上游文件 SHA-256                                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------ |
-| [`lib/protocol/MiCloud.js`](https://github.com/merdok/homebridge-miot/blob/8d27204423a569e11c468830e3df324d278954ee/lib/protocol/MiCloud.js)         | `client.ts`、`transport.ts` | `a27a12b3051e20860afa7f3986cb5fac87d19e0609aaae5db1521e5b6e10c997` |
-| [`lib/utils/CustomCryptRC4.js`](https://github.com/merdok/homebridge-miot/blob/8d27204423a569e11c468830e3df324d278954ee/lib/utils/CustomCryptRC4.js) | `rc4.ts`                    | `f0c553bce61aff761b344c8647f4334d8d59569aa71074b3f3e3ac137cf56baf` |
+| 移植来源                                                                                                                                     | 本地模块                    | 上游文件 SHA-256                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------ |
+| [`lib/protocol/MiCloud.js`](https://github.com/merdok/homebridge-miot/blob/8d27204423a569e11c468830e3df324d278954ee/lib/protocol/MiCloud.js) | `client.ts`、`transport.ts` | `a27a12b3051e20860afa7f3986cb5fac87d19e0609aaae5db1521e5b6e10c997` |
 
-上游 MIT 许可全文保留在 [LICENSE](LICENSE)，版权为 Copyright (c) 2025 Marcin。RC4 模块原有的 edomi-roboroc 来源说明保留在代码中。
+上游 MIT 许可全文保留在 [LICENSE](LICENSE)，版权为 Copyright (c) 2025 Marcin。`rc4.ts` 使用 Bun 的 `node:crypto` 原生 RC4，实现米家要求的前 1024 字节丢弃，不维护通用加密算法实现。
 
 passToken 续期遵循仓库固定版本 [go2rtc `LoginWithToken`](https://github.com/AlexxIT/go2rtc/blob/b5948cfb25404cc5cb37b166ecaa2dca20b11d4b/pkg/xiaomi/cloud.go#L345) 的同一米家账号协议：向 `account.xiaomi.com/pass/serviceLogin` 提交限定该主机及 `/pass` 路径的 `userId`／`passToken` Cookie，取得 `ssecurity` 和 STS 地址，再完成设备会话。该协议与 OAuth refresh token 无关；go2rtc 来源和 MIT 许可见 [构建目录](../../../../../../docker/go2rtc/README.md)。
 

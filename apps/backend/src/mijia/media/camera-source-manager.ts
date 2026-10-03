@@ -230,7 +230,8 @@ export class CameraSourceManager {
     this.playback.releaseForSource(this.adapter, stream.id);
     const prepared = stream.pending;
     stream.pending = (async () => {
-      await prepared.catch(() => {});
+      // Preparation records its failure on this source; retirement still owns deletion.
+      await Promise.allSettled([prepared]);
       if (!stream.error) await this.remove(stream.id);
       if (this.streams.get(key) === stream) this.streams.delete(key);
     })();

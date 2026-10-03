@@ -2,12 +2,14 @@ import { z } from "zod";
 import { produce, freeze } from "../immutable";
 import {
   mijiaAccountSchema,
-  mijiaDeviceSchema,
   mijiaHomeSelectionSchema,
   mijiaStateSchema,
   mijiaErrorSchema,
 } from "./mijia";
-import { mijiaDeviceSpecSchema } from "./mijia-spec";
+import {
+  inventoryDeviceSchema,
+  deviceCapabilitySchema,
+} from "../domain/devices";
 import {
   latestPropertySchema,
   sourceHealthSchema,
@@ -159,7 +161,7 @@ const specificationIdSchema = z
   .max(256)
   .regex(/^[!-~]+$/);
 const categorySchema = z.string().max(64).nullable();
-export const deviceSchema = mijiaDeviceSchema.extend({
+export const deviceSchema = inventoryDeviceSchema.extend({
   account_id: z.string(),
   device_id: z.string(),
   spec_id: specificationIdSchema.nullable(),
@@ -192,7 +194,7 @@ export const specSchema = z.object({
   urn: specificationIdSchema,
   version: z.string().max(64),
   category: categorySchema,
-  spec: mijiaDeviceSpecSchema.shape.spec,
+  spec: z.record(z.string(), deviceCapabilitySchema),
 });
 export const directorySchema = z.object({
   home: z.record(z.string(), homeSchema),

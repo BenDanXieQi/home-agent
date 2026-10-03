@@ -157,12 +157,22 @@ export class Go2RtcAdapter {
     if (!this.ready) throw new Go2RtcError("request_timeout");
     this.heartbeatTimer = context.with(ROOT_CONTEXT, () =>
       setInterval(() => {
-        this.renewSessionLease().catch(() => {});
+        this.renewSessionLease().catch(() => {
+          if (this.ready)
+            console.warn(
+              "Media heartbeat failed; session lease retained until expiry",
+            );
+        });
       }, HEARTBEAT_INTERVAL_MS),
     );
     this.heartbeatTimer.unref();
     // Token installation can consume most of the conservative initial lease.
-    this.renewSessionLease().catch(() => {});
+    this.renewSessionLease().catch(() => {
+      if (this.ready)
+        console.warn(
+          "Initial media heartbeat failed; session lease retained until expiry",
+        );
+    });
   }
 
   async prepareCamera(
@@ -286,12 +296,12 @@ export class Go2RtcAdapter {
       };
       this.heartbeatPending = pending;
       const current = pending;
-      pending.promise
-        .finally(() => {
-          if (this.heartbeatPending === current)
-            this.heartbeatPending = undefined;
-        })
-        .catch(() => {});
+      const settle = () => {
+        if (this.heartbeatPending === current)
+          this.heartbeatPending = undefined;
+      };
+      // probeSession owns failure state; callers own the rejected wait.
+      pending.promise.then(settle, settle);
     }
     const promise = pending.promise;
     if (!signal) return promise;

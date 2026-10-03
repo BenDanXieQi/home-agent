@@ -426,7 +426,10 @@ export class MiotMqtt {
     for (const detach of [...this.detachObservers]) detach();
     this.observers.clear();
     this.topics.clear();
-    this.closing = this.client.endAsync(true).catch(() => {});
+    this.closing = this.client.endAsync(true).catch((cause: unknown) => {
+      this.closing = undefined;
+      throw cause;
+    });
     return this.closing;
   }
 }

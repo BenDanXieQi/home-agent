@@ -67,7 +67,11 @@ export class MediaSession {
 
   private serial<T>(run: () => Promise<T>) {
     const result = this.queue.then(run);
-    this.queue = result.catch(() => {});
+    // The original result belongs to the caller; settlement only advances ordering.
+    this.queue = result.then(
+      () => ({ status: "fulfilled" as const }),
+      (reason: unknown) => ({ status: "rejected" as const, reason }),
+    );
     return result;
   }
 
@@ -199,7 +203,12 @@ export class MediaSession {
     this.configurationTimer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
         this.reconcileConfiguration()
-          .catch(() => {})
+          .catch((error: unknown) => {
+            console.warn(
+              "Media configuration or cleanup failed",
+              safeMijiaError(error).code,
+            );
+          })
           .finally(() => this.scheduleConfigurationCheck());
       }, 3_000),
     );
@@ -256,7 +265,12 @@ export class MediaSession {
             console.error("session: startBinding failed", backgroundError);
           });
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        console.warn(
+          "Media configuration or cleanup failed",
+          safeMijiaError(error).code,
+        );
+      });
   }
 
   clearAdapter() {
@@ -336,7 +350,12 @@ export class MediaSession {
         };
         await this.serial(async () => {
           if (this.configurationUnavailable)
-            await this.releaseAdapter().catch(() => {});
+            await this.releaseAdapter().catch((error: unknown) => {
+              console.warn(
+                "Media configuration or cleanup failed",
+                safeMijiaError(error).code,
+              );
+            });
         });
       }
       return;

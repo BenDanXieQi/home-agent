@@ -437,7 +437,7 @@ export async function createDetectionPool(
   async function videoControl(
     task: Extract<
       z.infer<typeof commandSchema>,
-      { kind: "video_start" | "video_stop" }
+      { kind: "video_start" | "video_stop" | "tracking_retry" }
     >,
   ) {
     const generation = current;
@@ -487,6 +487,7 @@ export async function createDetectionPool(
     detectImage,
     close,
     retry,
+    retryTracking: () => videoControl({ kind: "tracking_retry" }),
     getStatus,
     subscribeStatus(listener: () => void) {
       statusListeners.add(listener);

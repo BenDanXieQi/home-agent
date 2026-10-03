@@ -27,20 +27,22 @@ function DataBrowser({ scope }: { scope: string }) {
     contextBrowseQuerySchema.parse({
       scope_epoch: scope,
       table: "context_records",
-      page: 0,
+      cursor: null,
       search: "",
     }),
   );
+  const [page, setPage] = useState(0);
+  const [cursors, setCursors] = useState<(typeof input.cursor)[]>([null]);
   const [search, setSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
   const detailTrigger = useRef<HTMLButtonElement>(null);
   const [selectedKey, selectKey] = useState<string | null>(null);
   const query = useQuery({
-    ...contextBrowseOptions(input),
+    ...contextBrowseOptions(input, page),
     placeholderData: keepPreviousData,
   });
   const data = query.data;
-  const displayedInput = data?.request ?? input;
+  const displayedInput = data?.request ?? { ...input, page };
   const table = data?.tables.find((item) => item.name === displayedInput.table);
   const selected = query.isPlaceholderData
     ? undefined
@@ -50,13 +52,17 @@ function DataBrowser({ scope }: { scope: string }) {
     typeof selected?.contextId === "string" ? selected.contextId : undefined;
   const presentation = tablePresentation[displayedInput.table];
   function searchRecords() {
-    setInput({ ...input, page: 0, search: search.trim() });
+    setInput({ ...input, cursor: null, search: search.trim() });
+    setPage(0);
+    setCursors([null]);
     selectKey(null);
   }
   function navigate(
     next: Pick<typeof input, "table" | "context_id" | "entity">,
   ) {
-    setInput({ scope_epoch: scope, page: 0, search: "", ...next });
+    setInput({ scope_epoch: scope, cursor: null, search: "", ...next });
+    setPage(0);
+    setCursors([null]);
     setSearch("");
     selectKey(null);
   }
@@ -73,10 +79,13 @@ function DataBrowser({ scope }: { scope: string }) {
         onValueChange={(name) => navigate({ table: name })}
         options={(
           ["household_subjects", "context_records", "context_entities"] as const
-        ).map((name) => ({
-          value: name,
-          label: `${tablePresentation[name].title} · ${data?.tables.find((item) => item.name === name)?.count.toLocaleString() ?? "—"}`,
-        }))}
+        ).map((name) => {
+          const metadata = data?.tables.find((item) => item.name === name);
+          return {
+            value: name,
+            label: `${tablePresentation[name].title} · ${metadata?.count_is_estimate ? "约 " : ""}${metadata?.count.toLocaleString() ?? "—"}`,
+          };
+        })}
       />
       <output className="sr-only" aria-atomic="true">
         {query.isFetching
@@ -92,7 +101,7 @@ function DataBrowser({ scope }: { scope: string }) {
             : query.isFetching
               ? `正在更新${presentation.title}…`
               : table
-                ? `${table.count.toLocaleString()} 条记录`
+                ? `${table.count_is_estimate ? "约 " : ""}${table.count.toLocaleString()} 条记录`
                 : "暂无记录数量"}
         </span>
         <form
@@ -221,9 +230,11 @@ function DataBrowser({ scope }: { scope: string }) {
                 setInput({
                   scope_epoch: scope,
                   table: input.table,
-                  page: 0,
+                  cursor: null,
                   search: input.search,
                 });
+                setPage(0);
+                setCursors([null]);
                 selectKey(null);
                 searchInput.current?.focus();
               }}
@@ -278,7 +289,9 @@ function DataBrowser({ scope }: { scope: string }) {
                 <Button
                   disabled={query.isFetching}
                   onClick={() => {
-                    setInput({ ...input, page: 0, search: "" });
+                    setInput({ ...input, cursor: null, search: "" });
+                    setPage(0);
+                    setCursors([null]);
                     setSearch("");
                     selectKey(null);
                     searchInput.current?.focus();
@@ -351,14 +364,17 @@ function DataBrowser({ scope }: { scope: string }) {
           <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs text-muted">
             <span>
               第 {displayedInput.page + 1} 页 · 每页 25 条
-              {table ? ` · 全表 ${table.count.toLocaleString()} 条` : ""}
+              {table
+                ? ` · 全表${table.count_is_estimate ? "约" : ""} ${table.count.toLocaleString()} 条`
+                : ""}
             </span>
             <div className="flex gap-2">
               <Button
                 size="small"
-                disabled={!input.page || query.isFetching}
+                disabled={!page || query.isFetching}
                 onClick={() => {
-                  setInput({ ...input, page: input.page - 1 });
+                  setInput({ ...input, cursor: cursors[page - 1] ?? null });
+                  setPage(page - 1);
                   selectKey(null);
                 }}
               >
@@ -367,10 +383,13 @@ function DataBrowser({ scope }: { scope: string }) {
               <Button
                 size="small"
                 disabled={
-                  !data?.has_more || query.isFetching || input.page >= 10000
+                  !data?.next_cursor || query.isFetching || page >= 10000
                 }
                 onClick={() => {
-                  setInput({ ...input, page: input.page + 1 });
+                  if (!data.next_cursor) return;
+                  setCursors([...cursors.slice(0, page + 1), data.next_cursor]);
+                  setInput({ ...input, cursor: data.next_cursor });
+                  setPage(page + 1);
                   selectKey(null);
                 }}
               >

@@ -3,7 +3,7 @@ import {
   readLimitedJson,
   ResponseBodyError,
 } from "@home-agent/api/http/read-body";
-import type { MijiaCapability, MijiaDeviceSpec } from "@home-agent/api/mijia";
+import type { MijiaDeviceSpec } from "@home-agent/api/mijia";
 import { MiCloudError } from "../micloud/errors";
 
 const iid = z.number().int().positive();
@@ -237,7 +237,9 @@ export class MiotSpecClient {
           : "network",
       );
     } finally {
-      await response?.body?.cancel().catch(() => {});
+      await response?.body?.cancel().catch(() => {
+        if (!signal.aborted) console.warn("Supplier response cleanup failed");
+      });
     }
   }
 }
@@ -248,7 +250,7 @@ function parseSpec(instance: Instance, translations: Translations) {
   const result: Spec = { category: typeName(instance.type), spec: {} };
   const translate = (key: string, description: string) =>
     translations[key]?.trim() || description;
-  const add = (key: string, capability: MijiaCapability) => {
+  const add = (key: string, capability: MijiaDeviceSpec["spec"][string]) => {
     if (Object.hasOwn(result.spec, key))
       throw new MiCloudError("spec-invalid-response");
     result.spec[key] = capability;

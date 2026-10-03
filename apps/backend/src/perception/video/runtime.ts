@@ -135,6 +135,7 @@ export function createVideoRuntime(dependencies: {
       });
   }, 1000);
   return {
+    retryTracking: () => dependencies.tracking.retry(),
     start(
       input: Pick<
         Parameters<typeof createVideoSource>[0],
