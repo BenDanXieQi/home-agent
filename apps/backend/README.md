@@ -16,6 +16,8 @@ bun run dev         # 等待 Docker 依赖就绪，再启动 Web、backend 和 A
 bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 ```
 
+开发模式由 nodemon 监听 `src/`、共享 API 与观测包源码及根目录 `.env`。修改后发送 SIGTERM 并等待旧后端退出，再启动新的 Bun 进程；音视频分析子进程随旧后端结束，文件句柄不会跨重载保留。监听范围不包括依赖、构建产物和运行时媒体文件。
+
 默认监听 `http://127.0.0.1:3000`，通过 `BACKEND_HOST`、`BACKEND_PORT` 调整。配置、服务检查、米家和聊天接口同时验证 TCP 对端为 loopback 及 Host／Origin 为允许的本机地址；调整监听地址不会放宽访问限制。当前仅供可信本机使用，尚无用户认证。构建产物需要 workspace 与已安装的依赖。
 
 ## 静态文件服务
@@ -40,7 +42,6 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `POST /api/perception/images/detect`                | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
 | `GET /api/perception/windows`                       | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量           |
 | `POST /api/perception/windows/:id/media`            | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
-| `POST /api/mijia/cameras/recordings`                | 读取当前来源的 SD 卡录像索引，保留设备时间依据                                      |
 | `PUT/GET/DELETE /api/mijia/recordings/playback/:id` | 申请、查询或释放经校验的 SD 卡回放资源                                              |
 | `GET/HEAD /api/mijia/recordings/playback/:id/media` | 受控 MP4 读取，支持单段字节范围请求                                                 |
 | `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                          |
@@ -234,7 +235,7 @@ bun run db:down      # 停止容器，保留数据卷
 
 `POST /api/household-context/browse` 为 Web 的 `/data` 页面提供三张表的只读浏览。请求包含当前 `scope_epoch`、白名单表名 `table`、从 0 开始的 `page` 和 `search`；可按 `context_id` 或 `entity: { type, id }` 查看相关上下文及关联。成员按名称搜索，上下文按描述或主题搜索，关联按对象 ID 搜索；每页 25 条、最多第 10,001 页，返回是否还有下一页。计数是各表总数，不是筛选后的记录数。字段元数据从 Drizzle 表定义生成，响应最多 2 MiB，超限拒绝返回。
 
-接口仅允许本机访问，不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取与家庭切换共用绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
+接口仅允许本机访问，接纳后端直连、Vite 开发入口和 `https://localhost:8443` 正式页面入口；继续校验实际回环对端、Host 与 Origin，不信任转发头。成员与房间分析接口使用相同入口规则。数据浏览不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取与家庭切换共用绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
 
 配置协调由后台周期任务执行，状态查询没有维护副作用。保存新的 go2rtc 地址后自动迁移连接；`POST /api/mijia/connection/retry` 只恢复未就绪部分。纯设备识别位于 `devices/mapping.ts`，摄像头共享流规格由 `media/camera-source-spec.ts` 定义。
 
