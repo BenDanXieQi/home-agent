@@ -1,9 +1,6 @@
+import { inventoryDeviceSchema } from "../domain/devices";
 import { sourceMediaSchema } from "./media";
-export {
-  mijiaDeviceSpecSchema,
-  type MijiaDeviceSpec,
-  type MijiaCapability,
-} from "./mijia-spec";
+export { mijiaDeviceSpecSchema, type MijiaDeviceSpec } from "./mijia-spec";
 import { z } from "zod";
 import {
   playbackConnectionSummarySchema,
@@ -40,18 +37,6 @@ export const mijiaTimeouts = {
   signaling: 55_000,
 } as const;
 
-export const mijiaDeviceSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  model: z.string(),
-  home_id: z.string().nullable(),
-  home_name: z.string().nullable(),
-  room_id: z.string().nullable(),
-  room_name: z.string().nullable(),
-  online: z.boolean(),
-  camera: z.boolean(),
-  channels: z.array(z.union([z.literal(1), z.literal(2)])),
-});
 export const mijiaAccountSchema = z.discriminatedUnion("status", [
   z.object({ status: z.enum(["idle", "restoring"]) }),
   z.object({
@@ -129,11 +114,11 @@ export const mijiaStateSchema = z.object({
   devices: z.discriminatedUnion("status", [
     z.object({
       status: z.enum(["idle", "loading", "ready"]),
-      items: z.array(mijiaDeviceSchema),
+      items: z.array(inventoryDeviceSchema),
     }),
     z.object({
       status: z.literal("error"),
-      items: z.array(mijiaDeviceSchema),
+      items: z.array(inventoryDeviceSchema),
       error: mijiaErrorSchema,
     }),
   ]),

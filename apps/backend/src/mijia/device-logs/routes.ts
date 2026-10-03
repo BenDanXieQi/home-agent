@@ -3,7 +3,7 @@ import { streamSSE } from "hono/streaming";
 import { setTimeout as sleep } from "node:timers/promises";
 import { validateJson } from "@home-agent/api/errors/hono";
 import { startDeviceLogSchema } from "@home-agent/api/device-logs";
-import type { DevicePushLogs } from "./device-logs";
+import type { DevicePushLogs } from "./service";
 
 export function createDeviceLogRoutes(
   logs: DevicePushLogs,

@@ -15,7 +15,7 @@ import {
 } from "../../../src/mijia/household";
 import type { HouseholdRuntime } from "../../../src/household/runtime";
 import { householdLimits } from "../../../src/household/config";
-import { DevicePushLogs } from "../../../src/household/device-logs";
+import { DevicePushLogs } from "../../../src/mijia/device-logs/service";
 import { MijiaService } from "../../../src/mijia/service";
 import { createMijiaRoutes } from "../../../src/mijia/routes";
 import { MijiaError } from "../../../src/mijia/errors";

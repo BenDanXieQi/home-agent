@@ -1,5 +1,8 @@
 import { sql } from "drizzle-orm";
-import { contextEntityTypeSchema } from "@home-agent/api/household-context";
+import {
+  contextEntityTypeSchema,
+  contextEntityRoleSchema,
+} from "@home-agent/api/household-context";
 import {
   check,
   index,
@@ -59,12 +62,10 @@ export const contextEntityType = pgEnum(
   "context_entity_type",
   contextEntityTypeSchema.enum,
 );
-export const contextEntityRole = pgEnum("context_entity_role", [
-  "subject",
-  "participant",
-  "location",
-  "source",
-]);
+export const contextEntityRole = pgEnum(
+  "context_entity_role",
+  contextEntityRoleSchema.enum,
+);
 
 export const householdSubjects = pgTable(
   "household_subjects",

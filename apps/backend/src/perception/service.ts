@@ -357,10 +357,11 @@ export function createPerceptionService(options: {
       // Cancellation stops HTTP waiting, not an admitted native computation.
       return await compute.detectImage(input);
     },
-    retry() {
-      if (stopped) return Promise.reject(new Error("Perception stopped"));
+    async retry() {
+      if (stopped) throw new Error("Perception stopped");
       audio.retry();
-      return initialize();
+      await initialize();
+      if (pool?.getStatus().status === "ready") await pool.retryTracking();
     },
     snapshot() {
       const audioSnapshot = audio.snapshot();

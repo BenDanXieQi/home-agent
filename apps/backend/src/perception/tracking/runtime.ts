@@ -49,6 +49,7 @@ export function createTrackingRuntime(options: {
     observation: z.infer<typeof trackingObservationSchema>,
   ) => Promise<void>;
   failure: (error: unknown) => void;
+  fatal: (error: unknown) => void;
 }) {
   let model = options.createModel();
   let releasing: Promise<void> | undefined;
@@ -58,6 +59,33 @@ export function createTrackingRuntime(options: {
   const pixelTurns = new Map<string, number>();
   let retained = 0;
   let closed = false;
+  let restarts = 0;
+  let retryAt = 0;
+  let healthySince: number | undefined;
+
+  function recycleModel() {
+    if (releasing) return releasing;
+    const owned = model;
+    releasing = (async () => {
+      // Interrupt native work before draining its publication tasks. Do not
+      // release the CPU slot or create a replacement before confirmed exit.
+      await owned.close();
+      await Promise.allSettled(pending);
+      options.releaseCompute();
+      if (!closed) model = options.createModel();
+    })().finally(() => {
+      releasing = undefined;
+    });
+    return releasing;
+  }
+
+  function recoverModel() {
+    if (closed || releasing || !model.status.error) return;
+    healthySince = undefined;
+    retryAt =
+      restarts < 3 ? performance.now() + 5000 * 2 ** restarts++ : Infinity;
+    recycleModel().catch(options.fatal);
+  }
 
   return {
     start(run: z.infer<typeof runSchema>) {
@@ -68,15 +96,9 @@ export function createTrackingRuntime(options: {
       runs.delete(runId);
       pixelTurns.delete(runId);
       if (runs.size) return;
-      releasing ??= (async () => {
-        await Promise.all(pending);
-        await model.close();
-        options.releaseCompute();
-        if (!closed) model = options.createModel();
-      })().finally(() => {
-        releasing = undefined;
-      });
-      await releasing;
+      await recycleModel();
+      restarts = 0;
+      retryAt = 0;
     },
     capture(
       run: z.infer<typeof runSchema>,
@@ -171,7 +193,14 @@ export function createTrackingRuntime(options: {
                 features[i] ? [] : [i],
               );
               if (missing.length) {
-                if (!releasing && options.reserveCompute()) model.start();
+                recoverModel();
+                if (
+                  !releasing &&
+                  !model.status.error &&
+                  performance.now() >= retryAt &&
+                  options.reserveCompute()
+                )
+                  model.start();
                 if (
                   releasing ||
                   !rgb ||
@@ -181,8 +210,12 @@ export function createTrackingRuntime(options: {
                   status = "degraded";
                   reason = !rgb
                     ? "Appearance frame capacity unavailable"
-                    : (model.status.error ??
-                      "Appearance compute unavailable or busy");
+                    : retryAt === Infinity
+                      ? "Appearance recovery exhausted; retry perception"
+                      : performance.now() < retryAt
+                        ? "Appearance recovery backoff"
+                        : (model.status.error ??
+                          "Appearance compute unavailable or busy");
                 } else {
                   try {
                     const result = await model.extract(
@@ -206,9 +239,13 @@ export function createTrackingRuntime(options: {
                       throw new Error("ReID result count mismatch");
                     for (const [i, index] of missing.entries())
                       features[index] = result[i]!;
+                    healthySince ??= performance.now();
+                    if (performance.now() - healthySince >= 60_000)
+                      restarts = 0;
                   } catch (error) {
                     status = "degraded";
                     reason = String(error).slice(0, 4096);
+                    recoverModel();
                   }
                 }
               }
@@ -307,13 +344,19 @@ export function createTrackingRuntime(options: {
         },
       };
     },
+    async retry() {
+      if (closed) throw new Error("Tracking runtime closed");
+      restarts = 0;
+      retryAt = 0;
+      healthySince = undefined;
+      if (model.status.error || releasing) await recycleModel();
+    },
     async close() {
       closed = true;
       for (const entry of runs.values()) entry.release?.();
       runs.clear();
       pixelTurns.clear();
-      await releasing;
-      await Promise.all([model.close(), ...pending]);
+      await recycleModel();
     },
   };
 }

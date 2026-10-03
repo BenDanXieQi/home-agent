@@ -1,33 +1,25 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { memberSaveSchema } from "@home-agent/api/household-members";
 import type { Database } from "../../db";
-import { householdSubjects, mijiaHomeSelections } from "../../db/schema";
-import { createLockedTransactions } from "../../db/transaction-outcome";
-import { householdLimits } from "../config";
+import { householdSubjects } from "../../db/schema";
+import { createHouseholdBindingAccess } from "../binding-repository";
 import { HouseholdError } from "../errors";
 
 export function createMemberRepository(db: Database) {
-  const transaction = createLockedTransactions(
-    db,
-    householdLimits.transactionMs,
-  );
+  const access = createHouseholdBindingAccess(db);
   return {
     async access(
-      identity: { accountId: string; homeId: string },
+      identity: Parameters<typeof access>[0],
       assertCurrent: () => void,
       command?:
         | ReturnType<typeof memberSaveSchema.parse>
         | { id: string; operation: "delete" },
     ) {
-      return transaction("household_binding", async (tx) => {
-        assertCurrent();
-        const [binding] = await tx.select().from(mijiaHomeSelections).limit(1);
-        if (
-          binding?.accountKey !== identity.accountId ||
-          binding.homeId !== identity.homeId
-        )
-          throw new HouseholdError("stale_session");
+      return access(identity, assertCurrent, async (tx) => {
         if (command) {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended('household_members', 0))`,
+          );
           const [existing] = await tx
             .select()
             .from(householdSubjects)
@@ -68,7 +60,6 @@ export function createMemberRepository(db: Database) {
           .select()
           .from(householdSubjects)
           .orderBy(householdSubjects.createdAt, householdSubjects.id);
-        assertCurrent();
         return {
           members: rows.map((row) => ({
             id: row.id,

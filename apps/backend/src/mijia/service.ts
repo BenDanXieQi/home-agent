@@ -17,6 +17,7 @@ import type { MiCloud } from "./protocols/micloud";
 import type { Operation } from "@home-agent/api/contracts";
 import type { MijiaState } from "@home-agent/api/mijia";
 import type { CredentialStore } from "../credentials/store";
+import { CredentialCommitUnknownError } from "../credentials/store";
 import { MediaSession } from "./media/session";
 import { MijiaError, safeMijiaError } from "./errors";
 import { DeviceDiscovery } from "./devices/discovery";
@@ -92,7 +93,10 @@ export class MijiaService {
       onScopeChanged: () => {
         this.invalidateDeviceAccess();
         this.media.prepareRebind();
-        if (this.household?.ready()) this.media.startBinding().catch(() => {});
+        if (this.household?.ready())
+          this.media.startBinding().catch((error: unknown) => {
+            console.warn("Media binding failed", safeMijiaError(error).code);
+          });
       },
       onDevices: (devices, retryFailed) =>
         this.media.updateDevices(
@@ -129,7 +133,8 @@ export class MijiaService {
   );
   private mqtt: AccountObservations | undefined;
   private observationScope = new AbortController();
-  private mqttClosing: Promise<void> = Promise.resolve();
+  private mqttClosing: Promise<void> | undefined;
+  private readonly retiredObservations = new Set<AccountObservations>();
   private readScope = new AbortController();
   private readonly deviceReadScopes = new Map<string, AbortController>();
   private readGeneration = crypto.randomUUID();
@@ -245,7 +250,9 @@ export class MijiaService {
     this.revokeDevices(definitionChanges);
     this.syncDirectoryNotifications();
     if (this.household.ready() && this.media.binding.status === "unbound")
-      this.media.startBinding().catch(() => {});
+      this.media.startBinding().catch((error: unknown) => {
+        console.warn("Media binding failed", safeMijiaError(error).code);
+      });
     this.changed();
   }
   loginMaterial(id: string) {
@@ -312,16 +319,45 @@ export class MijiaService {
     this.directoryNotifications.close();
     const mqtt = this.mqtt;
     this.mqtt = undefined;
-    if (mqtt)
-      this.mqttClosing = Promise.all([
-        this.mqttClosing,
-        mqtt.close("scope_invalidated"),
-      ]).then(() => {});
+    if (mqtt) {
+      this.retiredObservations.add(mqtt);
+      this.drainRetiredObservations().catch((cause: unknown) => {
+        console.warn("Retired MQTT cleanup failed", safeMijiaError(cause).code);
+      });
+    }
     this.observationScope.abort();
     this.observationScope = new AbortController();
     this.invalidatePropertyReads();
     for (const scope of this.deviceReadScopes.values()) scope.abort();
     this.deviceReadScopes.clear();
+  }
+
+  private drainRetiredObservations() {
+    if (!this.retiredObservations.size && !this.mqttClosing)
+      return Promise.resolve();
+    const drain = async () => {
+      while (this.retiredObservations.size) {
+        const results = await Promise.allSettled(
+          [...this.retiredObservations].map(async (owner) => {
+            await owner.close("scope_invalidated");
+            this.retiredObservations.delete(owner);
+          }),
+        );
+        const failures = results.flatMap((result) =>
+          result.status === "rejected" ? [result.reason as unknown] : [],
+        );
+        if (failures.length)
+          throw new AggregateError(failures, "Retired MQTT cleanup failed");
+      }
+    };
+    const previous = this.mqttClosing ?? Promise.resolve();
+    const task = previous.then(drain, drain);
+    this.mqttClosing = task;
+    const settled = () => {
+      if (this.mqttClosing === task) this.mqttClosing = undefined;
+    };
+    task.then(settled, settled);
+    return task;
   }
 
   private revokeDevices(ids: readonly string[]) {
@@ -392,7 +428,9 @@ export class MijiaService {
           this.observationScope.signal === scope
         ) {
           // A topic ACL refusal can revoke device access without invalidating the token.
-          this.discovery.load(true).catch(() => {});
+          this.discovery.load(true).catch((error: unknown) => {
+            console.warn("Device refresh failed", safeMijiaError(error).code);
+          });
         }
       },
     ));
@@ -401,7 +439,7 @@ export class MijiaService {
     const account = this.accountClient;
     if (!account || !this.activeAccount(account) || !this.accountOAuth) return;
     const scope = this.observationScope.signal;
-    this.mqttClosing
+    this.drainRetiredObservations()
       .then(() => {
         if (scope.aborted || !this.activeAccount(account)) return;
         this.directoryNotifications.update(
@@ -454,7 +492,7 @@ export class MijiaService {
     };
     assertDevices();
     return this.serial(async () => {
-      await this.mqttClosing;
+      await this.drainRetiredObservations();
       assertDevices();
       if (this.mqtt?.closed) {
         await this.mqtt.close();
@@ -579,6 +617,44 @@ export class MijiaService {
   private requireStore() {
     if (!this.credentialStore) throw new MijiaError("credential_storage");
     return this.credentialStore;
+  }
+
+  private persistAuthorization(
+    operation: "save" | "remove",
+    run: () => Promise<void>,
+  ) {
+    return mijiaOperation(
+      `credentials.${operation}`,
+      "credential_storage",
+      async () => {
+        try {
+          await run();
+        } catch (cause) {
+          if (cause instanceof CredentialCommitUnknownError) {
+            this.stopAccountMaintenance();
+            this.cancelRestore();
+            this.invalidateDeviceAccess();
+            this.media.revokeAccount();
+            this.discovery.reset();
+            this.accountClient?.dispose();
+            this.accountClient = undefined;
+            this.accountOAuth = undefined;
+            this.state.account = {
+              status: "restore_error",
+              error: new MijiaError("credential_storage").toPayload(),
+            };
+            this.changed();
+            this.media.clearAdapter().catch((error: unknown) => {
+              console.warn(
+                "Unconfirmed authorization: media cleanup failed",
+                safeMijiaError(error).code,
+              );
+            });
+          }
+          throw cause;
+        }
+      },
+    );
   }
 
   requestConnection() {
@@ -750,7 +826,7 @@ export class MijiaService {
         throw new MijiaError("authentication");
       this.committingCredentials = true;
       try {
-        await mijiaOperation("credentials.save", "credential_storage", () =>
+        await this.persistAuthorization("save", () =>
           this.requireStore().write("mijia", {
             micloud: candidate.client.exportSession(),
             oauth: candidate.oauth,
@@ -797,7 +873,7 @@ export class MijiaService {
       const homeId = selection?.homeId ?? null;
       this.chooseDefaultHome = !selection;
       assertCurrent();
-      await mijiaOperation("credentials.save", "credential_storage", () =>
+      await this.persistAuthorization("save", () =>
         this.requireStore().write("mijia", {
           micloud: candidate.client.exportSession(),
           oauth: candidate.oauth,
@@ -845,7 +921,12 @@ export class MijiaService {
       this.changed();
       return { cleanup: this.media.clearAdapter() };
     });
-    await revoked?.cleanup.catch(() => {});
+    await revoked?.cleanup.catch((error: unknown) => {
+      console.warn(
+        "Revoked account media cleanup failed",
+        safeMijiaError(error).code,
+      );
+    });
   }
 
   async logout() {
@@ -866,7 +947,7 @@ export class MijiaService {
       const revoked = await this.serial(async () => {
         // Delete durable authorization first. Failure must never report a successful logout.
         try {
-          await mijiaOperation("credentials.remove", "credential_storage", () =>
+          await this.persistAuthorization("remove", () =>
             this.requireStore().remove("mijia"),
           );
         } catch (error) {
@@ -902,7 +983,12 @@ export class MijiaService {
         this.startAccountMaintenance(this.accountClient);
         // The household revoked its public scope before durable logout. Rebuild
         // it through fresh, validated discovery when authorization remains valid.
-        this.loadDevices().catch(() => {});
+        this.loadDevices().catch((cause: unknown) => {
+          console.warn(
+            "Account recovery device refresh failed",
+            safeMijiaError(cause).code,
+          );
+        });
       }
       throw error;
     } finally {
@@ -913,7 +999,11 @@ export class MijiaService {
 
   private serial<T>(run: () => Promise<T>) {
     const result = this.lifecycleQueue.then(run);
-    this.lifecycleQueue = result.catch(() => {});
+    // The caller owns rejection; the queue retains its settlement and keeps ordering.
+    this.lifecycleQueue = result.then(
+      () => ({ status: "fulfilled" as const }),
+      (reason: unknown) => ({ status: "rejected" as const, reason }),
+    );
     return result;
   }
 
@@ -1022,7 +1112,7 @@ export class MijiaService {
       this.stopAccountMaintenance();
       this.committingCredentials = true;
       try {
-        await mijiaOperation("credentials.save", "credential_storage", () =>
+        await this.persistAuthorization("save", () =>
           this.requireStore().write("mijia", {
             micloud: attempt.cloud.exportSession(),
             oauth,
@@ -1186,14 +1276,16 @@ export class MijiaService {
     this.accountClient = undefined;
     this.accountOAuth = undefined;
     this.discovery.reset();
-    try {
-      await this.media.close();
-    } finally {
-      await Promise.allSettled([
-        maintenanceClosing,
-        this.lifecycleQueue,
-        this.mqttClosing,
-      ]);
-    }
+    const results = await Promise.allSettled([
+      this.media.close(),
+      maintenanceClosing,
+      this.lifecycleQueue,
+      this.drainRetiredObservations(),
+    ]);
+    const failures = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason as unknown] : [],
+    );
+    if (failures.length)
+      throw new AggregateError(failures, "Account shutdown failed");
   }
 }

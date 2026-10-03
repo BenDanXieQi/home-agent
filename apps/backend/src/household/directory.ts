@@ -7,7 +7,7 @@ import {
   initialSpecification,
   roomSchema,
 } from "@home-agent/api/household";
-import { mijiaDeviceSchema } from "@home-agent/api/mijia";
+import { inventoryDeviceSchema } from "@home-agent/api/devices";
 
 /** Complete directory boundary; vendor transport fields are discarded here. */
 export const directoryCandidateSchema = z.object({
@@ -27,7 +27,7 @@ export const directoryCandidateSchema = z.object({
     }),
   ),
   devices: z.array(
-    mijiaDeviceSchema.extend({ spec_type: z.string().nullable() }),
+    inventoryDeviceSchema.extend({ spec_type: z.string().nullable() }),
   ),
 });
 export type DirectoryCandidate = z.infer<typeof directoryCandidateSchema>;

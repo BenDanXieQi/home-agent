@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { Database } from ".";
 
-type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 /** The database has not yet established whether a previous write committed. */
 export class StorageOutcomeUnknownError extends Error {
@@ -12,14 +12,20 @@ export class StorageOutcomeUnknownError extends Error {
 }
 
 /** Acquiring the same transaction lock also proves the previous transaction ended. */
-export function createLockedTransactions(db: Database, timeoutMs: number) {
+export function createLockedTransactions(
+  db: Database,
+  timeoutMs: number,
+  mode: "exclusive" | "shared" = "exclusive",
+) {
   return <T>(key: string, run: (tx: Transaction) => Promise<T>) =>
     db.transaction(async (tx) => {
       await tx.execute(
         sql`select set_config('statement_timeout', ${String(timeoutMs)}, true), set_config('lock_timeout', ${String(timeoutMs)}, true), set_config('transaction_timeout', ${String(timeoutMs)}, true)`,
       );
       await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+        mode === "shared"
+          ? sql`select pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`
+          : sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
       );
       return run(tx);
     });
@@ -33,7 +39,7 @@ export function createConfirmedWriter<TTransaction>(
   ) => Promise<T>,
 ) {
   let pending: (() => Promise<void>) | undefined;
-  return async <T>(
+  const write = async <T>(
     key: string,
     run: (tx: TTransaction, beforeWrite: () => void) => Promise<T>,
     confirm: (
@@ -71,4 +77,9 @@ export function createConfirmedWriter<TTransaction>(
       throw error;
     }
   };
+  return Object.assign(write, {
+    async settle() {
+      await pending?.();
+    },
+  });
 }

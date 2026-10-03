@@ -72,7 +72,9 @@ async function request(url: URL, init: RequestInit, signal: AbortSignal) {
       throw new MijiaError("cloud_invalid_response");
     throw new MijiaError("network");
   } finally {
-    await response?.body?.cancel().catch(() => {});
+    await response?.body?.cancel().catch(() => {
+      if (!signal.aborted) console.warn("Supplier response cleanup failed");
+    });
   }
 }
 function decode(text: string) {

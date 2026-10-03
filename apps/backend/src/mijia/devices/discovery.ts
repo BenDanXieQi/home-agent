@@ -277,7 +277,12 @@ export class DeviceDiscovery {
         )
           return;
         this.load(true)
-          .catch(() => {})
+          .catch((error: unknown) => {
+            console.warn(
+              "Scheduled device refresh failed",
+              safeMijiaError(error).code,
+            );
+          })
           .finally(() => {
             if (this.dependencies.activeAccount(account))
               this.schedule(account);

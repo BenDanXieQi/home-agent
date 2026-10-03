@@ -72,6 +72,7 @@ async function run(task: z.infer<typeof commandSchema>) {
       }),
       tracking: createTrackingRuntime({
         createModel: createReidProcess,
+        fatal: fail,
 
         reserveCompute: () => pool!.reserveTracking(),
         releaseCompute: () => {
@@ -131,6 +132,10 @@ async function run(task: z.infer<typeof commandSchema>) {
   }
   if (task.kind === "video_stop") {
     await video!.stop(task.runId);
+    return { kind: "video_ack" as const };
+  }
+  if (task.kind === "tracking_retry") {
+    await video!.retryTracking();
     return { kind: "video_ack" as const };
   }
   return await pool.submit(task);

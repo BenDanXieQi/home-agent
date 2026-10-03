@@ -6,6 +6,8 @@
 
 Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agent/api/household` 等入口使用 `src/contracts/`。契约层包含定义数据格式并执行校验的 Zod schema、由它推导的类型，以及不涉及网络或数据库的协议数据转换，不依赖 Hono、追踪或服务端错误处理。backend 与 Agent 按需导入 `@home-agent/api/errors` 和 `@home-agent/api/errors/hono`，服务端错误处理层向契约层依赖。
 
+`@home-agent/api/devices` 提供设备清单条目与规格能力的领域 schema；米家协议和家庭规则复用这份定义，供应商原始数据的转换属于接入适配器。
+
 `@home-agent/api/playback` 提供 `src/domain/playback.ts` 中的播放目标、go2rtc 连接观测以及一次性连接耗时摘要，不依赖 HTTP 或存储。播放连接响应将 SDP 与 `connection` 一同返回；客户端据此选择本地预估样本。媒体适配器独立校验外部观测，观测异常不破坏有效的媒体答案。
 
 网络接收入口负责完整校验输入。家庭 SSE（服务端持续推送事件的 HTTP 连接）入口使用 `stateChangeSchema.parse` 一次性校验整批变化及每条数据的标识，再把已校验批次交给 `applyChanges`；后者生成新的状态，不修改原状态，并复用未变化的数据对象。快照通过 `snapshotSchema` 校验结构并复用相同的条目标识规则，不对已校验条目重复运行 schema 校验。
