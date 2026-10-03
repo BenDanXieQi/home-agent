@@ -6,6 +6,9 @@ const emptyDevices: NonNullable<
 const deviceRecordsAtom = atom(
   (get) => get(householdSnapshotAtom)?.projection.device,
 );
+export const roomsAtom = atom(
+  (get) => get(householdSnapshotAtom)?.projection.room,
+);
 export const devicesAtom = atom((get) => {
   const records = get(deviceRecordsAtom);
   return records ? Object.values(records) : emptyDevices;

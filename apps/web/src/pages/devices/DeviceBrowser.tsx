@@ -1,5 +1,5 @@
-import { householdSnapshotAtom } from "../../modules/household/state";
-import { devicePropertiesAtom } from "../../modules/devices/facts";
+import { householdScopeEpochAtom } from "../../modules/household/state";
+import { roomsAtom } from "../../modules/devices/state";
 import { DeviceStateRow } from "./DeviceStateRow";
 import { RoomAnalysisPanel } from "./RoomAnalysisPanel";
 import { CollectionDetails } from "./CollectionDetails";
@@ -62,10 +62,13 @@ export const DeviceBrowser = memo(function DeviceBrowser({
   const [search, setSearch] = useAtom(deviceSearchAtom);
   const [filter, setFilter] = useAtom(deviceFilterAtom);
   const [filters, setFilters] = useAtom(deviceFiltersAtom);
-  const snapshot = useAtomValue(householdSnapshotAtom);
-  const properties = useAtomValue(devicePropertiesAtom);
+  const scope = useAtomValue(householdScopeEpochAtom);
+  const rooms = useAtomValue(roomsAtom);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const selectedRoom = Object.values(snapshot?.projection.room ?? {}).find(
+  const changeExpanded = useCallback((deviceId: string, open: boolean) => {
+    setExpanded(open ? deviceId : null);
+  }, []);
+  const selectedRoom = Object.values(rooms ?? {}).find(
     (room) =>
       !room.archived &&
       JSON.stringify([room.home_id, room.room_id]) === filters.room,
@@ -174,10 +177,10 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           ...options.rooms.map(([value, label]) => ({ value, label })),
         ]}
       />
-      {snapshot && selectedRoom ? (
+      {scope && selectedRoom ? (
         <RoomAnalysisPanel
-          key={`${snapshot.scope_epoch}/${selectedRoom.room_id}`}
-          scope={snapshot.scope_epoch}
+          key={`${scope}/${selectedRoom.room_id}`}
+          scope={scope}
           roomId={selectedRoom.room_id}
           roomName={selectedRoom.name}
           synced={reliable}
@@ -305,16 +308,13 @@ export const DeviceBrowser = memo(function DeviceBrowser({
                   entering={!previousKeys.has(device.id)}
                   onSize={measureRow}
                 >
-                  {snapshot ? (
+                  {scope ? (
                     <DeviceStateRow
                       device={device}
-                      properties={properties.get(device.id)}
-                      scope={snapshot.scope_epoch}
+                      scope={scope}
                       reliable={reliable}
                       open={expanded === device.id}
-                      onOpenChange={(open) =>
-                        setExpanded(open ? device.id : null)
-                      }
+                      onOpenChange={changeExpanded}
                     />
                   ) : null}
                 </VirtualRow>
@@ -353,13 +353,7 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           </EmptyState>
         ) : null}
       </DeviceList>
-      {snapshot ? (
-        <CollectionDetails
-          key={snapshot.scope_epoch}
-          snapshot={snapshot}
-          reliable={reliable}
-        />
-      ) : null}
+      {scope ? <CollectionDetails key={scope} reliable={reliable} /> : null}
     </>
   );
 });

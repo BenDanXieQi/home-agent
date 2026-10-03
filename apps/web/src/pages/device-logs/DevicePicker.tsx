@@ -14,6 +14,7 @@ import { AnimatePresence, m } from "motion/react";
 import { Check, ChevronDown, Search, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Select } from "../../components/Select";
+import { SearchSelect } from "../../components/SearchSelect";
 import { Skeleton } from "../../components/Skeleton";
 import { SelectionIndicator } from "../../components/SelectionIndicator";
 import { VirtualRow } from "../../components/VirtualRow";
@@ -180,9 +181,8 @@ export const DevicePicker = memo(function DevicePicker({
               }}
               options={roomOptions}
             />
-            <Select
+            <SearchSelect
               label="设备类型"
-              searchable
               className={twMerge(
                 `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${category ? "border-ink/24 text-ink font-medium" : ""}`,
               )}

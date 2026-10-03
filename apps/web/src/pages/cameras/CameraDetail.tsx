@@ -2,7 +2,7 @@ import { CameraAnalysisLayout } from "./CameraAnalysisLayout";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useMemo, useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
 import { BackLink } from "../../components/BackLink";
 import { Notice, StatusNotice } from "../../components/Notice";
@@ -160,6 +160,7 @@ function CameraDetailContent({
     watching,
     ready,
     freeze,
+    retry,
     live: returnToLive,
     inspection,
     inspect,
@@ -178,6 +179,7 @@ function CameraDetailContent({
   const error = useAtomValue(source.errorAtom);
   const presentation = playbackPresentation(snapshot);
   const frozen = !!view?.frozen;
+  const failed = watching && snapshot.phase === "error";
   const live = watching && ready;
   const waiting = live && !view?.hasFrame && snapshot.phase !== "error";
   const label =
@@ -247,14 +249,23 @@ function CameraDetailContent({
             <Button
               type="button"
               className="min-w-36 rounded-[10px]"
-              icon={watching ? <Pause size={15} /> : <Play size={15} />}
-              disabled={watching && (!view?.hasFrame || frozen)}
+              icon={
+                failed ? (
+                  <RotateCcw size={15} />
+                ) : watching ? (
+                  <Pause size={15} />
+                ) : (
+                  <Play size={15} />
+                )
+              }
+              disabled={watching && !failed && (!view?.hasFrame || frozen)}
               onClick={() => {
-                if (watching) freeze();
+                if (failed) retry();
+                else if (watching) freeze();
                 else returnToLive();
               }}
             >
-              {watching ? "定格当前画面" : "返回实时"}
+              {failed ? "重新播放" : watching ? "定格当前画面" : "返回实时"}
             </Button>
           }
         >

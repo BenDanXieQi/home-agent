@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useAtomValue, useStore } from "jotai";
 import { householdSyncedAtom } from "../household/state";
 import { usePlaybackSession } from "../playback/use-playback-session";
+import { playbackRetryDelay } from "../playback/retry";
 import { createFramePresentation } from "./presentation";
 import type { createPerceptionSourceState } from "./source-state";
 
@@ -67,11 +68,22 @@ export function useFrameViewer(
     onFrame,
     onStop,
   });
+  const retries = useRef(0);
   useEffect(() => {
+    retries.current = 0;
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A different viewing scope or manual resume starts a fresh retry budget.
+  }, [target?.scope_epoch, target?.revision, watching]);
+  useEffect(() => {
+    if (snapshot.phase === "playing") retries.current = 0;
     if (!watching || !target || snapshot.phase !== "error") return undefined;
-    const timer = setTimeout(restart, 2000);
+    const delay = playbackRetryDelay(snapshot.failure, retries.current);
+    if (delay === undefined) return undefined;
+    const timer = setTimeout(() => {
+      retries.current++;
+      restart();
+    }, delay);
     return () => clearTimeout(timer);
-  }, [watching, target, snapshot.phase, restart]);
+  }, [watching, target, snapshot.phase, snapshot.failure, restart]);
 
   const ready = !!target;
   const inspect = useCallback(() => {
@@ -128,6 +140,10 @@ export function useFrameViewer(
     watching,
     ready,
     freeze,
+    retry: () => {
+      retries.current = 0;
+      restart();
+    },
     live: () => {
       display.current?.live();
       setInspection(undefined);
