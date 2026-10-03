@@ -57,6 +57,8 @@ export function LogEvents({
   );
   // oxlint-disable-next-line react/incompatible-library -- Read the virtualizer's live measurements on every render; do not compiler-memoize this component.
   const virtualizer = useVirtualizer({
+    // Panel resizing can notify during a React commit; let React batch that update.
+    useFlushSync: false,
     count: visible.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => 100,
