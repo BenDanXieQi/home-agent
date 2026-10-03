@@ -1,6 +1,6 @@
-import { Link, useNavigate } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft } from "lucide-react";
+import { BackLink } from "../../components/BackLink";
 import { saveMember, memberListOptions } from "../../modules/members/queries";
 import { Notice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
@@ -39,16 +39,15 @@ function AddMember({ scope }: { scope: string }) {
   }
   return (
     <div className="mx-auto max-w-3xl pb-8 pt-2 md:pt-4">
-      {!mutation.isPending ? (
-        <Link
-          to="/members"
-          search={{ member: undefined }}
-          className="mb-7 inline-flex items-center gap-2 py-2 text-sm text-muted hover:text-ink"
-        >
-          <ArrowLeft size={16} />
-          返回家庭成员
-        </Link>
-      ) : null}
+      <BackLink
+        activeOptions={{ exact: true }}
+        to="/members"
+        search={{ member: undefined }}
+        className="-ml-2 mb-7"
+        disabled={mutation.isPending}
+      >
+        返回家庭成员
+      </BackLink>
       {mutation.isError ? (
         <Notice tone="error">
           {requestErrorMessage(mutation.error)}。可返回成员页核实保存结果。
