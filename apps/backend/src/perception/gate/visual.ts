@@ -63,42 +63,28 @@ export function evaluateScene(input: {
   failed: boolean;
   first: boolean;
   changedRatio: number;
-  lastChangeAt: number | null;
-  changedAt: number | null;
-  now: number;
   audioPassed: boolean;
 }) {
   const changed =
-    input.hasVideo &&
-    !input.failed &&
-    (input.first || input.changedRatio >= 0.005);
-  const lastChangeAt = changed ? input.changedAt : input.lastChangeAt;
-  const holdUntil = lastChangeAt === null ? null : lastChangeAt + 90_000;
+    input.hasVideo && !input.failed && input.changedRatio >= 0.005;
   const visual = input.failed
     ? ("failed" as const)
     : !input.hasVideo
       ? ("missing" as const)
       : changed
-        ? input.first
+        ? ("changed" as const)
+        : input.first
           ? ("first" as const)
-          : ("changed" as const)
-        : holdUntil !== null && input.now < holdUntil
-          ? ("hold" as const)
           : ("static" as const);
   const candidate =
-    visual === "first" || visual === "changed" || visual === "hold"
-      ? ("video" as const)
-      : input.audioPassed
-        ? ("audio" as const)
-        : ("none" as const);
+    visual === "changed" ? ("video" as const) : ("none" as const);
   return {
     gate: {
       candidate,
       visual,
       changedRatio: input.changedRatio,
-      holdUntil,
+      holdUntil: null,
       audioPassed: input.audioPassed,
     },
-    lastChangeAt,
   };
 }

@@ -1,10 +1,10 @@
-import { twMerge } from "tailwind-merge";
+import { CameraAnalysisLayout } from "./CameraAnalysisLayout";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Pause, Play } from "lucide-react";
+import { Pause, Play } from "lucide-react";
 import { Button } from "../../components/Button";
-import { buttonStyles } from "../../components/button-styles";
+import { BackLink } from "../../components/BackLink";
 import { Notice, StatusNotice } from "../../components/Notice";
 import {
   householdScopeEpochAtom,
@@ -22,7 +22,6 @@ import { cameraTileClassName, cameraTransitionName } from "./camera-styles";
 import { useCameraReturn } from "./use-camera-return";
 import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 import { CameraWindows } from "./CameraWindows";
-import { CameraRecordings } from "./CameraRecordings";
 
 export default function CameraDetailPage() {
   useCameraReturn();
@@ -39,24 +38,17 @@ export default function CameraDetailPage() {
         />
       ) : (
         <>
-          <CameraBackLink />
+          <BackLink
+            activeOptions={{ exact: true }}
+            to="/cameras"
+            className="-ml-2"
+          >
+            返回看家
+          </BackLink>
           <Notice tone="error">镜头不存在。</Notice>
         </>
       )}
     </section>
-  );
-}
-
-function CameraBackLink() {
-  return (
-    <Link
-      to="/cameras"
-      className={twMerge(
-        `${buttonStyles.base} ${buttonStyles.ghost} -ml-2 min-h-8 justify-self-start gap-1 rounded-[10px] border-0 px-2 py-1.5 text-xs font-normal hover:bg-surface hover:text-ink focus-visible:outline-2`,
-      )}
-    >
-      <ArrowLeft size={14} aria-hidden="true" /> 返回
-    </Link>
   );
 }
 
@@ -70,14 +62,26 @@ function CameraDetailSource(
   if (synced && (!device?.camera || !device.channels.includes(target.channel)))
     return (
       <>
-        <CameraBackLink />
+        <BackLink
+          activeOptions={{ exact: true }}
+          to="/cameras"
+          className="-ml-2"
+        >
+          返回看家
+        </BackLink>
         <Notice tone="warning">该视频不在当前家庭的设备清单中。</Notice>
       </>
     );
   if (!epoch || !device)
     return (
       <>
-        <CameraBackLink />
+        <BackLink
+          activeOptions={{ exact: true }}
+          to="/cameras"
+          className="-ml-2"
+        >
+          返回看家
+        </BackLink>
         <StatusNotice>正在同步设备清单…</StatusNotice>
       </>
     );
@@ -92,12 +96,23 @@ function CameraDetailModes({
   scope: string;
 }) {
   const { mode } = useSearch({ from: "/account/cameras/$deviceId/$channel" });
-  return (
+  const [windowsVisited, setWindowsVisited] = useState(mode === "windows");
+  if (mode === "windows" && !windowsVisited) setWindowsVisited(true);
+  const header = (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <CameraBackLink />
-        <nav aria-label="分析内容" className="flex gap-2">
-          {([undefined, "windows", "recordings"] as const).map((value) => (
+        <BackLink
+          activeOptions={{ exact: true }}
+          to="/cameras"
+          className="-ml-2"
+        >
+          返回看家
+        </BackLink>
+        <nav
+          aria-label="分析内容"
+          className="inline-flex rounded-[10px] bg-surface p-0.5"
+        >
+          {([undefined, "windows"] as const).map((value) => (
             <Link
               key={value ?? "live"}
               to="/cameras/$deviceId/$channel"
@@ -106,32 +121,29 @@ function CameraDetailModes({
                 channel: String(source.target.channel),
               }}
               search={{ mode: value }}
-              aria-current={mode === value ? "page" : undefined}
-              className="rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface focus-visible:outline-2 aria-[current=page]:bg-surface aria-[current=page]:text-ink"
+              activeOptions={{ exact: true }}
+              className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-ink focus-visible:outline-2 aria-[current=page]:bg-ink/5 aria-[current=page]:font-medium aria-[current=page]:text-ink"
             >
-              {value === "windows"
-                ? "筛选片段"
-                : value === "recordings"
-                  ? "SD 录像"
-                  : "实时检测"}
+              {value === "windows" ? "筛选片段" : "实时检测"}
             </Link>
           ))}
         </nav>
       </div>
-      <p className="text-sm text-muted">
-        {mode === "windows"
-          ? "查看窗口中的语音文字、人物判断和采样片段，不影响摄像头持续分析。"
-          : mode === "recordings"
-            ? "按日期查看摄像头 SD 卡中的完整录像。"
-            : "查看摄像头当前画面、检测框和实时分析结果。"}
-      </p>
-      {mode === "windows" ? (
-        <CameraWindows source={source} scope={scope} />
-      ) : mode === "recordings" ? (
-        <CameraRecordings source={source} />
-      ) : (
-        <CameraDetailContent source={source} />
-      )}
+    </div>
+  );
+  return (
+    <div className="space-y-4">
+      {header}
+      {windowsVisited ? (
+        <div hidden={mode !== "windows"}>
+          <CameraWindows
+            source={source}
+            scope={scope}
+            visible={mode === "windows"}
+          />
+        </div>
+      ) : null}
+      {mode !== "windows" ? <CameraDetailContent source={source} /> : null}
     </div>
   );
 }
@@ -174,81 +186,85 @@ function CameraDetailContent({
       : device?.name;
 
   return (
-    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-      <div className="grid min-w-0 gap-3 xl:sticky xl:top-[calc(var(--workspace-header-height)+1rem)] xl:max-h-[calc(100dvh-var(--workspace-header-height)-2rem)]">
-        <article
-          className={`${cameraTileClassName} xl:grid xl:min-h-0 xl:grid-rows-[auto_minmax(0,1fr)_auto] [&_.camera-surface]:max-h-[65dvh] xl:[&_.camera-surface]:min-h-0 xl:[&_.camera-surface]:max-h-[min(65dvh,100%)]`}
+    <CameraAnalysisLayout
+      sidebarLabel="画面分析数据"
+      sidebar={
+        <>
+          {!connected ? (
+            <StatusNotice>正在连接分析结果…</StatusNotice>
+          ) : !configured ? (
+            <StatusNotice>
+              当前视频暂无分析结果，可继续观看和定格。
+            </StatusNotice>
+          ) : null}
+          {error ? <Notice tone="error">{error}</Notice> : null}
+          {view?.failure ? (
+            <Notice tone="error">无法绘制当前画面，请重新打开视频详情。</Notice>
+          ) : null}
+          <CameraInspection
+            inspect={inspect}
+            inspection={inspection}
+            watching={watching}
+          />
+        </>
+      }
+    >
+      <article
+        className={`${cameraTileClassName} [&_.camera-surface]:max-h-[65dvh]`}
+      >
+        <CameraHeader
+          title={label ?? "视频详情"}
+          className="min-h-12 pr-4 py-2"
         >
-          <CameraHeader
-            title={label ?? "视频详情"}
-            className="min-h-12 pr-4 py-2"
-          >
-            <span className="text-xs text-muted">{device?.room_name}</span>
-          </CameraHeader>
-          <CameraFrame
-            aspectRatio={aspectRatio}
-            transitionName={cameraTransitionName(
-              source.target.deviceId,
-              source.target.channel,
-            )}
-            placeholder={
-              view?.hasFrame
-                ? null
-                : !watching
-                  ? "画面已暂停"
-                  : !ready
-                    ? "等待摄像头服务就绪"
-                    : snapshot.phase === "error"
-                      ? "暂时无法播放"
-                      : "等待摄像头画面"
-            }
-            waiting={waiting}
-            tone={live ? presentation.tone : "unknown"}
-            status={frozen ? "已定格" : watching ? "未就绪" : "已暂停"}
-            detail={frozen ? <p>画面与调试数据已固定</p> : undefined}
-            statusContent={
-              live ? <PlaybackStatus snapshot={snapshot} /> : undefined
-            }
-            loader={<PlaybackLoader active={waiting} />}
-            statusAction={
-              <Button
-                type="button"
-                className="min-w-36 rounded-[10px]"
-                icon={watching ? <Pause size={15} /> : <Play size={15} />}
-                disabled={watching && (!view?.hasFrame || frozen)}
-                onClick={() => {
-                  if (watching) freeze();
-                  else returnToLive();
-                }}
-              >
-                {watching ? "定格当前画面" : "返回实时"}
-              </Button>
-            }
-          >
-            <canvas
-              ref={canvas}
-              className="absolute inset-0 size-full object-contain"
-              aria-label={`${label ?? "视频"} 关联帧画面`}
-            />
-          </CameraFrame>
-        </article>
-      </div>
-      <aside className="min-w-0 space-y-3" aria-label="画面分析数据">
-        {!connected ? (
-          <StatusNotice>正在连接分析结果…</StatusNotice>
-        ) : !configured ? (
-          <StatusNotice>当前视频暂无分析结果，可继续观看和定格。</StatusNotice>
-        ) : null}
-        {error ? <Notice tone="error">{error}</Notice> : null}
-        {view?.failure ? (
-          <Notice tone="error">无法绘制当前画面，请重新打开视频详情。</Notice>
-        ) : null}
-        <CameraInspection
-          inspect={inspect}
-          inspection={inspection}
-          watching={watching}
-        />
-      </aside>
-    </div>
+          <span className="text-xs text-muted">{device?.room_name}</span>
+        </CameraHeader>
+        <CameraFrame
+          aspectRatio={aspectRatio}
+          transitionName={cameraTransitionName(
+            source.target.deviceId,
+            source.target.channel,
+          )}
+          placeholder={
+            view?.hasFrame
+              ? null
+              : !watching
+                ? "画面已暂停"
+                : !ready
+                  ? "等待摄像头服务就绪"
+                  : snapshot.phase === "error"
+                    ? "暂时无法播放"
+                    : "等待摄像头画面"
+          }
+          waiting={waiting}
+          tone={live ? presentation.tone : "unknown"}
+          status={frozen ? "已定格" : watching ? "未就绪" : "已暂停"}
+          detail={frozen ? <p>画面与调试数据已固定</p> : undefined}
+          statusContent={
+            live ? <PlaybackStatus snapshot={snapshot} /> : undefined
+          }
+          loader={<PlaybackLoader active={waiting} />}
+          statusAction={
+            <Button
+              type="button"
+              className="min-w-36 rounded-[10px]"
+              icon={watching ? <Pause size={15} /> : <Play size={15} />}
+              disabled={watching && (!view?.hasFrame || frozen)}
+              onClick={() => {
+                if (watching) freeze();
+                else returnToLive();
+              }}
+            >
+              {watching ? "定格当前画面" : "返回实时"}
+            </Button>
+          }
+        >
+          <canvas
+            ref={canvas}
+            className="absolute inset-0 size-full object-contain"
+            aria-label={`${label ?? "视频"} 关联帧画面`}
+          />
+        </CameraFrame>
+      </article>
+    </CameraAnalysisLayout>
   );
 }

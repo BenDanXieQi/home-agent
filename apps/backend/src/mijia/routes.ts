@@ -1,4 +1,3 @@
-import { mijiaRecordingQuerySchema } from "@home-agent/api/mijia-recordings";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -80,25 +79,6 @@ export function createMijiaRoutes(
       await runtime.logout();
       return c.json(commandResult());
     })
-    .post(
-      "/cameras/recordings",
-      validateJson(mijiaRecordingQuerySchema),
-      async (c) => {
-        const input = c.req.valid("json");
-        if (input.scope_epoch !== runtime.epoch || !runtime.ready)
-          throw new HouseholdError("stale_session");
-        const result = await service.readRecordings(
-          input.revision,
-          input.deviceId,
-          input.channel,
-          { afterMs: input.afterMs, limit: input.limit },
-          AbortSignal.any([c.req.raw.signal, shutdownSignal]),
-        );
-        if (input.scope_epoch !== runtime.epoch || !runtime.ready)
-          throw new HouseholdError("stale_session");
-        return c.json(result);
-      },
-    )
     .post(
       "/playback/reservations",
       validateJson(mijiaPlaybackReservationInputSchema),

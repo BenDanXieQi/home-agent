@@ -53,53 +53,63 @@ export function createWindowDraft(
   };
 }
 
+export function windowComparisonInterval(sampleFps: number) {
+  const frameInterval = 1000 / sampleFps;
+  return (
+    Math.ceil(windowLimits.sampleIntervalMs / frameInterval) * frameInterval +
+    windowLimits.samplingToleranceMs
+  );
+}
+
+export function canCompareWindowFrames(
+  previous: Frame,
+  current: Frame,
+  sampleFps: number,
+) {
+  const maximumInterval = windowComparisonInterval(sampleFps);
+  return (
+    previous.width === current.width &&
+    previous.height === current.height &&
+    previous.mediaTime.generation === current.mediaTime.generation &&
+    current.sequence > previous.sequence &&
+    current.receivedAt > previous.receivedAt &&
+    current.receivedAt - previous.receivedAt <= maximumInterval &&
+    current.mediaTime.pts > previous.mediaTime.pts &&
+    (current.mediaTime.pts - previous.mediaTime.pts) / 90 <= maximumInterval
+  );
+}
+
 export function summarizeWindow(
   value: ReturnType<typeof createWindowDraft>,
   entry: {
-    baseline: {
-      gray: Uint8Array;
-      width: number;
-      height: number;
-      generation: string;
-      runId: string;
-    } | null;
-    lastChangeAt: number | null;
     audioTrack: z.infer<typeof audioTrackSchema> | null;
   },
+  sampleFps: number,
 ) {
-  let baseline = entry.baseline;
-  let changedAt: number | null = null;
+  const first = value.frames.length < 2;
   let changedRatio = 0,
-    first = baseline === null,
     failed = value.gaps.has("capture_failed");
   const regions: z.infer<typeof windowBoxSchema>[] = [];
+  const comparisons: z.infer<
+    typeof windowSummarySchema
+  >["gate"]["comparisons"] = [];
+  const maximumInterval = windowComparisonInterval(sampleFps);
   try {
-    for (const frame of value.frames) {
-      const previous = baseline;
-      if (
-        previous &&
-        previous.width === frame.width &&
-        previous.height === frame.height &&
-        previous.generation === frame.mediaTime.generation &&
-        previous.runId === value.videoRun?.runId
-      ) {
+    for (const [index, frame] of value.frames.entries()) {
+      const previous = value.frames[index - 1];
+      if (previous && canCompareWindowFrames(previous, frame, sampleFps)) {
         const difference = visualDifference(previous.gray, frame.gray);
+        comparisons.push({
+          previousSequence: previous.sequence,
+          currentSequence: frame.sequence,
+          changedRatio: difference.ratio,
+          region: difference.region,
+        });
         changedRatio = Math.max(changedRatio, difference.ratio);
         if (difference.ratio >= 0.005 && difference.region) {
           regions.push(difference.region);
-          changedAt = frame.receivedAt;
         }
-      } else {
-        first = true;
-        changedAt = frame.receivedAt;
       }
-      baseline = {
-        gray: frame.gray,
-        width: frame.width,
-        height: frame.height,
-        generation: frame.mediaTime.generation,
-        runId: value.videoRun!.runId,
-      };
       for (const box of frame.detections ?? [])
         regions.push({
           x: box.x / frame.width,
@@ -117,8 +127,6 @@ export function summarizeWindow(
   if (!value.frames.length) value.gaps.add("video_missing");
   const firstFrame = value.frames[0];
   const lastFrame = value.frames.at(-1);
-  const maximumInterval =
-    windowLimits.sampleIntervalMs + windowLimits.samplingToleranceMs;
   if (
     firstFrame &&
     lastFrame &&
@@ -143,18 +151,13 @@ export function summarizeWindow(
     failed,
     first,
     changedRatio,
-    lastChangeAt: entry.lastChangeAt,
-    changedAt,
-    now: value.endedAt,
     audioPassed,
   });
 
   return {
     audio,
-    gate: decision.gate,
+    gate: { ...decision.gate, comparisons },
     crop: selectCrop(regions),
-    baseline: failed ? null : baseline,
-    lastChangeAt: failed ? null : decision.lastChangeAt,
   };
 }
 
