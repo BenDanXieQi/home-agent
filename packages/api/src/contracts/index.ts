@@ -88,6 +88,13 @@ export * from "./chat";
 
 export {
   perceptionSnapshotSchema,
+  appearanceSummarySchema,
+  appearanceReferenceSchema,
+  memberAssociationSchema,
+  attributionTriggerSchema,
+  memberAttributionSnapshotSchema,
+  memberActivityAttributionSchema,
+  memberActivityDataSchema,
   audioRunSchema,
   audioTrackSchema,
   speechConfigSchema,

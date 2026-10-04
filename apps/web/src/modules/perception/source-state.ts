@@ -134,6 +134,7 @@ export function createPerceptionSourceState({
         return "来源运行已切换，等待本次运行的身份分析结果。";
       return null;
     }),
+    associationsAtom: atom((get) => get(activeSourceAtom)?.associations ?? []),
     identityAtom: atom((get) => {
       const source = get(activeSourceAtom);
       if (

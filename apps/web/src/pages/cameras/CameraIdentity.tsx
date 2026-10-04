@@ -7,6 +7,7 @@ const states = {
   unknown: "未知",
   candidate: "疑似",
   confirmed: "已识别",
+  inferred: "推测 · 人体外观匹配",
   conflict: "证据冲突",
 };
 type LiveIdentity = NonNullable<
@@ -14,15 +15,19 @@ type LiveIdentity = NonNullable<
 >;
 
 function IdentityRow({
-  identity,
+  associations,
   track,
 }: {
-  identity: LiveIdentity;
-  track: LiveIdentity["tracks"][number];
+  associations: z.infer<
+    typeof perceptionSnapshotSchema
+  >["sources"][number]["associations"];
+  track: Pick<
+    LiveIdentity["tracks"][number],
+    "trackId" | "state" | "lastEvidenceAt"
+  >;
 }) {
-  const association = identity.associations.find(
-    (item) =>
-      item.trackId === track.trackId && item.sourceRunId === identity.run.runId,
+  const association = associations.find(
+    (item) => item.trackId === track.trackId,
   );
   const state =
     association?.state ?? (track.state === "conflict" ? "conflict" : "unknown");
@@ -54,6 +59,22 @@ export function CameraIdentity({
   frozen: boolean;
 }) {
   const identity = useAtomValue(source.identityAtom);
+  const associations = useAtomValue(source.associationsAtom);
+  const tracks = [
+    ...(identity?.tracks ?? []),
+    ...associations
+      .filter(
+        (association) =>
+          !identity?.tracks.some(
+            (track) => track.trackId === association.trackId,
+          ),
+      )
+      .map((association) => ({
+        trackId: association.trackId,
+        state: "unknown" as const,
+        lastEvidenceAt: association.observedAt,
+      })),
+  ];
   const unavailableMessage = useAtomValue(
     source.identityUnavailableMessageAtom,
   );
@@ -68,16 +89,16 @@ export function CameraIdentity({
           ? "画面已定格；此面板仍实时更新，结果不属于定格画面。"
           : "实时后台结果，仅关联当前来源运行中的人宠轨迹。"}
       </p>
-      {!identity ? (
+      {!identity && !associations.length ? (
         <p className="text-xs text-muted">{unavailableMessage}</p>
-      ) : !identity.tracks.length ? (
+      ) : !tracks.length ? (
         <p className="text-xs text-muted">当前没有成员识别轨迹。</p>
       ) : (
         <ul className="space-y-3">
-          {identity.tracks.map((track) => (
+          {tracks.map((track) => (
             <IdentityRow
-              key={`${identity.run.runId}:${track.trackId}`}
-              identity={identity}
+              key={track.trackId}
+              associations={associations}
               track={track}
             />
           ))}
