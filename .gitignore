@@ -14,6 +14,8 @@ coverage/
 .DS_Store
 data/
 *.log
+# ONNX Runtime telemetry session artifact created under macOS sandboxing.
+:memory:.ses
 
 /apps/backend/src/perception/identity/__pycache__/
 # Optional local ASR weights; source and fingerprints are documented in models/README.md.
