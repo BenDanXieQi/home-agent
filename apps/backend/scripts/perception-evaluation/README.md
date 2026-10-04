@@ -303,3 +303,55 @@ bun run --cwd apps/backend analyze:appearance-video \
 Real28 tune 的代表索引同时显示：同衣着跨镜头 81 份最佳身份错误、485 份最佳正确但拒绝，1186 份换衣样本拒绝。在冻结 0.94 绝对门槛下，holdout 跨镜头同衣着正确身份最高分达到门槛的只有 2／543，换衣为 0／866；即便只剔除错误成员，也无法挽救未过绝对门槛的目标。这只是现有分数的数学限制，未运行属性模型，不表示属性模型增益或准确率。
 
 报告提供累计完成／失败／最终待定尝试、失败原因、推测出现／丢失／重获、媒体形成延迟汇总和每采样帧逻辑缓存峰值，逐帧记录保留政策版本及真实原帧索引。对照领域 CPU／墙钟另测，不是单个策略部署成本。进程资源测量若运行记录注明另一同素材进程短时重叠，不得作为无竞争部署基准；重复运行同一视频不视作独立验收。数据库与完整生命周期的28项操作验收仍由计划维护，没有新增故障注入或模拟验证入口。
+
+## 人体可见属性对照
+
+`person-attributes.py` 是独立的本机离线分析入口：固定 PP-LCNet 人体属性原权重、既有 Real28 manifest／参照／ReID 分数，先冻结协议，再按 tune → holdout 顺序运行原生 Paddle CPU。没有在线模块、家庭写入或模拟输入。采用判断和完整覆盖限制见[人体属性参考](../../../../docs/references/person-attributes.md)。
+
+用临时目录隔离 Python3.12 环境和缓存，不修改项目依赖或全局 Python。准备官方模型包、官方来源源码与代码许可；`asset_dir` 为本机临时资产目录。Real28 原归档与已有基线报告的准备见上面的[人体外观离线校准](#人体外观离线校准)。
+
+```sh
+asset_dir=$(mktemp -d)
+export UV_CACHE_DIR="$asset_dir/uv-cache"
+uv venv --python 3.12 "$asset_dir/venv"
+uv pip install --python "$asset_dir/venv/bin/python" \
+  paddlepaddle==3.3.0 numpy==2.5.3 opencv-python-headless==4.13.0.92 \
+  PyYAML==6.0.3 psutil==7.2.2
+curl -L --fail \
+  https://bj.bcebos.com/v1/paddledet/models/pipeline/PPLCNet_x1_0_person_attribute_945_infer.zip \
+  -o "$asset_dir/model.zip"
+unzip -q "$asset_dir/model.zip" -d "$asset_dir/model"
+for file in deploy/pipeline/pphuman/attr_infer.py deploy/python/preprocess.py LICENSE; do
+  curl -L --fail "https://raw.githubusercontent.com/PaddlePaddle/PaddleDetection/release/2.9/$file" \
+    -o "$asset_dir/${file##*/}"
+done
+```
+
+以下命令从仓库根目录执行。用新的输出目录冻结协议；freeze 将实际解压文件与固定官方归档成员逐一比较，并绑定归档、模型、官方源码／许可、manifest、observations 和执行源码 SHA-256。重跑同一冻结协议时必须使用相同源码和输入；修改代码后用新的输出目录。源码快照可与协议指纹一起保留在 ignored data，不能修改旧快照后沿用原指纹。
+
+```sh
+attribute_script=apps/backend/scripts/perception-evaluation/person-attributes.py
+baseline_dir=data/perception/member-attribution/real28-failure-results
+output_dir=data/perception/member-attribution/real28-attributes-native
+"$asset_dir/venv/bin/python" "$attribute_script" freeze \
+  --baseline "$baseline_dir" --output "$output_dir" \
+  --archive data/perception/member-attribution/real28/Real28.zip \
+  --model "$asset_dir/model/PPLCNet_x1_0_person_attribute_945_infer" \
+  --model-archive "$asset_dir/model.zip" --sources "$asset_dir"
+cp "$attribute_script" "$output_dir/executed-script.py"
+for split in tune holdout; do
+  "$asset_dir/venv/bin/python" "$attribute_script" infer --split "$split" \
+    --baseline "$baseline_dir" --output "$output_dir" \
+    --archive data/perception/member-attribution/real28/Real28.zip \
+    --model "$asset_dir/model/PPLCNet_x1_0_person_attribute_945_infer" \
+    --model-archive "$asset_dir/model.zip" --sources "$asset_dir"
+  "$asset_dir/venv/bin/python" "$attribute_script" compare --split "$split" \
+    --baseline "$baseline_dir" --output "$output_dir"
+done
+```
+
+协议仅对 ReID 已接纳目标检查最高分参照，两组衣着类别都明确且不一致才退回未知；单属性、朝向和包帽均不否决身份。类别明确要求最高分至少0.9、领先至少0.3；低分或接近则未知。它不提供自动遮挡／完整度判定，高分不能当作可见性保证。绝对门槛0.94、领先差值0.13和划分不再搜索；属性一致不抬高身份分数。年龄和性别输出即时丢弃，保存22项可见属性原分数，不保存人体向量或图片。
+
+输出 `protocol.json`、`tune-raw.json`、`holdout-raw.json` 和各自 `*-comparison.json`。raw 包含每张裁剪 SHA、实际标签索引、资产／源码指纹、环境和资源；compare 核对这些冻结绑定及完整 split 后保存逐项接纳与参照，不允许混合另一份模型或基线报告。4324张原图按既有5份字节重复清单得到4319份输入，不把重复图再计为独立目标。
+
+前三张预热，稳态分母为实际样本数减3。逐张总耗时包括归档读取、裁剪指纹、JPEG解码、预处理和推理复制；各阶段另分列。`importMs` 计运行库导入，`loadMs` 计 predictor 创建，均不计入逐张稳态。Paddle数学线程与OpenCV线程分别记录为1；没有声称全部进程线程只有一个。RSS每20ms采样，包含运行库、模型和整个评估进程，峰值是采样观测值，不是模型净增量或线上并发预算。素材没有时间戳，不做跨静态图TTL／支持窗口；没有属性、遮挡、姿态和低光独立真值，不宣称这些专项通过。

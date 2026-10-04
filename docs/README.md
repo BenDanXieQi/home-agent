@@ -45,7 +45,7 @@
 | [家庭领域模型](plans/household-model.md)          | 实体、证据、判断、事件、要求及状态所有权；定义语义与不变量                               |
 | [家庭情景与自动化](plans/household-automation.md) | 第一方 Agent 与 backend 协作、持续情景、长期任务、本地规则运行器、接口、预算及主交付顺序 |
 | [音视频感知与证据](plans/media-perception.md)     | 跟踪剩余验收、Agent 多模态理解、身份与证据接纳；MiLoCo 作为参考来源                      |
-| [成员短期外观归因](plans/member-attribution.md)   | 已接入代码的剩余校准与专项验收、条件满足后的属性模型评估                                 |
+| [成员短期外观归因](plans/member-attribution.md)   | 已接入代码的剩余校准与专项验收、属性模型后续条件                                 |
 | [设备采集与当前状态](plans/device-collection.md)  | 接收设备观测、确定当前值、质量与连续性，不维护人物和活动判断                             |
 | [设备观测历史](plans/device-history.md)           | 选定原始观测的写入、缺口、查询及清理，不承担语义事件或动作的可靠交接                     |
 | [设备状态与历史页面](plans/device-state-ui.md)    | 消费采集和历史的页面增量，不重建状态协议或复制家庭情景                                   |
@@ -56,6 +56,7 @@
 
 | 文档                                                                           | 回答的问题与维护范围                                                                                   |
 | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| [人体可见属性离线评估](references/person-attributes.md) | PP-LCNet 原权重、固定 Real28 属性对照、无收益采用判断与本机资源边界 |
 | [MiLoCo 媒体感知与身份识别](references/miloco-perception.md)                   | 固定提交的媒体筛选、主模型请求、人物重审、参考样本与宠物识别行为，以及与本项目的职责差异               |
 | [Personal Agent 架构与基础设施选型](references/personal-agent-architecture.md) | Muse／Dots／Cue 产品依据、开源实现、运行框架与记忆候选、家庭场景及主动语音问答的设计判断；不代表已采用 |
 
