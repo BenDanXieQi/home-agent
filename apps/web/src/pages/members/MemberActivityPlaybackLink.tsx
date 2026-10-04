@@ -53,6 +53,8 @@ export function MemberActivityPlaybackLink({
         params={{ deviceId: source.deviceId, channel: String(source.channel) }}
         search={{
           recordingAt: clip.startAt,
+          activityRun: source.sourceRunId,
+          activityFirstAt: source.firstObservedAt,
           activityAt: source.lastObservedAt,
           member: memberId,
         }}
