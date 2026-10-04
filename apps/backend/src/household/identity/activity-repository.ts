@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
+import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import type { Database } from "../../db";
 import {
   contextEntities,
@@ -10,7 +11,7 @@ import {
 import { createHouseholdBindingAccess } from "../binding-repository";
 import { lockIdentityMembers, readReferenceVersion } from "./repository";
 import { identityMatchingParameters } from "./matching-parameters";
-import type { memberActivity } from "./activity";
+import { activitySupportVersions, type memberActivity } from "./activity";
 
 export function createMemberActivityRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
@@ -18,62 +19,176 @@ export function createMemberActivityRepository(db: Database) {
     async save(
       identity: Parameters<typeof access>[0],
       assertCurrent: () => void,
-      activity: NonNullable<ReturnType<typeof memberActivity>>,
+      activity: ReturnType<typeof memberActivity>,
     ) {
+      // Validate the shared JSON boundary before acquiring storage resources.
+      const data = memberActivityDataSchema.parse(activity.record.data);
+      const current = data.attribution.current;
+      if (
+        data.sourceRunId !== data.run.runId ||
+        activity.record.scopeEpoch !== data.run.scopeEpoch ||
+        data.deviceId !== data.run.deviceId ||
+        data.channel !== data.run.channel
+      )
+        throw new Error("Member activity source identity mismatch");
+      if (current.kind === "known") {
+        const association = current.association;
+        if (
+          !isDeepStrictEqual(association.run, data.run) ||
+          association.sourceRunId !== data.run.runId ||
+          association.mediaGeneration !== data.mediaGeneration ||
+          association.trackId !== data.trackId
+        )
+          throw new Error("Member activity target identity mismatch");
+      } else {
+        const correction = data.attribution.lastCorrection;
+        if (
+          !correction ||
+          correction.reason !== "reference_revoked" ||
+          !isDeepStrictEqual(correction.after, current) ||
+          correction.before.kind !== "known" ||
+          correction.before.association.basis !== "appearance" ||
+          !current.trigger.referenceIds.some(
+            (id) =>
+              correction.before.kind === "known" &&
+              correction.before.association.basis === "appearance" &&
+              correction.before.association.referenceIds.includes(id),
+          )
+        )
+          throw new Error("Member activity revocation lacks domain evidence");
+      }
       return access(identity, assertCurrent, async (tx) => {
         await lockIdentityMembers(tx);
-        const [member] = await tx
-          .select({ id: householdSubjects.id })
-          .from(householdSubjects)
-          .where(
-            and(
-              eq(householdSubjects.id, activity.memberId),
-              eq(householdSubjects.kind, activity.memberKind),
-            ),
-          );
-        if (!member) return false;
-        const [eligibility] = await tx
+        const [saved] = await tx
           .select()
-          .from(identityMembers)
-          .where(eq(identityMembers.memberId, activity.memberId));
-        const version = await readReferenceVersion(tx);
-        const expected = activity.record.data.referenceVersions;
-        if (
-          !eligibility?.enabled ||
-          !isDeepStrictEqual(expected, {
+          .from(contextRecords)
+          .where(eq(contextRecords.id, activity.record.id))
+          .for("update");
+        const previous = saved && memberActivityDataSchema.parse(saved.data);
+        if (saved && previous) {
+          const immutable = (value: typeof data) => ({
+            run: value.run,
+            mediaGeneration: value.mediaGeneration,
+            trackId: value.trackId,
+            deviceId: value.deviceId,
+            channel: value.channel,
+            firstObservedAt: value.firstObservedAt,
+            original: value.attribution.original,
+          });
+          if (
+            saved.topic !== activity.record.topic ||
+            saved.kind !== activity.record.kind ||
+            saved.scopeEpoch !== activity.record.scopeEpoch ||
+            saved.occurredAt.getTime() !==
+              activity.record.occurredAt.getTime() ||
+            !isDeepStrictEqual(immutable(previous), immutable(data))
+          )
+            throw new Error("Member activity immutable identity conflict");
+          if (data.attribution.revision < previous.attribution.revision)
+            return {
+              status: "obsolete" as const,
+              revision: previous.attribution.revision,
+            };
+          if (data.attribution.revision === previous.attribution.revision) {
+            if (
+              !isDeepStrictEqual(previous, data) ||
+              saved.summary !== activity.record.summary ||
+              saved.certainty !== activity.record.certainty ||
+              !isDeepStrictEqual(saved.evidence, activity.record.evidence)
+            )
+              throw new Error("Member activity revision content conflict");
+            return {
+              status: "saved" as const,
+              revision: data.attribution.revision,
+            };
+          }
+          if (
+            data.attribution.correctionCount <
+            previous.attribution.correctionCount
+          )
+            throw new Error("Member activity correction count decreased");
+        }
+        if (current.kind === "known") {
+          const association = current.association;
+          const [member] = await tx
+            .select({ id: householdSubjects.id })
+            .from(householdSubjects)
+            .where(
+              and(
+                eq(householdSubjects.id, association.memberId),
+                eq(householdSubjects.kind, association.memberKind),
+              ),
+            );
+          const [eligibility] = await tx
+            .select()
+            .from(identityMembers)
+            .where(eq(identityMembers.memberId, association.memberId));
+          const version = await readReferenceVersion(tx);
+          const expected = {
             contentVersion: version.contentVersion,
             eligibilityVersion: version.eligibilityVersion,
             matchingVersion: identityMatchingParameters.matchingVersion,
             modelVersion: version.modelVersion,
             processingVersion: version.processingVersion,
-          })
-        )
-          return false;
+          };
+          if (
+            !member ||
+            !eligibility?.enabled ||
+            activitySupportVersions(current).some(
+              (support) => !isDeepStrictEqual(support, expected),
+            )
+          )
+            return {
+              status: "ineligible" as const,
+              revision: data.attribution.revision,
+            };
+        }
+        assertCurrent();
+        if (!saved) await tx.insert(contextRecords).values(activity.record);
+        else
+          await tx
+            .update(contextRecords)
+            .set({
+              data,
+              summary: activity.record.summary,
+              certainty: activity.record.certainty,
+              evidence: activity.record.evidence,
+            })
+            .where(eq(contextRecords.id, activity.record.id));
         await tx
-          .insert(contextRecords)
-          .values(activity.record)
-          .onConflictDoUpdate({
-            target: contextRecords.id,
-            set: activity.record,
-          });
+          .delete(contextEntities)
+          .where(
+            and(
+              eq(contextEntities.contextId, activity.record.id),
+              eq(contextEntities.role, "subject"),
+            ),
+          );
         await tx
           .insert(contextEntities)
           .values([
+            ...(current.kind === "known"
+              ? [
+                  {
+                    contextId: activity.record.id,
+                    entityType: current.association.memberKind,
+                    entityId: current.association.memberId,
+                    role: "subject" as const,
+                  },
+                ]
+              : []),
             {
               contextId: activity.record.id,
-              entityType: activity.memberKind,
-              entityId: activity.memberId,
-              role: "subject",
-            },
-            {
-              contextId: activity.record.id,
-              entityType: "device",
-              entityId: activity.record.data.deviceId,
-              role: "source",
+              entityType: "device" as const,
+              entityId: data.deviceId,
+              role: "source" as const,
             },
           ])
           .onConflictDoNothing();
-        return true;
+        assertCurrent();
+        return {
+          status: "saved" as const,
+          revision: data.attribution.revision,
+        };
       });
     },
   };

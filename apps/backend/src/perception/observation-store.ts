@@ -1,4 +1,5 @@
 import type {
+  perceptionSnapshotSchema,
   sourceMediaSchema,
   identityObservationSchema,
   trackingObservationSchema,
@@ -14,6 +15,8 @@ import { validAppearanceEvent, type videoEventSchema } from "./video/events";
 import { sourceKey, type sourceSelectionSchema } from "./config";
 import { createVideoMetrics } from "./video/metrics";
 
+type Source = z.infer<typeof perceptionSnapshotSchema>["sources"][number];
+
 function initial(source: z.infer<typeof sourceSelectionSchema>) {
   return {
     source,
@@ -23,11 +26,11 @@ function initial(source: z.infer<typeof sourceSelectionSchema>) {
     status: "waiting_for_access",
     error: undefined as string | undefined,
     observation: null as z.infer<typeof observationSchema> | null,
-    validity: "no_data",
+    validity: "no_data" as Source["validity"],
     tracking: null as z.infer<typeof trackingObservationSchema> | null,
-    trackingValidity: "no_data",
+    trackingValidity: "no_data" as Source["trackingValidity"],
     identity: null as z.infer<typeof identityObservationSchema> | null,
-    identityValidity: "no_data",
+    identityValidity: "no_data" as Source["identityValidity"],
     identityRevision: 0,
     identityExpiresAt: 0,
     trackingSequence: 0,

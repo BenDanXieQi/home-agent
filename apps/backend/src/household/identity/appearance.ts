@@ -181,11 +181,26 @@ function revocationTrigger(
     omittedEvidence: track.evidence.length - evidence.length,
   };
 }
+function targetSummary(target: ReturnType<typeof newTarget>) {
+  return {
+    sourceTargetKey: target.key,
+    trackId: target.trackId,
+    blocked: target.blocked,
+    ending: target.endingAt !== null,
+    reason: target.reason,
+    candidate: target.candidate,
+    inferred: target.inferred
+      ? (({ deadline: _deadline, ...inferred }) => inferred)(target.inferred)
+      : null,
+  };
+}
 function revokedEvent(
   target: ReturnType<typeof newTarget>,
   references: ReturnType<typeof referenceSummary>[],
   reason:
-    "face_conflict" | "identity_replaced" | "terminal_identity_unavailable",
+    | "face_conflict"
+    | "identity_replaced"
+    | "terminal_identity_unavailable",
   trigger: ReturnType<typeof revocationTrigger> | null,
 ) {
   return {
@@ -1013,6 +1028,10 @@ export function createAppearanceIdentity(options: {
       sources.delete(runId);
       changed();
     },
+    target(sourceTargetKey: string) {
+      const target = targets.get(sourceTargetKey);
+      return target ? structuredClone(targetSummary(target)) : null;
+    },
     snapshot() {
       return structuredClone({
         revision,
@@ -1024,19 +1043,7 @@ export function createAppearanceIdentity(options: {
           targetCount: targets.size,
         },
         references: [...references.values()].map(referenceSummary),
-        targets: [...targets.values()].map((target) => ({
-          sourceTargetKey: target.key,
-          trackId: target.trackId,
-          blocked: target.blocked,
-          ending: target.endingAt !== null,
-          reason: target.reason,
-          candidate: target.candidate,
-          inferred: target.inferred
-            ? (({ deadline: _deadline, ...inferred }) => inferred)(
-                target.inferred,
-              )
-            : null,
-        })),
+        targets: [...targets.values()].map(targetSummary),
       });
     },
     subscribe(listener: (event: Event) => void) {

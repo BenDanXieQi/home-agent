@@ -76,13 +76,25 @@ export function associateMembers(
       return [];
     return [
       {
+        run: observation.run,
+        mediaGeneration: observation.mediaTime.generation,
+        referenceVersions,
+        evidence: supporting,
         sourceRunId: observation.run.runId,
         trackId: track.trackId,
         memberId: member.memberId,
         memberName,
-        memberKind:
-          member.className === "human" ? ("person" as const) : ("pet" as const),
-        className: member.className,
+        ...(member.className === "human"
+          ? {
+              basis: "face" as const,
+              memberKind: "person" as const,
+              className: "human" as const,
+            }
+          : {
+              basis: "pet" as const,
+              memberKind: "pet" as const,
+              className: member.className,
+            }),
         state: track.state,
         observedAt: latest.observedAt,
         expiresAt: track.expiresAt,
