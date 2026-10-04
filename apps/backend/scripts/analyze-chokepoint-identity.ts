@@ -822,7 +822,7 @@ try {
       cpuMs: (cpu.user + cpu.system) / 1000,
       sampledProcessRssPeakBytes: peakRss,
       scope:
-        "enrollment/target loops only, excludes archive extraction and model startup; per-frame sampled RSS, not deployment peak",
+        "wall/CPU cover enrollment and target loops, excluding archive extraction and model startup; RSS sampled once before enrollment and after each target frame, not enrollment or deployment peak",
     },
   };
   await mkdir(output, { recursive: true });
