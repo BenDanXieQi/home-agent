@@ -44,7 +44,7 @@ export function createMemberActivityRepository(db: Database) {
         const correction = data.attribution.lastCorrection;
         if (
           !correction ||
-          correction.reason !== "reference_revoked" ||
+          correction.reason !== current.reason ||
           !isDeepStrictEqual(correction.after, current) ||
           correction.before.kind !== "known" ||
           correction.before.association.basis !== "appearance" ||
@@ -56,6 +56,31 @@ export function createMemberActivityRepository(db: Database) {
           )
         )
           throw new Error("Member activity revocation lacks domain evidence");
+        if (current.reason === "target_face_conflict") {
+          const trigger = current.trigger;
+          if (
+            trigger.reason !== "target_face_conflict" ||
+            trigger.sourceTargetKey !==
+              JSON.stringify([
+                data.run.scopeEpoch,
+                data.run.runId,
+                data.mediaGeneration,
+                data.trackId,
+              ]) ||
+            !trigger.trigger ||
+            !isDeepStrictEqual(trigger.trigger.observation.run, data.run) ||
+            trigger.trigger.observation.mediaTime.generation !==
+              data.mediaGeneration ||
+            trigger.trigger.track.trackId !== data.trackId ||
+            trigger.trigger.track.state !== "conflict"
+          )
+            throw new Error(
+              "Member activity conflict target identity mismatch",
+            );
+        } else if (current.trigger.reason === "target_face_conflict")
+          throw new Error(
+            "Member activity reference revocation reason mismatch",
+          );
       }
       return access(identity, assertCurrent, async (tx) => {
         await lockIdentityMembers(tx);

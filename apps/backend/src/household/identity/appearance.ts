@@ -243,7 +243,25 @@ function endedEvent(
     trustworthy,
   };
 }
+function targetIdentityEvent(
+  target: ReturnType<typeof newTarget>,
+  update:
+    | { kind: "conflict"; trigger: ReturnType<typeof revocationTrigger> }
+    | {
+        kind: "confirmed";
+        association: ReturnType<
+          ReturnType<typeof createIdentityMatching>["associate"]
+        >[number];
+      },
+) {
+  return {
+    kind: "target_identity" as const,
+    sourceTargetKey: target.key,
+    update,
+  };
+}
 type Event =
+  | ReturnType<typeof targetIdentityEvent>
   | ReturnType<typeof revokedEvent>
   | ReturnType<typeof invalidatedEvent>
   | ReturnType<typeof endedEvent>
@@ -876,6 +894,7 @@ export function createAppearanceIdentity(options: {
           .filter((association) => association.className === "human")
           .map((association) => [association.trackId, association]),
       );
+      const newConfirmations = new Set<number>();
       // Destructive updates from BOTH collections precede every positive update.
       for (const track of all) {
         const target = targets.get(
@@ -890,6 +909,17 @@ export function createAppearanceIdentity(options: {
           ...faces.map((face) => face.provenance.sequence),
         );
         const confirmed = legal.get(track.trackId);
+        if (
+          compatible &&
+          confirmed?.state === "confirmed" &&
+          faces.some(
+            (face) =>
+              face.provenance.sequence > target.faceSequence &&
+              face.provenance.sequence > target.cutoff &&
+              face.label === confirmed.memberId,
+          )
+        )
+          newConfirmations.add(track.trackId);
         const replacement =
           confirmed?.state === "confirmed" &&
           latestSequence > target.faceSequence &&
@@ -907,6 +937,13 @@ export function createAppearanceIdentity(options: {
           target.directDeadline = 0;
           target.reason =
             track.state === "conflict" ? "face_conflict" : "identity_replaced";
+          if (track.state === "conflict")
+            emit(
+              targetIdentityEvent(target, {
+                kind: "conflict",
+                trigger: revocationTrigger(observation, track),
+              }),
+            );
           revoke(
             target,
             track.state === "conflict" ? "face_conflict" : "identity_replaced",
@@ -940,6 +977,11 @@ export function createAppearanceIdentity(options: {
             target.inferred = null;
           }
         }
+        if (
+          association?.state === "confirmed" &&
+          newConfirmations.has(track.trackId)
+        )
+          emit(targetIdentityEvent(target, { kind: "confirmed", association }));
         if (
           !compatible ||
           !association ||
