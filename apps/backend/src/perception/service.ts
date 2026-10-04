@@ -1,4 +1,6 @@
-import type { appearanceEvidenceSchema } from "../household/identity/appearance-evidence";
+import type { createAppearanceIdentity } from "../household/identity/appearance";
+import { identityLimits } from "./identity/config";
+import { reidSha256, reidProcessingVersion } from "./tracking/feature-version";
 import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
 import type { createIdentityMatching } from "../household/identity/matching";
 import { identityProcessingVersions } from "./identity/processing-version";
@@ -27,14 +29,7 @@ export function createPerceptionService(options: {
         "configure" | "snapshot" | "subscribe" | "associate"
       >
     | undefined;
-  acceptAppearance?: (input: {
-    evidence: z.infer<typeof appearanceEvidenceSchema>[];
-    householdVersion: NonNullable<
-      ReturnType<PerceptionSources["eligibility"]>
-    >["householdVersion"];
-    acceptedAt: number;
-    remainingMs: number;
-  }) => void;
+  appearance?: ReturnType<typeof createAppearanceIdentity>;
   configPath: string;
   executable: string;
   sources: PerceptionSources;
@@ -131,7 +126,10 @@ export function createPerceptionService(options: {
         referenceDelivery = undefined;
       });
   }
+  options.appearance?.replaceReferences(performance.now());
+  const unsubscribeAppearance = options.appearance?.subscribe(changed);
   const unsubscribeReferences = options.identityReferences?.subscribe(() => {
+    options.appearance?.replaceReferences(performance.now());
     const previousVersion = referenceVersion(referenceSnapshot);
     referenceSnapshot = options.identityReferences?.snapshot() ?? null;
     if (previousVersion !== referenceVersion(referenceSnapshot))
@@ -156,6 +154,7 @@ export function createPerceptionService(options: {
   function retire(key: string, reason: string) {
     const entry = desired.get(key);
     if (!entry) return;
+    options.appearance?.stop(entry.runId);
     windows.stopVideo(entry.runId);
     store.revoke(key, reason);
     desired.delete(key);
@@ -185,6 +184,7 @@ export function createPerceptionService(options: {
   function reconcile() {
     if (stopped) return;
     syncIdentityReferences();
+    options.appearance?.tick(performance.now());
     windows.tick(Date.now());
     media.prune();
     const selected =
@@ -263,6 +263,16 @@ export function createPerceptionService(options: {
         runId: crypto.randomUUID(),
       };
       const controller = new AbortController();
+      options.appearance?.start({
+        run,
+        householdVersion: access.householdVersion,
+        sampleFps: config.sampleFps,
+        maxFrameAgeMs: config.maxFrameAgeMs,
+        evidenceTtlMs: config.identity?.evidenceTtlMs ?? 30_000,
+        recentTtlMs: identityLimits.recentTtlMs,
+        modelVersion: reidSha256,
+        processingVersion: reidProcessingVersion,
+      });
       store.grant(run);
       windows.bindVideo(run);
       const entry = {
@@ -356,9 +366,15 @@ export function createPerceptionService(options: {
             Date.now(),
           );
           const accepted = store.receive(event);
+          if (accepted) {
+            options.appearance?.tracking(
+              { ...event.observation, ageMs: accepted.ageMs },
+              accepted.acceptedAt,
+            );
+          }
           if (accepted && event.appearanceEvidence?.length) {
             try {
-              options.acceptAppearance?.({
+              options.appearance?.acceptAppearance({
                 evidence: event.appearanceEvidence.map((evidence) => ({
                   ...evidence,
                   ageMs: accepted.ageMs,
@@ -374,7 +390,23 @@ export function createPerceptionService(options: {
           return;
         }
         windows.video(event, Date.now());
-        store.receive(event);
+        const accepted = store.receive(event);
+        const access = options.sources.eligibility(event.run);
+        const entry = desired.get(sourceKey(event.run));
+        const authorized =
+          access &&
+          access.scopeEpoch === event.run.scopeEpoch &&
+          entry?.runId === event.run.runId &&
+          entry.identity === access.identity;
+        if (event.event === "media" && authorized)
+          options.appearance?.media(event.run, event.media.generation);
+        if (event.event === "identity" && accepted && authorized) {
+          options.appearance?.identity(
+            { ...event.observation, ageMs: accepted.ageMs },
+            accepted.acceptedAt,
+            Date.now(),
+          );
+        }
         if (event.event === "health" && event.status === "failed") {
           const key = sourceKey(event.run);
           if (desired.get(key)?.runId === event.run.runId) {
@@ -514,6 +546,7 @@ export function createPerceptionService(options: {
       const compute = await ensurePool();
       return compute.enrollment(command);
     },
+    appearance: options.appearance,
     identityConfig: () => config.identity,
     async identityModelStatus(
       className: Extract<
@@ -605,6 +638,7 @@ export function createPerceptionService(options: {
           error = errorDetails(cause).message;
           throw cause;
         } finally {
+          unsubscribeAppearance?.();
           unsubscribeStore();
           store.close();
           windows.close();
