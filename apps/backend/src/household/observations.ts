@@ -69,7 +69,6 @@ export function emptyProperty(definition: PropertyDefinition) {
     unit: capability?.unit ?? null,
     has_value: false,
     value: null,
-    quality: "unknown",
     reason: capability ? "missing" : "spec_unknown",
     rule_eligible: false,
     evidence: null,
@@ -149,7 +148,6 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
         previous &&
         (previous.model !== device.model || previous.spec_id !== device.spec_id)
       ) {
-        fact.quality = "unconfirmed";
         fact.reason = "spec_changed";
         fact.rule_eligible = false;
         fact.expires_at = null;
@@ -157,7 +155,6 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
       }
       fact.room_id = device.room_id ?? null;
       if (stopped) {
-        fact.quality = "unavailable";
         fact.reason = "stopped";
         fact.rule_eligible = false;
         fact.expires_at = null;
@@ -198,19 +195,16 @@ export function reduceFacts(
     outcome: "applied" | "candidate" | "unchanged" | "failed";
     reason: string | null;
     observation_id: string | null;
-    quality: Latest["quality"];
   } = {
     outcome: "unchanged",
     reason: null,
     observation_id: null,
-    quality: "unknown",
   };
   const accepted: {
     observation: {
       event: HouseholdObservation;
       observation_id: string;
       input_sequence: number;
-      quality: Latest["quality"];
     } | null;
   } = { observation: null };
   const edges: { key: string; before: Latest; after: Latest }[] = [];
@@ -223,10 +217,6 @@ export function reduceFacts(
     ) => {
       for (const [key, fact] of Object.entries(draft.latest)) {
         if (!predicate(fact)) continue;
-        fact.quality =
-          reason === "expired" || reason === "gap"
-            ? "unconfirmed"
-            : "unavailable";
         fact.reason = reason;
         fact.rule_eligible = false;
         fact.expires_at = null;
@@ -254,8 +244,7 @@ export function reduceFacts(
         if (deadline > input.tick) continue;
         const fact = draft.latest[key];
         delete state.deadlines[key];
-        if (fact?.quality === "valid") {
-          fact.quality = "unconfirmed";
+        if (fact?.reason === "current") {
           fact.reason = "expired";
           fact.rule_eligible = false;
           fact.expires_at = null;
@@ -415,7 +404,6 @@ export function reduceFacts(
         event,
         observation_id: input.observation_id,
         input_sequence: sequence,
-        quality: usable ? "valid" : "unconfirmed",
       };
       return;
     }
@@ -433,18 +421,17 @@ export function reduceFacts(
           prior?.evidence?.observed_at != null &&
           Date.parse(event.observed_at) <
             Date.parse(prior.evidence.observed_at)));
-    const specQuality = definition.capability
+    const capabilityMatch = definition.capability
       ? matchesCapability(event.value, definition.capability)
       : "unknown";
     if (
       jsonBytes(event.value) > collectionLimits.valueBytes ||
-      specQuality === "invalid"
+      capabilityMatch === "invalid"
     ) {
       status.rejected++;
       if (prior && event.kind !== "read" && !ignored) {
         draft.latest[key] = {
           ...prior,
-          quality: "unconfirmed",
           reason: "invalid_value",
           rule_eligible: false,
           expires_at: null,
@@ -455,39 +442,26 @@ export function reduceFacts(
         outcome: "failed",
         reason: "invalid_value",
         observation_id: null,
-        quality: "unconfirmed",
       };
       return;
     }
-    let quality: Latest["quality"] = "unconfirmed";
     let reason: Latest["reason"] = "unverified";
     const policy = definition.policy;
-    if (specQuality === "unknown") {
-      quality = "unknown";
-      reason = "spec_unknown";
-    } else if (event.kind === "read") reason = "cloud_cache";
+    if (capabilityMatch === "unknown") reason = "spec_unknown";
+    else if (event.kind === "read") reason = "cloud_cache";
     else if (event.delivery_kind !== "live") reason = "baseline";
-    else if (source?.status !== "connected") {
-      quality = "unavailable";
-      reason = "disconnected";
-    } else if (coverage?.properties !== "confirmed")
+    else if (source?.status !== "connected") reason = "disconnected";
+    else if (coverage?.properties !== "confirmed")
       reason = "subscription_pending";
-    else if (device.availability === "offline") {
-      quality = "unavailable";
-      reason = "offline";
-    } else if (policy?.verified_push && policy.freshness.mode !== "unknown") {
-      quality = "valid";
+    else if (device.availability === "offline") reason = "offline";
+    else if (policy?.verified_push && policy.freshness.mode !== "unknown")
       reason = "current";
-    }
-    const observationQuality = quality;
     if (
-      quality === "valid" &&
+      reason === "current" &&
       policy?.freshness.mode === "ttl" &&
       input.tick + policy.freshness.max_age_ms <= clock.tick
-    ) {
-      quality = "unconfirmed";
+    )
       reason = "expired";
-    }
     const evidence = {
       observation_id: input.observation_id,
       input_sequence: sequence,
@@ -499,7 +473,6 @@ export function reduceFacts(
       observed_at: event.observed_at,
       received_at: event.received_at,
       read_started_at: event.kind === "read" ? event.read_started_at : null,
-      observation_quality: observationQuality,
       policy_version: definition.policy_version,
       spec_id: device.spec_id,
     };
@@ -510,7 +483,6 @@ export function reduceFacts(
         event,
         observation_id: input.observation_id,
         input_sequence: sequence,
-        quality: observationQuality,
       };
       return;
     }
@@ -519,21 +491,20 @@ export function reduceFacts(
       fact.read_candidate = { ...evidence, value: event.value };
     } else {
       const continuous =
-        prior?.quality === "valid" &&
+        prior?.reason === "current" &&
         (state.deadlines[key] === undefined ||
           state.deadlines[key] > input.tick) &&
         prior.evidence?.source === "push" &&
         prior.evidence.collection_generation === event.collection_generation &&
-        quality === "valid" &&
+        reason === "current" &&
         event.kind === "property" &&
         event.delivery_kind === "live";
       Object.assign(fact, {
         has_value: true,
         value: event.value,
         evidence,
-        quality,
         reason,
-        rule_eligible: quality === "valid" && policy?.rule_eligible === true,
+        rule_eligible: reason === "current" && policy?.rule_eligible === true,
         spec_id: device.spec_id,
         applied_at: clock.at,
         expires_at: null,
@@ -543,7 +514,7 @@ export function reduceFacts(
           event.kind === "read" ? event.received_at : fact.last_read_at,
       });
       delete state.deadlines[key];
-      if (quality === "valid" && policy?.freshness.mode === "ttl") {
+      if (reason === "current" && policy?.freshness.mode === "ttl") {
         state.deadlines[key] = input.tick + policy.freshness.max_age_ms;
         fact.expires_at = new Date(
           Date.parse(event.received_at) + policy.freshness.max_age_ms,
@@ -570,7 +541,6 @@ export function reduceFacts(
       if (prior && event.kind !== "read")
         draft.latest[key] = {
           ...prior,
-          quality: "unconfirmed",
           reason: "capacity",
           rule_eligible: false,
           expires_at: null,
@@ -579,7 +549,6 @@ export function reduceFacts(
         outcome: "failed",
         reason: "capacity",
         observation_id: null,
-        quality: "unconfirmed",
       };
       return;
     }
@@ -590,13 +559,11 @@ export function reduceFacts(
       outcome: candidate ? "candidate" : "applied",
       reason,
       observation_id: input.observation_id,
-      quality: fact.quality,
     };
     accepted.observation = {
       event,
       observation_id: input.observation_id,
       input_sequence: sequence,
-      quality: observationQuality,
     };
   });
   // Control transitions can alter many records; property reports only account for their own delta.

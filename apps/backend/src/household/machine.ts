@@ -139,7 +139,7 @@ function commit(
               deadlines: Object.fromEntries(
                 Object.entries(context.fact_state.deadlines).filter(
                   ([key]) =>
-                    prepared.projection.latest[key]?.quality === "valid",
+                    prepared.projection.latest[key]?.reason === "current",
                 ),
               ),
               latest_bytes: jsonBytes(prepared.projection.latest),

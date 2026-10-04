@@ -1,9 +1,5 @@
 import { z } from "zod";
-import {
-  factQualitySchema,
-  factReasonSchema,
-  propertyValueSchema,
-} from "./observations";
+import { factReasonSchema, propertyValueSchema } from "./observations";
 
 export const roomAnalysisLimits = {
   rooms: 50,
@@ -39,7 +35,6 @@ export const analysisFactSchema = z.object({
   value: valueSchema,
   value_label: shortText.nullable(),
   unit: shortText.nullable(),
-  quality: factQualitySchema,
   reason: factReasonSchema,
   observed_at: z.iso.datetime().nullable(),
   received_at: z.iso.datetime(),

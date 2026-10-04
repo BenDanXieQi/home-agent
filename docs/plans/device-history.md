@@ -29,7 +29,6 @@
 | received_at、observed_at、effective_at                                       | 原始接收 UTC、可为空的可信来源时间、被用于当前值的时间；候选或迟到值的 effective_at 为 null |
 | source、delivery_kind、read_semantics                                        | 区分实时推送、读取、缓存及已知重放，不把它们都称为新发生事件                                |
 | value／事件参数、单位与必要枚举说明、规格与来源契约版本                      | 保留当时可解释的值，不依赖后来改变的展示资料                                                |
-| observation_quality、state_quality、state_applied                            | 原观测 quality、当时被采纳为 latest 的质量；未采纳时 state_quality=null                     |
 | policy_version、适用的新鲜度方式及期限                                       | 记录所用配置依据；需要解释的少量字段随记录保存，不依赖独立策略版本库                        |
 
 规则触发与原始设备事件不同，不能为获得事件历史把属性变化伪装成 `siid/eiid` 事件。尚无独立事件通路时不启用该能力。
