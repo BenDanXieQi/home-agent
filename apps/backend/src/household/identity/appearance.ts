@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { appearanceScore } from "./appearance-score";
 import { z } from "zod";
 import {
   identityCapacity,
@@ -495,16 +496,7 @@ export function createAppearanceIdentity(options: {
         reference.appearance.processingVersion !== evidence.processingVersion
       )
         continue;
-      const score = Math.max(
-        -1,
-        Math.min(
-          1,
-          vector.reduce(
-            (total, value, index) => total + value * reference.vector[index]!,
-            0,
-          ),
-        ),
-      );
+      const score = appearanceScore(vector, reference.vector);
       const current = ranked.get(reference.memberId);
       if (current) {
         current.score = Math.max(current.score, score);
