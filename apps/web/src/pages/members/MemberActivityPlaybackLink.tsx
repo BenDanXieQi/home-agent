@@ -70,6 +70,11 @@ export function MemberActivityPlaybackLink({
       title={checking ? "正在检查对应录像" : "没有可回看的对应录像"}
     >
       {children}
+      <p className="text-xs text-muted sm:col-start-2">
+        {checking
+          ? "正在检查历史媒体…"
+          : "历史媒体不可用或尚未取得；观察与归因摘要仍保留。"}
+      </p>
     </div>
   );
 }
