@@ -39,7 +39,12 @@ const windowQueryPolicy = {
           error.details.code === "request_timeout")),
 };
 
-export function windowListOptions(source: WindowSource) {
+export function windowListOptions({
+  scopeEpoch,
+  deviceId,
+  channel,
+}: WindowSource) {
+  const source = { scopeEpoch, deviceId, channel };
   return queryOptions({
     ...windowQueryPolicy,
     queryKey: [...windowQueryScope(source.scopeEpoch), "list", source],

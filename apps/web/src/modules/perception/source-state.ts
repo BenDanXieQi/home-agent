@@ -12,12 +12,14 @@ import { mediaStateAtom } from "../playback/state";
 import type { PlaybackSession } from "../playback/session";
 
 /** Each detail owns one source; high-frequency results never enter page render state. */
-export function createPerceptionSourceState(
-  target: Pick<
-    ConstructorParameters<typeof PlaybackSession>[0],
-    "deviceId" | "channel"
-  >,
-) {
+export function createPerceptionSourceState({
+  deviceId,
+  channel,
+}: Pick<
+  ConstructorParameters<typeof PlaybackSession>[0],
+  "deviceId" | "channel"
+>) {
+  const target = { deviceId, channel };
   const sourceAtom = atom((get) =>
     get(perceptionSnapshotAtom)?.sources.find(
       (source) =>

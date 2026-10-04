@@ -100,6 +100,13 @@ const cameraRecordingRoute = createRoute({
   path: "$deviceId/$channel/recording",
   validateSearch: (search: Record<string, unknown>) => ({
     member: typeof search.member === "string" ? search.member : undefined,
+    activityRun:
+      typeof search.activityRun === "string" ? search.activityRun : undefined,
+    activityFirstAt:
+      typeof search.activityFirstAt === "number" &&
+      Number.isFinite(search.activityFirstAt)
+        ? search.activityFirstAt
+        : undefined,
     recordingAt:
       typeof search.recordingAt === "number" &&
       Number.isFinite(search.recordingAt)

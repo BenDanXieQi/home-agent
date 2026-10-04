@@ -3,19 +3,15 @@ import { atom, useAtomValue } from "jotai";
 import { useQueries } from "@tanstack/react-query";
 import type { z } from "zod";
 import { createPerceptionSourceState } from "../perception/source-state";
-import { windowListOptions } from "../perception/windows";
+import {
+  activityCacheSettled,
+  activityWindowListOptions,
+} from "./activity-cache";
 import { recordingAvailabilityOptions } from "../recordings/api";
 import {
   findMemberActivityWindow,
-  indexPlayableMemberActivityWindows,
   type memberActivitySourceSchema,
 } from "./activity";
-
-function selectWindows(data: {
-  windows: Parameters<typeof indexPlayableMemberActivityWindows>[0];
-}) {
-  return indexPlayableMemberActivityWindows(data.windows);
-}
 
 export function useActivityPlayback(
   activities: {
@@ -55,9 +51,11 @@ export function useActivityPlayback(
   const targets = useAtomValue(targetsAtom);
   const windows = useQueries({
     queries: groups.map((group, index) => ({
-      ...windowListOptions({ scopeEpoch: scope, ...group.state.target }),
+      ...activityWindowListOptions({
+        scopeEpoch: scope,
+        ...group.state.target,
+      }),
       enabled: targets[index]?.scope_epoch === scope,
-      select: selectWindows,
     })),
   });
   const [clock, setClock] = useState(Date.now);
@@ -100,13 +98,15 @@ export function useActivityPlayback(
   const recordings = useQueries({
     queries: groups.map((group, index) => {
       const target = targets[index];
-      const at = [
-        ...new Set(
-          group.activities
-            .filter((activity) => !matched[index]?.get(activity.id))
-            .map((activity) => activity.source.lastObservedAt),
-        ),
-      ];
+      const at = activityCacheSettled(windows[index])
+        ? [
+            ...new Set(
+              group.activities
+                .filter((activity) => !matched[index]?.get(activity.id))
+                .map((activity) => activity.source.lastObservedAt),
+            ),
+          ]
+        : [];
       const options = recordingAvailabilityOptions(
         target?.scope_epoch === scope && at.length
           ? { ...target, at }
@@ -134,7 +134,8 @@ export function useActivityPlayback(
             {
               window: matched[index]?.get(activity.id),
               clip:
-                targets[index]?.scope_epoch === scope
+                targets[index]?.scope_epoch === scope &&
+                activityCacheSettled(windows[index])
                   ? clips.get(activity.source.lastObservedAt)
                   : undefined,
               checking: !!recording?.isFetching || !!windows[index]?.isFetching,
