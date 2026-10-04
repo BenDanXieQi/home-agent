@@ -296,6 +296,101 @@ function summarize(rows: typeof observations) {
       : null,
   };
 }
+// Representative failure selection uses tune only; holdout is summarized without choosing examples or changing policy.
+const rejected = (row: (typeof observations)[number]) =>
+  !selected ||
+  row.bestScore < selected.threshold ||
+  row.margin < selected.margin ||
+  row.margin === 0;
+const categories = [
+  {
+    name: "cross_camera_wrong_best",
+    rows: observations.filter(
+      (row) =>
+        row.split === "tune" &&
+        row.cameraScope === "other_camera" &&
+        row.scenario === "same_clothing" &&
+        row.bestIdentity !== row.identity,
+    ),
+  },
+  {
+    name: "cross_camera_correct_but_abstained",
+    rows: observations.filter(
+      (row) =>
+        row.split === "tune" &&
+        row.cameraScope === "other_camera" &&
+        row.scenario === "same_clothing" &&
+        row.bestIdentity === row.identity &&
+        rejected(row),
+    ),
+  },
+  {
+    name: "clothes_changed_abstained",
+    rows: observations.filter(
+      (row) =>
+        row.split === "tune" &&
+        row.cameraScope === "all" &&
+        row.scenario === "changed_clothing" &&
+        rejected(row),
+    ),
+  },
+];
+const failureIndex = {
+  source: dataset.source,
+  modelSha256: model.metadata.sha256,
+  frozenCandidate: selected
+    ? { threshold: selected.threshold, margin: selected.margin }
+    : null,
+  selection:
+    "tune only; sort correctMargin ascending then original file; choose first, middle, last; no holdout tuning or example selection",
+  categories: categories.map(({ name, rows }) => {
+    const ordered = rows.toSorted(
+      (a, b) =>
+        (a.correctMargin ?? -2) - (b.correctMargin ?? -2) ||
+        a.file.localeCompare(b.file),
+    );
+    const positions = [
+      ...new Set([0, Math.floor(ordered.length / 2), ordered.length - 1]),
+    ].filter((index) => index >= 0 && index < ordered.length);
+    return {
+      name,
+      count: rows.length,
+      representatives: positions.map((index) => {
+        const row = ordered[index]!;
+        return {
+          file: row.file,
+          sha256: row.sha256,
+          identity: row.identity,
+          camera: row.camera,
+          clothing: row.clothing,
+          cameraScope: row.cameraScope,
+          bestIdentity: row.bestIdentity,
+          bestScore: row.bestScore,
+          margin: row.margin,
+          correctScore: row.correctScore,
+          wrongScore: row.wrongScore,
+          correctMargin: row.correctMargin,
+          reason: !selected
+            ? "no_frozen_candidate"
+            : row.bestScore < selected.threshold
+              ? "score_insufficient"
+              : row.margin < selected.margin || row.margin === 0
+                ? "candidates_close"
+                : "wrong_acceptance",
+          correctReferences: row.references
+            .filter((item) => item.identity === row.identity)
+            .toSorted((a, b) => b.score - a.score)
+            .slice(0, 2),
+          strongestWrongReferences: row.references
+            .filter((item) => item.identity !== row.identity)
+            .toSorted((a, b) => b.score - a.score)
+            .slice(0, 2),
+        };
+      }),
+    };
+  }),
+};
+
 const cpu = process.cpuUsage(cpuStart);
 const manifest = features.map(({ vector: _vector, ...sample }) => sample);
 const result = {
@@ -371,6 +466,7 @@ for (const [name, value] of [
   ["duplicates.json", duplicates],
   ["observations.json", observations],
   ["tune-grid.json", grid],
+  ["failure-index.json", failureIndex],
   ["results.json", result],
 ] as const)
   await writeFileAtomic(

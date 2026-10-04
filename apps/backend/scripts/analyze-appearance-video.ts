@@ -62,6 +62,8 @@ const { values } = parseArgs({
     "output-dir": { type: "string" },
     seconds: { type: "string", default: "302" },
     "identity-model-dir": { type: "string" },
+    "registration-start-seconds": { type: "string", default: "0" },
+    "compare-appearance": { type: "boolean", default: false },
   },
   strict: true,
 });
@@ -70,6 +72,16 @@ if (!values.manifest || !values["output-dir"])
     "Usage: analyze-appearance-video --manifest <licensed video input JSON> --output-dir <report> [--seconds 302] [--identity-model-dir <YuNet/SFace>]",
   );
 const seconds = z.coerce.number().positive().max(3600).parse(values.seconds);
+const registrationStartMs =
+  z.coerce
+    .number()
+    .nonnegative()
+    .max(3600)
+    .parse(values["registration-start-seconds"]) * 1000;
+if (values["compare-appearance"] && !values["identity-model-dir"])
+  throw new Error(
+    "Appearance comparison requires real face models and registration",
+  );
 const manifestBytes = await readFile(resolve(values.manifest));
 const manifest = manifestSchema.parse(JSON.parse(manifestBytes.toString()));
 const output = resolve(values["output-dir"]);
@@ -190,6 +202,10 @@ async function analyze(video: (typeof manifest.videos)[number]) {
           module.createVideoIdentityAnalysis(
             resolve(values["identity-model-dir"]!),
             `calibration:${video.sha256.slice(0, 16)}`,
+            {
+              registrationStartMs,
+              compareAppearance: values["compare-appearance"] ?? false,
+            },
           ),
         )
         .catch(async (error: unknown) => {

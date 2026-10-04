@@ -1,3 +1,4 @@
+import { createAppearanceComparison } from "./appearance-comparison";
 import { createHash } from "node:crypto";
 import type { z } from "zod";
 import {
@@ -29,6 +30,7 @@ import type { frameSchema } from "../../src/perception/detection/frame";
 export async function createVideoIdentityAnalysis(
   modelDirectory: string,
   sourceName: string,
+  options: { registrationStartMs: number; compareAppearance: boolean },
 ) {
   const config = identityConfigSchema.parse({ modelDirectory });
   const model = await createFaceModel(config.modelDirectory);
@@ -44,15 +46,21 @@ export async function createVideoIdentityAnalysis(
   let reference: ReturnType<typeof referenceSummary> | null = null;
   let gallery: z.infer<typeof identityReferenceSnapshotSchema> | null = null;
   let analysis: ReturnType<typeof createIdentityAnalysis> | null = null;
-  const appearance = createAppearanceIdentity({
-    matching: {
-      snapshot: () => gallery,
-      associate: (observation, ttl, now) =>
-        associateMembers(gallery, names, observation, ttl, now),
-    },
-  });
+  const matching = {
+    snapshot: () => gallery,
+    associate: (
+      observation: Parameters<typeof associateMembers>[2],
+      ttl: number,
+      now: number,
+    ) => associateMembers(gallery, names, observation, ttl, now),
+  };
+  const appearance = createAppearanceIdentity({ matching });
+  const comparison = options.compareAppearance
+    ? createAppearanceComparison(matching)
+    : null;
   let lastClockMs = 0;
   const statistics = {
+    preludeFrames: 0,
     registrationFrames: 0,
     registrationModelCalls: 0,
     registrationAmbiguousFrames: 0,
@@ -112,7 +120,19 @@ export async function createVideoIdentityAnalysis(
       .update(input.frame.rgb)
       .digest("hex");
     const freshIds = new Set(input.fresh.map((item) => item.trackId));
-    if (input.timeMs < 5000) {
+    if (input.timeMs < options.registrationStartMs) {
+      statistics.preludeFrames++;
+      return {
+        phase: "prelude" as const,
+        referenceReady: false,
+        quality: [],
+        identities: [],
+        referencesNow: 0,
+        newReferences: 0,
+        comparison: [],
+      };
+    }
+    if (input.timeMs < options.registrationStartMs + 5000) {
       statistics.registrationFrames++;
       if (!reference) {
         const prepared = await prepareIdentityFrame(
@@ -158,7 +178,8 @@ export async function createVideoIdentityAnalysis(
           });
           analysis = createIdentityAnalysis(config, gallery);
           appearance.replaceReferences(input.timeMs);
-          appearance.start({
+          comparison?.replaceReferences(input.timeMs);
+          const startInput = {
             run,
             householdVersion: { scope_epoch: run.scopeEpoch, sequence: 0 },
             sampleFps: 3,
@@ -167,7 +188,9 @@ export async function createVideoIdentityAnalysis(
             recentTtlMs: identityLimits.recentTtlMs,
             modelVersion: reidSha256,
             processingVersion: reidProcessingVersion,
-          });
+          };
+          appearance.start(startInput);
+          comparison?.start(startInput);
         }
       }
       return {
@@ -177,6 +200,7 @@ export async function createVideoIdentityAnalysis(
         identities: [],
         referencesNow: 0,
         newReferences: 0,
+        comparison: [],
       };
     }
     statistics.targetFrames++;
@@ -192,6 +216,7 @@ export async function createVideoIdentityAnalysis(
         identities: [],
         referencesNow: 0,
         newReferences: 0,
+        comparison: [],
       };
     }
     if (reference.frameSha256 === frameSha256) {
@@ -203,6 +228,7 @@ export async function createVideoIdentityAnalysis(
         identities: [],
         referencesNow: appearance.snapshot().references.length,
         newReferences: 0,
+        comparison: [],
       };
     }
     // File PTS supplies this calibration's frame binding; it is not network RTP.
@@ -262,7 +288,7 @@ export async function createVideoIdentityAnalysis(
       currentAnalysis.skipped("coverage");
     const before = appearance.snapshot().statistics.referencesCreated;
     appearance.tracking(observation, input.timeMs);
-    appearance.acceptAppearance({
+    const appearanceInput = {
       evidence: input.fresh.map((item) =>
         appearanceEvidenceSchema.parse({
           ...observation,
@@ -275,22 +301,26 @@ export async function createVideoIdentityAnalysis(
       householdVersion: { scope_epoch: run.scopeEpoch, sequence: 0 },
       acceptedAt: input.timeMs,
       remainingMs: 2000,
-    });
+    };
+    appearance.acceptAppearance(appearanceInput);
     const state = currentAnalysis.snapshot(input.timeMs);
-    appearance.identity(
-      identityObservationSchema.parse({
-        ...observation,
-        revision: input.sequence,
-        status: "recognizing",
-        referenceRevision: currentGallery.contentVersion,
-        referenceVersions:
-          identityReferenceVersionsSchema.parse(currentGallery),
-        model: null,
-        ...state,
-      }),
-      input.timeMs,
-      input.timeMs,
-    );
+    const identityObservation = identityObservationSchema.parse({
+      ...observation,
+      revision: input.sequence,
+      status: "recognizing",
+      referenceRevision: currentGallery.contentVersion,
+      referenceVersions: identityReferenceVersionsSchema.parse(currentGallery),
+      model: null,
+      ...state,
+    });
+    appearance.identity(identityObservation, input.timeMs, input.timeMs);
+    const comparisonRows =
+      comparison?.consume(
+        observation,
+        appearanceInput,
+        identityObservation,
+        input.timeMs,
+      ) ?? [];
     const identities = state.tracks.map((track) => {
       const sample = evidence?.samples.find(
         (item) => item.trackId === track.trackId,
@@ -356,6 +386,7 @@ export async function createVideoIdentityAnalysis(
       identities,
       referencesNow: domain.references.length,
       newReferences: domain.statistics.referencesCreated - before,
+      comparison: comparisonRows,
     };
   }
   return {
@@ -364,9 +395,10 @@ export async function createVideoIdentityAnalysis(
       const state = analysis?.snapshot(lastClockMs) ?? null;
       return {
         protocol: {
+          registrationStartMs: options.registrationStartMs,
           registrationWindowMs: 5000,
           referenceRule:
-            "first unique quality-accepted face in the prefix; target window begins at5s",
+            "first unique quality-accepted face in the prefix; target window begins after the fixed five-second registration window",
           targetTruth:
             "no per-frame identity GT; output means matching the observed single reference, not participant identity accuracy",
           realRtp: false,
@@ -386,6 +418,7 @@ export async function createVideoIdentityAnalysis(
         statistics: { ...statistics },
         analysisStatistics: state?.statistics ?? null,
         appearance: appearance.snapshot(),
+        comparison: comparison?.snapshot() ?? null,
         models: {
           yunet: faceModels.models.yunet,
           sface: faceModels.models.sface,
@@ -395,7 +428,7 @@ export async function createVideoIdentityAnalysis(
           "single reference/one public scene; no independent identity holdout or multi-person error rate",
           "role mapping is not per-frame identity GT",
           "no asynchronous latency, live frame-age or household/database/UI acceptance",
-          "30s cannot calibrate1/5/10minute TTL; no inferred activity output",
+          "diagnostic time policies are not household calibration; no inferred activity output or validated identity error rate",
         ],
       };
     },
