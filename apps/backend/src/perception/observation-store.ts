@@ -182,9 +182,12 @@ export function createObservationStore(maxAgeMs: number) {
         ) {
           entry.identity = { ...result, ageMs: age };
           entry.identityRevision = result.revision;
-          entry.identityExpiresAt = performance.now() + maxAgeMs - age;
+          const acceptedAt = performance.now();
+          entry.identityExpiresAt = acceptedAt + maxAgeMs - age;
           entry.identityValidity =
             result.status === "unavailable" ? "unavailable" : "valid";
+          changed();
+          return { ageMs: age, acceptedAt };
         }
         changed();
         return null;

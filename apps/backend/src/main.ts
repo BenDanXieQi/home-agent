@@ -1,3 +1,4 @@
+import { createAppearanceIdentity } from "./household/identity/appearance";
 import { createReferenceEnrollment } from "./household/identity/enrollment";
 import { createMemberActivityRepository } from "./household/identity/activity-repository";
 import { createMemberActivityService } from "./household/identity/activity-service";
@@ -113,6 +114,13 @@ const speechInbox = createSpeechInbox({
 const perceptionSources = createPerceptionSources(household, mijiaService);
 const perception = createPerceptionService({
   identityReferences: identityReferences?.matching,
+  ...(identityReferences
+    ? {
+        appearance: createAppearanceIdentity({
+          matching: identityReferences.matching,
+        }),
+      }
+    : {}),
   speechInbox,
   configPath: resolvePath(
     import.meta.dir,
