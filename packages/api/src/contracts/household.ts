@@ -463,7 +463,7 @@ export function selectRoomFacts(
       room_devices: allDevices.length,
       properties: properties.length,
       missing: properties.filter((item) => !item.has_value).length,
-      valid: properties.filter((item) => item.quality === "valid").length,
+      valid: properties.filter((item) => item.reason === "current").length,
       unknown_specifications: devices.filter(
         (device) => device.spec_status !== "ready",
       ).length,

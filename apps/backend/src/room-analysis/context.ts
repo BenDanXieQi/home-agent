@@ -51,7 +51,7 @@ export function canTrigger(fact: z.infer<typeof latestPropertySchema>) {
     !relevantProperty(fact) ||
     !fact.has_value ||
     !fact.rule_eligible ||
-    fact.quality !== "valid"
+    fact.reason !== "current"
   )
     return false;
   if (typeof fact.value === "string" && fact.value.length > 256) return false;
@@ -71,7 +71,7 @@ export function meaningfulChange(
   if (baseline === fact.value) return false;
   const threshold = numeric.get(fact.type_name ?? "");
   // Only apply a numeric tolerance when both values have the expected unit.
-  // A type/unit/quality change must not be mistaken for insignificant noise.
+  // A type/unit/source change must not be mistaken for insignificant noise.
   if (
     !threshold ||
     fact.unit !== threshold.unit ||
@@ -91,7 +91,6 @@ export function factMetadata(fact: z.infer<typeof latestPropertySchema>) {
     fact.room_id,
     fact.spec_id,
     fact.has_value,
-    fact.quality,
     fact.reason,
     fact.rule_eligible,
     fact.description,
@@ -191,7 +190,6 @@ export function buildRoomContext(
     (fact) =>
       fact.has_value &&
       fact.evidence &&
-      ["valid", "unconfirmed"].includes(fact.quality) &&
       ["current", "unverified", "cloud_cache", "baseline"].includes(
         fact.reason,
       ) &&
@@ -202,7 +200,7 @@ export function buildRoomContext(
       (changed.has(JSON.stringify([fact.device_id, fact.siid, fact.piid]))
         ? 4
         : 0) +
-      (fact.quality === "valid" ? 2 : 0) +
+      (fact.reason === "current" ? 2 : 0) +
       (fact.type_name === "on" ? 1 : 0);
     return priority(b) - priority(a);
   });
@@ -233,7 +231,6 @@ export function buildRoomContext(
             256,
           ) ?? null,
         unit: fact.unit,
-        quality: fact.quality,
         reason: fact.reason,
         observed_at: fact.evidence!.observed_at,
         received_at: fact.evidence!.received_at,
@@ -270,7 +267,7 @@ export function buildRoomContext(
   }
   context.coverage.included = context.facts.length;
   context.coverage.unconfirmed = context.facts.filter(
-    (fact) => fact.quality !== "valid",
+    (fact) => fact.reason !== "current",
   ).length;
   return context;
 }

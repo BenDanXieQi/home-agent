@@ -11,12 +11,6 @@ export const propertyValueSchema = z.union([
   z.boolean(),
   z.null(),
 ]);
-export const factQualitySchema = z.enum([
-  "valid",
-  "unconfirmed",
-  "unavailable",
-  "unknown",
-]);
 export const factReasonSchema = z.enum([
   "missing",
   "unverified",
@@ -53,7 +47,6 @@ const evidenceSchema = z.object({
   observed_at: z.iso.datetime().nullable(),
   received_at: z.iso.datetime(),
   read_started_at: z.iso.datetime().nullable(),
-  observation_quality: factQualitySchema,
   policy_version: z.string(),
   spec_id: z.string().nullable(),
 });
@@ -72,7 +65,6 @@ export const latestPropertySchema = z.object({
   unit: z.string().nullable(),
   has_value: z.boolean(),
   value: propertyValueSchema,
-  quality: factQualitySchema,
   reason: factReasonSchema,
   rule_eligible: z.boolean(),
   evidence: evidenceSchema.nullable(),
@@ -142,7 +134,6 @@ export const collectionRetrySchema = z.strictObject({ scope_epoch: z.uuid() });
 export const propertyReadItemSchema = propertyAddressSchema.extend({
   outcome: z.enum(["applied", "candidate", "unchanged", "failed"]),
   reason: z.string().nullable(),
-  quality: factQualitySchema,
   observation_id: z.uuid().nullable(),
 });
 

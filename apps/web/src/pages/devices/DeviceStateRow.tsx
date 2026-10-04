@@ -26,7 +26,6 @@ import { requestErrorMessage } from "../../messages/zh-CN";
 import { expand } from "../../utils/motion";
 import {
   summarizeProperties,
-  qualityLabels,
   reasonLabels,
   subscriptionLabels,
   propertyValue,
@@ -96,7 +95,7 @@ export const DeviceStateRow = memo(function DeviceStateRow({
                 <span className="text-muted">{property.description} </span>
                 {propertyValue(property)}
                 <span className="ml-2 text-muted">
-                  {reliable ? qualityLabels[property.quality] : "待同步"}
+                  {reliable ? reasonLabels[property.reason] : "待同步"}
                 </span>
               </span>
             ))
@@ -264,12 +263,7 @@ function DeviceDetails({
                       </small>
                     ) : null}
                   </td>
-                  <td>
-                    {reliable ? qualityLabels[property.quality] : "待同步"}
-                    <small className="mt-1 block text-muted">
-                      {reasonLabels[property.reason]}
-                    </small>
-                  </td>
+                  <td>{reliable ? reasonLabels[property.reason] : "待同步"}</td>
                   <td title={property.last_report_at ?? ""}>
                     {time(property.last_report_at)}
                     {property.last_read_at ? (

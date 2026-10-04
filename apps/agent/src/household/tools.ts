@@ -110,7 +110,7 @@ export function createHouseholdTools(backendUrl: string) {
       {
         name: "get_device_state",
         description:
-          "只读查询一个设备最近收到的属性报告，不触发设备读取或控制。保留单位、枚举说明、quality、reason、观测时间和过期时间。只有 valid 是已确认有效值；其他质量不能当作当前事实，未知观测时间不能以收到时间替代。无属性不代表关闭。属性列表分页。",
+          "只读查询一个设备最近收到的属性报告，不触发设备读取或控制。保留单位、枚举说明、来源、reason、观测时间和过期时间。缓存、断连、过期或缺值不能当作已确认的当前事实，未知观测时间不能以收到时间替代。无属性不代表关闭。属性列表分页。",
         schema: deviceStateInputSchema,
       },
     ),

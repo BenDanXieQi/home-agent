@@ -40,12 +40,6 @@ export function summarizeProperties(
     .slice(0, 2);
 }
 
-export const qualityLabels = {
-  valid: "有效",
-  unconfirmed: "待确认",
-  unavailable: "来源不可用",
-  unknown: "未知",
-};
 export const reasonLabels = {
   missing: "尚未收到值",
   unverified: "有效期尚未确认",

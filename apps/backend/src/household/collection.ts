@@ -571,7 +571,7 @@ export class HouseholdCollection {
         );
         if (
           seed.properties.has(key) ||
-          projection.latest[key]?.quality === "valid"
+          projection.latest[key]?.reason === "current"
         )
           continue;
         seed.properties.add(key);
@@ -623,7 +623,6 @@ export class HouseholdCollection {
     const failed = (reason: string) => ({
       ...property,
       outcome: "failed" as const,
-      quality: "unknown" as const,
       reason,
       observation_id: null,
     });
@@ -713,7 +712,6 @@ export class HouseholdCollection {
     task.resolve({
       ...task.property,
       outcome: "failed",
-      quality: "unknown",
       reason,
       observation_id: null,
     });
