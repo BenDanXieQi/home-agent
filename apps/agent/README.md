@@ -8,11 +8,11 @@ Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连�
 
 ## 初始化
 
-首次配置和日常启动统一见[项目启动说明](../../README.md#快速开始)。单独开发 Agent 使用根目录 `bun run dev:agent`，需先准备依赖和数据库。
+首次配置和日常启动统一见[项目启动说明](../../README.md#快速开始)。单独开发 Agent 使用 `bun run --cwd apps/agent dev`，需先准备依赖和数据库。
 
-根目录 `db:migrate` 先执行 backend 迁移，再调用 Agent 的官方 `setup()`，创建应用所有的 `agent_state.chat_threads` 会话摘要表，并为已有检查点补齐缺失摘要，可重复执行；部署和升级适配器时先运行。仅初始化 Agent 可执行 `bun run --cwd apps/agent db:setup`。服务启动不自动改表。初始化账号需要 schema/表创建权限，运行账号需相应读写权限。连接池上限 5，连接等待超时 10 秒，SQL 执行超时 30 秒。SIGINT/SIGTERM 最多等待 HTTP 请求 30 秒，再强制断开；随后 drain telemetry 中的活动执行并关闭连接池。
+根目录 `dev` 和 `db:migrate` 自动启动并等待本机数据库就绪，先执行 backend 迁移，再调用 Agent 的官方 `setup()`，创建应用所有的 `agent_state.chat_threads` 会话摘要表，并为已有检查点补齐缺失摘要，可重复执行。仅初始化 Agent 可执行 `bun run --cwd apps/agent db:setup`。外部数据库部署和升级适配器时，先执行各应用数据库命令。Agent 进程启动不自动改表。初始化账号需要 schema/表创建权限，运行账号需相应读写权限。连接池上限 5，连接等待超时 10 秒，SQL 执行超时 30 秒。SIGINT/SIGTERM 最多等待 HTTP 请求 30 秒，再强制断开；随后 drain telemetry 中的活动执行并关闭连接池。
 
-根目录 `dev` 包含只读 `db:check`，核对 checkpoint 迁移记录及检查点、会话摘要表读取；单独启动 Agent 不包含该检查。检查不验证写权限。升级适配器时需同步核对 `scripts/db-check.ts` 中的迁移版本要求。
+根目录 `dev` 和 `db:migrate` 在迁移和初始化后执行两应用的只读数据库检查；Agent 检查核对 checkpoint 迁移记录及检查点、会话摘要表读取。单独启动 Agent 不包含该检查。检查不验证写权限。升级适配器时需同步核对 `scripts/db-check.ts` 中的迁移版本要求。
 
 ## 对话
 
