@@ -143,6 +143,7 @@ export function createAppearanceComparison(
             );
             previous.candidateAt = null;
           };
+          if (target.blocked) failAttempt(target.reason);
           if (
             previous.candidateAt !== null &&
             now - previous.candidateAt >= variant.policy.supportWindowMs
