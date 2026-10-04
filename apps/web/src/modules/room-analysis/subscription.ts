@@ -1,9 +1,10 @@
-import { createParser } from "eventsource-parser";
 import {
   roomAnalysisStateSchema,
   type roomAnalysisQuerySchema,
 } from "@home-agent/api/room-analysis";
+import { parseRetryAfter } from "@home-agent/api/http/retry-after";
 import { rpc } from "../../api/client";
+import { consumeEventStream } from "../../api/event-stream";
 
 export function subscribeRoomAnalysis(
   input: ReturnType<typeof roomAnalysisQuerySchema.parse>,
@@ -14,82 +15,82 @@ export function subscribeRoomAnalysis(
   let controller: AbortController | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let delay = 1000;
+  let nextAllowedAt = 0;
   async function connect() {
     if (stopped) return;
+    const wait = nextAllowedAt - Date.now();
+    if (wait > 0) {
+      retry = setTimeout(
+        () => {
+          connect().catch((error: unknown) =>
+            console.warn("Room analysis reconnect failed", error),
+          );
+        },
+        Math.min(wait, 2_147_483_647),
+      );
+      return;
+    }
     const current = new AbortController();
     controller = current;
-    let deadline = setTimeout(() => current.abort(), 10_000);
     let stable: ReturnType<typeof setTimeout> | undefined;
-    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
-    const parser = createParser({
-      maxBufferSize: 128 * 1024,
-      onError: () => current.abort(),
-      onEvent: (event) => {
-        if (stopped || current.signal.aborted) return;
-        try {
-          if (new TextEncoder().encode(event.data).byteLength > 96 * 1024)
-            throw new Error("Oversized analysis state");
+    try {
+      await consumeEventStream(
+        {
+          request: (signal) =>
+            rpc.api.rooms.analysis.events.$post(
+              { json: input },
+              { init: { signal } },
+            ),
+          signal: current.signal,
+          maxBufferSize: 128 * 1024,
+          maxEventBytes: 96 * 1024,
+          firstEventTimeoutMs: 10_000,
+          silenceMs: 45_000,
+          onResponse(response) {
+            if (response.status === 503)
+              nextAllowedAt =
+                Date.now() +
+                (parseRetryAfter(response.headers.get("Retry-After")) ??
+                  30_000);
+          },
+        },
+        (event) => {
+          if (stopped || current.signal.aborted) return;
           if (event.event === "state") {
-            const value = roomAnalysisStateSchema.parse(JSON.parse(event.data));
+            const state = roomAnalysisStateSchema.parse(JSON.parse(event.data));
             if (
-              value.scope_epoch !== input.scope_epoch ||
-              value.room_id !== input.room_id
+              state.scope_epoch !== input.scope_epoch ||
+              state.room_id !== input.room_id
             )
-              throw new Error("Scope changed");
-            receive(value);
+              throw new Error("Room analysis scope changed");
+            receive(state);
             stable ??= setTimeout(() => {
               delay = 1000;
             }, 60_000);
           } else if (event.event !== "heartbeat")
-            throw new Error("Resync analysis");
-          clearTimeout(deadline);
-          deadline = setTimeout(() => current.abort(), 45_000);
-        } catch {
-          current.abort();
-        }
-      },
-    });
-    try {
-      const response = await rpc.api.rooms.analysis.events.$post(
-        { json: input },
-        { init: { signal: current.signal, cache: "no-store" } },
+            throw new Error("Unknown room analysis event");
+        },
       );
-      if (response.status === 503) delay = 30_000;
-      if (
-        !response.ok ||
-        !response.body ||
-        !response.headers.get("content-type")?.includes("text/event-stream")
-      )
-        throw new Error("Analysis stream unavailable");
-      reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      while (!current.signal.aborted) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        parser.feed(decoder.decode(chunk.value, { stream: true }));
-      }
-    } catch {
-      /* The viewer retains the previous summary with a disconnected label. */
+    } catch (error) {
+      if (!stopped && !current.signal.aborted)
+        console.warn("Room analysis stream interrupted", error);
     } finally {
       current.abort();
-      clearTimeout(deadline);
+      controller = undefined;
       clearTimeout(stable);
-      await reader?.cancel().catch(() => {});
-      reader?.releaseLock();
       if (!stopped) {
         disconnected();
-        retry = setTimeout(() => {
-          connect().catch(() => {
-            console.warn("Room analysis reconnect failed");
-          });
-        }, delay);
+        nextAllowedAt = Math.max(nextAllowedAt, Date.now() + delay);
         delay = Math.min(delay * 2, 30_000);
+        connect().catch((error: unknown) =>
+          console.warn("Room analysis reconnect failed", error),
+        );
       }
     }
   }
-  connect().catch(() => {
-    console.warn("Room analysis subscription failed");
-  });
+  connect().catch((error: unknown) =>
+    console.warn("Room analysis subscription failed", error),
+  );
   return () => {
     stopped = true;
     controller?.abort();

@@ -8,13 +8,12 @@ import {
 } from "../../db/schema";
 import { householdLimits } from "../../household/config";
 import { MijiaError } from "../errors";
+import { householdBindingLock } from "../../household/binding-repository";
 import {
   createConfirmedWriter,
   createLockedTransactions,
   StorageOutcomeUnknownError,
 } from "../../db/transaction-outcome";
-
-const bindingLockKey = "household_binding";
 
 export function createHomeSelectionStore(db: Database) {
   const transaction = createLockedTransactions(
@@ -25,7 +24,7 @@ export function createHomeSelectionStore(db: Database) {
   return {
     async read(accountKey: string) {
       try {
-        const rows = await transaction(bindingLockKey, (tx) =>
+        const rows = await transaction(householdBindingLock, (tx) =>
           tx.select().from(mijiaHomeSelections).limit(2),
         );
         const row = rows[0];
@@ -45,7 +44,7 @@ export function createHomeSelectionStore(db: Database) {
     ) {
       try {
         await write(
-          bindingLockKey,
+          householdBindingLock,
           async (tx, beforeWrite) => {
             assertCurrent();
             const rows = await tx.select().from(mijiaHomeSelections).limit(2);

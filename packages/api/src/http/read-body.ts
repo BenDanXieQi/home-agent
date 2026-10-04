@@ -38,7 +38,7 @@ export async function readLimitedBytes(
     try {
       await reader.cancel();
     } catch {
-      /* The transport may already have been aborted. */
+      if (!signal?.aborted) console.warn("Response reader cleanup failed");
     } finally {
       reader.releaseLock();
     }

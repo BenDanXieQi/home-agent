@@ -1,7 +1,7 @@
 import { deviceCategoryLabel } from "../../modules/devices/presentation";
 import { atom } from "jotai";
 import { householdSnapshotAtom } from "../../modules/household/state";
-import { devicesAtom } from "../../modules/devices/state";
+import { devicesAtom, roomsAtom } from "../../modules/devices/state";
 export const deviceSearchAtom = atom("");
 export const deviceFilterAtom = atom("all");
 const emptyDeviceFilters = { room: "", category: "", capability: "" };
@@ -29,9 +29,7 @@ const byName = ([, left]: [string, string], [, right]: [string, string]) =>
   left.localeCompare(right, "zh-CN");
 export const deviceFilterOptionsAtom = atom((get) => {
   const rooms = new Map<string, string>();
-  for (const room of Object.values(
-    get(householdSnapshotAtom)?.projection.room ?? {},
-  )) {
+  for (const room of Object.values(get(roomsAtom) ?? {})) {
     if (!room.archived)
       rooms.set(JSON.stringify([room.home_id, room.room_id]), room.name);
   }

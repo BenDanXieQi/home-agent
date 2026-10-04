@@ -22,7 +22,8 @@
     "./household-members": "./src/contracts/household-members.ts",
     "./household-queries": "./src/contracts/household-queries.ts",
     "./mijia-recordings": "./src/mijia/recordings.ts",
-    "./speech-dialogue": "./src/contracts/speech-dialogue.ts"
+    "./speech-dialogue": "./src/contracts/speech-dialogue.ts",
+    "./devices": "./src/domain/devices.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

@@ -1,4 +1,5 @@
-import type { householdSnapshotAtom } from "../../modules/household/state";
+import { householdSnapshotAtom } from "../../modules/household/state";
+import { useAtomValue } from "jotai";
 import { useEffect, useRef, useState } from "react";
 import { commandResultSchema } from "@home-agent/api/household";
 import { Disclosure } from "../../components/Disclosure";
@@ -7,20 +8,15 @@ import { requestJson } from "../../api/client";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import { collectionLabels } from "./fact-presentation";
 
-export function CollectionDetails({
-  snapshot,
-  reliable,
-}: {
-  snapshot: NonNullable<ReturnType<typeof householdSnapshotAtom.read>>;
-  reliable: boolean;
-}) {
-  const collection = snapshot.projection.collection.collection;
+export function CollectionDetails({ reliable }: { reliable: boolean }) {
+  const snapshot = useAtomValue(householdSnapshotAtom);
+  const collection = snapshot?.projection.collection.collection;
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState("");
   const operation = useRef<AbortController | null>(null);
   useEffect(() => () => operation.current?.abort(), []);
   async function retry() {
-    if (!reliable || pending) return;
+    if (!snapshot || !reliable || pending) return;
     const controller = new AbortController();
     operation.current = controller;
     setPending(true);
@@ -43,6 +39,7 @@ export function CollectionDetails({
       if (!controller.signal.aborted) setPending(false);
     }
   }
+  if (!collection) return null;
   return (
     <Disclosure
       className="mt-5"

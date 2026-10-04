@@ -1,7 +1,8 @@
 import { Link, useParams } from "@tanstack/react-router";
 import { useAtomValue, useSetAtom } from "jotai";
-import { ArrowLeft, ArrowUpRight } from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { Notice, StatusNotice } from "../../components/Notice";
+import { BackLink } from "../../components/BackLink";
 import { buttonStyles } from "../../components/button-styles";
 import { devicesAtom } from "../../modules/devices/state";
 import {
@@ -28,12 +29,13 @@ export default function CameraViewPage() {
   return (
     <section className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex shrink-0 items-center justify-between gap-3">
-        <Link
+        <BackLink
+          activeOptions={{ exact: true }}
           to="/cameras"
-          className={`${buttonStyles.base} ${buttonStyles.ghost} -ml-2 border-0 px-2`}
+          className="-ml-2"
         >
-          <ArrowLeft size={14} aria-hidden="true" /> 返回
-        </Link>
+          返回看家
+        </BackLink>
         <Link
           to="/cameras/$deviceId/$channel"
           search={{ mode: undefined }}

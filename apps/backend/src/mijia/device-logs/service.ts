@@ -6,11 +6,11 @@ import {
   type DeviceLogSnapshot,
   type DeviceLogEntry,
 } from "@home-agent/api/device-logs";
-import { MijiaError } from "../mijia/errors";
-import { subscribableDevice } from "../mijia/protocols/miot/messages";
-import type { MiotObservation } from "../mijia/protocols/miot/messages";
-import type { HouseholdRuntime } from "./runtime";
-import type { MijiaService } from "../mijia/service";
+import { MijiaError } from "../errors";
+import { subscribableDevice } from "../protocols/miot/messages";
+import type { MiotObservation } from "../protocols/miot/messages";
+import type { HouseholdRuntime } from "../../household/runtime";
+import type { MijiaService } from "../service";
 
 const RECENT_ROWS = 500;
 const MAX_FILE_BYTES = 256 * 1024 * 1024;
@@ -87,17 +87,17 @@ export class DevicePushLogs {
         (Date.now() - Date.parse(this.data.run.started_at)) / 1000,
       );
     const contents = JSON.stringify(this.data);
-    this.persistence = this.persistence
-      .catch(() => {})
-      .then(async () => {
-        await writeFile(join(this.directory, "latest.json.tmp"), contents, {
-          mode: 0o600,
-        });
-        await rename(
-          join(this.directory, "latest.json.tmp"),
-          join(this.directory, "latest.json"),
-        );
+    const save = async () => {
+      await writeFile(join(this.directory, "latest.json.tmp"), contents, {
+        mode: 0o600,
       });
+      await rename(
+        join(this.directory, "latest.json.tmp"),
+        join(this.directory, "latest.json"),
+      );
+    };
+    // Each returned write reports its own failure. A later write can retry the file.
+    this.persistence = this.persistence.then(save, save);
     return this.persistence;
   }
 

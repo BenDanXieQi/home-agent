@@ -108,33 +108,25 @@ export const DeviceLogWorkspace = memo(function DeviceLogWorkspace({
           onCaptured={resume}
         />
       </div>
-      {narrow ? (
-        <div
-          className="relative grid min-h-0 flex-1 grid-rows-[auto_minmax(0,1fr)] bg-white data-[devices-open=true]:grid-rows-[minmax(0,1fr)_minmax(0,1fr)]"
-          data-devices-open={devicesOpen}
+      <Group
+        className="relative min-h-0 flex-1 bg-white"
+        id="device-log-panels"
+        orientation={narrow ? "vertical" : "horizontal"}
+        disabled={narrow}
+      >
+        <Panel
+          id="device-list"
+          defaultSize={narrow ? (devicesOpen ? "50%" : "64px") : "250px"}
+          minSize={narrow ? (devicesOpen ? "50%" : "64px") : "200px"}
+          maxSize={narrow ? (devicesOpen ? "50%" : "64px") : "380px"}
         >
           {picker}
+        </Panel>
+        {narrow ? null : <ResizeHandle label="调整设备列表宽度" />}
+        <Panel id="log-reader" minSize="0px">
           {reader}
-        </div>
-      ) : (
-        <Group
-          className="relative min-h-0 flex-1 bg-white"
-          id="device-log-panels"
-        >
-          <Panel
-            id="device-list"
-            defaultSize="250px"
-            minSize="200px"
-            maxSize="380px"
-          >
-            {picker}
-          </Panel>
-          <ResizeHandle label="调整设备列表宽度" />
-          <Panel id="log-reader" minSize="0px">
-            {reader}
-          </Panel>
-        </Group>
-      )}
+        </Panel>
+      </Group>
     </section>
   );
 });

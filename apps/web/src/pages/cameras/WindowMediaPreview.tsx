@@ -51,13 +51,13 @@ export function WindowMediaPreview({
     (windowRequestUnavailable(query.error) || (!available && !query.isFetching))
   )
     return (
-      <StatusNotice>
+      <StatusNotice className="m-4 max-h-full overflow-auto text-ink">
         此媒体尚未加载，后台已无法读取。请选择新的片段。
       </StatusNotice>
     );
   if (query.isError)
     return (
-      <Notice tone="error">
+      <Notice tone="error" className="m-4 max-h-full overflow-auto">
         媒体读取失败：{requestErrorMessage(query.error)}
         {available ? (
           <Button
@@ -75,25 +75,23 @@ export function WindowMediaPreview({
     );
   if (!query.data)
     return (
-      <StatusNotice>
+      <StatusNotice className="m-4 max-h-full overflow-auto text-ink">
         {active ? "正在读取片段媒体…" : "等待家庭连接恢复后读取片段媒体。"}
       </StatusNotice>
     );
+  if (failed)
+    return (
+      <Notice tone="error" className="m-4 max-h-full overflow-auto">
+        浏览器无法显示该媒体，可能是不支持当前编码或媒体已损坏。
+      </Notice>
+    );
   return (
-    <div className="space-y-2">
-      <p className="text-xs text-muted">
-        已加载到本页，可播放或拖动进度；新片段到来不会关闭。
-      </p>
-      {failed ? (
-        <Notice tone="error">
-          浏览器无法显示该媒体，可能是不支持当前编码或媒体已损坏。
-        </Notice>
-      ) : null}
+    <div className="relative grid size-full place-items-center">
       {selection.representation.endsWith("image") ? (
         <img
           ref={attachMedia}
           alt="所选窗口的最后一张保留帧"
-          className="max-h-[60dvh] w-full rounded-xl bg-black object-contain"
+          className="size-full object-contain"
           onError={() => setFailed(true)}
         />
       ) : selection.representation === "audio" ? (
@@ -114,7 +112,7 @@ export function WindowMediaPreview({
           controls
           playsInline
           aria-label="所选窗口采样视频"
-          className="max-h-[60dvh] w-full rounded-xl bg-black"
+          className="size-full object-contain"
           onError={() => setFailed(true)}
         />
       )}

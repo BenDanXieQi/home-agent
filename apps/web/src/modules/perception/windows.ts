@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, skipToken } from "@tanstack/react-query";
 import {
   windowListSchema,
   mediaViewSchema,
@@ -68,17 +68,23 @@ export function windowListOptions(source: WindowSource) {
   });
 }
 
-export function windowDetailOptions(scope: string, id: string) {
+export function windowDetailOptions(scope: string, id: string | undefined) {
   return queryOptions({
     ...windowQueryPolicy,
     queryKey: [...windowQueryScope(scope), "detail", id],
-    queryFn: ({ signal }) =>
-      requestJson(
-        (client, options) =>
-          client.api.perception.windows[":id"].$get({ param: { id } }, options),
-        windowDetailSchema,
-        { signal },
-      ),
+    queryFn:
+      id === undefined
+        ? skipToken
+        : ({ signal }) =>
+            requestJson(
+              (client, options) =>
+                client.api.perception.windows[":id"].$get(
+                  { param: { id } },
+                  options,
+                ),
+              windowDetailSchema,
+              { signal },
+            ),
     staleTime: Infinity,
   });
 }

@@ -19,7 +19,7 @@ export function createContextRoutes(
   repository: ReturnType<typeof createContextRepository> | undefined,
 ) {
   const app = new Hono();
-  app.use(requireLocalAccess([port, 5173]));
+  app.use(requireLocalAccess([port, 5173], { webEntry: true }));
   app.use(
     bodyLimit({
       maxSize: 4096,

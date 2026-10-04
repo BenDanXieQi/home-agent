@@ -42,6 +42,7 @@ export const commandSchema = z.discriminatedUnion("kind", [
   taskSchema.options[3],
   z.object({ kind: z.literal("video_start"), source: videoStartSchema }),
   z.object({ kind: z.literal("video_stop"), runId: z.uuid() }),
+  z.object({ kind: z.literal("tracking_retry") }),
 ]);
 const tensorMetadata = z.object({
   name: z.string(),

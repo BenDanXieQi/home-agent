@@ -1,18 +1,12 @@
 export const tablePresentation = {
   household_subjects: {
     title: "家庭成员",
-    description: "人物和宠物的身份资料",
-    relation: "一个成员 → 多条关联",
   },
   context_records: {
     title: "上下文",
-    description: "每次观察或判断只保存一份",
-    relation: "一条上下文 → 多条关联",
   },
   context_entities: {
     title: "对象关联",
-    description: "把上下文与人、房间、设备连接起来",
-    relation: "context_id 引用上下文 ID",
   },
 };
 

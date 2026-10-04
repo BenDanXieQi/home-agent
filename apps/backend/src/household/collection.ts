@@ -804,7 +804,19 @@ export class HouseholdCollection {
       this.reading < collectionLimits.readConcurrent &&
       this.readQueue.length
     ) {
-      const tasks = this.readQueue.splice(0, collectionLimits.readBatch);
+      // A vendor request has one revocation scope. Never let another device's
+      // cancellation discard a surviving device's independently owned read.
+      const first = this.readQueue.shift()!;
+      const tasks = [first];
+      this.readQueue = this.readQueue.filter((task) => {
+        if (
+          task.deviceKey !== first.deviceKey ||
+          tasks.length >= collectionLimits.readBatch
+        )
+          return true;
+        tasks.push(task);
+        return false;
+      });
       this.reading++;
       this.readBatch(tasks)
         .finally(() => {

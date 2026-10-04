@@ -133,7 +133,7 @@ export function ServiceConnections() {
   const checkMutation = useAtomValue(checkConnectionsAtom);
   const checkStatus = checkMutation.status;
   function refresh() {
-    return checkMutation.mutateAsync().catch(() => {});
+    checkMutation.mutate();
   }
   async function save(value: ServiceConfiguration) {
     if (
@@ -192,12 +192,7 @@ export function ServiceConnections() {
             disabled={refreshing || saving}
             status={checkStatus}
             onClick={() => {
-              refresh().catch((backgroundError: unknown) => {
-                console.error(
-                  "ServiceConnections: refresh failed",
-                  backgroundError,
-                );
-              });
+              refresh();
             }}
           >
             {checkStatus === "pending" ? "检查中…" : "重新检查"}

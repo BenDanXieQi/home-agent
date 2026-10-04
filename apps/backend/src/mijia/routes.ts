@@ -1,4 +1,3 @@
-import { mijiaRecordingQuerySchema } from "@home-agent/api/mijia-recordings";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -17,8 +16,8 @@ import { loginMaterialSchema } from "@home-agent/api/household";
 import type { HouseholdRuntime } from "../household/runtime";
 import { createHouseholdRoutes } from "../household/routes";
 import { requireLocalAccess } from "@home-agent/api/local-access";
-import type { DevicePushLogs } from "../household/device-logs";
-import { createDeviceLogRoutes } from "../household/device-log-routes";
+import type { DevicePushLogs } from "./device-logs/service";
+import { createDeviceLogRoutes } from "./device-logs/routes";
 import type { MijiaService } from "./service";
 import { HouseholdError } from "../household/errors";
 import { safeMijiaError } from "./errors";
@@ -80,25 +79,6 @@ export function createMijiaRoutes(
       await runtime.logout();
       return c.json(commandResult());
     })
-    .post(
-      "/cameras/recordings",
-      validateJson(mijiaRecordingQuerySchema),
-      async (c) => {
-        const input = c.req.valid("json");
-        if (input.scope_epoch !== runtime.epoch || !runtime.ready)
-          throw new HouseholdError("stale_session");
-        const result = await service.readRecordings(
-          input.revision,
-          input.deviceId,
-          input.channel,
-          { afterMs: input.afterMs, limit: input.limit },
-          AbortSignal.any([c.req.raw.signal, shutdownSignal]),
-        );
-        if (input.scope_epoch !== runtime.epoch || !runtime.ready)
-          throw new HouseholdError("stale_session");
-        return c.json(result);
-      },
-    )
     .post(
       "/playback/reservations",
       validateJson(mijiaPlaybackReservationInputSchema),

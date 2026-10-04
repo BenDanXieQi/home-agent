@@ -207,7 +207,10 @@ export class MiCloudTransport {
       }
       throw new MiCloudError("invalid-response");
     } catch (error) {
-      await pendingResponse?.body?.cancel().catch(() => {});
+      await pendingResponse?.body?.cancel().catch(() => {
+        if (!requestSignal.aborted)
+          console.warn("Supplier response cleanup failed");
+      });
       if (requestSignal.aborted)
         throw new MiCloudError(
           requestSignal.reason instanceof DOMException &&

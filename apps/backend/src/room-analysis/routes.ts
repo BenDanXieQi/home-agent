@@ -19,7 +19,7 @@ export function createRoomAnalysisRoutes(
 ) {
   const app = new Hono();
   const events = createRoomAnalysisStream(service);
-  app.use(requireLocalAccess([port, 5173]));
+  app.use(requireLocalAccess([port, 5173], { webEntry: true }));
   app.use(
     bodyLimit({
       maxSize: 1024,

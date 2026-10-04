@@ -1,11 +1,10 @@
-import { buttonStyles } from "./components/button-styles";
+import { BackLink } from "./components/BackLink";
 import { Notice } from "./components/Notice";
 import {
   createRootRoute,
   createRoute,
   createRouter,
   lazyRouteComponent,
-  Link,
   Outlet,
 } from "@tanstack/react-router";
 import { AccountGate } from "./pages/workspace/AccountGate";
@@ -16,13 +15,9 @@ const rootRoute = createRootRoute({
   notFoundComponent: () => (
     <div className="py-20 text-center">
       <h1 className="text-3xl">页面不存在</h1>
-      <Link
-        draggable={false}
-        to="/"
-        className={`${buttonStyles.base} ${buttonStyles.primary} hover:bg-ink/85 mt-6`}
-      >
+      <BackLink activeOptions={{ exact: true }} to="/devices" className="mt-6">
         返回房间
-      </Link>
+      </BackLink>
     </div>
   ),
   errorComponent: ({ reset }) => (
@@ -83,10 +78,7 @@ const cameraDetailRoute = createRoute({
   getParentRoute: () => camerasRoute,
   path: "$deviceId/$channel",
   validateSearch: (search: Record<string, unknown>) => ({
-    mode:
-      search.mode === "windows" || search.mode === "recordings"
-        ? search.mode
-        : undefined,
+    mode: search.mode === "windows" ? search.mode : undefined,
   }),
   component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
 });

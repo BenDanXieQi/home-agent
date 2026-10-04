@@ -73,7 +73,7 @@ export const windowSummarySchema = z.object({
   synchronizationAccuracyMs: z.null(),
   incomplete: z.boolean(),
   gaps: z.array(z.string()).max(32),
-  frames: z.array(windowFrameSchema).max(5),
+  frames: z.array(windowFrameSchema).max(6),
   speech: z.object({
     enabled: z.boolean(),
     acceptingUntil: z.number(),
@@ -103,6 +103,16 @@ export const windowSummarySchema = z.object({
     candidate: z.enum(["video", "audio", "none"]),
     visual: z.enum(["first", "changed", "hold", "static", "missing", "failed"]),
     changedRatio: z.number().min(0).max(1),
+    comparisons: z
+      .array(
+        z.object({
+          previousSequence: windowFrameSchema.shape.sequence,
+          currentSequence: windowFrameSchema.shape.sequence,
+          changedRatio: z.number().min(0).max(1),
+          region: windowBoxSchema.nullable(),
+        }),
+      )
+      .max(5),
     holdUntil: z.number().nullable(),
     audioPassed: z.boolean(),
   }),
@@ -187,6 +197,6 @@ export const mediaViewSchema = z.object({
           identity: windowFrameSchema.shape.identity,
         }),
       )
-      .max(5),
+      .max(6),
   }),
 });

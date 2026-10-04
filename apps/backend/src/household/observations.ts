@@ -5,7 +5,8 @@ import {
   propertyKey,
   type HouseholdObservation,
 } from "@home-agent/api/observations";
-import type { MijiaCapability } from "@home-agent/api/mijia";
+import type { specSchema } from "@home-agent/api/household";
+type Capability = ReturnType<typeof specSchema.parse>["spec"][string];
 import { collectionLimits, propertyPolicy } from "./collection-policy";
 import { jsonBytes } from "./config";
 
@@ -14,7 +15,7 @@ export type PropertyDefinition = {
   device: Projection["device"][string];
   siid: number;
   piid: number;
-  capability: MijiaCapability | undefined;
+  capability: Capability | undefined;
   policy: ReturnType<typeof propertyPolicy>;
   policy_version: string;
 };
@@ -80,10 +81,7 @@ export function emptyProperty(definition: PropertyDefinition) {
     read_candidate: null,
   });
 }
-function matchesCapability(
-  value: Latest["value"],
-  capability: MijiaCapability,
-) {
+function matchesCapability(value: Latest["value"], capability: Capability) {
   const format = capability.format.toLowerCase();
   const integer = /^(u?int)(8|16|32|64)$/.exec(format);
   const known =
