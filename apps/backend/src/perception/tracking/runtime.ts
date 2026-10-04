@@ -6,6 +6,11 @@ import type { VideoFrame } from "../media/latest-frame";
 import type { observationSchema, runSchema } from "../observations";
 import { createHumanTracker } from "./tracker";
 import type { createReidProcess } from "./reid-process";
+import { frameLimits } from "../detection/frame";
+
+// Preserve the memory ceiling of two maximum-size RGB24 frames while allowing
+// more low-resolution sources to retain pixels for appearance and identity.
+const retainedPixelBytes = 2 * frameLimits.maxPixels * 3;
 
 function metadata(run: z.infer<typeof runSchema>, frame: VideoFrame) {
   return {
@@ -57,7 +62,7 @@ export function createTrackingRuntime(options: {
   const pending = new Set<Promise<void>>();
   // FIFO eligibility contains only source IDs and expires when input stops.
   const pixelTurns = new Map<string, number>();
-  let retained = 0;
+  let retainedBytes = 0;
   let closed = false;
   let restarts = 0;
   let retryAt = 0;
@@ -122,21 +127,22 @@ export function createTrackingRuntime(options: {
       }
       if (now - frame.availableAt < maxAgeMs)
         pixelTurns.set(run.runId, frame.availableAt + maxAgeMs);
+      const pixelBytes = frame.rgb.byteLength;
       const hasPixels =
-        retained < 2 &&
+        retainedBytes + pixelBytes <= retainedPixelBytes &&
         pixelTurns.keys().next().value === run.runId &&
         now - frame.availableAt < maxAgeMs;
       // Geometry needs no pixels. Only appearance owns a bounded independent
       // copy, because detection transfers the original buffer to Piscina.
       let rgb = hasPixels ? new Uint8Array(frame.rgb) : undefined;
       if (hasPixels) {
-        retained++;
+        retainedBytes += pixelBytes;
         pixelTurns.delete(run.runId);
       }
       function releasePixels() {
         if (!rgb) return;
         rgb = undefined;
-        retained--;
+        retainedBytes -= pixelBytes;
       }
       let released = false;
       const expiry = hasPixels

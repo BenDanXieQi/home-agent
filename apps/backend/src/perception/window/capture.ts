@@ -48,12 +48,13 @@ export function createWindowCapture(
           (frame.mediaTime.pts - lastPts) / 90 < windowLimits.sampleIntervalMs
         )
           return;
-        lastPts = frame.mediaTime.pts;
         if (active >= windowLimits.captureConcurrency) {
           skipped++;
           report("capture_capacity", frame.receivedAt);
           return;
         }
+        // A rejected frame must not consume the source's sampling interval.
+        lastPts = frame.mediaTime.pts;
         active++;
         const rgb = new Uint8Array(frame.rgb);
         const raw = {
