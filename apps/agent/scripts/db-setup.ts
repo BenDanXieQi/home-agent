@@ -1,3 +1,4 @@
+import { setupChatStorage } from "../src/chat/setup";
 import { loadConfig } from "../src/config";
 import { createAgentDatabase } from "../src/db";
 
@@ -7,7 +8,8 @@ if (!url) throw new Error("Set AGENT_DATABASE_URL or DATABASE_URL");
 const database = createAgentDatabase(url);
 try {
   await database.checkpointer.setup();
-  console.info("LangGraph checkpoint schema agent_state is ready");
+  await setupChatStorage(database);
+  console.info("Agent checkpoint and conversation storage are ready");
 } finally {
   await database.close();
 }

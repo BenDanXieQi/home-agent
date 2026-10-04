@@ -26,7 +26,8 @@ try {
   await database.checkpointer.getTuple({
     configurable: { thread_id: crypto.randomUUID() },
   });
-  console.info("Agent checkpoint 迁移和表读取已就绪。");
+  await database.threads.list({ limit: 1 });
+  console.info("Agent checkpoint 迁移和会话摘要读取已就绪。");
 } catch {
   console.error(
     connected

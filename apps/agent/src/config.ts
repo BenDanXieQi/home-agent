@@ -45,6 +45,18 @@ const environment = z.object({
       )
       .optional(),
   ),
+  AGENT_CONTEXT_BYTES: z.coerce
+    .number()
+    .int()
+    .min(32_768)
+    .max(1_048_576)
+    .default(65_536),
+  AGENT_MAX_OUTPUT_TOKENS: z.coerce
+    .number()
+    .int()
+    .min(256)
+    .max(32_768)
+    .default(4096),
   AGENT_MODEL: optionalText,
   AGENT_THINKING: optionalText.pipe(z.enum(["enabled", "disabled"]).optional()),
   OPENAI_API_KEY: optionalText,

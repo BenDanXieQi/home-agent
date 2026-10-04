@@ -1,5 +1,6 @@
 import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { Pool } from "pg";
+import { createChatThreads } from "./chat/threads";
 
 export function createAgentDatabase(
   url: string,
@@ -20,7 +21,12 @@ export function createAgentDatabase(
   const checkpointer = new PostgresSaver(pool, undefined, {
     schema: "agent_state",
   });
-  return { pool, checkpointer, close: () => pool.end() };
+  return {
+    pool,
+    checkpointer,
+    threads: createChatThreads(pool),
+    close: () => pool.end(),
+  };
 }
 
 export type AgentDatabase = ReturnType<typeof createAgentDatabase>;
