@@ -1,10 +1,17 @@
+import {
+  identityReferenceVersionsSchema,
+  identityMatchProvenanceSchema,
+} from "./member-identity";
 import { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
 import { z } from "zod";
 import identityCapacity from "./identity-capacity.json";
 export { identityCapacity };
 import { stateVersionSchema } from "./household";
 
-export const imageLimits = { maxFileBytes: 32 * 1024 * 1024 } as const;
+export const imageLimits = {
+  maxFileBytes: 32 * 1024 * 1024,
+  processingTimeoutMs: 10_000,
+} as const;
 export const frameLimits = {
   maxDimension: 8192,
   maxPixels: 3840 * 2160,
@@ -128,11 +135,13 @@ const identityTrackSchema = z.object({
   evidence: z
     .array(
       z.object({
+        provenance: identityMatchProvenanceSchema,
+        bestMemberId: z.uuid().nullable(),
         observedAt: z.number(),
         label: z.string().max(identityCapacity.labelLength).nullable(),
         score: z.number().min(-1).max(1).nullable(),
         margin: z.number().min(0).max(2).nullable(),
-        detectionScore: z.number().min(0).max(1),
+        detectionScore: z.number().min(0).max(1).nullable(),
         sharpness: z.number().nonnegative(),
       }),
     )
@@ -164,14 +173,16 @@ export const identityObservationSchema = trackingObservationSchema
     ]),
     error: z.string().max(4096).optional(),
     referenceRevision: z.string().nullable(),
+    referenceVersions: identityReferenceVersionsSchema.nullable(),
     model: z
       .object({
         processId: z.int().positive().optional(),
-        engine: z.literal("opencv"),
+        engine: z.literal("opencv-wasm-onnxruntime"),
         provider: z.literal("cpu"),
         version: z.string(),
         yunetSha256: z.string(),
         sfaceSha256: z.string(),
+        petSha256: z.string(),
       })
       .nullable(),
     tracks: z.array(identityTrackSchema).max(identityCapacity.tracksPerRun),
@@ -199,6 +210,7 @@ export const identityFrameSnapshotSchema = z.object({
   evaluatedAt: z.number(),
   inference: z.enum(["not_requested", "pending"]),
   referenceRevision: identityObservationSchema.shape.referenceRevision,
+  referenceVersions: identityObservationSchema.shape.referenceVersions,
   tracks: z
     .array(
       identityTrackSchema.pick({
@@ -410,7 +422,25 @@ export const perceptionSnapshotSchema = z.object({
       validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       observation: observation.nullable(),
       tracking: trackingObservationSchema.nullable(),
-      identity: identityObservationSchema.nullable(),
+      identity: identityObservationSchema
+        .extend({
+          associations: z
+            .array(
+              z.object({
+                sourceRunId: z.uuid(),
+                trackId: identityTrackSchema.shape.trackId,
+                memberId: z.uuid(),
+                memberName: z.string(),
+                memberKind: z.enum(["person", "pet"]),
+                className: z.enum(["human", "cat", "dog"]),
+                state: z.enum(["candidate", "confirmed"]),
+                observedAt: z.number(),
+                expiresAt: z.number(),
+              }),
+            )
+            .max(identityCapacity.tracksPerRun),
+        })
+        .nullable(),
       identityValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       trackingValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       metrics: z.record(z.string(), z.number()),

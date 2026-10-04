@@ -1,7 +1,7 @@
 import { CameraAnalysisLayout } from "./CameraAnalysisLayout";
 import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Pause, Play, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
 import { BackLink } from "../../components/BackLink";
@@ -13,6 +13,7 @@ import {
 import { createPerceptionSourceState } from "../../modules/perception/source-state";
 import { useFrameViewer } from "../../modules/perception/use-frame-viewer";
 import { CameraFrame } from "./MijiaPlayer";
+import { CameraIdentity } from "./CameraIdentity";
 import { CameraInspection } from "./CameraInspection";
 import { CameraHeader } from "./CameraHeader";
 import { PlaybackStatus } from "./PlaybackStatus";
@@ -22,6 +23,21 @@ import { cameraTileClassName, cameraTransitionName } from "./camera-styles";
 import { useCameraReturn } from "./use-camera-return";
 import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 import { CameraWindows } from "./CameraWindows";
+
+function CameraDetailBackLink() {
+  const { member } = useSearch({
+    from: "/account/cameras/$deviceId/$channel",
+  });
+  return member ? (
+    <BackLink to="/members" search={{ member }} className="-ml-2">
+      返回成员
+    </BackLink>
+  ) : (
+    <BackLink activeOptions={{ exact: true }} to="/cameras" className="-ml-2">
+      返回看家
+    </BackLink>
+  );
+}
 
 export default function CameraDetailPage() {
   useCameraReturn();
@@ -38,13 +54,7 @@ export default function CameraDetailPage() {
         />
       ) : (
         <>
-          <BackLink
-            activeOptions={{ exact: true }}
-            to="/cameras"
-            className="-ml-2"
-          >
-            返回看家
-          </BackLink>
+          <CameraDetailBackLink />
           <Notice tone="error">镜头不存在。</Notice>
         </>
       )}
@@ -62,26 +72,14 @@ function CameraDetailSource(
   if (synced && (!device?.camera || !device.channels.includes(target.channel)))
     return (
       <>
-        <BackLink
-          activeOptions={{ exact: true }}
-          to="/cameras"
-          className="-ml-2"
-        >
-          返回看家
-        </BackLink>
+        <CameraDetailBackLink />
         <Notice tone="warning">该视频不在当前家庭的设备清单中。</Notice>
       </>
     );
   if (!epoch || !device)
     return (
       <>
-        <BackLink
-          activeOptions={{ exact: true }}
-          to="/cameras"
-          className="-ml-2"
-        >
-          返回看家
-        </BackLink>
+        <CameraDetailBackLink />
         <StatusNotice>正在同步设备清单…</StatusNotice>
       </>
     );
@@ -95,19 +93,15 @@ function CameraDetailModes({
   source: ReturnType<typeof createPerceptionSourceState>;
   scope: string;
 }) {
-  const { mode } = useSearch({ from: "/account/cameras/$deviceId/$channel" });
+  const { mode, activityRun, activityFirstAt, activityAt, member } = useSearch({
+    from: "/account/cameras/$deviceId/$channel",
+  });
   const [windowsVisited, setWindowsVisited] = useState(mode === "windows");
   if (mode === "windows" && !windowsVisited) setWindowsVisited(true);
   const header = (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <BackLink
-          activeOptions={{ exact: true }}
-          to="/cameras"
-          className="-ml-2"
-        >
-          返回看家
-        </BackLink>
+        <CameraDetailBackLink />
         <nav
           aria-label="分析内容"
           className="inline-flex rounded-[10px] bg-surface p-0.5"
@@ -120,7 +114,13 @@ function CameraDetailModes({
                 deviceId: source.target.deviceId,
                 channel: String(source.target.channel),
               }}
-              search={{ mode: value }}
+              search={{
+                mode: value,
+                activityRun: undefined,
+                activityAt: undefined,
+                activityFirstAt: undefined,
+                member,
+              }}
               activeOptions={{ exact: true }}
               className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-ink focus-visible:outline-2 aria-[current=page]:bg-ink/5 aria-[current=page]:font-medium aria-[current=page]:text-ink"
             >
@@ -137,6 +137,7 @@ function CameraDetailModes({
       {windowsVisited ? (
         <div hidden={mode !== "windows"}>
           <CameraWindows
+            key={`${activityRun ?? ""}:${activityFirstAt ?? ""}:${activityAt ?? ""}`}
             source={source}
             scope={scope}
             visible={mode === "windows"}
@@ -148,10 +149,14 @@ function CameraDetailModes({
   );
 }
 
-function CameraDetailContent({
+export function CameraDetailContent({
   source,
+  renderControls,
 }: {
   source: ReturnType<typeof createPerceptionSourceState>;
+  renderControls?: (
+    inspect: ReturnType<typeof useFrameViewer>["inspect"],
+  ) => ReactNode;
 }) {
   const {
     canvas,
@@ -203,6 +208,7 @@ function CameraDetailContent({
           {view?.failure ? (
             <Notice tone="error">无法绘制当前画面，请重新打开视频详情。</Notice>
           ) : null}
+          <CameraIdentity source={source} frozen={frozen} />
           <CameraInspection
             inspect={inspect}
             inspection={inspection}
@@ -275,6 +281,7 @@ function CameraDetailContent({
             aria-label={`${label ?? "视频"} 关联帧画面`}
           />
         </CameraFrame>
+        {renderControls?.(inspect)}
       </article>
     </CameraAnalysisLayout>
   );

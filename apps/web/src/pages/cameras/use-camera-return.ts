@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 
 /** Restore the originating camera link after the router commits the list. */
 export function useCameraReturnFocus() {
@@ -37,15 +37,18 @@ export function useCameraReturnFocus() {
 
 export function useCameraReturn() {
   const navigate = useNavigate();
+  const { member } = useSearch({ strict: false });
   useEffect(() => {
     const returnToWall = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
-      navigate({ to: "/cameras" }).catch((error) => {
-        console.error("无法返回看家页面", error);
+      navigate(
+        member ? { to: "/members", search: { member } } : { to: "/cameras" },
+      ).catch((error) => {
+        console.error("无法返回来源页面", error);
       });
     };
     document.addEventListener("keydown", returnToWall);
     return () => document.removeEventListener("keydown", returnToWall);
-  }, [navigate]);
+  }, [navigate, member]);
 }

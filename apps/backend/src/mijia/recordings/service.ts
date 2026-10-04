@@ -9,6 +9,7 @@ import { windowSummarySchema } from "@home-agent/api/contracts";
 import {
   mijiaRecordingPlaybackStateSchema,
   type mijiaRecordingPlaybackInputSchema,
+  type mijiaRecordingAvailabilityQuerySchema,
 } from "@home-agent/api/mijia-recordings";
 import type { HouseholdRuntime } from "../../household/runtime";
 import type { MijiaService } from "../service";
@@ -148,7 +149,7 @@ export function createRecordingService(options: {
     await chmod(directory, 0o700);
     return directory;
   }
-  function assertScope(input: PlaybackInput) {
+  function assertScope(input: Pick<PlaybackInput, "scope_epoch">) {
     if (
       media.snapshot.closed ||
       options.shutdown.aborted ||
@@ -514,6 +515,53 @@ export function createRecordingService(options: {
   const unsubscribe = options.household.subscribe(() => {
     for (const item of resources.values()) current(item);
   });
+  async function availability(
+    input: z.infer<typeof mijiaRecordingAvailabilityQuerySchema>,
+    requestSignal: AbortSignal,
+  ) {
+    assertScope(input);
+    const source = options.mijia.recordingAccess(
+      input.revision,
+      input.deviceId,
+      input.channel,
+    );
+    const signal = AbortSignal.any([
+      requestSignal,
+      source.signal,
+      options.shutdown,
+    ]);
+    const matches = [];
+    let index: Awaited<ReturnType<MijiaService["readRecordings"]>> | undefined;
+    for (const at of [...new Set(input.at)].toSorted((a, b) => a - b)) {
+      signal.throwIfAborted();
+      if (
+        !index ||
+        (index.status === "ready" &&
+          index.nextAfterMs !== null &&
+          at > index.nextAfterMs)
+      ) {
+        index = await options.mijia.readRecordings(
+          input.revision,
+          input.deviceId,
+          input.channel,
+          { afterMs: Math.max(0, at - 255_001), limit: 1000 },
+          signal,
+        );
+        assertScope(input);
+        source.assertCurrent();
+      }
+      if (index.status !== "ready")
+        return { status: index.status, reason: index.reason };
+      matches.push({
+        at,
+        clip:
+          index.recordings.find(
+            (clip) => clip.startAt <= at && at < clip.endAt,
+          ) ?? null,
+      });
+    }
+    return { status: "ready" as const, matches };
+  }
   function request(input: PlaybackInput) {
     prune();
     assertScope(input);
@@ -648,5 +696,5 @@ export function createRecordingService(options: {
   }
   options.shutdown.addEventListener("abort", onShutdown, { once: true });
   if (options.shutdown.aborted) onShutdown();
-  return { request, state, release, mediaInfo, read, close };
+  return { availability, request, state, release, mediaInfo, read, close };
 }

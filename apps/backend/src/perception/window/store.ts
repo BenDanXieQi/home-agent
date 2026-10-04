@@ -829,6 +829,7 @@ export function createWindowStore(options: {
             id: summary.id,
             revision: summary.revision,
             run: { ...summary.run },
+            videoRun: summary.videoRun ? { ...summary.videoRun } : null,
             startedAt: summary.startedAt,
             endedAt: summary.endedAt,
             readableUntil: summary.readableUntil,

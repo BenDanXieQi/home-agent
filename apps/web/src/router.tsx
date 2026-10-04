@@ -79,8 +79,41 @@ const cameraDetailRoute = createRoute({
   path: "$deviceId/$channel",
   validateSearch: (search: Record<string, unknown>) => ({
     mode: search.mode === "windows" ? search.mode : undefined,
+    activityRun:
+      typeof search.activityRun === "string" ? search.activityRun : undefined,
+    member: typeof search.member === "string" ? search.member : undefined,
+    activityFirstAt:
+      typeof search.activityFirstAt === "number" &&
+      Number.isFinite(search.activityFirstAt)
+        ? search.activityFirstAt
+        : undefined,
+    activityAt:
+      typeof search.activityAt === "number" &&
+      Number.isFinite(search.activityAt)
+        ? search.activityAt
+        : undefined,
   }),
   component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
+});
+const cameraRecordingRoute = createRoute({
+  getParentRoute: () => camerasRoute,
+  path: "$deviceId/$channel/recording",
+  validateSearch: (search: Record<string, unknown>) => ({
+    member: typeof search.member === "string" ? search.member : undefined,
+    recordingAt:
+      typeof search.recordingAt === "number" &&
+      Number.isFinite(search.recordingAt)
+        ? search.recordingAt
+        : undefined,
+    activityAt:
+      typeof search.activityAt === "number" &&
+      Number.isFinite(search.activityAt)
+        ? search.activityAt
+        : undefined,
+  }),
+  component: lazyRouteComponent(
+    () => import("./pages/cameras/CameraRecording"),
+  ),
 });
 const cameraViewRoute = createRoute({
   getParentRoute: () => camerasRoute,
@@ -121,6 +154,7 @@ export const router = createRouter({
         camerasIndexRoute,
         cameraDetailRoute,
         cameraViewRoute,
+        cameraRecordingRoute,
       ]),
       deviceLogsRoute,
       dataRoute,

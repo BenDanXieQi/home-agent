@@ -20,6 +20,17 @@
       "licenseFile": "sface-LICENSE",
       "licenseSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
       "licenseUrl": "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE"
+    },
+    "pet": {
+      "file": "pet-recognition-small.onnx",
+      "sha256": "6a5e2373ab348bed588cef4072f3914ca9c8bacde3e8d0651019e8dad86b24ba",
+      "bytes": 89227604,
+      "url": "https://huggingface.co/open-noodle/pet-recognition-small/resolve/9dd4c915be29a81b116b3e30eb996c59d0e7ede0/recognition/model.onnx",
+      "license": "Apache-2.0",
+      "licenseFile": "pet-LICENSE",
+      "licenseSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "licenseUrl": "https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE",
+      "modelCard": "https://huggingface.co/open-noodle/pet-recognition-small/blob/9dd4c915be29a81b116b3e30eb996c59d0e7ede0/README.md"
     }
   }
 }

@@ -29,10 +29,6 @@ export async function readPerceptionConfig(path: string) {
       const base = dirname(path);
       const identity = config.identity;
       identity.modelDirectory = resolve(base, identity.modelDirectory);
-      if (identity.galleryFile)
-        identity.galleryFile = resolve(base, identity.galleryFile);
-      if (identity.python.includes("/") || identity.python.includes("\\"))
-        identity.python = resolve(base, identity.python);
     }
     return config;
   } finally {

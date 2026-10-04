@@ -15,7 +15,13 @@ import {
   StorageOutcomeUnknownError,
 } from "../../db/transaction-outcome";
 
-export function createHomeSelectionStore(db: Database) {
+import { revokeMemberReferences } from "../../household/identity/repository";
+
+export function createHomeSelectionStore(
+  db: Database,
+  cleanupReferences: () => Promise<void>,
+  invalidateReferences: () => void,
+) {
   const transaction = createLockedTransactions(
     db,
     householdLimits.transactionMs,
@@ -63,6 +69,7 @@ export function createHomeSelectionStore(db: Database) {
             if (previousHomeId !== null) {
               // Context links are deleted by the context_records foreign key.
               await tx.delete(contextRecords);
+              await revokeMemberReferences(tx, invalidateReferences);
               await tx.delete(householdSubjects);
               await tx.delete(householdDirectories);
             }
@@ -95,6 +102,8 @@ export function createHomeSelectionStore(db: Database) {
           throw error;
         assertCurrent();
         throw new MijiaError("home_storage");
+      } finally {
+        if (previousHomeId !== null) await cleanupReferences();
       }
     },
   };

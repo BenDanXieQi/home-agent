@@ -1,3 +1,4 @@
+import { handleHttpError } from "@home-agent/api/errors/hono";
 import { createWindowRoutes } from "./window/routes";
 import { Hono } from "hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
@@ -41,5 +42,6 @@ export function createPerceptionRoutes(
       await service.retry();
       return c.json(snapshot());
     })
-    .route("/windows", createWindowRoutes(service, shutdown));
+    .route("/windows", createWindowRoutes(service, shutdown))
+    .onError(handleHttpError);
 }

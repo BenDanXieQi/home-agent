@@ -109,6 +109,39 @@ export function createPerceptionSourceState(
     deviceAtom,
     accessibleAtom,
     activeSourceAtom,
+    identityUnavailableMessageAtom: atom((get) => {
+      if (!get(connectedAtom)) return "正在同步成员身份分析状态…";
+      if (!get(accessibleAtom)) return "当前摄像头已不可访问，成员关联已清空。";
+      const snapshot = get(perceptionSnapshotAtom);
+      if (snapshot?.status === "unavailable")
+        return `后台分析不可用${snapshot.error ? `：${snapshot.error}` : "。"}`;
+      if (snapshot?.resources?.identityThreads === 0)
+        return "成员身份分析未启用。";
+      const source = get(sourceAtom);
+      if (!source) return "当前摄像头未配置后台分析。";
+      if (source.status === "failed" || source.status === "unavailable")
+        return `当前来源不可用${source.error ? `：${source.error}` : "。"}`;
+      if (!get(activeSourceAtom)) return "当前来源运行尚未就绪，等待后台同步。";
+      if (source.identityValidity === "expired")
+        return "成员身份分析结果已过期，等待更新。";
+      if (source.identityValidity === "unavailable")
+        return "成员身份分析暂不可用，等待后台恢复。";
+      if (!source.identity || source.identityValidity === "no_data")
+        return "成员身份分析已启用，等待首个分析结果。";
+      if (source.identity.run.runId !== source.run?.runId)
+        return "来源运行已切换，等待本次运行的身份分析结果。";
+      return null;
+    }),
+    identityAtom: atom((get) => {
+      const source = get(activeSourceAtom);
+      if (
+        !source ||
+        source.identityValidity !== "valid" ||
+        source.identity?.run.runId !== source.run?.runId
+      )
+        return null;
+      return source.identity;
+    }),
     audioAtom,
     playbackTargetAtom,
     configuredAtom: atom((get) => !!get(sourceAtom)),

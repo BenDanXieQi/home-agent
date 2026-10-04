@@ -134,10 +134,16 @@ async function run(task: z.infer<typeof commandSchema>) {
     await video!.stop(task.runId);
     return { kind: "video_ack" as const };
   }
+  if (task.kind === "identity_references") {
+    video!.replaceIdentityReferences(task.snapshot);
+    return { kind: "video_ack" as const };
+  }
   if (task.kind === "tracking_retry") {
     await video!.retryTracking();
     return { kind: "video_ack" as const };
   }
+  if (task.kind === "identity_status" || task.kind === "identity_extract")
+    return video!.enrollmentCommand(task);
   return await pool.submit(task);
 }
 function send(message: z.infer<typeof responseSchema>) {

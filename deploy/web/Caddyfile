@@ -1,6 +1,7 @@
 {
 	admin "unix/{$HOME_AGENT_CADDY_SOCKET}"
 	persist_config off
+	grace_period 5s
 	auto_https disable_redirects
 	skip_install_trust
 	storage file_system {

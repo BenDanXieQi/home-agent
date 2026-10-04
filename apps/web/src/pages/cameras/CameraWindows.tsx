@@ -1,3 +1,5 @@
+import { findPlayableMemberActivityWindow } from "../../modules/members/activity";
+import { useSearch } from "@tanstack/react-router";
 import { CameraAnalysisLayout } from "./CameraAnalysisLayout";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -31,6 +33,10 @@ export function CameraWindows({
   scope: string;
   visible: boolean;
 }) {
+  const { activityRun, activityFirstAt, activityAt } = useSearch({
+    from: "/account/cameras/$deviceId/$channel",
+  });
+  const fromActivity = activityRun !== undefined && activityAt !== undefined;
   const accessible = useAtomValue(source.accessibleAtom);
   const active = visible && accessible;
   const container = useRef<HTMLElement>(null);
@@ -57,7 +63,7 @@ export function CameraWindows({
   }, [active, client, scope]);
   const [selection, select] = useState<WindowListEntry>();
   const [visibleCount, setVisibleCount] = useState(50);
-  if (!selection && active && !query.isError) {
+  if (!fromActivity && !selection && active && !query.isError) {
     const playable = query.data?.windows.filter(
       (entry) =>
         entry.sampledMedia?.state === "ready" &&
@@ -66,8 +72,29 @@ export function CameraWindows({
     if (playable?.length === 1) select(playable[0]);
   }
   const windows = query.data?.windows ?? [];
+  const activityWindow = fromActivity
+    ? findPlayableMemberActivityWindow(
+        windows,
+        {
+          sourceRunId: activityRun,
+          firstObservedAt: activityFirstAt ?? activityAt,
+          lastObservedAt: activityAt,
+        },
+        query.dataUpdatedAt,
+      )
+    : undefined;
+  if (fromActivity && !selection && activityWindow) select(activityWindow);
+  const activityUnavailable =
+    fromActivity && query.isSuccess && !activityWindow;
+  const activityUnavailableReason =
+    windows.length &&
+    !windows.some((entry) => entry.videoRun?.runId === activityRun)
+      ? "该活动来源运行的片段已不在当前缓存中；片段最多保留 30 分钟，后台重启也会清理。"
+      : "该活动观察期间没有保留的筛选片段，可能未生成或已清理。";
   const selected =
-    windows.find((entry) => entry.id === selection?.id) ?? selection;
+    windows.find((entry) => entry.id === selection?.id) ??
+    selection ??
+    activityWindow;
   const detail = useWindowDetail(selected, scope, active);
   const media =
     detail.window &&
@@ -78,6 +105,7 @@ export function CameraWindows({
         window={detail.window}
         scope={scope}
         active={active}
+        autoPlay={fromActivity}
       />
     ) : null;
   return (
@@ -90,6 +118,18 @@ export function CameraWindows({
               <h2 className="font-medium">筛选片段</h2>
               <span className="text-xs text-muted">最多保留 30 分钟</span>
             </div>
+            {fromActivity ? (
+              <StatusNotice>
+                活动观察时间：{new Date(activityAt).toLocaleString("zh-CN")}
+                {query.isSuccess
+                  ? activityWindow
+                    ? activityAt <= activityWindow.endedAt
+                      ? "。已定位对应片段。"
+                      : "。已定位该活动期间最近的筛选片段。"
+                    : `。${activityUnavailableReason}`
+                  : "。正在查找对应片段。"}
+              </StatusNotice>
+            ) : null}
             {!accessible ? (
               <StatusNotice>正在恢复家庭连接…</StatusNotice>
             ) : null}
@@ -160,16 +200,20 @@ export function CameraWindows({
                       ? "仅文字记录"
                       : selected
                         ? "片段暂未就绪"
-                        : windows.length
-                          ? "选择片段"
-                          : "暂无片段"
+                        : activityUnavailable
+                          ? "活动片段未保留"
+                          : windows.length
+                            ? "选择片段"
+                            : "暂无片段"
                 }
                 description={
                   selected?.gate.candidate === "none"
                     ? "此片段没有可回放的画面，可在详情中查看语音文字。"
-                    : windows.length
-                      ? "选择列表中的片段查看内容。"
-                      : "检测到画面变化或识别出说话内容后，片段会自动出现在这里。"
+                    : activityUnavailable
+                      ? `${activityUnavailableReason} 活动记录仍然保留。`
+                      : windows.length
+                        ? "选择列表中的片段查看内容。"
+                        : "检测到画面变化或识别出说话内容后，片段会自动出现在这里。"
                 }
                 className="h-full min-h-0 rounded-none bg-surface shadow-none"
               />

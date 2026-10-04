@@ -1,3 +1,9 @@
+import { createReferenceEnrollment } from "./household/identity/enrollment";
+import { createMemberActivityRepository } from "./household/identity/activity-repository";
+import { createMemberActivityService } from "./household/identity/activity-service";
+import { createMemberAccess } from "./household/members/access";
+import { createIdentityReferences } from "./household/identity/references";
+import { createReferenceFiles } from "./household/identity/files";
 import { createSpeechInbox } from "./conversation/speech-inbox";
 import { createSpeechDialogueClient } from "./conversation/agent-client";
 import { createMemberRepository } from "./household/members/repository";
@@ -39,6 +45,22 @@ const readAgentUrl = async () =>
 const database = environment.DATABASE_URL
   ? createDatabase(environment.DATABASE_URL)
   : undefined;
+let identityEnrollment:
+  | ReturnType<typeof createReferenceEnrollment>
+  | undefined;
+const identityReferences = database
+  ? createIdentityReferences(
+      database.db,
+      createReferenceFiles(
+        resolvePath(import.meta.dir, "../../..", "data/identity/references"),
+      ),
+    )
+  : undefined;
+await identityReferences?.cleanup();
+const cleanupIdentity = async () => {
+  await identityReferences?.cleanup();
+  await identityEnrollment?.reconcile();
+};
 const keyPath = resolvePath(
   import.meta.dir,
   "../../..",
@@ -52,7 +74,9 @@ const mijiaService = new MijiaService({
   credentialStore,
   resetHomeData: createAgentHouseholdReset(readAgentUrl),
   homeSelectionStore: database
-    ? createHomeSelectionStore(database.db)
+    ? createHomeSelectionStore(database.db, cleanupIdentity, () => {
+        identityReferences?.matching.invalidate();
+      })
     : undefined,
 });
 const { createMijiaHousehold, createMijiaSpecificationLoader } =
@@ -86,7 +110,9 @@ const speechInbox = createSpeechInbox({
   instanceId: crypto.randomUUID(),
   analyze: createSpeechDialogueClient(readAgentUrl),
 });
+const perceptionSources = createPerceptionSources(household, mijiaService);
 const perception = createPerceptionService({
+  identityReferences: identityReferences?.matching,
   speechInbox,
   configPath: resolvePath(
     import.meta.dir,
@@ -94,8 +120,15 @@ const perception = createPerceptionService({
     "config/perception.json",
   ),
   executable: environment.PERCEPTION_FFMPEG_PATH,
-  sources: createPerceptionSources(household, mijiaService),
+  sources: perceptionSources,
 });
+const memberActivity = database
+  ? createMemberActivityService(
+      household,
+      perception,
+      createMemberActivityRepository(database.db),
+    )
+  : undefined;
 perception.start().catch((error: unknown) => {
   console.error("Perception startup failed", error);
 });
@@ -107,9 +140,26 @@ const roomAnalysis = new RoomAnalysisService(
   household,
   createRoomAnalysisClient(readAgentUrl),
 );
+identityEnrollment = identityReferences
+  ? createReferenceEnrollment(
+      identityReferences,
+      perception,
+      createMemberAccess(household),
+      {
+        executable: environment.PERCEPTION_FFMPEG_PATH,
+        sources: perceptionSources,
+      },
+    )
+  : undefined;
 const app = createApp({
+  identityEnrollment,
+  identityReferences,
   speechInbox,
-  memberRepository: database ? createMemberRepository(database.db) : undefined,
+  memberRepository: database
+    ? createMemberRepository(database.db, cleanupIdentity, () => {
+        identityReferences?.matching.invalidate();
+      })
+    : undefined,
   contextRepository: database
     ? createContextRepository(database.db)
     : undefined,
@@ -144,6 +194,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
     roomAnalysis.close();
+    identityEnrollment?.close();
     (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -154,7 +205,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
             app.closeRecordings(),
             speechInbox.close(),
             deviceLogs.stop("后端停止", "interrupted"),
-            household.close(),
+            (async () => {
+              await memberActivity?.close();
+              await household.close();
+            })(),
           ]),
           new Promise<null>((resolve) => {
             drainTimer = setTimeout(

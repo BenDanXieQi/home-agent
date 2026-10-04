@@ -56,7 +56,13 @@ const CameraTile = memo(function CameraTile({
   const analysisLink = (
     <Link
       to="/cameras/$deviceId/$channel"
-      search={{ mode: undefined }}
+      search={{
+        mode: undefined,
+        activityRun: undefined,
+        activityAt: undefined,
+        activityFirstAt: undefined,
+        member: undefined,
+      }}
       params={{ deviceId: device.id, channel: String(channel) }}
       aria-label={label + "画面分析"}
       className={twMerge(

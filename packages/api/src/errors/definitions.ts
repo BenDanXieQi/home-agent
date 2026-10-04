@@ -74,6 +74,22 @@ export const errorDefinitions = {
   request_cancelled: { status: 408, message: "The request was cancelled." },
   run_timeout: { status: 504, message: "The Agent run timed out." },
   agent_execution_failed: { status: 500, message: "The Agent run failed." },
+  identity_enrollment_unavailable: {
+    status: 410,
+    message: "The enrollment expired or is no longer available.",
+  },
+  identity_reference_unavailable: {
+    status: 409,
+    message: "The person or reference is no longer available.",
+  },
+  identity_recording_invalid: {
+    status: 400,
+    message: "The recorded video cannot be decoded within the input limits.",
+  },
+  identity_source_unavailable: {
+    status: 409,
+    message: "The selected camera is no longer available in this household.",
+  },
   perception_image_invalid: {
     status: 400,
     message: "Provide a valid image within the input limits.",

@@ -117,6 +117,13 @@ export function createObservationStore(maxAgeMs: number) {
       entry.trackingValidity = "unavailable";
       changed();
     },
+    invalidateIdentity() {
+      for (const entry of sources.values()) {
+        entry.identity = null;
+        entry.identityValidity = "unavailable";
+      }
+      changed();
+    },
     receive(event: z.infer<typeof videoEventSchema>) {
       if (
         event.event === "window_frame" ||

@@ -1,4 +1,4 @@
-import { accessHousehold } from "../access";
+import { createMemberAccess } from "./access";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -41,45 +41,33 @@ export function createMemberRoutes(
       c,
     ),
   );
-  function access(scope: string) {
-    const context = accessHousehold(household, scope);
-    if (!repository) throw new HouseholdError("home_storage");
-    return {
-      repository,
-      ...context,
-    };
-  }
+  const access = createMemberAccess(household);
   return app
     .post("/list", validateJson(memberScopeSchema), async (c) => {
       const input = c.req.valid("json");
       const context = access(input.scope_epoch);
+      if (!repository) throw new HouseholdError("home_storage");
       return c.json(
-        await context.repository.access(
-          context.identity,
-          context.assertCurrent,
-        ),
+        await repository.access(context.identity, context.assertCurrent),
       );
     })
     .post("/save", validateJson(memberSaveSchema), async (c) => {
       const input = c.req.valid("json");
       const context = access(input.scope_epoch);
+      if (!repository) throw new HouseholdError("home_storage");
       return c.json(
-        await context.repository.access(
-          context.identity,
-          context.assertCurrent,
-          input,
-        ),
+        await repository.access(context.identity, context.assertCurrent, input),
       );
     })
     .post("/delete", validateJson(memberDeleteSchema), async (c) => {
       const input = c.req.valid("json");
       const context = access(input.scope_epoch);
+      if (!repository) throw new HouseholdError("home_storage");
       return c.json(
-        await context.repository.access(
-          context.identity,
-          context.assertCurrent,
-          { id: input.id, operation: "delete" },
-        ),
+        await repository.access(context.identity, context.assertCurrent, {
+          id: input.id,
+          operation: "delete",
+        }),
       );
     });
 }

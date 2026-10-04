@@ -1,3 +1,4 @@
+import { MemberReferences } from "./MemberReferences";
 import { Pencil, Sparkles } from "lucide-react";
 import type { Member } from "../../modules/members/queries";
 import { Button } from "../../components/Button";
@@ -85,6 +86,11 @@ export function MemberOverview({
           </div>
         </section>
       </div>
+      <MemberReferences
+        key={`${scope}:${member.id}`}
+        member={member}
+        scope={scope}
+      />
       <MemberActivity key={member.id} member={member} scope={scope} />
     </div>
   );

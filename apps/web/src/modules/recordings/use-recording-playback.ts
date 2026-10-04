@@ -81,16 +81,20 @@ export function useRecordingPlayback(target: RecordingTarget | null) {
       cancel();
   }, [target, cancel]);
 
-  function start(selection: RecordingPlaybackInput["selection"]) {
-    if (!target) return;
-    release();
-    const current = {
-      input: { ...target, id: crypto.randomUUID(), selection },
-      controller: new AbortController(),
-    };
-    owner.current = current;
-    mutation.mutate(current.input);
-  }
+  const { mutate } = mutation;
+  const start = useCallback(
+    (selection: RecordingPlaybackInput["selection"]) => {
+      if (!target) return;
+      release();
+      const current = {
+        input: { ...target, id: crypto.randomUUID(), selection },
+        controller: new AbortController(),
+      };
+      owner.current = current;
+      mutate(current.input);
+    },
+    [target, release, mutate],
+  );
 
   return {
     request,

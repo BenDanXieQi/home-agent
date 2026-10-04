@@ -133,8 +133,8 @@ try {
 }
 try {
   if (action === "stop") {
-    await stopWebEntry();
     await stopDev();
+    await stopWebEntry();
     await stopNative();
     await runDocker(["compose", "stop"]);
     console.info("本项目管理的开发应用、go2rtc 和数据库已停止，数据保留。");

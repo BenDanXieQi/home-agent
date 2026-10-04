@@ -1,7 +1,11 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import parseRange from "range-parser";
-import { mijiaRecordingPlaybackInputSchema } from "@home-agent/api/mijia-recordings";
+import {
+  mijiaRecordingPlaybackInputSchema,
+  mijiaRecordingAvailabilityQuerySchema,
+  mijiaRecordingAvailabilitySchema,
+} from "@home-agent/api/mijia-recordings";
 import { AppError } from "@home-agent/api/errors";
 import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
@@ -51,6 +55,20 @@ export function createRecordingRoutes(
         error instanceof AppError ? error : safeMijiaError(error),
       );
     })
+    .post(
+      "/availability",
+      bodyLimit({
+        maxSize: 4096,
+        onError: (c) => errorResponse(c, new AppError("request_too_large")),
+      }),
+      validateJson(mijiaRecordingAvailabilityQuerySchema),
+      async (c) =>
+        c.json(
+          mijiaRecordingAvailabilitySchema.parse(
+            await service.availability(c.req.valid("json"), c.req.raw.signal),
+          ),
+        ),
+    )
     .put(
       "/playback/:id",
       bodyLimit({

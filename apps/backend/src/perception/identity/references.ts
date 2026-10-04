@@ -1,47 +1,33 @@
-import { z } from "zod";
-import { identityCapacity } from "@home-agent/api/contracts";
-import { featureSchema } from "./evidence";
+import type { z } from "zod";
+import type { identityReferenceSnapshotSchema } from "@home-agent/api/contracts";
 
-export const referenceSetSchema = z.object({
-  threshold: z.number().min(-1).max(1.000001),
-  margin: z.number().min(0).max(2),
-  gallery: z
-    .record(
-      z.string().min(1).max(identityCapacity.labelLength),
-      z
-        .array(
-          z.object({
-            feature: featureSchema,
-            frame: z.string(),
-            sha256: z.string().regex(/^[a-f0-9]{64}$/),
-          }),
-        )
-        .min(1)
-        .max(identityCapacity.referencesPerMember),
-    )
-    .refine(
-      (members) =>
-        Object.keys(members).length > 0 &&
-        Object.keys(members).length <= identityCapacity.members,
-      `Reference set supports 1–${identityCapacity.members} labels`,
-    ),
-});
 function normalize(vector: number[]) {
   const norm = Math.hypot(...vector);
   return vector.map((value) => value / norm);
 }
-export function createReferences(input: z.infer<typeof referenceSetSchema>) {
-  const members = Object.entries(input.gallery).map(([label, references]) => ({
-    label,
-    vectors: references.map((reference) => normalize(reference.feature)),
+export function createReferences(
+  input: Pick<z.infer<typeof identityReferenceSnapshotSchema>, "members">,
+) {
+  const members = input.members.map((member) => ({
+    label: member.memberId,
+    className: member.className,
+    threshold: member.threshold,
+    margin: member.margin,
+    vectors: member.references.map((reference) => normalize(reference.feature)),
   }));
   return {
-    threshold: input.threshold,
-    margin: input.margin,
-    rank(feature: number[]) {
+    rank(
+      feature: number[],
+      className: z.infer<
+        typeof identityReferenceSnapshotSchema
+      >["members"][number]["className"],
+    ) {
       const normalized = normalize(feature);
       return members
-        .map(({ label, vectors }) => ({
+        .filter((member) => member.className === className)
+        .map(({ label, vectors, threshold, margin }) => ({
+          threshold,
+          margin,
           label,
           score: Math.max(
             ...vectors.map((vector) =>

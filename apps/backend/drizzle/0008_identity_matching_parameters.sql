@@ -1,0 +1,1 @@
+ALTER TABLE "identity_reference_state" DROP COLUMN "policy";
