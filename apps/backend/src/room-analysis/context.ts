@@ -129,7 +129,7 @@ export function roomDependencies(
             device.alias,
             device.spec_id,
             device.spec_status,
-            device.availability,
+            device.online,
           ]),
         properties: properties.map((fact) => [
           propertyKey(fact.account_id, fact.device_id, fact.siid, fact.piid),
@@ -188,6 +188,7 @@ export function buildRoomContext(
   );
   const available = relevant.filter(
     (fact) =>
+      devices.get(fact.device_id)?.online === true &&
       fact.has_value &&
       fact.evidence &&
       ["current", "unverified", "cloud_cache", "baseline"].includes(
@@ -218,7 +219,7 @@ export function buildRoomContext(
         id: `f${index + 1}`,
         device_id: fact.device_id,
         device: (device.alias ?? device.name).slice(0, 256),
-        availability: device.availability,
+        online: device.online,
         siid: fact.siid,
         piid: fact.piid,
         property: fact.description.slice(0, 256),

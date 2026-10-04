@@ -26,7 +26,7 @@ export const analysisFactSchema = z.object({
   id: z.string().max(16),
   device_id: z.string().max(512),
   device: shortText,
-  availability: z.enum(["unknown", "online", "offline"]),
+  online: z.boolean(),
   siid: z.number().int().positive(),
   piid: z.number().int().positive(),
   property: shortText,

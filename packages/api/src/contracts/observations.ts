@@ -85,8 +85,6 @@ export const deviceCoverageSchema = z.object({
   properties: subscriptionStateSchema,
   online: subscriptionStateSchema,
   reason: z.string().nullable(),
-  availability_observation_id: z.uuid().nullable(),
-  availability_received_at: z.iso.datetime().nullable(),
   independent_events: z.literal("unsupported"),
 });
 export const sourceHealthSchema = z.object({
@@ -159,7 +157,6 @@ export const householdObservationSchema = z.discriminatedUnion("kind", [
   observationEnvelope.extend({
     kind: z.literal("online"),
     online: z.boolean(),
-    verified: z.boolean(),
   }),
   sourceEnvelope.extend({
     kind: z.literal("connection"),

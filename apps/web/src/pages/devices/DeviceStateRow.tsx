@@ -89,14 +89,17 @@ export const DeviceStateRow = memo(function DeviceStateRow({
           {recent.length ? (
             recent.map((property) => (
               <span
-                className="block wrap-anywhere"
+                className="flex min-w-0 items-center gap-2"
                 key={`${property.siid}/${property.piid}`}
+                title={`${property.description} ${propertyValue(property)} · ${reliable ? reasonLabels[property.reason] : "待同步"}`}
               >
-                <span className="text-muted">{property.description} </span>
-                {propertyValue(property)}
-                <span className="ml-2 text-muted">
-                  {reliable ? reasonLabels[property.reason] : "待同步"}
+                <span className="truncate">
+                  <span className="text-muted">{property.description} </span>
+                  {propertyValue(property)}
                 </span>
+                {property.reason === "expired" ? (
+                  <span className="shrink-0 text-muted">已过期</span>
+                ) : null}
               </span>
             ))
           ) : (
@@ -104,16 +107,10 @@ export const DeviceStateRow = memo(function DeviceStateRow({
           )}
         </span>
         <span
-          className="text-xs text-muted data-[availability=online]:text-sage data-[availability=offline]:text-warning max-md:col-start-2 max-md:row-start-1"
-          data-availability={reliable ? device.availability : "unknown"}
+          className="text-xs text-muted data-[online=true]:text-sage data-[online=false]:text-warning max-md:col-start-2 max-md:row-start-1"
+          data-online={reliable ? device.online : undefined}
         >
-          {!reliable
-            ? "待确认"
-            : device.availability === "online"
-              ? "在线"
-              : device.availability === "offline"
-                ? "离线"
-                : "未知"}
+          {!reliable ? "待同步" : device.online ? "在线" : "离线"}
         </span>
         <ChevronRight
           size={15}
@@ -213,10 +210,7 @@ function DeviceDetails({
           </Link>
           <Button
             disabled={
-              !reliable ||
-              pending ||
-              !readable.length ||
-              device.availability === "offline"
+              !reliable || pending || !readable.length || !device.online
             }
             onClick={read}
           >
@@ -239,7 +233,7 @@ function DeviceDetails({
               <tr>
                 <th>属性</th>
                 <th>最近值</th>
-                <th>有效性与来源</th>
+                <th>来源与说明</th>
                 <th>最近上报 / 读取</th>
                 <th>最近变化</th>
               </tr>

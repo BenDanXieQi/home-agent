@@ -406,6 +406,7 @@ export class HouseholdRuntime {
     };
     assert();
     const now = new Date().toISOString();
+    const inputSequence = this.context.input_sequence;
     const previousDevices = this.projection.device;
     const directory = publicDirectory(candidate, this.projection);
     const provider = this.source.snapshot().provider;
@@ -440,10 +441,20 @@ export class HouseholdRuntime {
         this.projection.device === previousDevices
           ? directory
           : publicDirectory(candidate, this.projection);
+      // A live notification accepted after preparation is newer than this inventory.
+      const device = produce(current.device, (draft) => {
+        for (const [key, sequence] of Object.entries(
+          this.context.fact_state.online_updates,
+        )) {
+          if (sequence <= inputSequence || !draft[key]) continue;
+          const latest = this.projection.device[key];
+          if (latest) draft[key].online = latest.online;
+        }
+      });
       return {
         ...this.projection,
         ...current,
-        device: this.withSpecifications(current.device, changedDevices),
+        device: this.withSpecifications(device, changedDevices),
         household: { household },
       };
     };

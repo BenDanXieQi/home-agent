@@ -16,8 +16,8 @@ export function DeviceList({
       {showHeader ? (
         <div className={`${columns} h-11 px-5 text-xs text-muted`}>
           <span>设备名称</span>
-          <span className="max-md:hidden">最近状态</span>
-          <span>状态</span>
+          <span className="max-md:hidden">最近报告</span>
+          <span>在线状态</span>
           <span className="max-md:hidden" />
         </div>
       ) : null}

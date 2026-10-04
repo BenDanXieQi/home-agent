@@ -84,7 +84,6 @@ export function device(
     archived: false,
     category: null,
     capability_tags: [],
-    availability: "unknown",
     read_enabled_properties: [],
     ...overrides,
   });

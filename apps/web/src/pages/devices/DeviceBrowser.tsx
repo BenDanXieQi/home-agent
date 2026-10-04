@@ -37,11 +37,10 @@ import {
 } from "./filters";
 import type { deviceInventoryAtom } from "../../modules/devices/state";
 
-const availabilityOptions = [
+const onlineOptions = [
   { value: "all", label: "全部" },
   { value: "online", label: "在线" },
   { value: "offline", label: "离线" },
-  { value: "unknown", label: "未知" },
 ];
 const capabilityOptions = [
   { value: "readable", label: "可读取" },
@@ -216,13 +215,13 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           <m.div ref={refinements} className="overflow-hidden" {...expand}>
             <div id="device-refinements" className="mb-4 flex flex-wrap gap-4">
               <div className="m-0 flex min-w-36 flex-1 items-center gap-2 text-[13px] text-muted">
-                连接{" "}
+                在线状态{" "}
                 <Select
-                  label="连接状态"
+                  label="在线状态"
                   className="flex-1"
                   value={filter}
                   onValueChange={setFilter}
-                  options={availabilityOptions}
+                  options={onlineOptions}
                 />
               </div>
               <div className="m-0 flex min-w-36 flex-1 items-center gap-2 text-[13px] text-muted">

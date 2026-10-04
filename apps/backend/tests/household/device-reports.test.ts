@@ -7,6 +7,7 @@ import {
   propertyPolicy,
 } from "../../src/household/collection-policy";
 import type { FactInput } from "../../src/household/observations";
+import { publicDirectory } from "../../src/household/directory";
 import {
   buildRoomContext,
   canTrigger,
@@ -164,6 +165,27 @@ function household({ configured = true, knownSpec = true } = {}) {
   function expire() {
     return commit({ kind: "expire", tick, at: timestamp() });
   }
+  function refreshOnline(online: boolean) {
+    const current = snapshot();
+    actor.send({
+      type: "directory",
+      scope_epoch: current.scope_epoch,
+      projection: {
+        ...current.projection,
+        ...publicDirectory(
+          {
+            accountId: device.account_id,
+            homeId: device.home_id,
+            homes: [
+              { id: device.home_id!, name: "Home A", shared: false, rooms: [] },
+            ],
+            devices: [{ ...device, online, spec_type: null }],
+          },
+          current.projection,
+        ),
+      },
+    });
+  }
   commit({
     kind: "configure",
     definitions: [definition],
@@ -182,6 +204,7 @@ function household({ configured = true, knownSpec = true } = {}) {
     context,
     snapshot,
     expire,
+    refreshOnline,
   };
 }
 
@@ -280,6 +303,7 @@ describe("设备报告的业务使用条件", () => {
     const baseline = roomDependencies(home.snapshot(), null);
     home.at(100);
     home.observe({ kind: "connection", status: "closed", reason: "network" });
+    expect(home.view().devices[0]?.online).toBe(true);
     expect(home.fact()).toMatchObject({
       value: false,
       has_value: true,
@@ -398,6 +422,56 @@ describe("设备报告的业务使用条件", () => {
     expect(canTrigger(home.fact())).toBe(false);
     expect(home.context().facts).toHaveLength(0);
     expect(home.push(true).edges).toHaveLength(0);
+    expect(canTrigger(home.fact())).toBe(true);
+  });
+
+  test("清单刷新确认离线撤销旧报告的使用资格，上线后仍须等待新的实时报告", () => {
+    const home = household();
+    home.push(false);
+    const baseline = roomDependencies(home.snapshot(), null);
+    home.refreshOnline(false);
+    expect(home.view().devices[0]?.online).toBe(false);
+    expect(home.fact()).toMatchObject({
+      value: false,
+      reason: "offline",
+      rule_eligible: false,
+    });
+    expect(home.context().facts).toHaveLength(0);
+    expect(
+      roomDependenciesChanged(
+        baseline,
+        roomDependencies(home.snapshot(), null),
+      ),
+    ).toBe(true);
+    home.refreshOnline(true);
+    expect(home.view().devices[0]?.online).toBe(true);
+    expect(canTrigger(home.fact())).toBe(false);
+    expect(home.push(true).edges).toHaveLength(0);
+    expect(canTrigger(home.fact())).toBe(true);
+  });
+
+  test("合法上下线通知不依赖型号验证名单，旧连接通知不能覆盖当前设备状态", () => {
+    const home = household();
+    home.push(false);
+    const notify = (online: boolean, collection_generation = "connection-1") =>
+      home.observe({
+        kind: "online",
+        online,
+        delivery_kind: "live",
+        observed_at: null,
+        packet_bytes: 32,
+        collection_generation,
+      });
+    notify(false);
+    expect(home.view().devices[0]?.online).toBe(false);
+    expect(canTrigger(home.fact())).toBe(false);
+    home.connect("connection-2");
+    notify(true);
+    expect(home.view().devices[0]?.online).toBe(false);
+    notify(true, "connection-2");
+    expect(home.view().devices[0]?.online).toBe(true);
+    expect(canTrigger(home.fact())).toBe(false);
+    expect(home.push(true, "connection-2").edges).toHaveLength(0);
     expect(canTrigger(home.fact())).toBe(true);
   });
 });

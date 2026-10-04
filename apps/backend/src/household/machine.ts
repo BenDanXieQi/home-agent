@@ -133,13 +133,21 @@ function commit(
     fact_state: options.newScope
       ? initialFactState()
       : (options.facts?.state ??
-        (prepared.projection.latest === context.projection.latest
+        (prepared.projection.latest === context.projection.latest &&
+        prepared.projection.device === context.projection.device
           ? context.fact_state
           : {
               deadlines: Object.fromEntries(
                 Object.entries(context.fact_state.deadlines).filter(
                   ([key]) =>
                     prepared.projection.latest[key]?.reason === "current",
+                ),
+              ),
+              online_updates: Object.fromEntries(
+                Object.entries(context.fact_state.online_updates).filter(
+                  ([key]) =>
+                    prepared.projection.device[key] &&
+                    !prepared.projection.device[key].archived,
                 ),
               ),
               latest_bytes: jsonBytes(prepared.projection.latest),
@@ -402,7 +410,6 @@ function prepareInput(
       const directory = directoryFits(event.directory)
         ? produce(event.directory, (draft) => {
             for (const device of Object.values(draft.device)) {
-              device.availability = "unknown";
               device.read_enabled_properties = [];
             }
           })

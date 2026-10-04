@@ -176,7 +176,6 @@ export const deviceSchema = inventoryDeviceSchema.extend({
   capability_tags: z.array(
     z.enum(["readable", "writeable", "notify", "action", "event"]),
   ),
-  availability: z.enum(["unknown", "online", "offline"]),
   read_enabled_properties: z.array(
     z.object({ siid: z.number().int(), piid: z.number().int() }),
   ),
