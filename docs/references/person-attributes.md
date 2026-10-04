@@ -36,7 +36,7 @@ tune 同衣着的全／同／跨镜头正确接纳分别为84／88／0，其余�
 
 ## 资源与适用边界
 
-本机 Apple M4 Pro、macOS arm64，Python3.12.14、Paddle3.3.0、NumPy2.5.3、OpenCV4.13.0.92；原生CPU、Paddle数学线程和OpenCV线程各为1、batch1，固定 `enable_new_ir(False)` 执行包内 fluid 图。没有安装完整 PP-Human。[官方 macOS 安装说明](https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/macos-pip_en.html)提供 ARM64 CPU 支持。
+本机 Apple M4 Pro、macOS arm64，Python3.12.14、Paddle3.3.0、NumPy2.5.3、OpenCV4.13.0.92；原生CPU、batch1，Paddle数学线程配置请求为1；入口在创建 predictor 前请求OpenCV线程为1，但创建后运行库改变了该设置，两个进程推理结束时 `cv2.getNumThreads()` 均为14。这些耗时不代表OpenCV全流程单线程成绩，也没有逐阶段线程数观测。固定 `enable_new_ir(False)` 执行包内 fluid 图。没有安装完整 PP-Human。[官方 macOS 安装说明](https://www.paddlepaddle.org.cn/documentation/docs/en/install/pip/macos-pip_en.html)提供 ARM64 CPU 支持。
 
 各进程前三张为预热并排除于逐张分位统计：tune稳态2309份，holdout稳态2004份。tune／holdout 的预处理均值0.482／0.488ms，推理含输入输出复制均值10.239／10.222ms，含归档读取、指纹核对和JPEG解码的总均值10.800／10.786ms，总P95为10.996／10.981ms。推理循环墙钟25.014／21.687秒；运行库导入461.988／470.066ms，predictor创建47.628／48.882ms；创建耗时不含Python导入和归档校验。进程RSS（驻留内存）每20ms采样，峰值896.8／896.1MiB，包含Paddle与评估进程，不是模型增量占用，也不是峰值上界。官方V100 TensorRT FP16的0.54ms不能当成本机成绩。此资源观测不是长期线上并发预算。
 
