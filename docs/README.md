@@ -45,7 +45,7 @@
 | [家庭领域模型](plans/household-model.md)          | 实体、证据、判断、事件、要求及状态所有权；定义语义与不变量                               |
 | [家庭情景与自动化](plans/household-automation.md) | 第一方 Agent 与 backend 协作、持续情景、长期任务、本地规则运行器、接口、预算及主交付顺序 |
 | [音视频感知与证据](plans/media-perception.md)     | 跟踪剩余验收、Agent 多模态理解、身份与证据接纳；MiLoCo 作为参考来源                      |
-| [成员短期外观归因](plans/member-attribution.md) | 任意来源确认后的短期人体外观参照、归因接入、活动纠正及验收 |
+| [成员短期外观归因](plans/member-attribution.md)   | 已接入代码的剩余校准与专项验收、条件满足后的属性模型评估                                 |
 | [设备采集与当前状态](plans/device-collection.md)  | 接收设备观测、确定当前值、质量与连续性，不维护人物和活动判断                             |
 | [设备观测历史](plans/device-history.md)           | 选定原始观测的写入、缺口、查询及清理，不承担语义事件或动作的可靠交接                     |
 | [设备状态与历史页面](plans/device-state-ui.md)    | 消费采集和历史的页面增量，不重建状态协议或复制家庭情景                                   |
