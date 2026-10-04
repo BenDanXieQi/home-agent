@@ -27,6 +27,8 @@ const manifestSchema = z.strictObject({
         path: z.string().min(1),
         url: z.url(),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
+        provenancePath: z.string().min(1).optional(),
+        licensePath: z.string().min(1).optional(),
       }),
     )
     .min(1)
@@ -59,12 +61,13 @@ const { values } = parseArgs({
     manifest: { type: "string" },
     "output-dir": { type: "string" },
     seconds: { type: "string", default: "302" },
+    "identity-model-dir": { type: "string" },
   },
   strict: true,
 });
 if (!values.manifest || !values["output-dir"])
   throw new Error(
-    "Usage: analyze-appearance-video --manifest <licensed video input JSON> --output-dir <report> [--seconds 302]",
+    "Usage: analyze-appearance-video --manifest <licensed video input JSON> --output-dir <report> [--seconds 302] [--identity-model-dir <YuNet/SFace>]",
   );
 const seconds = z.coerce.number().positive().max(3600).parse(values.seconds);
 const manifestBytes = await readFile(resolve(values.manifest));
@@ -87,10 +90,31 @@ function distribution(samples: number[]) {
     max: sorted.at(-1) ?? null,
   };
 }
+async function readVideoProvenance(video: (typeof manifest.videos)[number]) {
+  if (!video.provenancePath) return null;
+  const bytes = await readFile(resolve(video.provenancePath));
+  if (bytes.length > 256 * 1024)
+    throw new Error("Source provenance exceeds the metadata budget");
+  const value = z
+    .object({
+      source: z.object({ url: z.url() }).passthrough(),
+      clip: z.object({ sha256: z.string() }).passthrough(),
+    })
+    .passthrough()
+    .parse(JSON.parse(bytes.toString()));
+  if (value.clip.sha256 !== video.sha256 || value.source.url !== video.url)
+    throw new Error("Source provenance does not match this video");
+  return {
+    ...value,
+    artifactSha256: createHash("sha256").update(bytes).digest("hex"),
+  };
+}
+
 async function analyze(video: (typeof manifest.videos)[number]) {
   const path = resolve(video.path);
   if ((await hashFile(path)) !== video.sha256)
     throw new Error(`Video fingerprint mismatch: ${path}`);
+  const provenance = await readVideoProvenance(video);
   const { stdout } = await promisify(execFile)(
     "ffprobe",
     [
@@ -151,6 +175,23 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     await detector.close();
     throw error;
   });
+  const identity = values["identity-model-dir"]
+    ? await import("./perception-evaluation/video-identity")
+        .then((module) =>
+          module.createVideoIdentityAnalysis(
+            resolve(values["identity-model-dir"]!),
+            `calibration:${video.sha256.slice(0, 16)}`,
+          ),
+        )
+        .catch(async (error: unknown) => {
+          try {
+            await model.close();
+          } finally {
+            await detector.close();
+          }
+          throw error;
+        })
+    : null;
   const tracker = createHumanTracker();
   const trackFeatures = new Map<
     number,
@@ -165,10 +206,14 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     freshTrackIds: number[],
     faceTrackIds: Set<number>,
     missing: number[],
+    identityResult: Awaited<
+      ReturnType<NonNullable<typeof identity>["step"]>
+    > | null,
   ) {
     return {
       sequence,
       ...sample,
+      identity: identityResult,
       humanDetections: detections.filter(
         (detection) => detection.className === "human",
       ).length,
@@ -265,10 +310,16 @@ async function analyze(video: (typeof manifest.videos)[number]) {
             features[index] = vectors[offset]!;
           });
         }
-        const freshTrackIds: number[] = [];
-        const tracks = tracker.finish(input, features, ({ trackId }) => {
-          freshTrackIds.push(trackId);
+        const fresh: Pick<
+          z.infer<
+            typeof import("../src/household/identity/appearance-evidence").appearanceEvidenceSchema
+          >,
+          "trackId" | "vector"
+        >[] = [];
+        const tracks = tracker.finish(input, features, (item) => {
+          fresh.push(item);
         });
+        const freshTrackIds = fresh.map((item) => item.trackId);
         const measured = tracks.filter((track) => track.state === "measured");
         const faces = detections.filter(
           (detection) => detection.className === "face",
@@ -303,6 +354,26 @@ async function analyze(video: (typeof manifest.videos)[number]) {
               intervalsMs: [],
             });
         }
+        durations.push(performance.now() - at);
+        const identityResult = identity
+          ? await identity.step({
+              frame,
+              tracks,
+              fresh,
+              timeMs: sample.time,
+              ptsMs: sample.presentationTimeMs,
+              sourceFrameIndex: sample.sourceFrameIndex,
+              sequence: frames.length + 1,
+              omittedHumans: Math.max(
+                0,
+                detections.filter((item) => item.className === "human").length -
+                  measured.length,
+              ),
+              omittedPets: detections.filter(
+                (item) => item.className === "cat" || item.className === "dog",
+              ).length,
+            })
+          : null;
         frames.push(
           frameReport(
             frames.length + 1,
@@ -313,9 +384,9 @@ async function analyze(video: (typeof manifest.videos)[number]) {
             freshTrackIds,
             faceTrackIds,
             missing,
+            identityResult,
           ),
         );
-        durations.push(performance.now() - at);
         peakRss = Math.max(peakRss, process.memoryUsage().rss);
         if (frames.length % 100 === 0)
           console.log(
@@ -335,9 +406,13 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     decoder.kill("SIGKILL");
     await exited;
     try {
-      await model.close();
+      await identity?.close();
     } finally {
-      await detector.close();
+      try {
+        await model.close();
+      } finally {
+        await detector.close();
+      }
     }
   }
   const cpu = process.cpuUsage(cpuStart);
@@ -361,9 +436,18 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     (total, frame) => total + frame.faceTrackIds.length,
     0,
   );
+  const identitySummary = identity?.snapshot() ?? null;
+  const confirmedSupports =
+    identitySummary?.statistics.newConfirmedFaceSupports ?? 0;
+  const jointSupports =
+    identitySummary?.statistics.newConfirmedSupportWithFreshBody ?? 0;
+  const targetFresh =
+    identitySummary?.statistics.targetFreshBodyObservations ?? 0;
   return {
+    identity: identitySummary,
     source: {
       ...video,
+      provenance,
       path,
       width: metadata.width,
       height: metadata.height,
@@ -435,7 +519,21 @@ async function analyze(video: (typeof manifest.videos)[number]) {
       freshIntervalsMs: distribution(
         [...trackFeatures.values()].flatMap((track) => track.intervalsMs),
       ),
-      confirmedFaceJointAvailability: null,
+      confirmedFaceJointAvailability: identitySummary
+        ? {
+            newConfirmedSupports: confirmedSupports,
+            jointNewConfirmedAndFreshBody: jointSupports,
+            targetFreshBodyObservations: targetFresh,
+            freshAmongNewConfirmedRatio: confirmedSupports
+              ? jointSupports / confirmedSupports
+              : null,
+            newConfirmedAmongFreshRatio: targetFresh
+              ? jointSupports / targetFresh
+              : null,
+            meaning:
+              "actual new accepted face supports belonging to the current confirmed state, not participant GT accuracy",
+          }
+        : null,
       inferenceFlashes: null,
       attributionLatencyMs: null,
     },
@@ -464,6 +562,15 @@ for (const [index, video] of manifest.videos.entries()) {
     join(output, `source-${index + 1}-frames.json`),
     JSON.stringify(frames, null, 2) + "\n",
   );
+  if (video.licensePath) {
+    const notice = await readFile(resolve(video.licensePath));
+    if (notice.length > 256 * 1024)
+      throw new Error("License notice exceeds the metadata budget");
+    await writeFileAtomic(
+      join(output, `source-${index + 1}-license.txt`),
+      notice,
+    );
+  }
   sources.push(summary);
   await writeFileAtomic(
     join(output, "results.json"),
