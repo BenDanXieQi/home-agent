@@ -84,7 +84,7 @@ export const deviceSummarySchema = deviceSchema.pick({
   room_id: true,
   room_name: true,
   category: true,
-  availability: true,
+  online: true,
   spec_status: true,
 });
 export const householdOverviewResponseSchema =

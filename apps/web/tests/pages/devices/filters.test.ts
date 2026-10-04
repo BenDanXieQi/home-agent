@@ -24,20 +24,19 @@ beforeEach(() => {
 });
 
 describe("Device filtering", () => {
-  it("filters by runtime availability rather than cloud online, and searches normalized aliases", () => {
-    const unknown = device({ online: true, availability: "unknown" });
+  it("filters by the latest device online report and searches normalized aliases", () => {
+    const offline = device({ online: false });
     const online = device({
       id: "device-2",
       device_id: "device-2",
-      online: false,
-      availability: "online",
+      online: true,
       alias: "Reading Light",
     });
-    store.set(householdSnapshotAtom, withDevices(unknown, online));
+    store.set(householdSnapshotAtom, withDevices(offline, online));
     store.set(deviceFilterAtom, "online");
     expect(store.get(filteredDevicesAtom)).toEqual([online]);
-    store.set(deviceFilterAtom, "unknown");
-    expect(store.get(filteredDevicesAtom)).toEqual([unknown]);
+    store.set(deviceFilterAtom, "offline");
+    expect(store.get(filteredDevicesAtom)).toEqual([offline]);
     store.set(deviceFilterAtom, "all");
     store.set(deviceSearchAtom, "  READING  ");
     expect(store.get(filteredDevicesAtom)).toEqual([online]);

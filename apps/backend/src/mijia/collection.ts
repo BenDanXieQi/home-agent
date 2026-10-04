@@ -1,7 +1,6 @@
 import type { CollectionSource } from "../household/collection";
 import type { MijiaService } from "./service";
 import { subscribableDevice } from "./protocols/miot/messages";
-import { miotCloudPushProfile } from "./properties/source-profiles";
 
 /** All topic decoding and vendor read outcomes stay at the integration boundary. */
 export function createMijiaCollectionSource(service: MijiaService) {
@@ -23,18 +22,6 @@ export function createMijiaCollectionSource(service: MijiaService) {
               did: match[1]!,
               channel: match[2] === "state" ? "online" : "properties",
             });
-          } else if (event.kind === "online") {
-            let verified = false;
-            try {
-              const model = service.getDeviceSpec(id).model;
-              verified =
-                miotCloudPushProfile.evidence.online_messages.models.some(
-                  (item) => item === model,
-                );
-            } catch {
-              /* Unknown models cannot claim verified availability. */
-            }
-            receive({ ...event, verified });
           } else receive(event);
         },
         signal,

@@ -67,6 +67,7 @@ export type CollectionSource = {
 export class HouseholdCollection {
   private scope = "";
   private devices: Projection["device"] | undefined;
+  private observedDevices: Projection["device"] | undefined;
   private synced = false;
   private syncing = false;
   private paused = false;
@@ -105,6 +106,18 @@ export class HouseholdCollection {
   ) {}
 
   scheduleSync() {
+    const snapshot = this.runtime.snapshot();
+    const devices = snapshot.projection.device;
+    if (
+      this.scope === snapshot.scope_epoch &&
+      this.observedDevices !== devices
+    ) {
+      // Capture every committed recovery before sync microtasks can coalesce it.
+      for (const [key, device] of Object.entries(devices))
+        if (this.observedDevices?.[key]?.online === false && device.online)
+          this.seeded.delete(device.id);
+    }
+    this.observedDevices = devices;
     if (this.synced) return;
     this.synced = true;
     queueMicrotask(() => {
@@ -434,18 +447,6 @@ export class HouseholdCollection {
         event.status === "confirmed"
       )
         this.seedRead(event.did);
-      if (event.kind === "online" && event.online) {
-        const key = entityKey(
-          before.household.household.account_id ?? "",
-          event.did,
-        );
-        if (
-          before.device[key]?.availability !== "online" &&
-          this.runtime.snapshot().projection.device[key]?.availability ===
-            "online"
-        )
-          this.seedRead(event.did, true);
-      }
     }
   }
   private armExpiry() {
@@ -498,14 +499,14 @@ export class HouseholdCollection {
     )
       this.samples.shift();
   }
-  private seedRead(id: string, online = false) {
+  private seedRead(id: string) {
     if (!this.scope || this.paused) return;
     const projection = this.runtime.snapshot().projection;
     const device =
       projection.device[
         entityKey(projection.household.household.account_id ?? "", id)
       ];
-    if (!device || device.availability === "offline") return;
+    if (!device || !device.online) return;
     const coverage =
       projection.device_coverage[entityKey(device.account_id, id)];
     if (coverage?.properties !== "confirmed") return;
@@ -514,7 +515,7 @@ export class HouseholdCollection {
       coverage.collection_generation,
     ]);
     let seeded = this.seeded.get(id);
-    if (!seeded || seeded.signature !== signature || online) {
+    if (!seeded || seeded.signature !== signature) {
       seeded = { signature, properties: new Set<string>() };
       this.seeded.set(id, seeded);
     }
@@ -552,7 +553,7 @@ export class HouseholdCollection {
         !binding ||
         binding.controller.signal.aborted ||
         device.archived ||
-        device.availability === "offline" ||
+        !device.online ||
         coverage?.properties !== "confirmed" ||
         seed.signature !==
           JSON.stringify([
@@ -628,8 +629,7 @@ export class HouseholdCollection {
     });
     if (!device || device.archived)
       return Promise.resolve(failed("device_not_found"));
-    if (device.availability === "offline")
-      return Promise.resolve(failed("offline"));
+    if (!device.online) return Promise.resolve(failed("offline"));
     const definition = this.definition(device, property.siid, property.piid);
     if (!definition.capability?.readable)
       return Promise.resolve(failed("property_not_readable"));
@@ -883,6 +883,7 @@ export class HouseholdCollection {
     this.immediate = undefined;
     this.scope = "";
     this.devices = undefined;
+    this.observedDevices = undefined;
     this.queue = [];
     this.queuedBytes = 0;
     this.turnProcessed = 0;

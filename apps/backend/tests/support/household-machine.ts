@@ -56,7 +56,6 @@ export function machineDirectory(account_id = accountId, home_id = "home-a") {
     alias: null,
     category: null,
     capability_tags: [],
-    availability: "unknown",
     read_enabled_properties: [],
   });
   return {

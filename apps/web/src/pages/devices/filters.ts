@@ -60,7 +60,8 @@ export const filteredDevicesAtom = atom((get) => {
   const { room, category, capability } = get(deviceFiltersAtom);
   return devices.filter(
     (device) =>
-      (filter === "all" || device.availability === filter) &&
+      (filter === "all" ||
+        (filter === "online" ? device.online : !device.online)) &&
       (!room || JSON.stringify([device.home_id, device.room_id]) === room) &&
       (!category || JSON.stringify(device.category) === category) &&
       (!capability ||

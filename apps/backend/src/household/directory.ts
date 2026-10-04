@@ -70,7 +70,6 @@ export function publicDirectory(
           ...initialSpecification,
           category: null,
           capability_tags: [],
-          availability: "unknown" as const,
           read_enabled_properties: [],
           alias: null,
           ...previous.device[entityKey(account_id, device.id)],

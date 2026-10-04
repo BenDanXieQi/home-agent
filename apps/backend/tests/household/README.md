@@ -9,6 +9,7 @@
 ```sh
 bun test ./apps/backend/tests/household/lifecycle.test.ts
 bun test ./apps/backend/tests/household/device-reports.test.ts
+bun test ./apps/backend/tests/integration/device-online.test.ts
 bun test ./apps/backend/tests/integration/runtime-authorization.test.ts
 bun run --cwd apps/web test -- tests/integration/command-confirmation.test.ts
 ```
@@ -42,6 +43,6 @@ bun run --cwd apps/web test -- tests/integration/command-confirmation.test.ts
 
 这些测试不渲染 React UI，不验证真实数据库锁等待、连接池释放、JSONB 增量 SQL 的实际执行或操作系统异常退出。存储替身与事务协议测试只能证明相应边界约定，不能替代真实 PostgreSQL 的提交、回滚和恢复验收。增量数据库写入与真实摄像头、供应商认证/限流等仍需对应集成或实机证据；没有把测试替身的通过结果标记为这些验收已完成。
 
-`device-reports.test.ts` 依据[设备事实](../../../../docs/contracts/device-facts.md)和[房间 AI 上下文](../../../../docs/contracts/room-analysis.md)，验证缺值与关闭的区别、云缓存不覆盖实时值或延长其有效期、同值续报不制造变化、断连与到期撤销使用资格、恢复首报不推断缺口期间的变化、积压超期报告不复活状态，以及未配置策略、规格未知和非法报告的使用限制。通过真实家庭状态机提交报告，并检查房间查询、可信变化和模型输入；单调时间可控，不等待真实计时器。
+`device-reports.test.ts` 依据[设备事实](../../../../docs/contracts/device-facts.md)和[房间 AI 上下文](../../../../docs/contracts/room-analysis.md)，验证缺值与关闭的区别、云缓存不覆盖实时值或延长其有效期、同值续报不制造变化、断连与到期撤销使用资格、恢复首报不推断缺口期间的变化、积压超期报告不复活状态，以及未配置策略、规格未知和非法报告的使用限制；清单刷新或上下线通知更改在线状态时，旧属性使用资格随业务事实变化，断连保留最后设备在线报告，旧连接通知不能覆盖新连接状态。通过真实家庭状态机提交报告，并检查房间查询、可信变化和模型输入；单调时间可控，不等待真实计时器。
 
 首次授权没有候选家庭的具体交互、损坏数据库记录的自动修复，以及文档未规定的错误码，不在这里补造产品约定。设备报告测试不验证持续采集与补读调度、历史保存、规则动作执行、Agent 自动调用或模型回答；实机来源保证仍需独立验收。

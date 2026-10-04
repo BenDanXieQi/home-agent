@@ -47,7 +47,11 @@ export type FactInput =
       reason: string | null;
     };
 export function initialFactState() {
-  return { deadlines: {} as Record<string, number>, latest_bytes: 2 };
+  return {
+    deadlines: {} as Record<string, number>,
+    online_updates: {} as Record<string, number>,
+    latest_bytes: 2,
+  };
 }
 export function emptyProperty(definition: PropertyDefinition) {
   const { device, siid, piid, capability } = definition;
@@ -154,6 +158,15 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
         fact.read_candidate = null;
       }
       fact.room_id = device.room_id ?? null;
+      if (
+        previous?.online &&
+        !device.online &&
+        fact.evidence?.source === "push"
+      ) {
+        fact.reason = "offline";
+        fact.rule_eligible = false;
+        fact.expires_at = null;
+      }
       if (stopped) {
         fact.reason = "stopped";
         fact.rule_eligible = false;
@@ -168,7 +181,6 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
       if (stopped) {
         coverage.properties = "cancelled";
         coverage.online = "cancelled";
-        draft.device[key].availability = "unknown";
       }
     }
     if (!Object.keys(draft.device).length) draft.source_health = {};
@@ -189,6 +201,7 @@ export function reduceFacts(
 ) {
   const state = {
     deadlines: { ...previous.deadlines },
+    online_updates: previous.online_updates,
     latest_bytes: previous.latest_bytes,
   };
   let receipt: {
@@ -235,8 +248,6 @@ export function reduceFacts(
       status.reason = input.reason;
       if (input.paused) status.status = "paused";
       invalidate((fact) => fact.evidence?.source === "push", "gap");
-      for (const device of Object.values(draft.device))
-        device.availability = "unknown";
       return;
     }
     if (input.kind === "expire") {
@@ -265,8 +276,6 @@ export function reduceFacts(
             properties: supported.has(device.id) ? "pending" : "unsupported",
             online: supported.has(device.id) ? "pending" : "unsupported",
             reason: supported.has(device.id) ? null : "unsupported_device_id",
-            availability_observation_id: null,
-            availability_received_at: null,
             independent_events: "unsupported",
           };
         device.read_enabled_properties = input.definitions
@@ -343,12 +352,11 @@ export function reduceFacts(
             fact.evidence.source_id === event.source_id,
           "disconnected",
         );
-        for (const [key, coverage] of Object.entries(draft.device_coverage))
+        for (const coverage of Object.values(draft.device_coverage))
           if (coverage.source_id === event.source_id) {
             coverage.properties = "pending";
             coverage.online = "pending";
             coverage.collection_generation = event.collection_generation;
-            draft.device[key]!.availability = "unknown";
           }
       }
       return;
@@ -378,21 +386,19 @@ export function reduceFacts(
               ? "subscription_failed"
               : "subscription_pending",
           );
-        else device.availability = "unknown";
       }
       return;
     }
     if (event.kind === "online") {
       status.accepted++;
       const usable =
-        source?.status === "connected" &&
-        coverage?.online === "confirmed" &&
-        event.delivery_kind === "live" &&
-        event.verified;
+        source?.status === "connected" && event.delivery_kind === "live";
       if (usable) {
-        device.availability = event.online ? "online" : "offline";
-        coverage.availability_observation_id = input.observation_id;
-        coverage.availability_received_at = event.received_at;
+        device.online = event.online;
+        state.online_updates = {
+          ...state.online_updates,
+          [deviceKey]: sequence,
+        };
         if (!event.online)
           invalidate(
             (fact) =>
@@ -453,7 +459,7 @@ export function reduceFacts(
     else if (source?.status !== "connected") reason = "disconnected";
     else if (coverage?.properties !== "confirmed")
       reason = "subscription_pending";
-    else if (device.availability === "offline") reason = "offline";
+    else if (!device.online) reason = "offline";
     else if (policy?.verified_push && policy.freshness.mode !== "unknown")
       reason = "current";
     if (

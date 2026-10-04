@@ -51,8 +51,7 @@ const CameraTile = memo(function CameraTile({
     device.channels.length > 1
       ? `${device.name} · 镜头 ${channel}`
       : device.name;
-  const notice =
-    device.availability === "offline" ? "设备离线，保留现有画面" : null;
+  const notice = !device.online ? "设备离线，保留现有画面" : null;
   const analysisLink = (
     <Link
       to="/cameras/$deviceId/$channel"
