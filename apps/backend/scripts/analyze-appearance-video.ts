@@ -207,8 +207,11 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     [
       "-v",
       "error",
+      "-noautorotate",
       "-i",
       path,
+      "-map",
+      "0:v:0",
       "-t",
       String(seconds),
       "-vf",
