@@ -10,7 +10,7 @@ import {
   type observationSchema,
   type runSchema,
 } from "./observations";
-import type { videoEventSchema } from "./video/events";
+import { validAppearanceEvent, type videoEventSchema } from "./video/events";
 import { sourceKey, type sourceSelectionSchema } from "./config";
 import { createVideoMetrics } from "./video/metrics";
 
@@ -130,7 +130,7 @@ export function createObservationStore(maxAgeMs: number) {
         event.event === "window_gap" ||
         event.event === "identity_frame"
       )
-        return;
+        return null;
       const entry = sources.get(sourceKey(event.run));
       if (
         !entry ||
@@ -146,7 +146,7 @@ export function createObservationStore(maxAgeMs: number) {
           rejectedRetiredResults++;
           changed();
         }
-        return;
+        return null;
       }
       if (event.event === "media") {
         if (entry.media?.generation !== event.media.generation) {
@@ -155,7 +155,7 @@ export function createObservationStore(maxAgeMs: number) {
         }
         entry.media = event.media;
         changed();
-        return;
+        return null;
       }
       if (
         (event.event === "tracking" ||
@@ -166,7 +166,7 @@ export function createObservationStore(maxAgeMs: number) {
       ) {
         entry.rejected++;
         changed();
-        return;
+        return null;
       }
       if (event.event === "identity") {
         const result = event.observation;
@@ -187,27 +187,31 @@ export function createObservationStore(maxAgeMs: number) {
             result.status === "unavailable" ? "unavailable" : "valid";
         }
         changed();
-        return;
+        return null;
       }
       if (event.event === "tracking") {
         const result = event.observation;
         const elapsed = Date.now() - result.receivedAt;
         const age = Math.max(elapsed, result.ageMs);
         if (
+          validAppearanceEvent(event) &&
           entry.status !== "failed" &&
           isCurrentRun(entry.run, result.run) &&
           result.sequence > entry.trackingSequence &&
           elapsed >= 0 &&
           age < maxAgeMs
         ) {
+          const acceptedAt = performance.now();
           entry.tracking = { ...result, ageMs: age };
           entry.trackingSequence = result.sequence;
-          entry.trackingExpiresAt = performance.now() + maxAgeMs - age;
+          entry.trackingExpiresAt = acceptedAt + maxAgeMs - age;
           entry.trackingValidity =
             result.status === "failed" ? "unavailable" : "valid";
+          changed();
+          return { ageMs: age, acceptedAt };
         }
         changed();
-        return;
+        return null;
       }
       entry.metrics = event.metrics;
       if (event.event === "health") {
@@ -256,6 +260,7 @@ export function createObservationStore(maxAgeMs: number) {
         }
       }
       changed();
+      return null;
     },
     snapshot() {
       const now = performance.now();

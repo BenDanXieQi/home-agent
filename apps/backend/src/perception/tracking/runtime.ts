@@ -1,3 +1,5 @@
+import type { appearanceEvidenceSchema } from "../../household/identity/appearance-evidence";
+import { reidSha256, reidProcessingVersion } from "./feature-version";
 import { createPetTracker } from "./pet-tracker";
 import { createTrackIds } from "./track-ids";
 import type { z } from "zod";
@@ -52,6 +54,7 @@ export function createTrackingRuntime(options: {
   createModel: typeof createReidProcess;
   emit: (
     observation: z.infer<typeof trackingObservationSchema>,
+    appearanceEvidence: z.infer<typeof appearanceEvidenceSchema>[],
   ) => Promise<void>;
   failure: (error: unknown) => void;
   fatal: (error: unknown) => void;
@@ -167,6 +170,9 @@ export function createTrackingRuntime(options: {
             let observation:
               | z.infer<typeof trackingObservationSchema>
               | undefined;
+            const appearanceEvidence: z.infer<
+              typeof appearanceEvidenceSchema
+            >[] = [];
             let tracks: z.infer<typeof trackingObservationSchema>["tracks"] =
               [];
             let status: z.infer<typeof trackingObservationSchema>["status"] =
@@ -256,7 +262,14 @@ export function createTrackingRuntime(options: {
                 }
               }
               tracks = [
-                ...entry.tracker.finish(input, features),
+                ...entry.tracker.finish(input, features, (feature) => {
+                  appearanceEvidence.push({
+                    ...metadata(run, frame),
+                    ...feature,
+                    modelVersion: reidSha256,
+                    processingVersion: reidProcessingVersion,
+                  });
+                }),
                 ...entry.pets.update(frame.availableAt, detections),
               ].map((track) => {
                 const previous = entry.times.get(track.trackId);
@@ -288,6 +301,7 @@ export function createTrackingRuntime(options: {
                 if (!activeIds.has(id)) entry.times.delete(id);
               }
             } catch (error) {
+              appearanceEvidence.length = 0;
               status = "failed";
               reason = String(error).slice(0, 4096);
               entry.tracker.reset();
@@ -341,7 +355,14 @@ export function createTrackingRuntime(options: {
                 release();
               }
             }
-            if (observation) await options.emit(observation);
+            if (observation)
+              await options.emit(
+                observation,
+                appearanceEvidence.map((evidence) => ({
+                  ...evidence,
+                  ageMs: observation.ageMs,
+                })),
+              );
           })().catch(options.failure);
           pending.add(task);
           task.then(() => {

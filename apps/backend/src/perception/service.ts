@@ -1,3 +1,4 @@
+import type { appearanceEvidenceSchema } from "../household/identity/appearance-evidence";
 import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
 import type { createIdentityMatching } from "../household/identity/matching";
 import { identityProcessingVersions } from "./identity/processing-version";
@@ -26,6 +27,14 @@ export function createPerceptionService(options: {
         "configure" | "snapshot" | "subscribe" | "associate"
       >
     | undefined;
+  acceptAppearance?: (input: {
+    evidence: z.infer<typeof appearanceEvidenceSchema>[];
+    householdVersion: NonNullable<
+      ReturnType<PerceptionSources["eligibility"]>
+    >["householdVersion"];
+    acceptedAt: number;
+    remainingMs: number;
+  }) => void;
   configPath: string;
   executable: string;
   sources: PerceptionSources;
@@ -325,6 +334,44 @@ export function createPerceptionService(options: {
             referenceVersion(referenceSnapshot)
           )
             return;
+        }
+        if (event.event === "tracking") {
+          const access = options.sources.eligibility(event.run);
+          const entry = desired.get(sourceKey(event.run));
+          if (
+            !access ||
+            access.scopeEpoch !== event.run.scopeEpoch ||
+            entry?.runId !== event.run.runId ||
+            entry.identity !== access.identity
+          )
+            return;
+          // Window history admits original-frame results on its own deadline,
+          // independently of live tracking and appearance freshness.
+          windows.video(
+            {
+              event: "tracking",
+              run: event.run,
+              observation: event.observation,
+            },
+            Date.now(),
+          );
+          const accepted = store.receive(event);
+          if (accepted && event.appearanceEvidence?.length) {
+            try {
+              options.acceptAppearance?.({
+                evidence: event.appearanceEvidence.map((evidence) => ({
+                  ...evidence,
+                  ageMs: accepted.ageMs,
+                })),
+                householdVersion: access.householdVersion,
+                acceptedAt: accepted.acceptedAt,
+                remainingMs: config.maxFrameAgeMs - accepted.ageMs,
+              });
+            } catch (cause) {
+              console.error("Appearance evidence delivery failed", cause);
+            }
+          }
+          return;
         }
         windows.video(event, Date.now());
         store.receive(event);
