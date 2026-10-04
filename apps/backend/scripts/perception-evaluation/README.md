@@ -135,3 +135,68 @@ ORT_DISABLE_TELEMETRY=1 bun apps/backend/scripts/verify-speech.ts \
 报告还记录 ASR 父进程／进程组关系、源端与识别故障、空闲释放、再次唤起、定期进程树 CPU/RSS，以及关闭后的自有子进程数量。JSONL 随运行写入，最终 JSON 汇总结果；重复执行覆盖指定输出。CPU 累计本次已观测进程的最后采样值，包含已退出进程；最后采样到退出之间的工作可能少算，因此是已观测累计下界。通过条件核对历次 CPU 累计不回退，不要求 RSS 单调。段尾时间来自音轨采样和 VAD，不是人工标注的真实说话结束时间。
 
 输入是公开或自行构造的素材，不包含真实摄像头网络、远场、电视声或多人叠音。短时进程验证不能证明家庭转写准确率或日级内存稳定性。当前生产功能和限制见[本地语音转写](../../../../docs/perception.md#本地语音转写)。
+
+## 人体外观离线校准
+
+`calibrate:appearance` 用固定的 [Real28 官方数据](https://wanfb.github.io/dataset.html) 比较人物身份分数。作者提供 28 个身份、4 个镜头和不同日期换衣的 4324 张人体裁剪；[作者许可](https://wanfb.github.io/resources/licence.txt)为 Apache 2.0。仅在本机忽略的 `data/` 或临时目录保存素材、许可与报告，不将图片提交到仓库。PRCC 的官方条款仅限学术用途；Real28 可作为这里的公开统计输入，不表示家庭识别验收通过。
+
+准备数据目录，放入作者 Google Drive 中的 `Real28.zip` 与官网许可文件 `LICENSE.txt`：
+
+```sh
+mkdir -p data/perception/member-attribution/real28
+curl -L --fail \
+  'https://drive.usercontent.google.com/download?id=1PQuhZJ05WBY62gdMMFiD8wBCItzKegWY&export=download&confirm=t' \
+  -o data/perception/member-attribution/real28/Real28.zip
+curl -L --fail 'https://wanfb.github.io/resources/licence.txt' \
+  -o data/perception/member-attribution/real28/LICENSE.txt
+bun run --cwd apps/backend calibrate:appearance \
+  --data-dir ../../data/perception/member-attribution/real28 \
+  --output-dir ../../data/perception/member-attribution/real28-results
+```
+
+命令要求本机 `unzip`，只接纳 SHA-256 为 `bb84e9dfed9e1a9801bfd7617e6addc44cee36d483d777b2db5d1308170d5de8` 的固定官方归档。读取已核对的归档字节，复制到独立临时目录后用原生工具解包；不使用调用方任意提供的解压图片。正常结束或失败会清理自有临时目录。该指纹固定本次下载内容，不是作者数字签名。
+
+文件名 `identity_camera_clothing_index.jpeg` 按官方规则提供身份、镜头、衣着和图片序号，序号不是时间戳。官方 `gallery/query` 中都包含相同的 28 个身份，不能把这两个目录直接当独立调参／留出集。命令按 `sha256(real28-appearance-split:身份数字)` 排序：前 14 个身份为调参集，后 14 个为留出集；每集前 10 个提供参照，后 4 个完全不登记，用于观察未登记身份被误接纳的情况。划分在读取特征前固定。每个登记身份仅从衣着 1 的 gallery 图片选参照，先每镜头一份，再按镜头和序号补齐到最多五份。相同字节去重，重复标签矛盾时报错；参照优先，不让重复图片进入目标。
+
+图片逐张解码成 RGB24，把整张已标注人体裁剪交给正式 `createReid`，使用固定模型指纹及正式 BGR、96×192、线性缩放、原始浮点输入与 L2 归一化。特征只保留在本次离线进程内，不导出向量，也不制造人脸确认或提交家庭活动。评分直接调用正式领域的 `appearanceScore`，每个候选身份取最多五份参照的最高分，再计算最佳与第二身份的差值。分别评估全部参照、只保留目标镜头参照、对所有候选排除目标镜头参照；后者才是这个固定方案的跨镜头成员选择。
+
+绝对门槛与差值网格预设为 0 到 1、步长 0.01。在全部参照的调参集上选择“已登记身份正确接纳最多且已登记／未登记身份均无观察到的错误”的候选，同覆盖时优先较高差值再较高绝对门槛；无合格非空候选则返回 `null`。冻结候选后才报告留出集与各镜头／衣着分组，不根据留出结果改参数。这是探索性选择标准，样本内零错误不表示部署误归属风险已校准。报告中的 `scoreCandidate` 不能直接作为包含时间策略的 `appearanceCalibrationSchema`，命令不改变正式装配。
+
+输出会原子替换指定目录中的同名报告：
+
+- `manifest.json`：每份实际使用图片的原路径、SHA-256、尺寸、身份、镜头、衣着、划分及参照／目标角色；`results.json` 保存此文件的字节指纹。
+- `duplicates.json`：重复字节对应的原图及被跳过路径。
+- `observations.json`：各镜头方案下每份目标的正确身份最高分、错误身份最高分、正确身份与最强错误身份差值、最佳成员／领先差值及实际参照分数，无向量。
+- `tune-grid.json`：所有预设候选在调参集的正确接纳、错误接纳、未登记身份接纳及未知数量。
+- `results.json`：来源与许可指纹、模型／预处理／依赖、划分、候选、分数分布、同衣着／换衣／未登记身份分组及资源统计。正确覆盖率分母为已登记身份目标数，错误率分母为实际接纳数，未登记身份接纳率另列；零接纳时错误率为 `null`。RSS（进程驻留内存）仅逐图采样，包含离线特征和模型，不是线上缓存峰值。
+
+固定素材包含 4319 份不同图片字节，5 份重复被跳过，100 份参照与 4219 份目标。调参候选 `threshold=0.94`、`margin=0.13` 在留出集全部参照下正确接纳 114／1409，548 份未登记目标全部未知，样本内错误接纳为零。同镜头同衣着为 115／543，跨镜头同衣着为 2／543，换衣为 0／866；高未知比例和很低的跨镜头覆盖不支持上线。这些是静态图的候选选择，未运行至少两份新帧支持规则。
+
+Real28 图片都是 64×128 低清人体裁剪。模型训练数据未在本项目中明确，身份独立留出仅指本次调参未使用这些身份，不保证模型训练时未见。图片可能相邻且高度相关，每图比例不能解释为独立试验概率。衣着编号标明同人换衣，不提供不同人相似衣着的独立标签；也没有可靠原帧时间、同帧人脸／人体可用性或连续采样轨迹。因此不比较 1／5／10 分钟参照期限、500 毫秒支持跨度、支持窗口与推测期限，不报告在线闪断、形成延迟、缓存峰值或家庭误归属率。活动保存、纠正、终态、版本和页面联动的剩余验收继续见[成员短期外观归因计划](../../../../docs/plans/member-attribution.md#5-校准与验收)。
+
+## 视频外观输入可用性
+
+`analyze:appearance-video` 分别读取真实视频原帧，核对指定输入指纹，使用正式 `createDetector` 默认门槛 0.5、人体跟踪器、新特征资格过滤及 `createReid`。它是离线素材分析入口，不启动服务，不连接家庭数据库，不提供模拟身份或生命周期注入。每路顺序处理，不代表多路并发负载。
+
+输入 JSON 保存 `sourcePage`、`attribution`、`license` 与 `videos` 数组。每个视频提供本机 `path`、真实下载 `url` 和 `sha256`。路径由运行者填入，不在共享文档保存个人绝对路径。最多八个视频；命令依赖本机 FFmpeg／FFprobe，默认分析前 302 秒，可通过 `--seconds` 指定不超过 3600 秒的范围。
+
+```sh
+bun run --cwd apps/backend analyze:appearance-video \
+  --manifest ../../data/perception/member-attribution/meva-manifest.json \
+  --output-dir ../../data/perception/member-attribution/meva-results \
+  --seconds 302
+```
+
+[MEVA 官方下载说明](https://mevadata.org/resources/README-meva-kf1-data.html)提供公开 S3 数据，作者为 Kitware Inc. 与 IARPA，数据采用 [CC BY 4.0](https://mevadata.org/resources/MEVA-data-license.txt)。示例原始对象路径为 `drops-123-r13/2018-03-07/11/2018-03-07.11-00-00.11-05-01.admin.G329.r13.avi`；完整 URL 以 `https://mevadata-public-01.s3.amazonaws.com/` 为前缀。输入和报告应保留署名、许可与真实对象 URL，不把说明页面当作视频下载链接。
+
+FFprobe 探测限于请求时段及 100 毫秒尾部余量，读取原始 PTS（解码后的呈现时间）；先核对尺寸符合正式原帧预算，再启动像素解码。按平均帧率选择整数步长，使名义采样率不超过 3 fps；实际采样时间使用对应原帧 PTS，不用帧率重新生成时间。每份记录同时保存从 0 开始的原帧序号、原 PTS 与从首帧开始的相对时间。真正采样帧无 PTS 或时间倒退时失败；未采样的尾部 flush 帧可缺 PTS，报告单独计数，不伪造时间。FFmpeg 保留原分辨率，不插值或重复图片；输出帧数必须与选定原帧相符。
+
+跟踪器只给本帧新提取、非预测、非缓存复用且通过现有重叠过滤的目标交付新外观证据。报告区分实际 ReID 调用次数、提取目标数、重叠过滤、缓存复用和预测目标。同帧有脸的定义仅为“检测器输出的人脸中心落在唯一实测人体框中”；不经过人脸质量检查、身份参考匹配、确认支持或异步接纳，所以不能称为人脸确认共同可用率。
+
+`results.json` 在每路成功后原子更新，`source-N-frames.json` 保存该路逐帧计数、实测框、轨迹状态及新特征／人脸目标编号，不保存向量、像素或虚构成员标签。报告包含实际模型指纹、输入／输出契约、ReID 预处理版本、来源 manifest 字节指纹与以下指标：
+
+- **新特征间隔**：同一本地轨迹两次合格新外观之间的实际媒体时间差；首份不产生间隔。不证明轨迹编号从未换人，也不把检测缺失视为分数失败。
+- **有脸检测与新特征交集**：按目标观察计数，分别以全部合格新特征和有唯一对应人脸检测的目标为分母。一次目标出现多张脸也只计一次；没有对应分母时比例为 `null`。
+- **资源**：逐帧采样的本进程 RSS、CPU、检测与跟踪耗时。顺序离线背压不模拟线上采样丢帧、计算名额、原帧过龄或身份结果迟到，不表示线上缓存峰值。
+
+`confirmedFaceJointAvailability`、`inferenceFlashes`、`attributionLatencyMs` 保持 `null`：没有实际直接确认或正式归因输出时无法测量。没有全局身份映射、参考成员和已校准时间策略，不选择分数或比较参照 TTL；也不验收数据库、活动撤销或页面联动。MEVA 局部目标标注不能直接当家庭成员 ID 或跨镜头全局身份，连续视频文件也不能据文件名自动拼接成同人长间隔验收。
