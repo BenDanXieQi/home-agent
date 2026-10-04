@@ -1,3 +1,8 @@
+import {
+  windowAcknowledgementSchema,
+  type windowFrameEventSchema,
+} from "../window/protocol";
+import { createIdentityRuntime } from "../identity/runtime";
 import { createReidProcess } from "../tracking/reid-process";
 import { createTrackingRuntime } from "../tracking/runtime";
 import { createVideoRuntime } from "../video/runtime";
@@ -13,6 +18,21 @@ import type { z } from "zod";
 
 let pool: ReturnType<typeof createInferencePool> | undefined;
 let video: ReturnType<typeof createVideoRuntime> | undefined;
+const windowTransfers = new Map<
+  string,
+  ReturnType<typeof Promise.withResolvers<void>>
+>();
+async function sendWindow(payload: z.infer<typeof windowFrameEventSchema>) {
+  const key = `${payload.run.runId}:${payload.frame.sequence}`;
+  const acknowledgement = Promise.withResolvers<void>();
+  windowTransfers.set(key, acknowledgement);
+  try {
+    await send({ kind: "video", payload });
+    await acknowledgement.promise;
+  } finally {
+    windowTransfers.delete(key);
+  }
+}
 let initialized = false;
 let closing = false;
 let failed = false;
@@ -35,8 +55,24 @@ async function run(task: z.infer<typeof commandSchema>) {
     pool = createInferencePool(fail, task.budget);
     const result = await pool.submit(task);
     video = createVideoRuntime({
+      identity: createIdentityRuntime({
+        fatal: fail,
+        reserveCompute: () => pool!.reserveIdentity(),
+        releaseCompute: () => {
+          pool!.releaseIdentity();
+        },
+        emit: (observation) =>
+          send({
+            kind: "video",
+            payload: { event: "identity", run: observation.run, observation },
+          }),
+        failure: (error) => {
+          console.error("Identity analysis failed", error);
+        },
+      }),
       tracking: createTrackingRuntime({
         createModel: createReidProcess,
+
         reserveCompute: () => pool!.reserveTracking(),
         releaseCompute: () => {
           pool!.releaseTracking();
@@ -66,7 +102,10 @@ async function run(task: z.infer<typeof commandSchema>) {
           return detection;
         },
       },
-      emit: (payload) => send({ kind: "video", payload }),
+      emit: (payload) =>
+        payload.event === "window_frame"
+          ? sendWindow(payload)
+          : send({ kind: "video", payload }),
       fatal: fail,
     });
     initialized = true;
@@ -110,6 +149,13 @@ function send(message: z.infer<typeof responseSchema>) {
 }
 // Piscina, rather than an IPC promise chain, owns the compute queue.
 process.on("message", (message: unknown) => {
+  const acknowledgement = windowAcknowledgementSchema.safeParse(message);
+  if (acknowledgement.success) {
+    windowTransfers
+      .get(`${acknowledgement.data.runId}:${acknowledgement.data.sequence}`)
+      ?.resolve();
+    return;
+  }
   const receivedAt = performance.now();
   const request = requestSchema.safeParse(message);
   if (!request.success) {

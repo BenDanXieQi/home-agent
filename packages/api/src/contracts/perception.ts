@@ -1,5 +1,7 @@
 import { sourceMediaSchema, mediaFrameTimeSchema } from "./media";
 import { z } from "zod";
+import identityCapacity from "./identity-capacity.json";
+export { identityCapacity };
 import { stateVersionSchema } from "./household";
 
 export const imageLimits = { maxFileBytes: 32 * 1024 * 1024 } as const;
@@ -107,6 +109,113 @@ export const trackingObservationSchema = z.object({
     )
     .max(16),
 });
+// These are local face-reference observations, not authoritative household identities.
+const identityTrackSchema = z.object({
+  trackId: z.int().positive(),
+  state: z.enum(["unknown", "candidate", "confirmed", "conflict"]),
+  label: z.string().max(identityCapacity.labelLength).nullable(),
+  reason: z.string().max(256),
+  samples: z.int().nonnegative().max(identityCapacity.samplesPerTrack),
+  supportingSamples: z
+    .int()
+    .nonnegative()
+    .max(identityCapacity.samplesPerTrack),
+  score: z.number().min(-1).max(1).nullable(),
+  margin: z.number().min(0).max(2).nullable(),
+  firstSeenAt: z.number(),
+  lastSeenAt: z.number(),
+  lastEvidenceAt: z.number().nullable(),
+  evidence: z
+    .array(
+      z.object({
+        observedAt: z.number(),
+        label: z.string().max(identityCapacity.labelLength).nullable(),
+        score: z.number().min(-1).max(1).nullable(),
+        margin: z.number().min(0).max(2).nullable(),
+        detectionScore: z.number().min(0).max(1),
+        sharpness: z.number().nonnegative(),
+      }),
+    )
+    .max(identityCapacity.samplesPerTrack),
+  confirmedAt: z.number().nullable(),
+  expiresAt: z.number().nullable(),
+});
+export const identityObservationSchema = trackingObservationSchema
+  .pick({
+    run: true,
+    sequence: true,
+    receivedAt: true,
+    sampledAt: true,
+    mediaTime: true,
+    ageMs: true,
+    width: true,
+    height: true,
+    coordinateBasis: true,
+  })
+  .extend({
+    revision: z.int().positive(),
+    status: z.enum([
+      "idle",
+      "starting",
+      "unloading",
+      "collecting",
+      "recognizing",
+      "unavailable",
+    ]),
+    error: z.string().max(4096).optional(),
+    referenceRevision: z.string().nullable(),
+    model: z
+      .object({
+        processId: z.int().positive().optional(),
+        engine: z.literal("opencv"),
+        provider: z.literal("cpu"),
+        version: z.string(),
+        yunetSha256: z.string(),
+        sfaceSha256: z.string(),
+      })
+      .nullable(),
+    tracks: z.array(identityTrackSchema).max(identityCapacity.tracksPerRun),
+    recent: z
+      .array(identityTrackSchema.extend({ endedAt: z.number() }))
+      .max(identityCapacity.recentTracks),
+    statistics: z.object({
+      frames: z.int().nonnegative(),
+      sampledFrames: z.int().nonnegative(),
+      skippedBusy: z.int().nonnegative(),
+      skippedNoPixels: z.int().nonnegative(),
+      skippedIncompleteTracking: z.int().nonnegative(),
+      acceptedSamples: z.int().nonnegative(),
+      duplicateSamples: z.int().nonnegative(),
+      qualityRejected: z.int().nonnegative(),
+      conflicts: z.int().nonnegative(),
+      tracksSeen: z.int().nonnegative(),
+      confirmedTracks: z.int().nonnegative(),
+      confirmationDelayMsTotal: z.number().nonnegative(),
+    }),
+  });
+// Frozen at tracking completion; pending describes that moment, not live work.
+export const identityFrameSnapshotSchema = z.object({
+  status: identityObservationSchema.shape.status.or(z.literal("disabled")),
+  evaluatedAt: z.number(),
+  inference: z.enum(["not_requested", "pending"]),
+  referenceRevision: identityObservationSchema.shape.referenceRevision,
+  tracks: z
+    .array(
+      identityTrackSchema.pick({
+        trackId: true,
+        state: true,
+        label: true,
+        reason: true,
+        supportingSamples: true,
+        score: true,
+        margin: true,
+        lastEvidenceAt: true,
+        confirmedAt: true,
+        expiresAt: true,
+      }),
+    )
+    .max(identityCapacity.tracksPerRun),
+});
 export const audioRunSchema = z.object({
   deviceId: z.string().regex(/^[0-9]{1,32}$/),
   scopeEpoch: z.uuid(),
@@ -115,6 +224,76 @@ export const audioRunSchema = z.object({
 const sampleInterval = z.object({
   startSample: z.int().nonnegative(),
   endSample: z.int().positive(),
+});
+export const speechConfigSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  idleUnloadMs: z.int().min(5000).max(3600000).default(60000),
+});
+export const speechObservationSchema = z
+  .object({
+    id: z.string().min(1).max(128),
+    run: audioRunSchema,
+    generation: z.uuid(),
+    startSample: z.int().nonnegative(),
+    endSample: z.int().positive(),
+    speechEndSample: z.int().positive(),
+    boundary: z.enum(["pause", "length_limit"]),
+    observedStartAt: z.number(),
+    observedEndAt: z.number(),
+    completedAt: z.number(),
+    text: z.string().max(4096),
+    modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
+    processingVersion: z.literal("sensevoice-silero-frame-processor"),
+    inferenceMs: z.number().nonnegative(),
+  })
+  .refine(
+    (speech) =>
+      speech.startSample < speech.speechEndSample &&
+      speech.speechEndSample <= speech.endSample &&
+      speech.observedStartAt <= speech.observedEndAt,
+    "Inconsistent speech observation interval",
+  );
+export const speechTrackSchema = z.object({
+  status: z.enum([
+    "listening",
+    "collecting",
+    "queued",
+    "recognizing",
+    "unavailable",
+  ]),
+  latest: speechObservationSchema.nullable(),
+  validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
+  dropped: z.int().nonnegative(),
+  error: z.string().max(4096).optional(),
+});
+export const speechRuntimeSchema = z.object({
+  status: z.enum([
+    "sleeping",
+    "loading",
+    "ready",
+    "recognizing",
+    "unloading",
+    "recovering",
+    "unavailable",
+    "closed",
+  ]),
+  processId: z.int().positive().optional(),
+  processRssBytes: z.number().nonnegative().nullable(),
+  modelSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable(),
+  idleUnloadMs: z.int().positive(),
+  loads: z.int().nonnegative(),
+  failures: z.int().nonnegative(),
+  queueDepth: z.int().nonnegative().max(8),
+  queueBytes: z.int().nonnegative(),
+  inFlight: z.boolean(),
+  completed: z.int().nonnegative(),
+  dropped: z.int().nonnegative(),
+  cancelled: z.int().nonnegative(),
+  inboxUnconfirmed: z.int().nonnegative(),
+  error: z.string().max(4096).optional(),
 });
 export const audioTrackSchema = z.object({
   run: audioRunSchema,
@@ -152,11 +331,22 @@ export const audioTrackSchema = z.object({
     .max(8),
   vadStatus: z.enum(["insufficient_input", "ready", "unavailable"]),
   vadError: z.string().max(4096).optional(),
+  speech: speechTrackSchema.optional(),
   energyRemainder: z.int().min(0).max(479),
   vadRemainder: z.int().min(0).max(511),
   validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
 });
+export const perceptionResourceSchema = z.object({
+  nativeThreads: z.int().positive(),
+  videoWorkers: z.int().positive(),
+  audioThreads: z.int().nonnegative(),
+  speechThreads: z.int().nonnegative(),
+  identityThreads: z.int().nonnegative(),
+  modelMemoryMiB: z.int().positive(),
+  reservedModelMiB: z.int().positive(),
+});
 export const perceptionSnapshotSchema = z.object({
+  resources: perceptionResourceSchema.nullable(),
   sequence: z.int().nonnegative(),
   householdVersion: stateVersionSchema.nullable(),
   instanceId: z.uuid(),
@@ -165,6 +355,8 @@ export const perceptionSnapshotSchema = z.object({
   error: z.string().optional(),
   settings: z.object({
     cpuRatio: z.number().positive().max(1),
+    modelMemoryMiB: z.int().positive(),
+    speech: speechConfigSchema,
     sampleFps: z.number(),
     maxFrameAgeMs: z.number(),
     firstFrameTimeoutMs: z.number(),
@@ -204,6 +396,7 @@ export const perceptionSnapshotSchema = z.object({
       .nullable(),
     error: z.string().max(4096).optional(),
     tracks: z.array(audioTrackSchema).max(8),
+    speech: speechRuntimeSchema.optional(),
   }),
   sources: z.array(
     z.object({
@@ -217,6 +410,8 @@ export const perceptionSnapshotSchema = z.object({
       validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       observation: observation.nullable(),
       tracking: trackingObservationSchema.nullable(),
+      identity: identityObservationSchema.nullable(),
+      identityValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       trackingValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       metrics: z.record(z.string(), z.number()),
     }),

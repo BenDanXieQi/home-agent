@@ -107,19 +107,26 @@ test("concurrent first choices cannot grant access before persistence or disagre
   expect(h.runtime.snapshot().projection.household.household.home_id).toBe(
     saved.homeId,
   );
-  expect(h.runtime.setupHomes()).toEqual({ items: [] });
+  const requestsBeforeCandidates = h.catalog.mock.calls.length;
+  expect(
+    h.runtime
+      .setupHomes()
+      .items.map((home) => home.id)
+      .toSorted(),
+  ).toEqual(["home-a", "home-b"]);
+  expect(h.catalog.mock.calls.length).toBe(requestsBeforeCandidates);
+  expect(
+    h.runtime.snapshot().projection.household.household.homes,
+  ).not.toHaveProperty("items");
   expect(
     await h.service.readProperties([currentProperty], signal()),
   ).toMatchObject([{ status: "success" }]);
   await expect(
     h.service.readProperties([foreignProperty], signal()),
   ).rejects.toMatchObject({ reason: "device_not_found" });
-  for (const home of ["home-a", "home-b"])
-    await expect(
-      h.runtime.bindHome(h.runtime.epoch, home),
-    ).rejects.toMatchObject({
-      reason: "binding_conflict",
-    });
+  await expect(
+    h.runtime.bindHome(h.runtime.epoch, saved.homeId),
+  ).rejects.toMatchObject({ reason: "binding_conflict" });
   expect(await h.homes.read(account)).toEqual(saved);
 });
 
@@ -185,7 +192,9 @@ test("a binding committed before shutdown survives restart but its late receipt 
     home_id: "home-a",
     status: "initializing",
   });
-  expect(runtime.setupHomes()).toEqual({ items: [] });
+  expect(() => runtime.setupHomes()).toThrow(
+    expect.objectContaining({ reason: "not_bound" }),
+  );
   await expect(
     service.readProperties([property], signal()),
   ).rejects.toBeDefined();
@@ -210,6 +219,14 @@ test("a binding committed before shutdown survives restart but its late receipt 
     "home-a",
   );
   expect(await h.homes.read(account)).toEqual({ homeId: "home-a" });
+  const requestsBeforeCandidates = h.catalog.mock.calls.length;
+  expect(
+    runtime
+      .setupHomes()
+      .items.map((home) => home.id)
+      .toSorted(),
+  ).toEqual(["home-a", "home-b"]);
+  expect(h.catalog.mock.calls.length).toBe(requestsBeforeCandidates);
   expect(await service.readProperties([property], signal())).toMatchObject([
     { status: "success" },
   ]);

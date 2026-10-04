@@ -18,7 +18,9 @@ type homeAgentDualCamera struct {
 // and address; neither producers nor cloud credentials use a global device cache.
 func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int, camera *homeAgentCameraState) (*streams.Stream, func()) {
 	query := source.Query()
+	quality := query.Get("subtype")
 	query.Del("channel")
+	query.Del("subtype")
 	source.RawQuery = query.Encode()
 	key := source.String()
 	if session.dualCameras == nil {
@@ -33,7 +35,13 @@ func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int,
 		session.dualCameras[key] = shared
 	}
 	shared.channels++
-	stream := streams.NewHomeAgentStream(func() (core.Producer, error) { producer, err := shared.source.Open(channel); if err != nil { return nil, err }; return homeAgentTimeProducer(camera, producer), nil })
+	stream := streams.NewHomeAgentStream(func() (core.Producer, error) {
+		producer, err := shared.source.Open(camera.ctx, channel, quality)
+		if err != nil {
+			return nil, err
+		}
+		return homeAgentTimeProducer(camera, producer), nil
+	})
 	release := sync.OnceFunc(func() {
 		shared.channels--
 		if shared.channels == 0 {

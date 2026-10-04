@@ -23,10 +23,6 @@ export function createChatRoutes({
   const app = new Hono();
   app.use(requireLocalAccess([port, 5173], { webEntry: true }));
   const routes = app
-    .route(
-      "/history",
-      createChatHistoryProxy({ readAgentUrl, readHouseholdScope }),
-    )
     .post(
       "/",
       bodyLimit({
@@ -125,6 +121,10 @@ export function createChatRoutes({
           headers,
         });
       },
+    )
+    .route(
+      "/history",
+      createChatHistoryProxy({ readAgentUrl, readHouseholdScope }),
     );
   return routes;
 }

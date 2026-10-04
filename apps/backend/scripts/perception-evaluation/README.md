@@ -81,7 +81,7 @@ bun run --cwd apps/backend evaluate:models \
 
 ## 音频链路与资源
 
-`benchmark-audio.ts` 比较相同 PCMA 8 kHz 单声道输入、相同 16 kHz PCM 输出和固定 Silero 模型。输入按墙钟发送；前 5 秒预热，测量期间统计父子进程总 CPU 时间、RSS、PCM 采样推进、媒体年龄、事件循环以及订阅开销。CPU 百分比以单个逻辑核为 100%；采样不足、有效性丢失或链路错误会使命令失败退出，不能把失败后的低资源占用当作优化结果。
+`benchmark-audio.ts` 比较相同 PCMA 8 kHz 单声道输入、相同 16 kHz PCM 输出和固定 Silero 模型。输入按墙钟发送；前 5 秒预热，测量期间统计已观测父子进程的 CPU 累计下界、RSS、PCM 采样推进、媒体年龄、事件循环以及订阅开销。CPU 累计保留已退出进程的最后采样值，但最后采样到退出之间的工作可能少算。CPU 百分比以单个逻辑核为 100%；采样不足、有效性丢失或链路错误会使命令失败退出，不能把失败后的低资源占用当作优化结果。
 
 ```sh
 bun run --cwd apps/backend benchmark:audio --variant=ffmpeg --sources=8 --seconds=30
@@ -93,7 +93,7 @@ bun run --cwd apps/backend benchmark:audio --variant=service --sources=8 --subsc
 
 保留独立 FFmpeg 解码器的依据是单轨故障可独立回收，以及实际时效与 CPU 成本；进程内 libav 的内存优势不足以单独证明整体更优。对照实现不进入生产选择分支。
 
-`verify-camera-audio.ts` 从正在运行的后端读取已提交设备清单，以工作室优先顺序验证所有摄像头；账号凭据仅从本机数据库读取。它以 `cpuRatio: 0.15` 和默认 3 fps 采样运行检测；这不是默认 `cpuRatio: 0.5` 的部署内存承诺。它启动独立 go2rtc 实例，使用本机 1986/18556 端口，提供临时浏览器页面、正式感知查询接口和资源观测，退出时释放自己拥有的播放、采集与进程。运行前保证这两个端口空闲；不替换日常使用的媒体服务。
+`verify-camera-audio.ts` 从正在运行的后端读取已提交设备清单，以工作室优先顺序验证所有摄像头；账号凭据仅从本机数据库读取。它以 `cpuRatio: 0.5` 和默认 3 fps 采样运行检测；视频 worker 从共同音视频预算中分配，实际峰值内存仍需观察。它启动独立 go2rtc 实例，使用本机 1986/18556 端口，提供临时浏览器页面、正式感知查询接口和资源观测，退出时释放自己拥有的播放、采集与进程。运行前保证这两个端口空闲；不替换日常使用的媒体服务。
 
 ```sh
 bun --env-file=.env apps/backend/scripts/verify-camera-audio.ts \
@@ -104,3 +104,34 @@ bun --env-file=.env apps/backend/scripts/verify-camera-audio.ts \
 浏览器需检查真实接收的音频采样和解码视频帧，不能只以 SDP 成功或连接状态作为通过依据。关闭、重新打开预览后，后台音轨运行应保持不变。运行时定期核对家庭作用域；发生变化时停止验证，避免沿用旧授权。该工具不会保存摄像头音视频。
 
 原始测量放在 Git 忽略的 `data/perception/`；功能文档只维护可复现入口、设计取舍与已知验证边界。
+
+## SenseVoice 持续语音链路
+
+`../verify-speech.ts` 通过正式 `createAudioService`，或启用视频时通过正式 `createPerceptionService` 和感知 HTTP 路由验证语音。评估主进程只提供受控编码流、读取结果和观测资源；PCM 解码、单一 P3 VAD 与切段位于正式音频子进程，SenseVoice 位于该进程下的独立子进程。不使用另一套实验语音运行时。
+
+先安装仓库依赖并按[语音模型资产](../../models/README.md#语音转写模型)放置固定权重；同一官方资产包中的 `test_wavs/zh.wav` 用作公开样本。评估复用正式服务的模型、VAD、切段和预算，不另安装运行库或装配第二套模型。将样本转为带静音间隔的 8 kHz 单声道 A-law 编码流，从仓库根目录运行：
+
+```sh
+mkdir -p data/perception/sensevoice
+ffmpeg -v error -y \
+  -i apps/backend/models/sensevoice/test_wavs/zh.wav \
+  -af 'adelay=1000,apad=pad_dur=1.5' -ar 8000 -ac 1 -c:a pcm_alaw -f alaw \
+  data/perception/sensevoice/continuous.alaw
+
+ORT_DISABLE_TELEMETRY=1 bun apps/backend/scripts/verify-speech.ts \
+  --audio data/perception/sensevoice/continuous.alaw \
+  --output data/perception/sensevoice/production.json \
+  --seconds 115 --sources 2 --video --lifecycle
+```
+
+`--audio` 只接受无文件头的 8 kHz 单声道 A-law 字节，最长 60 秒；按墙钟循环发送，每块 20 ms。`--seconds` 为 15–3600 秒，`--sources` 为 1–8 个物理音轨。`--dual-channel` 给每个物理设备配置两个镜头，总通道数仍不超过 8，用于核对共享音轨只有一次识别。所有场景使用正式 `speech` 配置，空闲卸载设为 5 秒以缩短验证；生产默认值仍为 60 秒。
+
+- `--video` 提供 1280×720、15 fps 的移动图案 MPEG-TS 流，由正式视频子进程和其 FFmpeg 子进程读取、解码、采样及检测。配置请求 3 fps、`cpuRatio: 0.5`，不补帧。通过正式 HTTP 路由校验感知共享 schema 和结果输出。所有场景另实际请求 `/speech`，按语音收件箱共享 schema 校验响应。视频计数属于当前运行，来源重建后会重置，不是整个实验的累计帧数。
+- `--lifecycle` 要求至少 110 秒及有语音的输入。第 12 秒暂停首路源端发送，第 17 秒恢复，核对正式断流重建；第 30 秒起等待识别开始且收件箱已有当前作用域片段后撤销来源，当场检查音轨与对应片段已清除，至少 5 秒后重新授权；第 50 秒起等待识别开始，确认进程的父 PID 和进程组属于音频进程后向其发送 SIGSTOP。第 72 秒切换为静音，核对模型进程退出；第 87 秒恢复人声，核对重新加载时音频 PID、运行身份和采样仍连续。只操纵本次创建的来源与进程。
+- `--expect-silence` 从开始就发送静音，要求没有转写、ASR 加载次数为零；不能与生命周期场景一起使用。它只改变源端音频与验收预期，不绕过 VAD 或模型。
+
+报告从正式交付调用逐段记录转写、接纳结果和拒绝，不靠每轨最近结果推导完整交付。通过条件要求每个物理来源至少交付一段、收件箱接纳／拒绝计数与实际调用一致、语音 HTTP 校验成功；静音场景要求没有交付。普通场景要求交接零拒绝；生命周期按片段实际所属的撤销运行，以及全部来源撤权到重新授权之间的独立窗口核对预期拒绝，窗口记录作用域、音轨运行和前后交接拒绝数，不能用任意容忍数量覆盖正常交接错误。故障后的恢复与新段交付仍须通过；故障注入造成的切段丢弃与取消记录在音频快照，不要求它们为零。
+
+报告还记录 ASR 父进程／进程组关系、源端与识别故障、空闲释放、再次唤起、定期进程树 CPU/RSS，以及关闭后的自有子进程数量。JSONL 随运行写入，最终 JSON 汇总结果；重复执行覆盖指定输出。CPU 累计本次已观测进程的最后采样值，包含已退出进程；最后采样到退出之间的工作可能少算，因此是已观测累计下界。通过条件核对历次 CPU 累计不回退，不要求 RSS 单调。段尾时间来自音轨采样和 VAD，不是人工标注的真实说话结束时间。
+
+输入是公开或自行构造的素材，不包含真实摄像头网络、远场、电视声或多人叠音。短时进程验证不能证明家庭转写准确率或日级内存稳定性。当前生产功能和限制见[本地语音转写](../../../../docs/perception.md#本地语音转写)。

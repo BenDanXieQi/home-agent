@@ -7,6 +7,7 @@ import { AV_CODEC_ID_PCM_S16LE } from "node-av/constants";
 import type { z } from "zod";
 import type { perceptionConfigSchema } from "../config";
 import type { encodedAudioSchema } from "./encoded-stream";
+import type { pcmSchema } from "./pcm";
 
 export function createAudioDecoder(options: {
   config: Pick<
@@ -26,7 +27,7 @@ export function createAudioDecoder(options: {
     >,
   ) => void;
   onPcm: (
-    samples: Int16Array,
+    samples: z.infer<typeof pcmSchema>,
     observedAt: number,
     receivedAt: number,
   ) => Promise<void>;

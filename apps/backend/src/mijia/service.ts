@@ -1078,6 +1078,7 @@ export class MijiaService {
     deviceId: string,
     channel: 1 | 2,
     signal: AbortSignal,
+    videoQuality?: Parameters<MediaSession["prepareAnalysis"]>[4],
   ) {
     if (
       !this.household?.ready() ||
@@ -1086,7 +1087,73 @@ export class MijiaService {
       this.committingCredentials
     )
       throw new MijiaError("stale_session");
-    return this.media.prepareAnalysis(revision, deviceId, channel, signal);
+    return this.media.prepareAnalysis(
+      revision,
+      deviceId,
+      channel,
+      signal,
+      videoQuality,
+    );
+  }
+
+  recordingAccess(revision: string, deviceId: string, channel: 1 | 2) {
+    const assertCurrent = () => {
+      if (
+        !this.household?.ready() ||
+        this.stopped ||
+        this.loggingOut ||
+        this.committingCredentials
+      )
+        throw new MijiaError("stale_session");
+      this.discovery.requireHome();
+      if (!this.discovery.find(deviceId))
+        throw new MijiaError("device_not_found");
+    };
+    assertCurrent();
+    const source = this.media.recordingAccess(revision, deviceId, channel);
+    const signal = AbortSignal.any([
+      source.signal,
+      this.observationScope.signal,
+      this.deviceReadSignal(deviceId),
+    ]);
+    return {
+      access: source.access,
+      signal,
+      assertCurrent: () => {
+        assertCurrent();
+        source.assertCurrent();
+      },
+    };
+  }
+
+  readRecordings(
+    revision: string,
+    deviceId: string,
+    channel: 1 | 2,
+    query: Parameters<MediaSession["readRecordings"]>[3],
+    signal: AbortSignal,
+  ) {
+    if (
+      !this.household?.ready() ||
+      this.stopped ||
+      this.loggingOut ||
+      this.committingCredentials
+    )
+      throw new MijiaError("stale_session");
+    this.discovery.requireHome();
+    if (!this.discovery.find(deviceId))
+      throw new MijiaError("device_not_found");
+    return this.media.readRecordings(
+      revision,
+      deviceId,
+      channel,
+      query,
+      signal,
+      AbortSignal.any([
+        this.observationScope.signal,
+        this.deviceReadSignal(deviceId),
+      ]),
+    );
   }
 
   reservePlayback(revision: string, deviceId: string, channel: 1 | 2) {

@@ -472,7 +472,16 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
  	"net"
  	"net/url"
  	"time"
-@@ -46,6 +47,7 @@
+@@ -33,6 +34,8 @@
+ 	WritePacket(hdr, payload []byte) error
+ 	RemoteAddr() net.Addr
+ 	SetDeadline(t time.Time) error
++	SetReadDeadline(t time.Time) error
++	SetWriteDeadline(t time.Time) error
+ 	Close() error
+ }
+ 
+@@ -46,6 +49,7 @@
  	query := u.Query()
  	key, err := crypto.CalcSharedKey(query.Get("device_public"), query.Get("client_private"))
  	if err != nil {
@@ -480,7 +489,7 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
  		return nil, err
  	}
  
-@@ -59,20 +61,36 @@
+@@ -59,26 +63,44 @@
  	case "tutk":
  		conn, err = tutk.Dial(u.Host, query.Get("uid"), "Miss", "client")
  	default:
@@ -511,6 +520,7 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
 -	return &Client{Conn: conn, key: key, model: model}, nil
 +	client := &Client{Conn: conn, key: key, model: model}
 +	client.startCommandLoop()
++	client.startRecordingReader()
 +	return client, nil
 +}
 +
@@ -525,7 +535,16 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
  }
  
  type Client struct {
-@@ -116,7 +134,7 @@
+ 	Conn
+-	key   []byte
+-	model string
++	key        []byte
++	model      string
++	recordings recordingReader
+ }
+ 
+ const (
+@@ -116,7 +138,7 @@
  	}
  
  	if !bytes.Contains(data, []byte(`"result":"success"`)) {
@@ -534,7 +553,7 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
  	}
  
  	return nil
-@@ -158,6 +176,22 @@
+@@ -158,6 +180,22 @@
  		)
  	}
  
@@ -557,7 +576,7 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
  	// 0 - auto, 1 - sd, 2 - hd, default - hd
  	switch quality {
  	case "", "hd":
-@@ -176,17 +210,7 @@
+@@ -176,17 +214,7 @@
  		quality = "0"
  	}
  
@@ -576,11 +595,18 @@ diff --git a/pkg/xiaomi/miss/client.go b/pkg/xiaomi/miss/client.go
  }
  
  func (c *Client) StopMedia() error {
+@@ -272,7 +300,6 @@
+ 	Sequence  uint32
+ 	Flags     uint32
+ 	Timestamp uint64 // msec
+-	//TimestampS uint32
+ 	//Reserved uint32
+ 	Payload []byte
+ }
 diff --git a/pkg/xiaomi/miss/cs2/conn.go b/pkg/xiaomi/miss/cs2/conn.go
-index 1bea07c..a37c889 100644
 --- a/pkg/xiaomi/miss/cs2/conn.go
 +++ b/pkg/xiaomi/miss/cs2/conn.go
-@@ -5,6 +5,7 @@ import (
+@@ -5,6 +5,7 @@
  	"bytes"
  	"encoding/binary"
  	"fmt"
@@ -588,7 +614,38 @@ index 1bea07c..a37c889 100644
  	"io"
  	"net"
  	"sync"
-@@ -63,6 +64,7 @@ const (
+@@ -21,10 +22,11 @@
+ 	_, isTCP := conn.(*tcpConn)
+ 
+ 	c := &Conn{
+-		Conn:  conn,
+-		isTCP: isTCP,
++		Conn:      conn,
++		isTCP:     isTCP,
++		rdtFailed: make(chan struct{}),
+ 		channels: [4]*dataChannel{
+-			newDataChannel(0, 10), nil, newDataChannel(250, 100), nil,
++			newDataChannel(0, 10), newRDTChannel(), newDataChannel(250, 100), nil,
+ 		},
+ 	}
+ 	go c.worker()
+@@ -35,9 +37,12 @@
+ 	net.Conn
+ 	isTCP bool
+ 
+-	err    error
+-	seqCh0 uint16
+-	seqCh3 uint16
++	err            error
++	seqCh0         uint16
++	seqCh3         uint16
++	seqCh1         uint16
++	rdtFailed      chan struct{}
++	rdtFailureOnce sync.Once
+ 
+ 	channels [4]*dataChannel
+ 
+@@ -63,6 +68,7 @@
  func handshake(host, transport string) (net.Conn, error) {
  	conn, err := newUDPConn(host, 32108)
  	if err != nil {
@@ -596,7 +653,7 @@ index 1bea07c..a37c889 100644
  		return nil, err
  	}
  
-@@ -73,6 +75,7 @@ func handshake(host, transport string) (net.Conn, error) {
+@@ -73,6 +79,7 @@
  		return res[1] == msgPunchPkt
  	})
  	if err != nil {
@@ -604,7 +661,7 @@ index 1bea07c..a37c889 100644
  		_ = conn.Close()
  		return nil, err
  	}
-@@ -90,6 +93,7 @@ func handshake(host, transport string) (net.Conn, error) {
+@@ -90,6 +97,7 @@
  		return res[1] == msgUDP || res[1] == msgTCP
  	})
  	if err != nil {
@@ -612,21 +669,30 @@ index 1bea07c..a37c889 100644
  		_ = conn.Close()
  		return nil, err
  	}
-@@ -99,9 +103,12 @@ func handshake(host, transport string) (net.Conn, error) {
+@@ -99,15 +107,19 @@
  	if res[1] == msgTCP {
  		_ = conn.Close()
  		//host := fmt.Sprintf("%d.%d.%d.%d:%d", b[31], b[30], b[29], b[28], uint16(b[27])<<8|uint16(b[26]))
 -		return newTCPConn(conn.RemoteAddr().String())
+-	}
+-
 +		tcp, err := newTCPConn(conn.RemoteAddr().String())
 +		diagnostic.Report("cs2_tcp", err)
 +		return tcp, err
- 	}
- 
++	}
++
 +	diagnostic.Report("cs2_udp", nil)
  	return conn, nil
  }
  
-@@ -122,6 +129,9 @@ func (c *Conn) worker() {
+ func (c *Conn) worker() {
+ 	defer func() {
+ 		c.channels[0].Close()
++		c.channels[1].Close()
+ 		c.channels[2].Close()
+ 	}()
+ 
+@@ -122,6 +134,9 @@
  			return
  		}
  
@@ -636,7 +702,7 @@ index 1bea07c..a37c889 100644
  		// 0  f1d0  magic
  		// 2  005d  size = total size + 4
  		// 4  d1    magic
-@@ -129,7 +139,13 @@ func (c *Conn) worker() {
+@@ -129,7 +144,13 @@
  		// 6  0000  seq
  		switch buf[1] {
  		case msgDrw:
@@ -650,7 +716,23 @@ index 1bea07c..a37c889 100644
  			channel := c.channels[ch]
  
  			if c.isTCP {
-@@ -168,7 +184,7 @@ func (c *Conn) worker() {
+@@ -156,6 +177,10 @@
+ 			}
+ 
+ 			if err != nil {
++				if ch == 1 {
++					c.failRDT()
++					continue
++				}
+ 				c.err = fmt.Errorf("%s: %w", "cs2", err)
+ 				return
+ 			}
+@@ -164,11 +189,11 @@
+ 			_, _ = c.Conn.Write([]byte{magic, msgPong, 0, 0})
+ 		case msgPong, msgP2PRdyUDP, msgP2PRdyTCP, msgClose: // skip it
+ 		case msgDrwAck: // only for UDP
+-			if c.cmdAck != nil {
++			if n >= 8 && buf[5] == 0 && c.cmdAck != nil {
  				c.cmdAck()
  			}
  		default:
@@ -659,7 +741,7 @@ index 1bea07c..a37c889 100644
  		}
  	}
  }
-@@ -324,7 +340,7 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
+@@ -324,7 +349,7 @@
  			return 0, err
  		}
  
@@ -668,7 +750,7 @@ index 1bea07c..a37c889 100644
  			//log.Printf("<- %x", b[:n])
  			return
  		}
-@@ -341,9 +357,17 @@ func (c *udpConn) RemoteAddr() net.Addr {
+@@ -341,9 +366,17 @@
  }
  
  func (c *udpConn) WriteUntil(req []byte, ok func(res []byte) bool) ([]byte, error) {
@@ -687,24 +769,103 @@ index 1bea07c..a37c889 100644
  			t.Reset(time.Second)
  		}
  	})
-@@ -354,10 +378,15 @@ func (c *udpConn) WriteUntil(req []byte, ok func(res []byte) bool) ([]byte, erro
+@@ -354,10 +387,15 @@
  	for {
  		n, addr, err := c.UDPConn.ReadFromUDP(buf)
  		if err != nil {
 -			return nil, err
+-		}
+-
+-		if string(addr.IP) != string(c.addr.IP) || n < 16 {
 +			select {
 +			case sendError := <-writeErrors:
 +				return nil, sendError
 +			default:
 +				return nil, err
 +			}
- 		}
- 
--		if string(addr.IP) != string(c.addr.IP) || n < 16 {
++		}
++
 +		if !addr.IP.Equal(c.addr.IP) || n < 16 {
  			continue // skip messages from another IP
  		}
  
+@@ -423,38 +461,63 @@
+ 	pushBuf  map[uint16][]byte
+ 	pushSize int
+ 
+-	waitData []byte
+-	waitSize int
+-	popBuf   chan []byte
++	waitData       []byte
++	waitSize       int
++	popBuf         chan []byte
++	maxMessageSize int
++	maxQueuedBytes int64
++	queuedBytes    atomic.Int64
++	discard        bool
+ }
+ 
+ func (c *dataChannel) Push(b []byte) error {
++	if c.discard {
++		return nil
++	}
+ 	c.waitData = append(c.waitData, b...)
+ 
+ 	for len(c.waitData) > 4 {
+ 		// Every new data starts with size. There can be several data inside one packet.
+ 		if c.waitSize == 0 {
+ 			c.waitSize = int(binary.BigEndian.Uint32(c.waitData))
++			if c.maxMessageSize > 0 && (c.waitSize < 1 || c.waitSize > c.maxMessageSize) {
++				return ErrRDTUnavailable
++			}
+ 			c.waitData = c.waitData[4:]
+ 		}
+ 		if c.waitSize > len(c.waitData) {
+ 			break
+ 		}
+ 
++		if c.maxQueuedBytes > 0 && c.queuedBytes.Add(int64(c.waitSize)) > c.maxQueuedBytes {
++			c.queuedBytes.Add(-int64(c.waitSize))
++			return ErrRDTUnavailable
++		}
+ 		select {
+ 		case c.popBuf <- c.waitData[:c.waitSize]:
+ 		default:
++			if c.maxQueuedBytes > 0 {
++				c.queuedBytes.Add(-int64(c.waitSize))
++			}
+ 			return fmt.Errorf("pop buffer is full")
+ 		}
+ 
+ 		c.waitData = c.waitData[c.waitSize:]
+ 		c.waitSize = 0
+ 	}
++	if c.maxMessageSize > 0 && len(c.waitData) == 0 {
++		// A completed RDT chunk can be a whole recording. An empty subslice
++		// would retain its large allocation until another packet arrives.
++		c.waitData = nil
++	}
+ 	return nil
+ }
+ 
+ func (c *dataChannel) Pop() ([]byte, bool) {
+ 	data, ok := <-c.popBuf
++	if ok && c.maxQueuedBytes > 0 {
++		c.queuedBytes.Add(-int64(len(data)))
++	}
+ 	return data, ok
+ }
+ 
+@@ -466,6 +529,9 @@
+ // Returns 0 if seq was saved or processed earlier.
+ // Returns -1 if seq could not be saved (buffer full or disabled).
+ func (c *dataChannel) PushSeq(seq uint16, data []byte) (int, error) {
++	if c.discard {
++		return 1, nil
++	}
+ 	diff := int16(seq - c.waitSeq)
+ 	// Check if this is seq from the future.
+ 	if diff > 0 {
 diff --git a/pkg/xiaomi/miss/producer.go b/pkg/xiaomi/miss/producer.go
 --- a/pkg/xiaomi/miss/producer.go
 +++ b/pkg/xiaomi/miss/producer.go
@@ -781,15 +942,21 @@ diff --git a/pkg/xiaomi/miss/producer.go b/pkg/xiaomi/miss/producer.go
  			break
  		}
  	}
-@@ -124,8 +133,6 @@
- 
+@@ -125,13 +134,11 @@
  	return medias, nil
  }
--
--const timestamp40ms = 48000 * 0.040
  
+-const timestamp40ms = 48000 * 0.040
+-
  func (p *Producer) Start() error {
  	var audioTS uint32
+ 
+ 	for {
+-		_ = p.client.SetDeadline(time.Now().Add(10 * time.Second))
++		_ = p.client.SetReadDeadline(time.Now().Add(10 * time.Second))
+ 		pkt, err := p.client.ReadPacket()
+ 		if err != nil {
+ 			return err
 @@ -157,31 +164,22 @@
  			} else {
  				name = core.CodecH265

@@ -1,3 +1,5 @@
+import { createSpeechInbox } from "./conversation/speech-inbox";
+import { createSpeechDialogueClient } from "./conversation/agent-client";
 import { createMemberRepository } from "./household/members/repository";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
@@ -31,6 +33,9 @@ try {
   );
 }
 
+const readAgentUrl = async () =>
+  (await connectionStore.read()).services.agent.url;
+
 const database = environment.DATABASE_URL
   ? createDatabase(environment.DATABASE_URL)
   : undefined;
@@ -45,9 +50,7 @@ const credentialStore = database
 const mijiaService = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
-  resetHomeData: createAgentHouseholdReset(
-    async () => (await connectionStore.read()).services.agent.url,
-  ),
+  resetHomeData: createAgentHouseholdReset(readAgentUrl),
   homeSelectionStore: database
     ? createHomeSelectionStore(database.db)
     : undefined,
@@ -79,7 +82,12 @@ const deviceLogs = new DevicePushLogs(
 mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
+const speechInbox = createSpeechInbox({
+  instanceId: crypto.randomUUID(),
+  analyze: createSpeechDialogueClient(readAgentUrl),
+});
 const perception = createPerceptionService({
+  speechInbox,
   configPath: resolvePath(
     import.meta.dir,
     "../../..",
@@ -97,17 +105,24 @@ const { createRoomAnalysisClient } =
   await import("./room-analysis/agent-client");
 const roomAnalysis = new RoomAnalysisService(
   household,
-  createRoomAnalysisClient(
-    async () => (await connectionStore.read()).services.agent.url,
-  ),
+  createRoomAnalysisClient(readAgentUrl),
 );
 const app = createApp({
+  speechInbox,
   memberRepository: database ? createMemberRepository(database.db) : undefined,
   contextRepository: database
     ? createContextRepository(database.db)
     : undefined,
   perception,
   staticRoot: join(import.meta.dir, "public"),
+  recordings: {
+    executable: environment.PERCEPTION_FFMPEG_PATH,
+    directory: resolvePath(
+      import.meta.dir,
+      "../../..",
+      "data/recording-playback",
+    ),
+  },
   environment,
   connectionStore,
   household,
@@ -115,7 +130,7 @@ const app = createApp({
   deviceLogs,
   roomAnalysis,
   shutdownSignal: shutdown.signal,
-  readAgentUrl: async () => (await connectionStore.read()).services.agent.url,
+  readAgentUrl,
 });
 const server = Bun.serve({
   hostname: environment.BACKEND_HOST,
@@ -136,6 +151,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           Promise.all([
             server.stop(),
             perception.close(),
+            app.closeRecordings(),
+            speechInbox.close(),
             deviceLogs.stop("后端停止", "interrupted"),
             household.close().catch(() => {
               console.warn(

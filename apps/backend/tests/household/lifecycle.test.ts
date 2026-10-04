@@ -120,7 +120,7 @@ test("a throwing subscriber cannot prevent first binding or later subscribers", 
   expect(warning).toHaveBeenCalled();
 });
 
-test("home access loss keeps the binding and cannot reopen setup", async () => {
+test("home access loss keeps the saved binding without choosing another home", async () => {
   const fixture = await runningHousehold();
   fixtures.push(fixture);
   const epoch = fixture.runtime.epoch;
@@ -142,21 +142,112 @@ test("home access loss keeps the binding and cannot reopen setup", async () => {
     homes: { status: "unavailable" },
   });
   expect(snapshot.projection.device).toEqual({});
+  expect(fixture.runtime.ready).toBe(false);
+  expect(fixture.homes.write).not.toHaveBeenCalled();
+  expect(await fixture.homes.read(fixture.service.identity()!)).toEqual({
+    homeId: "home-a",
+  });
   await expect(
-    fixture.runtime.bindHome(snapshot.scope_epoch, "home-b"),
-  ).rejects.toMatchObject({ reason: "binding_conflict" });
+    fixture.service.readProperties(
+      [{ did: "device-a", siid: 2, piid: 1 }],
+      new AbortController().signal,
+    ),
+  ).rejects.toMatchObject({ reason: "devices_failed" });
 });
 
-test("normal operation rejects another home without clearing devices or advancing scope", async () => {
-  const fixture = await runningHousehold();
+test("switching homes waits for cleanup and durable binding before replacing device access", async () => {
+  const cleanupEntered = deferred();
+  const cleanupFinished = deferred();
+  const saveEntered = deferred();
+  const saveAllowed = deferred();
+  restore.push(
+    () => cleanupFinished.resolve(),
+    () => saveAllowed.resolve(),
+  );
+  const fixture = await runningHousehold(householdCatalog(), {
+    homeId: "home-a",
+    resetHomeData: async (commit) => {
+      cleanupEntered.resolve();
+      await cleanupFinished.promise;
+      await commit(() => {});
+    },
+  });
   fixtures.push(fixture);
   const before = fixture.runtime.snapshot();
+  const persist = fixture.homes.write.getMockImplementation()!;
+  fixture.homes.write.mockImplementationOnce(async (...args) => {
+    saveEntered.resolve();
+    await saveAllowed.promise;
+    await persist(...args);
+  });
+  await expect(
+    fixture.runtime.bindHome(before.scope_epoch, "home-a"),
+  ).rejects.toMatchObject({ reason: "binding_conflict" });
+  const switching = fixture.runtime.bindHome(before.scope_epoch, "home-b");
+  await cleanupEntered.promise;
+  expect(fixture.homes.write).not.toHaveBeenCalled();
+  expect(fixture.runtime.epoch).toBe(before.scope_epoch);
+  expect(
+    Object.values(fixture.runtime.snapshot().projection.device)
+      .map((device) => device.id)
+      .toSorted(),
+  ).toEqual(
+    Object.values(before.projection.device)
+      .map((device) => device.id)
+      .toSorted(),
+  );
   await expect(
     fixture.runtime.bindHome(before.scope_epoch, "home-b"),
-  ).rejects.toMatchObject({ reason: "binding_conflict" });
-  expect(fixture.runtime.snapshot()).toEqual(before);
-  expect(fixture.homes.write).not.toHaveBeenCalled();
-  expect(fixture.runtime.setupHomes()).toEqual({ items: [] });
+  ).rejects.toMatchObject({ reason: "invalid_state" });
+
+  cleanupFinished.resolve();
+  await saveEntered.promise;
+  expect(fixture.runtime.epoch).toBe(before.scope_epoch);
+  expect(fixture.runtime.ready).toBe(true);
+  expect(await fixture.homes.read(fixture.service.identity()!)).toEqual({
+    homeId: "home-a",
+  });
+  expect(
+    await fixture.service.readProperties(
+      [{ did: "device-a", siid: 2, piid: 1 }],
+      new AbortController().signal,
+    ),
+  ).toMatchObject([{ status: "success" }]);
+  saveAllowed.resolve();
+  const receipt = await switching;
+
+  expect(receipt.state_version.scope_epoch).not.toBe(before.scope_epoch);
+  expect(fixture.runtime.epoch).toBe(receipt.state_version.scope_epoch);
+  expect(await fixture.homes.read(fixture.service.identity()!)).toEqual({
+    homeId: "home-b",
+  });
+  await expect(
+    fixture.runtime.bindHome(before.scope_epoch, "home-a"),
+  ).rejects.toMatchObject({ reason: "stale_session" });
+  await eventually(
+    () =>
+      fixture.runtime.ready &&
+      Object.values(fixture.runtime.snapshot().projection.device).some(
+        (device) => device.id === "device-b" && device.spec_status === "ready",
+      ),
+  );
+  expect(
+    Object.values(fixture.runtime.snapshot().projection.device).map(
+      (device) => device.id,
+    ),
+  ).toEqual(["device-b"]);
+  await expect(
+    fixture.service.readProperties(
+      [{ did: "device-a", siid: 2, piid: 1 }],
+      new AbortController().signal,
+    ),
+  ).rejects.toMatchObject({ reason: "device_not_found" });
+  expect(
+    await fixture.service.readProperties(
+      [{ did: "device-b", siid: 2, piid: 1 }],
+      new AbortController().signal,
+    ),
+  ).toMatchObject([{ status: "success" }]);
 });
 
 test("first directory cache failure does not block confirmed device access", async () => {

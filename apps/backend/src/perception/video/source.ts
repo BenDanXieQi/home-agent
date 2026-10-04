@@ -5,6 +5,7 @@ import type { runSchema, observationSchema } from "../observations";
 import { createFfmpegDecoder } from "../media/ffmpeg-decoder";
 import { createLatestFrame, type VideoFrame } from "../media/latest-frame";
 import { createVideoMetrics } from "./metrics";
+import type { createWindowCapture } from "../window/capture";
 
 export function createVideoSource(options: {
   run: z.infer<typeof runSchema>;
@@ -17,6 +18,7 @@ export function createVideoSource(options: {
     | "silenceTimeoutMs"
     | "onMedia"
   >;
+  capture: ReturnType<ReturnType<typeof createWindowCapture>>;
   ready: () => void;
   media: Parameters<typeof createFfmpegDecoder>[0]["onMedia"];
   failure: (error: unknown) => void;
@@ -51,12 +53,11 @@ export function createVideoSource(options: {
             actions: [
               assign(({ context }) => ({ sequence: context.sequence + 1 })),
               ({ context, event }) => {
+                const frame = { ...event.frame, sequence: context.sequence };
+                options.capture.accept(frame);
                 metrics.values.complete++;
                 metrics.values.sampled++;
-                if (
-                  slot.replace({ ...event.frame, sequence: context.sequence })
-                )
-                  metrics.values.replaced++;
+                if (slot.replace(frame)) metrics.values.replaced++;
                 metrics.values.pending = 1;
                 if (context.inFlight === null) options.ready();
               },
@@ -100,6 +101,7 @@ export function createVideoSource(options: {
   decoder.completed.catch((error: unknown) => {
     if (!actor.getSnapshot().matches("reading")) return;
     actor.send({ type: "FAIL" });
+    options.capture.stop();
     if (slot.clear()) metrics.values.discarded++;
     metrics.values.pending = 0;
     options.failure(error);
@@ -166,6 +168,7 @@ export function createVideoSource(options: {
     },
     close() {
       actor.send({ type: "STOP" });
+      options.capture.stop();
       if (slot.clear()) metrics.values.discarded++;
       metrics.values.pending = 0;
       closing ??= decoder.close().then(() => {

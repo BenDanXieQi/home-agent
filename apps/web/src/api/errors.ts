@@ -9,10 +9,15 @@ export type ClientErrorCode =
 
 export class RequestError extends Error {
   readonly details: ApiError | { code: ClientErrorCode };
+  readonly status;
 
-  constructor(details: ApiError | { code: ClientErrorCode }) {
+  constructor(
+    details: ApiError | { code: ClientErrorCode },
+    status?: Response["status"],
+  ) {
     super("message" in details ? details.message : details.code);
     this.name = "RequestError";
     this.details = details;
+    this.status = status;
   }
 }
