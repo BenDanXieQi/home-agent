@@ -1,35 +1,53 @@
 import type { z } from "zod";
 import type {
+  identityReferenceSnapshotSchema,
+  identityMatchProvenanceSchema,
   trackingObservationSchema,
   identityObservationSchema,
 } from "@home-agent/api/contracts";
 import { identityLimits, type identityConfigSchema } from "./config";
-import type { createReferences } from "./references";
+import { createReferences } from "./references";
 import type { identityEvidenceSchema } from "./evidence";
 
 function sampleEvidence(
   sample: z.infer<typeof identityEvidenceSchema>["samples"][number],
   references: ReturnType<typeof createReferences> | null,
+  snapshot: z.infer<typeof identityReferenceSnapshotSchema>,
+  provenance: z.infer<typeof identityMatchProvenanceSchema>,
   clock: number,
   at: number,
 ) {
-  const scores = references?.rank(sample.feature) ?? [];
+  const scores = references?.rank(sample.feature, sample.className) ?? [];
   const best = scores[0];
   const margin = best ? best.score - (scores[1]?.score ?? -1) : null;
   const label =
     best &&
     references &&
-    best.score >= references.threshold &&
+    best.score >= best.threshold &&
     margin !== null &&
-    margin > references.margin
+    margin > best.margin &&
+    snapshot.members.some(
+      (member) => member.memberId === best.label && member.enabled,
+    )
       ? best.label
       : null;
   return {
     clock,
     at,
     cropSha256: sample.cropSha256,
+    provenance,
     scores,
     label,
+    reason:
+      best &&
+      best.score >= best.threshold &&
+      margin !== null &&
+      margin > best.margin &&
+      !snapshot.members.some(
+        (member) => member.memberId === best.label && member.enabled,
+      )
+        ? "reference_disabled"
+        : "below_identity_threshold",
     sharpness: sample.sharpness,
     detectionScore: sample.detectionScore,
   };
@@ -52,9 +70,10 @@ function newTrack(trackId: number, clock: number, at: number) {
 // Owns only local identity evidence. Tracking owns geometry and track lifetimes.
 export function createIdentityAnalysis(
   config: z.infer<typeof identityConfigSchema>,
-  initialReferences: ReturnType<typeof createReferences> | null,
+  initialReferences: z.infer<typeof identityReferenceSnapshotSchema> | null,
 ) {
-  let references = initialReferences;
+  let snapshot = initialReferences;
+  let references = snapshot ? createReferences(snapshot) : null;
   const tracks = new Map<number, ReturnType<typeof newTrack>>();
   const recent: {
     clock: number;
@@ -120,14 +139,14 @@ export function createIdentityAnalysis(
       reason: !references
         ? "no_reference_gallery"
         : track.conflict
-          ? "conflicting_face_evidence"
+          ? "conflicting_identity_evidence"
           : track.confirmedLabel
-            ? "repeated_face_support"
+            ? "repeated_identity_support"
             : label
               ? "insufficient_support"
               : latest
-                ? "below_identity_threshold"
-                : "no_fresh_face",
+                ? latest.reason
+                : "no_fresh_identity_sample",
       samples: track.samples.length,
       supportingSamples: supporting.length,
       score: best?.score ?? null,
@@ -136,8 +155,10 @@ export function createIdentityAnalysis(
       lastSeenAt: track.lastSeenAt,
       lastEvidenceAt: latest?.at ?? null,
       evidence: track.samples.map((sample) => ({
+        provenance: sample.provenance,
         observedAt: sample.at,
         label: sample.label,
+        bestMemberId: sample.scores[0]?.label ?? null,
         score: sample.scores[0]?.score ?? null,
         margin: sample.scores[0]
           ? sample.scores[0].score - (sample.scores[1]?.score ?? -1)
@@ -150,8 +171,11 @@ export function createIdentityAnalysis(
     };
   }
   return {
-    replaceReferences(next: ReturnType<typeof createReferences> | null) {
-      references = next;
+    replaceReferences(
+      next: z.infer<typeof identityReferenceSnapshotSchema> | null,
+    ) {
+      snapshot = next;
+      references = next ? createReferences(next) : null;
       for (const track of tracks.values()) {
         track.samples = [];
         track.confirmedLabel = null;
@@ -167,19 +191,30 @@ export function createIdentityAnalysis(
     ) {
       prune(clock);
       statistics.frames++;
-      const humanIds = new Set(
+      const activeIds = new Set(
         input
-          .filter((track) => track.className === "human")
+          .filter((track) =>
+            snapshot?.members.some(
+              (member) =>
+                member.className === track.className && member.enabled,
+            ),
+          )
           .map((track) => track.trackId),
       );
       for (const [id, track] of tracks) {
-        if (!humanIds.has(id)) {
+        if (!activeIds.has(id)) {
           recent.push({ clock, value: { ...describe(track), endedAt: at } });
           tracks.delete(id);
         }
       }
       for (const inputTrack of input) {
-        if (inputTrack.className !== "human" || inputTrack.state !== "measured")
+        if (
+          !snapshot?.members.some(
+            (member) =>
+              member.className === inputTrack.className && member.enabled,
+          ) ||
+          inputTrack.state !== "measured"
+        )
           continue;
         let track = tracks.get(inputTrack.trackId);
         if (!track && tracks.size < identityLimits.tracksPerRun) {
@@ -193,7 +228,10 @@ export function createIdentityAnalysis(
       return input
         .filter(
           (track) =>
-            track.className === "human" &&
+            snapshot?.members.some(
+              (member) =>
+                member.className === track.className && member.enabled,
+            ) &&
             track.state === "measured" &&
             track.measuredBox &&
             track.hits >= 2,
@@ -208,7 +246,7 @@ export function createIdentityAnalysis(
             tracks.get(a.trackId)!.attemptedAt -
             tracks.get(b.trackId)!.attemptedAt,
         )
-        .slice(0, identityLimits.facesPerFrame)
+        .slice(0, identityLimits.targetsPerFrame)
         .map((track) => track.trackId);
     },
     admitted(ids: number[], clock: number) {
@@ -225,14 +263,24 @@ export function createIdentityAnalysis(
     },
     accept(
       result: z.infer<typeof identityEvidenceSchema>,
+      observation: z.infer<typeof trackingObservationSchema>,
       clock: number,
       at: number,
     ) {
+      if (!snapshot) return;
       prune(clock);
       statistics.qualityRejected += result.qualityRejected;
       for (const sample of result.samples) {
         const track = tracks.get(sample.trackId);
-        if (!track) continue;
+        if (
+          !track ||
+          !observation.tracks.some(
+            (target) =>
+              target.trackId === sample.trackId &&
+              target.className === sample.className,
+          )
+        )
+          continue;
         if (
           track.samples.some(
             (previous) => previous.cropSha256 === sample.cropSha256,
@@ -241,7 +289,27 @@ export function createIdentityAnalysis(
           statistics.duplicateSamples++;
           continue;
         }
-        const evidence = sampleEvidence(sample, references, clock, at);
+        const provenance = {
+          contentVersion: snapshot.contentVersion,
+          eligibilityVersion: snapshot.eligibilityVersion,
+          matchingVersion: snapshot.matchingVersion,
+          modelVersion: snapshot.modelVersion,
+          processingVersion: snapshot.processingVersion,
+          evidenceKey: `${observation.run.runId}:${observation.mediaTime.generation}:${observation.mediaTime.rtpTimestamp}:${sample.trackId}`,
+          sourceRunId: observation.run.runId,
+          sequence: observation.sequence,
+          mediaGeneration: observation.mediaTime.generation,
+          rtpTimestamp: observation.mediaTime.rtpTimestamp,
+          trackId: sample.trackId,
+        };
+        const evidence = sampleEvidence(
+          sample,
+          references,
+          snapshot,
+          provenance,
+          clock,
+          at,
+        );
         statistics.acceptedSamples++;
         const previousLabel =
           track.confirmedLabel ??

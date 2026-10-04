@@ -25,10 +25,12 @@ export function WindowMedia({
   window,
   scope,
   active,
+  autoPlay = false,
 }: {
   window: PerceptionWindow;
   scope: string;
   active: boolean;
+  autoPlay?: boolean;
 }) {
   const canGenerate = useWindowInputState(window) === "available";
   const [representation, setRepresentation] = useState<
@@ -50,6 +52,7 @@ export function WindowMedia({
         selection={selection}
         canGenerate={canGenerate}
         active={active}
+        autoPlay={autoPlay}
       />
       <div className="flex flex-wrap items-center gap-3 px-4">
         <label className="flex items-center gap-2 whitespace-nowrap text-sm">
@@ -104,12 +107,14 @@ function MediaRequest({
   selection,
   canGenerate,
   active,
+  autoPlay,
 }: {
   canGenerate: boolean;
   scope: string;
   id: string;
   selection: WindowMediaSelection;
   active: boolean;
+  autoPlay: boolean;
 }) {
   const { query, mutation, error } = useWindowMedia(
     scope,
@@ -136,6 +141,7 @@ function MediaRequest({
             mediaId={media.mediaId}
             available={state === "ready"}
             active={active}
+            autoPlay={autoPlay}
           />
         ) : (
           <span className="text-sm">

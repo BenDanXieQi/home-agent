@@ -1,5 +1,8 @@
 import { createHouseholdQueries } from "./household/queries/service";
 import { createHouseholdQueryRoutes } from "./household/queries/routes";
+import { createIdentityRoutes } from "./household/identity/routes";
+import type { createReferenceEnrollment } from "./household/identity/enrollment";
+import type { createIdentityReferences } from "./household/identity/references";
 import { createRecordingService } from "./mijia/recordings/service";
 import { createRecordingRoutes } from "./mijia/recordings/routes";
 import { createSpeechRoutes } from "./conversation/routes";
@@ -30,6 +33,8 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  identityEnrollment?: ReturnType<typeof createReferenceEnrollment> | undefined;
+  identityReferences?: ReturnType<typeof createIdentityReferences> | undefined;
   speechInbox: ReturnType<typeof createSpeechInbox>;
   perception: ReturnType<typeof createPerceptionService>;
   staticRoot?: string;
@@ -50,6 +55,8 @@ type AppDependencies = {
 };
 
 export function createApp({
+  identityEnrollment,
+  identityReferences,
   speechInbox,
   perception,
   staticRoot,
@@ -106,6 +113,17 @@ export function createApp({
         environment.BACKEND_PORT,
         createHouseholdQueries(household, memberRepository),
       ),
+    )
+    .route(
+      "/api/household-members/references",
+      createIdentityRoutes({
+        port: environment.BACKEND_PORT,
+        household,
+        enrollment: identityEnrollment,
+        references: identityReferences,
+        shutdown: shutdownSignal,
+        timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+      }),
     )
     .route(
       "/api/household-members",

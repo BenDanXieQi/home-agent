@@ -43,6 +43,8 @@ bun run web:stop         # 只停止本项目入口，不停止其他服务
 
 入口由 `scripts/web-entry.ts` 使用 Caddy 原生命令管理。`deploy/web/Caddyfile` 仅绑定回环地址，保留浏览器 Host／Origin；`/api/*` 直接转发至 backend。开发模式通过 `development.caddy` 转发页面及 WebSocket 热更新到 Vite；生产模式通过 `production.caddy` 提供 `apps/backend/dist/public`、预压缩文件和前端路由入口，API 不进入页面回退。开发及生产共用本地证书与管理实例，重载不会启动第二个入口。
 
+`bun run stop` 先停止受管理的开发应用，让 backend 结束持续推送，再停止 Caddy，最后停止 go2rtc 和数据库。Caddy 停止或配置切换时最多等待现有 HTTP 请求 5 秒，随后关闭尚未结束的连接，避免 SSE 长连接阻止退出。停止和重载命令最多等待 15 秒，超过后终止命令并报错；这不代表 Caddy 服务本身已退出。管理接口状态查询最多等待 10 秒；超时会报错，不把仍占用管理 socket 的进程当作未运行，也不自动启动第二个入口。
+
 证书与私钥、管理 socket（本机进程通信端点）及运行日志保存在 Git 忽略的 `config/runtime/caddy/`，目录只允许当前用户访问；管理接口不开放 TCP 端口。Caddy 使用[自动 HTTPS](https://caddyserver.com/docs/automatic-https)签发和续期 `localhost` 证书，首次信任由显式的 `web:trust` 命令完成，不跳过浏览器证书检查。不要复制私钥或把该目录提交 Git；删除证书存储后需要重新信任新根证书。开发终端退出后入口仍运行，可用 `web:stop` 或 `bun run stop` 关闭。
 
 浏览器入口支持 HTTP/2，内部转发使用 HTTP/1.1；SSE 沿用 Caddy 对 `text/event-stream` 的[即时刷新](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming)，不设置响应缓冲或 `flush_interval -1`，客户端离页时取消上游读取。WebRTC 媒体仍直接连接本机 go2rtc，HTTPS 入口只代理播放信令。backend 验证真实 TCP 对端为回环地址，单独接纳 `localhost:8443` Host 与 `https://localhost:8443` Origin，不信任转发头；Agent 的访问范围不变。

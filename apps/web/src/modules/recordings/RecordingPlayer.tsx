@@ -12,26 +12,25 @@ import {
 
 export function RecordingPlayer({
   playback,
+  activityAt,
+  autoPlay = false,
 }: {
   playback: ReturnType<typeof useRecordingPlayback>;
+  activityAt?: number | undefined;
+  autoPlay?: boolean;
 }) {
   const { state, request, expired } = playback;
   if (!request) return null;
   return (
     <section aria-label="SD 录像回看" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="font-medium">SD 录像回看</h3>
-        <Button size="small" onClick={playback.cancel}>
-          {playback.pending || state?.state === "preparing"
-            ? "取消准备"
-            : "关闭录像"}
-        </Button>
-      </div>
+      <h3 className="font-medium">SD 录像回看</h3>
       {!expired && state?.state === "ready" ? (
         <ReadyRecording
           key={state.id}
           resource={state}
           refresh={playback.refresh}
+          activityAt={activityAt}
+          autoPlay={autoPlay}
         />
       ) : (
         <RecordingSurface>
@@ -44,7 +43,7 @@ export function RecordingPlayer({
                   ? recordingUnavailableText[state.reason]
                   : playback.error
                     ? "录像暂时无法读取，请重试。"
-                    : "正在从摄像头准备录像，可随时取消。"}
+                    : "正在从摄像头准备录像…"}
           </output>
         </RecordingSurface>
       )}
@@ -78,13 +77,30 @@ function RecordingSurface({ children }: { children: ReactNode }) {
 function ReadyRecording({
   resource,
   refresh,
+  activityAt,
+  autoPlay,
 }: {
   resource: Extract<RecordingPlaybackState, { state: "ready" }>;
+  activityAt?: number | undefined;
+  autoPlay: boolean;
   refresh: ReturnType<typeof useRecordingPlayback>["refresh"];
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const alignment = resource.alignment;
+  const activitySegment =
+    activityAt === undefined
+      ? undefined
+      : resource.segments.find(
+          (item) => item.startAt <= activityAt && activityAt < item.endAt,
+        );
+  const activityOffset =
+    activitySegment && activityAt !== undefined
+      ? activitySegment.mediaStartMs +
+        ((activityAt - activitySegment.startAt) *
+          (activitySegment.mediaEndMs - activitySegment.mediaStartMs)) /
+          (activitySegment.endAt - activitySegment.startAt)
+      : undefined;
   useEffect(() => {
     const node = video.current;
     if (!node) return undefined;
@@ -119,12 +135,16 @@ function ReadyRecording({
         <video
           ref={video}
           controls
+          autoPlay={autoPlay}
+          muted={autoPlay}
           playsInline
           preload="metadata"
           aria-label="摄像头 SD 录像"
           className="size-full object-contain"
           onLoadedMetadata={() => {
-            if (alignment.type === "confirmed") seek(alignment.seekOffsetMs);
+            if (activityOffset !== undefined) seek(activityOffset);
+            else if (alignment.type === "confirmed")
+              seek(alignment.seekOffsetMs);
           }}
           onError={() => {
             setFailure(
@@ -142,7 +162,13 @@ function ReadyRecording({
         {" · "}本次回看保留至 {recordingTime(resource.expiresAt)}
       </p>
       {failure ? <Notice tone="error">{failure}</Notice> : null}
-      {alignment.type === "confirmed" ? (
+      {activityAt !== undefined ? (
+        <p className="text-xs text-muted">
+          {activityOffset !== undefined
+            ? "已按摄像头录像时间定位到活动时刻；画面与识别采样尚未经逐帧核对。"
+            : "录像未覆盖活动时间，请返回成员重新查看。"}
+        </p>
+      ) : alignment.type === "confirmed" ? (
         <div className="space-y-2">
           <p className="text-xs text-muted">
             事件位置已对齐。 对齐误差范围 ±{Math.ceil(alignment.uncertaintyMs)}{" "}

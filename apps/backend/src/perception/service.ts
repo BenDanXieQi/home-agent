@@ -1,3 +1,8 @@
+import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
+import type { createIdentityMatching } from "../household/identity/matching";
+import { identityProcessingVersions } from "./identity/processing-version";
+import type { z } from "zod";
+import type { enrollmentCommandSchema } from "./identity/enrollment-protocol";
 import { dirname, join } from "node:path";
 import { createWindowStore } from "./window/store";
 import { createWindowMedia } from "./media/window-media";
@@ -15,6 +20,12 @@ import { createObservationStore } from "./observation-store";
 
 // Capture belongs to the backend; browser viewing and freezing do not own its lifetime.
 export function createPerceptionService(options: {
+  identityReferences?:
+    | Pick<
+        ReturnType<typeof createIdentityMatching>,
+        "configure" | "snapshot" | "subscribe" | "associate"
+      >
+    | undefined;
   configPath: string;
   executable: string;
   sources: PerceptionSources;
@@ -47,6 +58,7 @@ export function createPerceptionService(options: {
     | undefined;
   let closing: Promise<void> | undefined;
   let configRead = false;
+  let identityConfigured = false;
   let configurationError: unknown;
   let computeId: number | undefined;
   const listeners = new Set<() => void>();
@@ -83,6 +95,41 @@ export function createPerceptionService(options: {
     options.executable,
     join(dirname(options.configPath), "runtime", "perception-clips"),
   );
+  let referenceSnapshot = options.identityReferences?.snapshot() ?? null;
+  let referenceDelivery: Promise<void> | undefined;
+  let deliveredReferences = "";
+  function referenceVersion(value: typeof referenceSnapshot) {
+    return value
+      ? JSON.stringify(identityReferenceVersionsSchema.parse(value))
+      : "null";
+  }
+  function syncIdentityReferences() {
+    const compute = pool;
+    if (!compute || compute.getStatus().status !== "ready" || referenceDelivery)
+      return;
+    const key = `${compute.getStatus().processId}:${referenceVersion(referenceSnapshot)}`;
+    if (key === deliveredReferences) return;
+    const next = referenceSnapshot;
+    referenceDelivery = compute
+      .identityReferences(next)
+      .then(() => {
+        deliveredReferences = key;
+      })
+      .catch((cause) => {
+        console.error("Identity reference delivery failed", cause);
+      })
+      .finally(() => {
+        referenceDelivery = undefined;
+      });
+  }
+  const unsubscribeReferences = options.identityReferences?.subscribe(() => {
+    const previousVersion = referenceVersion(referenceSnapshot);
+    referenceSnapshot = options.identityReferences?.snapshot() ?? null;
+    if (previousVersion !== referenceVersion(referenceSnapshot))
+      store.invalidateIdentity();
+    else changed();
+    syncIdentityReferences();
+  });
   const unsubscribeWindows = windows.subscribe(media.capture);
   const audio = createAudioService({
     retainSpeech(observation) {
@@ -128,6 +175,7 @@ export function createPerceptionService(options: {
   }
   function reconcile() {
     if (stopped) return;
+    syncIdentityReferences();
     windows.tick(Date.now());
     media.prune();
     const selected =
@@ -269,6 +317,15 @@ export function createPerceptionService(options: {
       pool = created;
       created.subscribeStatus(reconcile);
       created.subscribeVideo((event) => {
+        if (event.event === "identity" || event.event === "identity_frame") {
+          const value =
+            event.event === "identity" ? event.observation : event.identity;
+          if (
+            JSON.stringify(value.referenceVersions) !==
+            referenceVersion(referenceSnapshot)
+          )
+            return;
+        }
         windows.video(event, Date.now());
         store.receive(event);
         if (event.event === "health" && event.status === "failed") {
@@ -304,6 +361,15 @@ export function createPerceptionService(options: {
           store = createObservationStore(config.maxFrameAgeMs);
           unsubscribeStore = store.subscribe(changed);
         }
+        if (!identityConfigured) {
+          await options.identityReferences?.configure(
+            config.identity
+              ? identityProcessingVersions(config.identity.minimumSharpness)
+              : null,
+          );
+          referenceSnapshot = options.identityReferences?.snapshot() ?? null;
+          identityConfigured = true;
+        }
         resources ??= planPerceptionResources(config);
         options.speechInbox?.configure(config.dialogue);
         audio.start();
@@ -323,6 +389,45 @@ export function createPerceptionService(options: {
       initializing = undefined;
     });
     return initializing;
+  }
+  function currentSources() {
+    return store.snapshot().map((source) => {
+      const runId = source.run?.runId;
+      const active =
+        runId && desired.get(sourceKey(source.source))?.runId === runId;
+      const projected =
+        active &&
+        source.identity &&
+        source.identityValidity === "valid" &&
+        source.trackingValidity === "valid" &&
+        config.identity
+          ? (
+              options.identityReferences?.associate(
+                source.identity,
+                config.identity.evidenceTtlMs,
+                Date.now(),
+              ) ?? []
+            ).filter((association) =>
+              source.tracking?.tracks.some(
+                (track) =>
+                  track.trackId === association.trackId &&
+                  track.className === association.className,
+              ),
+            )
+          : [];
+      return {
+        ...source,
+        identity: source.identity
+          ? {
+              ...source.identity,
+              associations: projected,
+            }
+          : null,
+        authorizedAt: source.run
+          ? (desired.get(sourceKey(source.source))?.authorizedAt ?? null)
+          : null,
+      };
+    });
   }
   return {
     start: initialize,
@@ -357,6 +462,36 @@ export function createPerceptionService(options: {
       // Cancellation stops HTTP waiting, not an admitted native computation.
       return await compute.detectImage(input);
     },
+    async enrollment(command: z.infer<typeof enrollmentCommandSchema>) {
+      await initializing;
+      const compute = await ensurePool();
+      return compute.enrollment(command);
+    },
+    identityConfig: () => config.identity,
+    async identityModelStatus(
+      className: Extract<
+        z.infer<typeof enrollmentCommandSchema>,
+        { kind: "identity_status" }
+      >["className"],
+    ) {
+      if (
+        stopped ||
+        configurationError ||
+        (pool && pool.getStatus().status !== "ready")
+      )
+        return {
+          status: "unavailable" as const,
+          reason: "身份计算进程不可用，请检查后端配置或等待恢复",
+        };
+      if (!pool) return { status: "not_checked" as const, reason: null };
+      const result = await pool.enrollment({
+        kind: "identity_status",
+        className,
+      });
+      if (result.kind !== "identity_status")
+        throw new Error("Unexpected identity status result");
+      return result;
+    },
     async retry() {
       if (stopped) throw new Error("Perception stopped");
       audio.retry();
@@ -376,17 +511,14 @@ export function createPerceptionService(options: {
         compute: pool?.getStatus() ?? null,
         model: pool?.metadata ?? null,
         audio: audioSnapshot,
-        sources: store.snapshot().map((source) => ({
+        sources: currentSources().map((source) => ({
+          ...source,
           audioTrackRunId:
             audioSnapshot.tracks.find(
               (track) =>
                 track.run.deviceId === source.source.deviceId &&
                 track.channels.includes(source.source.channel),
             )?.run.trackRunId ?? null,
-          ...source,
-          authorizedAt: source.run
-            ? (desired.get(sourceKey(source.source))?.authorizedAt ?? null)
-            : null,
         })),
         rejectedRetiredResults: store.rejectedRetiredResults,
       };
@@ -401,6 +533,7 @@ export function createPerceptionService(options: {
       if (closing) return closing;
       stopped = true;
       unsubscribeWindows();
+      unsubscribeReferences?.();
       shutdown.abort();
       clearInterval(timer);
       unsubscribeSources();

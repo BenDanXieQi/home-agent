@@ -138,6 +138,7 @@ export const windowListEntrySchema = windowDetailSchema
     id: true,
     revision: true,
     run: true,
+    videoRun: true,
     startedAt: true,
     endedAt: true,
     readableUntil: true,

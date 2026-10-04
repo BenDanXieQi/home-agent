@@ -1,3 +1,8 @@
+import {
+  enrollmentCommandSchema,
+  enrollmentResultSchema,
+  identityModelStatusSchema,
+} from "../identity/enrollment-protocol";
 import { computeBudgetSchema } from "./budget";
 import { perceptionConfigSchema } from "../config";
 import { runSchema } from "../observations";
@@ -7,6 +12,7 @@ import { z } from "zod";
 import { inspect } from "node:util";
 import { frameSchema } from "../detection/frame";
 import {
+  identityReferenceSnapshotSchema,
   detectionSchema,
   detectionTimingSchema,
 } from "@home-agent/api/contracts";
@@ -43,6 +49,11 @@ export const commandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("video_start"), source: videoStartSchema }),
   z.object({ kind: z.literal("video_stop"), runId: z.uuid() }),
   z.object({ kind: z.literal("tracking_retry") }),
+  ...enrollmentCommandSchema.options,
+  z.object({
+    kind: z.literal("identity_references"),
+    snapshot: identityReferenceSnapshotSchema.nullable(),
+  }),
 ]);
 const tensorMetadata = z.object({
   name: z.string(),
@@ -56,6 +67,8 @@ const detectionResultSchema = z.object({
   timing: detectionTimingSchema,
 });
 export const resultSchema = z.discriminatedUnion("kind", [
+  enrollmentResultSchema,
+  identityModelStatusSchema,
   z.object({
     kind: z.literal("initialized"),
     metadata: z.object({

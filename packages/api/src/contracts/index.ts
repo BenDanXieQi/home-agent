@@ -114,3 +114,5 @@ export {
 } from "./media";
 
 export * from "./perception-window";
+
+export * from "./member-identity";

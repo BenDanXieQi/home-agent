@@ -38,7 +38,13 @@ export default function CameraViewPage() {
         </BackLink>
         <Link
           to="/cameras/$deviceId/$channel"
-          search={{ mode: undefined }}
+          search={{
+            mode: undefined,
+            activityRun: undefined,
+            activityAt: undefined,
+            activityFirstAt: undefined,
+            member: undefined,
+          }}
           params={{ deviceId, channel }}
           className={`${buttonStyles.base} ${buttonStyles.secondary}`}
         >

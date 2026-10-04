@@ -60,7 +60,11 @@ export async function loadImage(input: z.infer<typeof imageRequestSchema>) {
   const decodeStarted = performance.now();
   let decoded;
   try {
-    const image = sharp(bytes, { limitInputPixels: frameLimits.maxPixels });
+    const image = sharp(bytes, {
+      limitInputPixels: frameLimits.maxPixels,
+    })
+      .autoOrient()
+      .timeout({ seconds: imageLimits.processingTimeoutMs / 1000 });
     const metadata = await image.metadata();
     if (
       !metadata.width ||

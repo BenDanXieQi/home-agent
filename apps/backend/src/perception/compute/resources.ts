@@ -9,7 +9,7 @@ const modelMemoryMiB = Object.freeze({
   tracking: 256,
   vad: 128,
   speech: 1536,
-  identity: 512,
+  identity: 768,
 });
 
 export function planPerceptionResources(
@@ -20,7 +20,7 @@ export function planPerceptionResources(
     config.sources === "household" || config.sources.length > 0;
   const audioThreads = audioEnabled ? 1 : 0;
   const speechThreads = audioEnabled && config.speech.enabled ? 1 : 0;
-  const identityThreads = audioEnabled && config.identity !== null ? 1 : 0;
+  const identityThreads = config.identity !== null ? 1 : 0;
   // Continuous capture keeps one detector and one VAD lane even on a tiny share.
   // Optional ASR must fit beyond that minimum; it cannot raise the budget itself.
   const nativeThreads = Math.max(1 + audioThreads, host.workersPerProcess);

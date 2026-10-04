@@ -1,3 +1,4 @@
+import { type enrollmentCommandSchema } from "../identity/enrollment-protocol";
 import type { videoEventSchema } from "../video/events";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
@@ -17,6 +18,7 @@ import {
 } from "./protocol";
 import {
   ImageProcessingError,
+  imageLimits,
   imageRequestSchema,
 } from "../detection/image-request";
 
@@ -24,7 +26,11 @@ const optionsSchema = z.object({
   cpuRatio: cpuRatioSchema,
   workerLimit: z.int().positive().optional(),
   initializeTimeoutMs: z.int().positive().max(300_000).default(30_000),
-  taskTimeoutMs: z.int().positive().max(300_000).default(10_000),
+  taskTimeoutMs: z
+    .int()
+    .positive()
+    .max(300_000)
+    .default(imageLimits.processingTimeoutMs),
   closeTimeoutMs: z.int().min(100).max(300_000).default(10_000),
   recoveryDelayMs: z.int().nonnegative().max(30_000).default(250),
   recoveryResetMs: z.int().positive().max(3_600_000).default(60_000),
@@ -437,7 +443,13 @@ export async function createDetectionPool(
   async function videoControl(
     task: Extract<
       z.infer<typeof commandSchema>,
-      { kind: "video_start" | "video_stop" | "tracking_retry" }
+      {
+        kind:
+          | "video_start"
+          | "video_stop"
+          | "tracking_retry"
+          | "identity_references";
+      }
     >,
   ) {
     const generation = current;
@@ -485,6 +497,44 @@ export async function createDetectionPool(
     },
     detect,
     detectImage,
+    async enrollment(command: z.infer<typeof enrollmentCommandSchema>) {
+      const generation = current;
+      if (status !== "ready" || !generation)
+        throw new DetectionPoolError("unavailable", "身份计算不可用");
+      if (activeControls >= 16)
+        throw new DetectionPoolError("busy", "身份请求繁忙");
+      activeControls++;
+      try {
+        const result = await within(
+          generation.submit(command),
+          40_000,
+          "Identity enrollment",
+          stopping.signal,
+        );
+        if (current !== generation || generation.signal.aborted)
+          throw new DetectionPoolError("unavailable", "身份计算运行已更换");
+        if (result.kind !== "identity_status" && result.kind !== "enrollment")
+          throw new Error("Unexpected enrollment result");
+        return result;
+      } catch (error) {
+        if (
+          error instanceof ComputeBusyError ||
+          error instanceof ImageProcessingError
+        )
+          throw new DetectionPoolError(error.code, error.message, {
+            cause: error,
+          });
+        if (error instanceof DetectionPoolError && error.code === "timeout")
+          fail(generation, error);
+        throw error instanceof DetectionPoolError
+          ? error
+          : new DetectionPoolError("unavailable", "身份模型不可用", {
+              cause: error,
+            });
+      } finally {
+        activeControls--;
+      }
+    },
     close,
     retry,
     retryTracking: () => videoControl({ kind: "tracking_retry" }),
@@ -500,6 +550,13 @@ export async function createDetectionPool(
         kind: "video_start",
         source: videoStartSchema.parse(source),
       });
+    },
+    identityReferences(
+      snapshot: z.infer<
+        typeof import("@home-agent/api/contracts").identityReferenceSnapshotSchema
+      > | null,
+    ) {
+      return videoControl({ kind: "identity_references", snapshot });
     },
     stopVideo(runId: string) {
       return videoControl({ kind: "video_stop", runId });

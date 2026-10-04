@@ -47,6 +47,11 @@ const errorMessages = {
   request_cancelled: "请求已取消。",
   run_timeout: "Agent 执行超时。",
   agent_execution_failed: "Agent 执行失败，请查看运行记录。",
+  identity_enrollment_unavailable: "登记已过期或已取消，请重新开始。",
+  identity_reference_unavailable: "该人物或参考资料已变化，请刷新后重试。",
+  identity_recording_invalid: "录像无法解析或超过限制，请重新录制。",
+  identity_source_unavailable:
+    "所选摄像头已不在当前家庭设备清单中，请重新选择。",
   perception_image_invalid: "图片无法解码或超过输入限制，请选择其他图片。",
   perception_busy: "图片分析正忙，请稍后重试。",
   perception_unavailable: "图片分析暂时不可用，请稍后重试。",

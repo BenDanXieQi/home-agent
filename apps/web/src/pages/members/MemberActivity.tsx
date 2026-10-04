@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useActivityPlayback } from "../../modules/members/use-activity-playback";
+import { useMemo, useState } from "react";
+import { MemberActivityPlaybackLink } from "./MemberActivityPlaybackLink";
+import { memberActivitySourceSchema } from "../../modules/members/activity";
 import type { contextCursorSchema } from "@home-agent/api/household-context";
 import { useQuery } from "@tanstack/react-query";
 import { Clock3, RefreshCw } from "lucide-react";
@@ -33,8 +36,8 @@ export function MemberActivity({
   const [cursors, setCursors] = useState<
     (ReturnType<typeof contextCursorSchema.parse> | null)[]
   >([null]);
-  const query = useQuery(
-    contextBrowseOptions(
+  const query = useQuery({
+    ...contextBrowseOptions(
       {
         scope_epoch: scope,
         table: "context_records",
@@ -44,8 +47,31 @@ export function MemberActivity({
       },
       page,
     ),
+    refetchInterval: page === 0 ? 5000 : false,
+  });
+  const activities = useMemo(
+    () =>
+      (query.data?.rows ?? []).flatMap((row) => {
+        const source =
+          row.topic === "member_sighting"
+            ? memberActivitySourceSchema.safeParse(row.data)
+            : undefined;
+        return source?.success && typeof row.id === "string"
+          ? [{ id: row.id, source: source.data }]
+          : [];
+      }),
+    [query.data?.rows],
   );
+  const sources = new Map(
+    activities.map((activity) => [activity.id, activity.source]),
+  );
+  const playback = useActivityPlayback(activities, scope);
   function refresh() {
+    if (page > 0) {
+      setCursors([null]);
+      setPage(0);
+      return;
+    }
     query.refetch().catch((error: unknown) => {
       console.error("Member activity refresh failed", error);
     });
@@ -83,22 +109,24 @@ export function MemberActivity({
           {query.data.rows.length ? (
             <ol className="space-y-1">
               {query.data.rows.map((row) => {
+                const source =
+                  typeof row.id === "string" ? sources.get(row.id) : undefined;
                 const uncertain = row.certainty !== "supported";
+                const memberSighting = row.topic === "member_sighting";
                 const certainty =
                   row.certainty === "tentative"
-                    ? "可能"
+                    ? memberSighting
+                      ? "疑似"
+                      : "证据不足"
                     : row.certainty === "conflicting"
                       ? "存在冲突"
                       : row.certainty === "supported"
-                        ? "有依据"
+                        ? memberSighting
+                          ? "已识别"
+                          : "有依据"
                         : "尚未确认";
-                return (
-                  <li
-                    key={
-                      typeof row.id === "string" ? row.id : JSON.stringify(row)
-                    }
-                    className="grid gap-3 rounded-xl bg-white px-5 py-4 shadow-surface sm:grid-cols-[120px_minmax(0,1fr)]"
-                  >
+                const content = (
+                  <>
                     <time
                       className="pt-0.5 text-xs tabular-nums text-muted"
                       dateTime={
@@ -115,6 +143,13 @@ export function MemberActivity({
                           {row.kind === "assessment" ? "判断记录" : "观察记录"}
                         </span>
                         <span
+                          title={
+                            memberSighting
+                              ? row.certainty === "supported"
+                                ? "多次画面识别结果一致，系统识别为该成员。"
+                                : "画面中的目标可能是该成员，识别依据还不充分。"
+                              : undefined
+                          }
                           className={uncertain ? "text-warning" : "text-sage"}
                         >
                           {certainty}
@@ -130,6 +165,32 @@ export function MemberActivity({
                           : "记录暂无描述"}
                       </p>
                     </div>
+                  </>
+                );
+                const className =
+                  "relative grid gap-3 rounded-xl bg-white px-5 py-4 shadow-surface sm:grid-cols-[120px_minmax(0,1fr)_16px]";
+                return (
+                  <li
+                    key={
+                      typeof row.id === "string" ? row.id : JSON.stringify(row)
+                    }
+                  >
+                    {source ? (
+                      <MemberActivityPlaybackLink
+                        source={source}
+                        memberId={member.id}
+                        availability={
+                          typeof row.id === "string"
+                            ? playback.get(row.id)
+                            : undefined
+                        }
+                        className={className}
+                      >
+                        {content}
+                      </MemberActivityPlaybackLink>
+                    ) : (
+                      <div className={className}>{content}</div>
+                    )}
                   </li>
                 );
               })}
@@ -141,7 +202,9 @@ export function MemberActivity({
                 <p className="text-sm">
                   {page ? "这一页没有活动记录" : "还没有相关活动记录"}
                 </p>
-                <p className="mt-1.5 text-xs">没有记录不代表成员没有活动。</p>
+                <p className="mt-1.5 text-xs">
+                  摄像头识别到该成员后，观察记录会自动显示在这里。
+                </p>
               </div>
             </div>
           )}

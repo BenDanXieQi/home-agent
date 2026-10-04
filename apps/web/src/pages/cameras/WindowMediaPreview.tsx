@@ -16,9 +16,11 @@ export function WindowMediaPreview({
   mediaId,
   available,
   active,
+  autoPlay,
 }: {
   available: boolean;
   active: boolean;
+  autoPlay: boolean;
   scope: string;
   id: string;
   selection: WindowMediaSelection;
@@ -110,6 +112,8 @@ export function WindowMediaPreview({
         <video
           ref={attachMedia}
           controls
+          autoPlay={autoPlay}
+          muted={autoPlay}
           playsInline
           aria-label="所选窗口采样视频"
           className="size-full object-contain"

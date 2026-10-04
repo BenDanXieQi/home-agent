@@ -1,3 +1,4 @@
+import type { enrollmentCommandSchema } from "../identity/enrollment-protocol";
 import { createWindowCapture } from "../window/capture";
 import type { createIdentityRuntime } from "../identity/runtime";
 import { ComputeBusyError } from "../compute/protocol";
@@ -135,6 +136,13 @@ export function createVideoRuntime(dependencies: {
       });
   }, 1000);
   return {
+    replaceIdentityReferences: (
+      snapshot: Parameters<typeof dependencies.identity.replaceReferences>[0],
+    ) => {
+      dependencies.identity.replaceReferences(snapshot);
+    },
+    enrollmentCommand: (command: z.infer<typeof enrollmentCommandSchema>) =>
+      dependencies.identity.enrollmentCommand(command),
     retryTracking: () => dependencies.tracking.retry(),
     start(
       input: Pick<

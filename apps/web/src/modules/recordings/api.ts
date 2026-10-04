@@ -3,6 +3,8 @@ import { queryOptions, skipToken } from "@tanstack/react-query";
 import {
   type mijiaRecordingPlaybackInputSchema,
   mijiaRecordingPlaybackStateSchema,
+  mijiaRecordingAvailabilitySchema,
+  type mijiaRecordingAvailabilityQuerySchema,
 } from "@home-agent/api/mijia-recordings";
 import {
   requestEmpty,
@@ -81,4 +83,27 @@ export function releaseRecordingPlayback(id: string) {
       ),
     { keepalive: true, retry: retryOnceOnTransportFailure },
   );
+}
+
+export function recordingAvailabilityOptions(
+  input: z.infer<typeof mijiaRecordingAvailabilityQuerySchema> | undefined,
+) {
+  return queryOptions({
+    queryKey: ["recording-availability", input],
+    queryFn: input
+      ? ({ signal }) =>
+          requestJson(
+            (client, options) =>
+              client.api.mijia.recordings.availability.$post(
+                { json: input },
+                options,
+              ),
+            mijiaRecordingAvailabilitySchema,
+            { signal },
+          )
+      : skipToken,
+    retry: false,
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
 }

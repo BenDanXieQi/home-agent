@@ -47,6 +47,26 @@ export const cameraRecordingIndexSchema = z.discriminatedUnion("status", [
   }),
 ]);
 
+export const mijiaRecordingAvailabilityQuerySchema =
+  mijiaPlaybackReservationInputSchema.safeExtend({
+    at: z.array(timestamp).min(1).max(25),
+  });
+
+export const mijiaRecordingAvailabilitySchema = z.discriminatedUnion("status", [
+  cameraRecordingIndexSchema.options[1],
+  z.strictObject({
+    status: z.literal("ready"),
+    matches: z
+      .array(
+        z.strictObject({
+          at: timestamp,
+          clip: cameraRecordingIndexSchema.options[0].shape.recordings.element.nullable(),
+        }),
+      )
+      .max(25),
+  }),
+]);
+
 export const mijiaRecordingPlaybackInputSchema =
   mijiaPlaybackReservationInputSchema.safeExtend({
     id: z.uuid(),

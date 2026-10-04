@@ -1,5 +1,9 @@
+import { ComputeBusyError } from "../compute/protocol";
+import type { enrollmentCommandSchema } from "./enrollment-protocol";
+import type { identityRequestSchema } from "./protocol";
 import { isDeepStrictEqual } from "node:util";
-import sharp from "sharp";
+import { loadImage } from "../detection/image";
+import { prepareIdentityFrame, prepareFacePhoto } from "./frame";
 import type { z } from "zod";
 import type {
   identityFrameSnapshotSchema,
@@ -9,22 +13,23 @@ import type {
 import type { runSchema } from "../observations";
 import { createIdentityAnalysis } from "./analysis";
 import { identityLimits, type identityConfigSchema } from "./config";
-import { loadGallery } from "./gallery-file";
-import { createFaceProcess, FaceProcessExitError } from "./process";
-import profile from "./profile.json";
+import {
+  identityReferenceSnapshotSchema,
+  identityReferenceVersionsSchema,
+} from "@home-agent/api/contracts";
+import { identityProcessingVersions } from "./processing-version";
+import { createIdentityProcess, IdentityProcessExitError } from "./process";
 
 function createOwner(config: z.infer<typeof identityConfigSchema>) {
   return {
     config,
-    gallery: null as Awaited<ReturnType<typeof loadGallery>>,
-    referenceLoad: undefined as ReturnType<typeof loadGallery> | undefined,
-    referencesReady: false,
+    versions: identityProcessingVersions(config.minimumSharpness),
     controller: new AbortController(),
     model: undefined as
-      | Awaited<ReturnType<typeof createFaceProcess>>
+      | Awaited<ReturnType<typeof createIdentityProcess>>
       | undefined,
     creating: undefined as Promise<void> | undefined,
-    pending: undefined as Promise<void> | undefined,
+    pending: undefined as Promise<unknown> | undefined,
     unloading: undefined as Promise<void> | undefined,
     lastDemandAt: 0,
     error: undefined as string | undefined,
@@ -71,13 +76,14 @@ function identityStatus(
     return owner?.creating || owner?.reserved
       ? ("starting" as const)
       : ("idle" as const);
-  return owner.gallery ? ("recognizing" as const) : ("collecting" as const);
+  return "collecting" as const;
 }
 
 function frameSnapshot(
   source: ReturnType<typeof createSource>,
   session: ReturnType<typeof createOwner>,
   inference: z.infer<typeof identityFrameSnapshotSchema>["inference"],
+  snapshot: z.infer<typeof identityReferenceSnapshotSchema> | null,
 ) {
   const error =
     source.error ??
@@ -85,10 +91,16 @@ function frameSnapshot(
     (session.unloading ? undefined : session.model?.error);
   const { tracks } = source.analysis.snapshot(performance.now());
   return {
-    status: identityStatus(error, session),
+    status:
+      snapshot && !error && session.model
+        ? ("recognizing" as const)
+        : identityStatus(error, session),
     evaluatedAt: Date.now(),
     inference,
-    referenceRevision: session.gallery?.revision ?? null,
+    referenceRevision: snapshot?.contentVersion ?? null,
+    referenceVersions: snapshot
+      ? identityReferenceVersionsSchema.parse(snapshot)
+      : null,
     tracks: tracks.map(
       ({
         trackId,
@@ -128,7 +140,84 @@ export function createIdentityRuntime(options: {
 }) {
   const sources = new Map<string, ReturnType<typeof createSource>>();
   let owner: ReturnType<typeof createOwner> | undefined;
+  let snapshot: z.infer<typeof identityReferenceSnapshotSchema> | null = null;
   let cleaning: Promise<void> | undefined;
+  let enrolling = false;
+  function sessionFor(config: z.infer<typeof identityConfigSchema>) {
+    if (closed || cleaning)
+      throw new ComputeBusyError("身份模型正在释放，请稍后重试");
+    if (owner && JSON.stringify(owner.config) !== JSON.stringify(config))
+      throw new Error("Active identity sources must share one configuration");
+    owner ??= createOwner(config);
+    return owner;
+  }
+  async function enrollment(
+    config: z.infer<typeof identityConfigSchema>,
+    prepare: () => Promise<z.infer<typeof identityRequestSchema>>,
+  ) {
+    const session = sessionFor(config);
+    if (enrolling || session.unloading)
+      throw new ComputeBusyError("身份模型忙，请稍后重试");
+    enrolling = true;
+    session.lastDemandAt = performance.now();
+    try {
+      // A user registration waits for the one admitted online frame; enrolling prevents new online work.
+      await session.pending;
+      ensureModel(session);
+      await session.creating;
+      const model = session.model;
+      if ((!model && performance.now() < session.retryAt) || session.retired)
+        throw new Error(session.error ?? "身份模型不可用");
+      if (!model) throw new ComputeBusyError(session.error ?? "身份模型不可用");
+      const operation = (async () => {
+        const input = await prepare();
+        const classes =
+          input.kind === "tracking"
+            ? [
+                ...new Set(
+                  input.tracks
+                    .filter((track) => input.targets.includes(track.trackId))
+                    .map((track) => track.className),
+                ),
+              ]
+            : [input.className];
+        const prepared = await model.prepare(classes);
+        if (!prepared.available.length)
+          throw new Error(
+            prepared.failures.map((failure) => failure.error).join("; "),
+          );
+        if (session.retired) throw new Error("身份模型已停止");
+        const result = await model.extract(
+          input,
+          identityLimits.requestTimeoutMs,
+        );
+        if (result.kind !== "enrollment")
+          throw new Error("Unexpected enrollment response");
+        return result;
+      })();
+      session.pending = operation;
+      try {
+        return await operation;
+      } catch (cause) {
+        if (model.error) {
+          session.error = String(cause).slice(0, 4096);
+          session.retryAt = performance.now() + identityLimits.restartDelayMs;
+          try {
+            await model.close();
+            if (session.model === model) session.model = undefined;
+            releaseCompute(session);
+          } catch (closeError) {
+            session.retryAt = Infinity;
+            options.fatal(closeError);
+          }
+        }
+        throw cause;
+      }
+    } finally {
+      session.pending = undefined;
+      enrolling = false;
+    }
+  }
   let closed = false;
   const turns = new Map<string, number>();
 
@@ -163,9 +252,15 @@ export function createIdentityRuntime(options: {
           width: observation.width,
           height: observation.height,
           coordinateBasis: observation.coordinateBasis,
-          status: identityStatus(error, owner),
+          status:
+            snapshot && !error && owner?.model
+              ? ("recognizing" as const)
+              : identityStatus(error, owner),
           error,
-          referenceRevision: owner?.gallery?.revision ?? null,
+          referenceRevision: snapshot?.contentVersion ?? null,
+          referenceVersions: snapshot
+            ? identityReferenceVersionsSchema.parse(snapshot)
+            : null,
           model: owner?.model?.metadata ?? null,
           ...source.analysis.snapshot(performance.now()),
         };
@@ -203,19 +298,7 @@ export function createIdentityRuntime(options: {
     session.error = undefined;
     session.creating = (async () => {
       try {
-        session.referenceLoad ??= loadGallery(
-          session.config.galleryFile,
-          session.config.minimumSharpness,
-        );
-        const gallery = await session.referenceLoad;
-        if (session.retired) return;
-        if (!session.referencesReady) {
-          session.gallery = gallery;
-          session.referencesReady = true;
-          for (const source of sources.values())
-            source.analysis.replaceReferences(gallery?.references ?? null);
-        }
-        const model = await createFaceProcess(
+        const model = await createIdentityProcess(
           session.config,
           session.controller.signal,
         );
@@ -227,11 +310,9 @@ export function createIdentityRuntime(options: {
       } catch (cause) {
         if (!session.retired) {
           session.error = String(cause).slice(0, 4096);
-          session.retryAt = session.referencesReady
-            ? performance.now() + identityLimits.restartDelayMs
-            : Infinity;
+          session.retryAt = performance.now() + identityLimits.restartDelayMs;
         }
-        if (cause instanceof FaceProcessExitError) {
+        if (cause instanceof IdentityProcessExitError) {
           session.retryAt = Infinity;
           options.fatal(cause);
         } else releaseCompute(session);
@@ -274,7 +355,7 @@ export function createIdentityRuntime(options: {
       options.fatal(cause);
       throw cause;
     }
-    await session.pending;
+    await Promise.allSettled([session.pending]);
     releaseCompute(session);
   }
   const expiry = setInterval(() => {
@@ -289,6 +370,56 @@ export function createIdentityRuntime(options: {
   }, 500);
 
   return {
+    replaceReferences(
+      next: z.infer<typeof identityReferenceSnapshotSchema> | null,
+    ) {
+      snapshot =
+        next === null ? null : identityReferenceSnapshotSchema.parse(next);
+      for (const source of sources.values()) {
+        source.analysis.replaceReferences(snapshot);
+        publish(source);
+      }
+    },
+    async enrollmentCommand(command: z.infer<typeof enrollmentCommandSchema>) {
+      if (command.kind === "identity_status") {
+        const error = owner?.error ?? owner?.model?.error;
+        return {
+          kind: "identity_status" as const,
+          ...(error
+            ? {
+                status: "unavailable" as const,
+                reason: "身份模型不可用，请检查后端模型配置或计算资源",
+              }
+            : owner?.model && !owner.unloading
+              ? owner.model.status(command.className)
+              : { status: "not_checked" as const, reason: null }),
+        };
+      }
+      return enrollment(command.config, async () => {
+        const input =
+          command.className === "human"
+            ? { rgb: await prepareFacePhoto(command.image), tracks: [] }
+            : await (async () => {
+                const { frame } = await loadImage(command.image);
+                return prepareIdentityFrame(
+                  {
+                    ...frame,
+                    tracks: command.regions.map((region) => ({
+                      ...region,
+                      state: "measured" as const,
+                    })),
+                  },
+                  frame.rgb,
+                );
+              })();
+        return {
+          kind: command.mode,
+          className: command.className,
+          ...input,
+          minimumSharpness: command.config.minimumSharpness,
+        };
+      });
+    },
     start(
       run: z.infer<typeof runSchema>,
       config: z.infer<typeof identityConfigSchema> | null,
@@ -313,6 +444,7 @@ export function createIdentityRuntime(options: {
           evaluatedAt: Date.now(),
           inference: "not_requested" as const,
           referenceRevision: null,
+          referenceVersions: null,
           tracks: [],
         } satisfies z.infer<typeof identityFrameSnapshotSchema>;
       if (
@@ -332,10 +464,7 @@ export function createIdentityRuntime(options: {
         source.dimensions !== dimensions ||
         observation.status === "failed"
       ) {
-        source.analysis = createIdentityAnalysis(
-          source.config,
-          session.gallery?.references ?? null,
-        );
+        source.analysis = createIdentityAnalysis(source.config, snapshot);
         source.generation = observation.mediaTime.generation;
         source.dimensions = dimensions;
         source.rtpTimestamp = -1;
@@ -352,19 +481,27 @@ export function createIdentityRuntime(options: {
         availableAt,
         observation.receivedAt,
       );
-      if (observation.omittedHumans > 0) {
+      if (observation.omittedHumans > 0 || observation.omittedPets > 0) {
         source.analysis.skipped("coverage");
         turns.delete(source.run.runId);
-        return frameSnapshot(source, session, "not_requested");
+        return frameSnapshot(source, session, "not_requested", snapshot);
       }
-      if (source.error || repeated || !targets.length) {
+      if (
+        source.error ||
+        !snapshot ||
+        snapshot.modelVersion !== session.versions.modelVersion ||
+        snapshot.processingVersion !== session.versions.processingVersion ||
+        !snapshot.members.some((member) => member.enabled) ||
+        repeated ||
+        !targets.length
+      ) {
         turns.delete(source.run.runId);
-        return frameSnapshot(source, session, "not_requested");
+        return frameSnapshot(source, session, "not_requested", snapshot);
       }
       if (!rgb) {
         turns.delete(source.run.runId);
         source.analysis.skipped("pixels");
-        return frameSnapshot(source, session, "not_requested");
+        return frameSnapshot(source, session, "not_requested", snapshot);
       }
       session.lastDemandAt = now;
       ensureModel(session);
@@ -373,68 +510,53 @@ export function createIdentityRuntime(options: {
         !session.model ||
         session.unloading ||
         session.pending ||
+        enrolling ||
         turns.keys().next().value !== source.run.runId ||
         session.retryAt === Infinity
       ) {
         source.analysis.skipped("busy");
-        return frameSnapshot(source, session, "not_requested");
+        return frameSnapshot(source, session, "not_requested", snapshot);
       }
       turns.delete(source.run.runId);
       const model = session.model;
       const analysis = source.analysis;
+      const admittedSnapshot = snapshot;
       // Keep the tracking-owned pixel buffer alive for this one admitted resize.
       const pixels = rgb;
       analysis.admitted(targets, availableAt);
       session.pending = (async () => {
         try {
-          const scaleX = profile.width / observation.width;
-          const scaleY = profile.height / observation.height;
-          const input =
-            scaleX === 1 && scaleY === 1
-              ? Buffer.from(pixels.buffer, pixels.byteOffset, pixels.byteLength)
-              : await sharp(pixels, {
-                  raw: {
-                    width: observation.width,
-                    height: observation.height,
-                    channels: 3,
-                  },
-                })
-                  .timeout({ seconds: 1 })
-                  .resize(profile.width, profile.height, {
-                    fit: "fill",
-                    kernel: "lanczos3",
-                  })
-                  .raw()
-                  .toBuffer();
+          const prepared = await model.prepare([
+            ...new Set(
+              observation.tracks
+                .filter((track) => targets.includes(track.trackId))
+                .map((track) => track.className),
+            ),
+          ]);
+          source.error = prepared.available.length
+            ? undefined
+            : prepared.failures.map((failure) => failure.error).join("; ");
+          if (!prepared.available.length) return;
+          const input = await prepareIdentityFrame(observation, pixels);
           if (
             session.retired ||
             closed ||
             sources.get(source.run.runId) !== source ||
             source.analysis !== analysis ||
+            snapshot !== admittedSnapshot ||
             performance.now() - availableAt >= maxAgeMs
           )
             return;
           const request = {
-            rgb: input.toString("base64"),
-            tracks: observation.tracks.flatMap((track) => {
-              const box = track.measuredBox;
-              return track.className === "human" &&
-                track.state === "measured" &&
-                box
-                ? [
-                    {
-                      trackId: track.trackId,
-                      measuredBox: {
-                        x: box.x * scaleX,
-                        y: box.y * scaleY,
-                        w: box.w * scaleX,
-                        h: box.h * scaleY,
-                      },
-                    },
-                  ]
-                : [];
-            }),
-            targets,
+            kind: "tracking" as const,
+            ...input,
+            targets: targets.filter((id) =>
+              input.tracks.some(
+                (track) =>
+                  track.trackId === id &&
+                  prepared.available.includes(track.className),
+              ),
+            ),
             minimumSharpness: source.config.minimumSharpness,
           };
           const result = await model.extract(
@@ -452,10 +574,18 @@ export function createIdentityRuntime(options: {
             closed ||
             sources.get(source.run.runId) !== source ||
             source.analysis !== analysis ||
+            snapshot !== admittedSnapshot ||
             performance.now() - availableAt >= maxAgeMs
           )
             return;
-          analysis.accept(result, availableAt, observation.receivedAt);
+          if (result.kind !== "result")
+            throw new Error("Unexpected face response");
+          analysis.accept(
+            result,
+            observation,
+            availableAt,
+            observation.receivedAt,
+          );
         } catch (cause) {
           session.error = String(cause).slice(0, 4096);
           session.retryAt = performance.now() + identityLimits.restartDelayMs;
@@ -475,7 +605,7 @@ export function createIdentityRuntime(options: {
       })();
       // Freeze only what was known when tracking completed. This frame's native
       // result may inform later frames, but never rewrites this historical view.
-      return frameSnapshot(source, session, "pending");
+      return frameSnapshot(source, session, "pending", snapshot);
     },
     async stop(runId: string) {
       sources.delete(runId);

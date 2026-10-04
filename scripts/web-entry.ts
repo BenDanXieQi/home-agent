@@ -28,10 +28,21 @@ async function runCaddy(args: string[], mode = "development") {
     },
     stdio: "inherit",
     detached: args[0] === "start",
+    timeout: args[0] === "stop" || args[0] === "reload" ? 15_000 : undefined,
   });
   const code = await new Promise<number | null>((done, reject) => {
     child.once("error", reject);
-    child.once("exit", done);
+    child.once("exit", (exitCode, signal) => {
+      if (signal) {
+        reject(
+          new Error(
+            `Caddy ${args[0]} 命令被信号 ${signal} 终止（停止和重载最多等待 15 秒）。请检查 config/runtime/caddy/caddy.log；Caddy 服务本身可能仍在运行。`,
+          ),
+        );
+        return;
+      }
+      done(exitCode);
+    });
   });
   if (code !== 0)
     throw new Error("Caddy 操作失败，请检查 config/runtime/caddy/caddy.log。");
@@ -44,7 +55,7 @@ export async function webEntryRunning() {
       {
         socketPath: socket,
         path: "/config/",
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(10_000),
       },
       (response) => {
         response.resume();
@@ -53,6 +64,15 @@ export async function webEntryRunning() {
       },
     );
     req.once("error", (error) => {
+      if ("code" in error && error.code === "ABORT_ERR") {
+        reject(
+          new Error(
+            "Caddy 管理接口在 10 秒内未响应，进程可能正在退出或已卡住。请检查 config/runtime/caddy/caddy.log 并确认本项目 Caddy 进程状态。",
+            { cause: error },
+          ),
+        );
+        return;
+      }
       if (
         "code" in error &&
         ["ENOENT", "ECONNREFUSED"].includes(String(error.code))

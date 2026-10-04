@@ -5,9 +5,7 @@ import { z } from "zod";
 // Native paths stay in backend configuration and never enter public snapshots.
 export const identityConfigSchema = z
   .strictObject({
-    python: z.string().min(1),
     modelDirectory: z.string().min(1),
-    galleryFile: z.string().min(1).nullable().default(null),
     sampleIntervalMs: z.int().min(500).max(10_000).default(1000),
     evidenceTtlMs: z.int().min(5000).max(120_000).default(30_000),
     idleUnloadMs: z.int().min(1000).max(300_000).default(30_000),
