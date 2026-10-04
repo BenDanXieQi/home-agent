@@ -2,6 +2,11 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Database } from "../db";
 import { credentials } from "../db/schema";
+import {
+  createConfirmedWriter,
+  createLockedTransactions,
+  StorageOutcomeUnknownError,
+} from "../db/transaction-outcome";
 
 export class CredentialStoreError extends Error {
   constructor() {
@@ -10,11 +15,16 @@ export class CredentialStoreError extends Error {
   }
 }
 
+export class CredentialCommitUnknownError extends CredentialStoreError {}
+const lockKey = (name: string) => `credentials/${name}`;
+
 /** Encrypted provider credentials. Record keys are authenticated as AAD. */
 export function createCredentialStore(
   db: Database,
   loadKey: () => Promise<string>,
 ) {
+  const transaction = createLockedTransactions(db, 5000);
+  const write = createConfirmedWriter(transaction);
   async function readKey() {
     const key = Buffer.from(await loadKey(), "base64");
     if (key.length !== 32) throw new CredentialStoreError();
@@ -23,10 +33,10 @@ export function createCredentialStore(
   return {
     async read(name: string) {
       try {
-        const [row] = await db
-          .select()
-          .from(credentials)
-          .where(eq(credentials.key, name));
+        await write.settle();
+        const [row] = await transaction(lockKey(name), (tx) =>
+          tx.select().from(credentials).where(eq(credentials.key, name)),
+        );
         if (!row) return undefined;
         const key = await readKey();
         const encrypted = Buffer.from(row.ciphertext, "base64");
@@ -68,18 +78,52 @@ export function createCredentialStore(
           ]).toString("base64"),
           updatedAt: new Date(),
         };
-        await db
-          .insert(credentials)
-          .values(data)
-          .onConflictDoUpdate({ target: credentials.key, set: data });
-      } catch {
+        await write(
+          lockKey(name),
+          async (tx, beforeWrite) => {
+            beforeWrite();
+            await tx
+              .insert(credentials)
+              .values(data)
+              .onConflictDoUpdate({ target: credentials.key, set: data });
+          },
+          async (tx) => {
+            const [row] = await tx
+              .select({ ciphertext: credentials.ciphertext })
+              .from(credentials)
+              .where(eq(credentials.key, name));
+            return row?.ciphertext === data.ciphertext
+              ? { committed: true, value: undefined }
+              : { committed: false };
+          },
+        );
+      } catch (cause) {
+        if (cause instanceof StorageOutcomeUnknownError)
+          throw new CredentialCommitUnknownError();
         throw new CredentialStoreError();
       }
     },
     async remove(name: string) {
       try {
-        await db.delete(credentials).where(eq(credentials.key, name));
-      } catch {
+        await write(
+          lockKey(name),
+          async (tx, beforeWrite) => {
+            beforeWrite();
+            await tx.delete(credentials).where(eq(credentials.key, name));
+          },
+          async (tx) => {
+            const [row] = await tx
+              .select({ key: credentials.key })
+              .from(credentials)
+              .where(eq(credentials.key, name));
+            return row
+              ? { committed: false }
+              : { committed: true, value: undefined };
+          },
+        );
+      } catch (cause) {
+        if (cause instanceof StorageOutcomeUnknownError)
+          throw new CredentialCommitUnknownError();
         throw new CredentialStoreError();
       }
     },

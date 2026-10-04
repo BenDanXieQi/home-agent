@@ -1,14 +1,8 @@
 import type { z } from "zod";
+import { queryOptions, skipToken } from "@tanstack/react-query";
 import {
-  infiniteQueryOptions,
-  queryOptions,
-  skipToken,
-} from "@tanstack/react-query";
-import {
-  mijiaRecordingIndexSchema,
   type mijiaRecordingPlaybackInputSchema,
   mijiaRecordingPlaybackStateSchema,
-  type mijiaRecordingQuerySchema,
 } from "@home-agent/api/mijia-recordings";
 import {
   requestEmpty,
@@ -31,40 +25,6 @@ function retryRead(failures: number, error: Error) {
     error instanceof RequestError &&
     (error.details.code === "network_error" ||
       error.details.code === "request_timeout")
-  );
-}
-
-export function recordingIndexOptions(
-  target: RecordingTarget,
-  from: number,
-  until: number,
-) {
-  return infiniteQueryOptions({
-    queryKey: ["camera-recordings", target, from, until],
-    initialPageParam: from,
-    queryFn: ({ pageParam, signal }) =>
-      readRecordingIndex({ ...target, afterMs: pageParam, limit: 200 }, signal),
-    getNextPageParam: (page) =>
-      page.status === "ready" &&
-      page.nextAfterMs !== null &&
-      page.nextAfterMs < until
-        ? page.nextAfterMs
-        : undefined,
-    retry: retryRead,
-    gcTime: 0,
-    staleTime: 30_000,
-  });
-}
-
-function readRecordingIndex(
-  input: z.infer<typeof mijiaRecordingQuerySchema>,
-  signal: AbortSignal,
-) {
-  return requestJson(
-    (client, options) =>
-      client.api.mijia.cameras.recordings.$post({ json: input }, options),
-    mijiaRecordingIndexSchema,
-    { signal, timeoutMs: 25_000 },
   );
 }
 

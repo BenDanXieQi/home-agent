@@ -24,7 +24,7 @@ export function createMemberRoutes(
   repository: ReturnType<typeof createMemberRepository> | undefined,
 ) {
   const app = new Hono();
-  app.use(requireLocalAccess([port, 5173]));
+  app.use(requireLocalAccess([port, 5173], { webEntry: true }));
   app.use(
     bodyLimit({
       maxSize: 16 * 1024,

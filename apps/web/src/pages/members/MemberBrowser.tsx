@@ -1,15 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useAtomValue } from "jotai";
+import { memberReadyAtom } from "../../modules/members/state";
+import { useMemberMutation } from "../../modules/members/use-member-mutation";
 import { Users, Plus, RefreshCw } from "lucide-react";
 import { AlertDialog } from "radix-ui";
-import type { memberSaveSchema } from "@home-agent/api/household-members";
-import {
-  deleteMember,
-  memberListOptions,
-  saveMember,
-  type Member,
-} from "../../modules/members/queries";
+import { memberListOptions, type Member } from "../../modules/members/queries";
 import { Button } from "../../components/Button";
 import { buttonStyles } from "../../components/button-styles";
 import { Notice } from "../../components/Notice";
@@ -22,45 +19,38 @@ import { MemberForm } from "./MemberForm";
 import { MemberOverview } from "./MemberOverview";
 
 export function MemberBrowser({ scope }: { scope: string }) {
-  const client = useQueryClient();
+  const ready = useAtomValue(memberReadyAtom);
   const navigate = useNavigate();
   const search = useSearch({ strict: false });
   const options = memberListOptions(scope);
-  const query = useQuery(options);
+  const query = useQuery({ ...options, enabled: ready });
   const [editing, setEditing] = useState<Member | null>(null);
   const [deleting, setDeleting] = useState<Member | null>(null);
-  const mutation = useMutation({
-    mutationFn: (
-      command:
-        | ReturnType<typeof memberSaveSchema.parse>
-        | { operation: "delete"; id: string },
-    ) =>
-      command.operation === "delete"
-        ? deleteMember(scope, command.id)
-        : saveMember(command),
-    onMutate: async () => {
-      await client.cancelQueries({ queryKey: options.queryKey });
-    },
-    onSuccess: async (data, command) => {
-      await client.cancelQueries({ queryKey: options.queryKey });
-      client.setQueryData(options.queryKey, data);
+  const mutation = useMemberMutation(scope);
+  const afterSave = {
+    onSuccess: (
+      data: NonNullable<typeof query.data>,
+      command: NonNullable<typeof mutation.variables>,
+    ) => {
       setEditing(null);
       setDeleting(null);
-      await client.invalidateQueries({ queryKey: ["household-context"] });
-      await navigate({
+      navigate({
         to: "/members",
         search: {
           member:
             command.operation === "delete" ? data.members[0]?.id : command.id,
         },
         replace: true,
+      }).catch((error: unknown) => {
+        console.error("Member navigation failed", error);
       });
     },
-  });
+  };
   const members = query.data?.members ?? [];
   const selected =
     members.find((member) => member.id === search.member) ?? members[0];
   function refresh() {
+    if (!ready) return;
     query.refetch().catch((error: unknown) => {
       console.error("Member refresh failed", error);
     });
@@ -69,58 +59,59 @@ export function MemberBrowser({ scope }: { scope: string }) {
     <>
       <PageHeaderContent slot="details">
         <span className="text-xs text-muted">
-          {query.data
+          {members.length > 0
             ? `${members.filter((member) => member.kind === "person").length} 人 · ${members.filter((member) => member.kind === "pet").length} 只宠物`
             : ""}
         </span>
       </PageHeaderContent>
-      <PageHeaderContent slot="actions">
-        <Button
-          variant="ghost"
-          aria-label="刷新成员资料"
-          title="刷新成员资料"
-          icon={<RefreshCw size={15} />}
-          disabled={!!editing || mutation.isPending}
-          status={query.isFetching ? "pending" : "idle"}
-          onClick={refresh}
+      {selected ? (
+        <SegmentedControl
+          className="mb-5 border-b border-line"
+          variant="underline"
+          label="家庭成员"
+          value={selected.id}
+          disabled={!ready || !!editing || mutation.isPending}
+          onValueChange={(member) => {
+            mutation.reset();
+            navigate({
+              to: "/members",
+              search: { member },
+              replace: true,
+            }).catch((error: unknown) => {
+              console.error("Member navigation failed", error);
+            });
+          }}
+          options={members.map((member) => ({
+            value: member.id,
+            label: member.name,
+          }))}
         />
-        {!editing ? (
-          <Link
-            to="/members/new"
-            className={`${buttonStyles.base} ${buttonStyles.primary} shrink-0`}
-          >
-            <Plus size={14} />
-            添加成员
-          </Link>
-        ) : null}
-      </PageHeaderContent>
-      <div className="mb-6 flex items-center border-b border-line">
-        {selected ? (
-          <SegmentedControl
-            className="min-w-0 flex-1 [&_button]:px-1"
-            variant="underline"
-            label="家庭成员"
-            value={selected.id}
-            disabled={!!editing || mutation.isPending}
-            onValueChange={(member) => {
-              mutation.reset();
-              navigate({
-                to: "/members",
-                search: { member },
-                replace: true,
-              }).catch((error: unknown) => {
-                console.error("Member navigation failed", error);
-              });
-            }}
-            options={members.map((member) => ({
-              value: member.id,
-              label: member.name,
-            }))}
-          />
-        ) : (
-          <span className="flex-1 py-3 text-sm text-muted">家庭成员</span>
-        )}
-      </div>
+      ) : null}
+      {selected ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <span className="text-xs text-muted">成员资料</span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              aria-label="刷新成员资料"
+              title="刷新成员资料"
+              icon={<RefreshCw size={14} />}
+              disabled={!ready || !!editing || mutation.isPending}
+              status={query.isFetching ? "pending" : "idle"}
+              onClick={refresh}
+            />
+            {!editing ? (
+              <Link
+                to="/members/new"
+                className={`${buttonStyles.base} ${buttonStyles.secondary}`}
+              >
+                <Plus size={14} />
+                添加成员
+              </Link>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
       {query.isError ? (
         <Notice tone="error">
           {requestErrorMessage(query.error)}
@@ -132,29 +123,43 @@ export function MemberBrowser({ scope }: { scope: string }) {
           {requestErrorMessage(mutation.error)}。可刷新资料核实保存结果。
         </Notice>
       ) : null}
-      {query.isPending ? (
+      {query.isPending && !editing ? (
         <Skeleton className="h-64 rounded-2xl" aria-label="正在读取成员" />
       ) : null}
-      {query.isSuccess && !selected ? (
+      {query.isSuccess && !selected && !editing ? (
         <EmptyState
-          icon={<Users size={25} />}
-          title="还没有家庭成员"
-          description="添加人物或宠物，每位成员都会拥有自己的标签页。"
-        />
+          surface="plain"
+          className="min-h-[55svh]"
+          icon={<Users size={24} />}
+          title="让家人和宠物拥有自己的资料"
+          description="从添加第一位成员开始，记录称呼、外观与日常备注。"
+        >
+          <Link
+            to="/members/new"
+            className={`${buttonStyles.base} ${buttonStyles.primary}`}
+          >
+            <Plus size={14} />
+            添加成员
+          </Link>
+        </EmptyState>
       ) : null}
-      {query.isSuccess && selected ? (
+      {selected || editing ? (
         editing ? (
           <MemberForm
             key={editing.id}
             member={editing}
             pending={mutation.isPending}
+            disabled={!ready}
             onSave={(id, profile) => {
-              mutation.mutate({
-                scope_epoch: scope,
-                id,
-                profile,
-                operation: "update",
-              });
+              mutation.mutate(
+                {
+                  scope_epoch: scope,
+                  id,
+                  profile,
+                  operation: "update",
+                },
+                afterSave,
+              );
             }}
             onCancel={() => {
               setEditing(null);
@@ -165,7 +170,7 @@ export function MemberBrowser({ scope }: { scope: string }) {
               setDeleting(editing);
             }}
           />
-        ) : (
+        ) : selected ? (
           <MemberOverview
             key={selected.id}
             member={selected}
@@ -175,7 +180,7 @@ export function MemberBrowser({ scope }: { scope: string }) {
               setEditing(selected);
             }}
           />
-        )
+        ) : null
       ) : null}
       <AlertDialog.Root
         open={!!deleting}
@@ -209,9 +214,17 @@ export function MemberBrowser({ scope }: { scope: string }) {
               <Button
                 variant="primary"
                 status={mutation.isPending ? "pending" : "idle"}
+                disabled={!ready}
                 onClick={() => {
                   if (deleting)
-                    mutation.mutate({ operation: "delete", id: deleting.id });
+                    mutation.mutate(
+                      {
+                        scope_epoch: scope,
+                        operation: "delete",
+                        id: deleting.id,
+                      },
+                      afterSave,
+                    );
                 }}
               >
                 确认删除

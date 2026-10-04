@@ -1,4 +1,12 @@
-import { memo, useEffect, useId, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Collapsible } from "radix-ui";
 import { m, AnimatePresence, useReducedMotion } from "motion/react";
 import { Box, Video, ChevronRight } from "lucide-react";
@@ -8,8 +16,10 @@ import {
   type Projection,
 } from "@home-agent/api/household";
 import { useAtomValue } from "jotai";
-import { householdSnapshotAtom } from "../../modules/household/state";
-import { entityKey } from "@home-agent/api/household";
+import {
+  createDevicePropertiesAtom,
+  createDeviceCoverageAtom,
+} from "../../modules/devices/facts";
 import { Button } from "../../components/Button";
 import { requestJson } from "../../api/client";
 import { requestErrorMessage } from "../../messages/zh-CN";
@@ -23,29 +33,35 @@ import {
   time,
 } from "./fact-presentation";
 
-const emptyProperties: Projection["latest"][string][] = [];
 export const DeviceStateRow = memo(function DeviceStateRow({
   device,
-  properties = emptyProperties,
   scope,
   reliable,
   open,
   onOpenChange,
 }: {
   device: Projection["device"][string];
-  properties: typeof emptyProperties | undefined;
   scope: string;
   reliable: boolean;
   open: boolean;
-  onOpenChange: (open: boolean) => void;
+  onOpenChange: (deviceId: string, open: boolean) => void;
 }) {
+  const propertiesAtom = useMemo(
+    () => createDevicePropertiesAtom(device.id),
+    [device.id],
+  );
+  const properties = useAtomValue(propertiesAtom);
+  const changeOpen = useCallback(
+    (next: boolean) => onOpenChange(device.id, next),
+    [device.id, onOpenChange],
+  );
   const reduced = useReducedMotion();
   const id = useId();
   const recent = summarizeProperties(properties, device);
   return (
     <Collapsible.Root
       open={open}
-      onOpenChange={onOpenChange}
+      onOpenChange={changeOpen}
       className="overflow-hidden rounded-xl bg-white shadow-surface"
     >
       <Collapsible.Trigger
@@ -132,12 +148,12 @@ function DeviceDetails({
 }: Pick<
   Parameters<typeof DeviceStateRow>[0],
   "device" | "scope" | "reliable"
-> & { properties: typeof emptyProperties }) {
-  const snapshot = useAtomValue(householdSnapshotAtom);
-  const coverage =
-    snapshot?.projection.device_coverage[
-      entityKey(device.account_id, device.id)
-    ];
+> & { properties: Parameters<typeof summarizeProperties>[0] }) {
+  const coverageAtom = useMemo(
+    () => createDeviceCoverageAtom(device.account_id, device.id),
+    [device.account_id, device.id],
+  );
+  const coverage = useAtomValue(coverageAtom);
   const [pending, setPending] = useState(false);
   const [feedback, setFeedback] = useState("");
   const operation = useRef<AbortController | null>(null);

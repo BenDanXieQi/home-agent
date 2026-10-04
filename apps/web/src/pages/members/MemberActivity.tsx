@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { contextCursorSchema } from "@home-agent/api/household-context";
 import { useQuery } from "@tanstack/react-query";
 import { Clock3, RefreshCw } from "lucide-react";
 import type { Member } from "../../modules/members/queries";
@@ -29,14 +30,20 @@ export function MemberActivity({
   scope: string;
 }) {
   const [page, setPage] = useState(0);
+  const [cursors, setCursors] = useState<
+    (ReturnType<typeof contextCursorSchema.parse> | null)[]
+  >([null]);
   const query = useQuery(
-    contextBrowseOptions({
-      scope_epoch: scope,
-      table: "context_records",
+    contextBrowseOptions(
+      {
+        scope_epoch: scope,
+        table: "context_records",
+        cursor: cursors[page] ?? null,
+        search: "",
+        entity: { type: member.kind, id: member.id },
+      },
       page,
-      search: "",
-      entity: { type: member.kind, id: member.id },
-    }),
+    ),
   );
   function refresh() {
     query.refetch().catch((error: unknown) => {
@@ -151,8 +158,17 @@ export function MemberActivity({
                 </Button>
                 <Button
                   size="small"
-                  disabled={!query.data.has_more || query.isFetching}
-                  onClick={() => setPage(page + 1)}
+                  disabled={
+                    !query.data.next_cursor || query.isFetching || page >= 10000
+                  }
+                  onClick={() => {
+                    if (!query.data.next_cursor) return;
+                    setCursors([
+                      ...cursors.slice(0, page + 1),
+                      query.data.next_cursor,
+                    ]);
+                    setPage(page + 1);
+                  }}
                 >
                   更早记录
                 </Button>

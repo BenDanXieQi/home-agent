@@ -24,7 +24,7 @@ export function windowTime(time: number) {
   return windowClock.format(time);
 }
 export function candidateLabel(window: Pick<WindowListEntry, "gate">) {
-  return { video: "视觉通过", audio: "声音通过", none: "跳过" }[
+  return { video: "画面变化", audio: "语音片段", none: "仅文字" }[
     window.gate.candidate
   ];
 }

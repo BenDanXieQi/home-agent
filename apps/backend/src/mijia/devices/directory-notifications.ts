@@ -70,7 +70,9 @@ export class DirectoryNotifications {
         this.timer = undefined;
         if (this.controller !== controller || controller?.signal.aborted)
           return;
-        this.refresh().catch(() => {});
+        this.refresh().catch(() => {
+          console.warn("Device directory notification refresh failed");
+        });
       }, DIRECTORY_DEBOUNCE_MS),
     );
     this.timer.unref();

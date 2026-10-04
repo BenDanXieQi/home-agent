@@ -1,0 +1,12 @@
+{
+  "watch": [
+    "src",
+    "../../packages/api/src",
+    "../../packages/observability/src",
+    "../../.env"
+  ],
+  "ext": "ts,json,env",
+  "signal": "SIGTERM",
+  "delay": 500,
+  "exec": "bun --env-file=../../.env src/main.ts"
+}

@@ -16,7 +16,11 @@ bun run dev         # 等待 Docker 依赖就绪，再启动 Web、backend 和 A
 bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 ```
 
+开发模式由 nodemon 监听 `src/`、共享 API 与观测包源码及根目录 `.env`。修改后发送 SIGTERM 并等待旧后端退出，再启动新的 Bun 进程；音视频分析子进程随旧后端结束，文件句柄不会跨重载保留。监听范围不包括依赖、构建产物和运行时媒体文件。
+
 默认监听 `http://127.0.0.1:3000`，通过 `BACKEND_HOST`、`BACKEND_PORT` 调整。配置、服务检查、米家和聊天接口同时验证 TCP 对端为 loopback 及 Host／Origin 为允许的本机地址；调整监听地址不会放宽访问限制。当前仅供可信本机使用，尚无用户认证。构建产物需要 workspace 与已安装的依赖。
+
+服务关闭会等待各资源分别完成清理；任一清理失败或总期限到达时强制断开活动连接，再关闭数据库与追踪资源。清理失败保留为关闭错误，不因另一个任务提前失败而取消强制断连。
 
 ## 静态文件服务
 
@@ -40,7 +44,6 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `POST /api/perception/images/detect`                | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
 | `GET /api/perception/windows`                       | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量           |
 | `POST /api/perception/windows/:id/media`            | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
-| `POST /api/mijia/cameras/recordings`                | 读取当前来源的 SD 卡录像索引，保留设备时间依据                                      |
 | `PUT/GET/DELETE /api/mijia/recordings/playback/:id` | 申请、查询或释放经校验的 SD 卡回放资源                                              |
 | `GET/HEAD /api/mijia/recordings/playback/:id/media` | 受控 MP4 读取，支持单段字节范围请求                                                 |
 | `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                          |
@@ -143,6 +146,7 @@ src/
 │   │   ├── discovery.ts   # 设备快照、发现任务、刷新合并与定时器
 │   │   ├── directory-notifications.ts # 账号级设备清单变化通知与刷新防抖
 │   │   └── mapping.ts     # 设备业务映射与摄像头识别
+│   ├── device-logs/        # 米家推送诊断采集、文件与读取接口
 │   ├── properties/
 │   │   ├── read-request.ts # 请求复制、按设备分组与 readable 规格预检
 │   │   ├── reader.ts      # 指定属性读取、共用串行批次与取消
@@ -165,7 +169,7 @@ src/
 │       │   └── properties.ts # 属性地址类型、每批数量上限及请求超时
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
-├── household/             # 家庭状态机、设备清单存储、规格、SSE 与限时设备推送日志
+├── household/             # 家庭状态机、设备清单存储、规格、属性采集、成员与状态 SSE
 ├── perception/            # 本地检测、来源协调、人宠跟踪、轨迹身份证据、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
 │   ├── source-lease.ts     # 音视频共用的来源资格撤销与取消联动
@@ -188,7 +192,7 @@ src/
     └── schema.ts           # 业务表定义
 ```
 
-按功能组织代码，子路由使用 `new Hono()` 创建，由 `app.route()` 挂载。backend 与 Agent 通过 `@home-agent/api/local-access` 复用本机访问限制；前后端数据契约位于 `packages/api/src/contracts`。
+按功能组织代码，子路由使用 `new Hono()` 创建，由 `app.route()` 挂载。backend 与 Agent 通过 `@home-agent/api/local-access` 复用本机访问限制；前后端数据契约位于 `packages/api/src/contracts`。设备清单条目与规格能力由 `packages/api/src/domain/devices.ts` 统一定义，米家适配器转换供应商数据，家庭规则消费领域结构。
 
 `perception/identity/analysis.ts` 拥有单次来源运行中的人物身份证据与判断；`runtime.ts` 协调原帧采样、证据期限和资源，`process.ts` 与 Python 入口适配 OpenCV。`video/runtime.ts` 统一协调跟踪和身份模块的启停，`tracking/` 通过本帧回调交付结果与像素。跟踪完成时冻结的紧凑身份快照经 `identity_frame` 交给窗口，只接纳到准确对应帧的未关闭窗口；当前身份广播继续独立合并。窗口媒体保存、字节预算及读取权限复用 `media/window-media.ts`，身份模块只增加历史元数据。人体轨迹仍由 `tracking/` 拥有，家庭成员资料与权威身份归家庭领域。配置与判断规则见[持续人物身份分析](../../docs/perception.md#持续人物身份分析)，历史语义及独立保留期限见[窗口中的历史身份](../../docs/perception.md#窗口中的历史身份)。
 
@@ -227,7 +231,7 @@ bun run db:down      # 停止容器，保留数据卷
 
 `mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表、选择 API 与切换语义见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 
-`credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
+`credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。凭据写入与删除使用事务和提交结果确认：确认已提交后采用结果，确认回滚才报告普通存储失败；数据库暂时无法确认时暂停账号访问，待显式重试读取数据库中的保存状态后恢复，不沿用旧内存会话。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
 
 ### 家庭上下文表
 
@@ -245,15 +249,15 @@ bun run db:down      # 停止容器，保留数据卷
 
 上下文主键由提交方生成并在重试时复用，主键约束阻止重复插入；它不执行语义去重，也不自动将重复插入转为成功。时间检索使用 `(occurred_at, id)` 索引，对象检索使用 `(entity_type, entity_id, context_id)` 索引。切换家庭时，在更新绑定的同一事务中清空上下文、关联和成员，保留登录凭据。
 
-已提供表结构、迁移、切换家庭清理及只读浏览接口；尚未接入成员管理、上下文写入或定期清理。现有房间分析不会自动写入这些表。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
+已提供表结构、迁移、切换家庭清理及只读浏览接口；尚未接入上下文自动写入或定期清理。现有房间分析不会自动写入这些表。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
 
-成员资料由 `household/members/` 维护，复用 `household_subjects`，不经数据库浏览接口写入。`POST /api/household-members/list` 查询成员；`/save` 使用 `operation: create | update`、稳定 UUID `id` 和 `profile` 新增或更新；`/delete` 按 `id` 删除成员资料，保留上下文及其关联。三个接口都要求当前 `scope_epoch`、已就绪家庭和本机访问资格，返回更新后的成员列表；写入与家庭重新绑定共用事务锁，并核对数据库绑定与运行范围。
+成员资料由 `household/members/` 维护，复用 `household_subjects`，不经数据库浏览接口写入。`POST /api/household-members/list` 查询成员；`/save` 使用 `operation: create | update`、稳定 UUID `id` 和 `profile` 新增或更新；`/delete` 按 `id` 删除成员资料，保留上下文及其关联。三个接口都要求当前 `scope_epoch`、已就绪家庭和本机访问资格，返回更新后的成员列表；成员操作持有共享绑定锁，并核对数据库绑定与运行范围；成员写入另持有成员排他锁，家庭切换使用排他绑定锁。
 
 人物资料包含 `kind: person`、名称和描述，宠物使用 `kind: pet` 并要求物种；描述和物种存于 `details.description`、`details.species`，编辑时保留其他补充字段。类型登记后不可修改；名称、物种、描述分别限制为 100、50、2,000 字符，新增上限为 500 位成员，请求体限制为 16 KiB。不提供自动身份确认或行为总结。
 
-`POST /api/household-context/browse` 为 Web 的 `/data` 页面提供三张表的只读浏览。请求包含当前 `scope_epoch`、白名单表名 `table`、从 0 开始的 `page` 和 `search`；可按 `context_id` 或 `entity: { type, id }` 查看相关上下文及关联。成员按名称搜索，上下文按描述或主题搜索，关联按对象 ID 搜索；每页 25 条、最多第 10,001 页，返回是否还有下一页。计数是各表总数，不是筛选后的记录数。字段元数据从 Drizzle 表定义生成，响应最多 2 MiB，超限拒绝返回。
+`POST /api/household-context/browse` 为 Web 的 `/data` 页面提供三张表的只读浏览。请求包含当前 `scope_epoch`、白名单表名 `table`、`cursor` 和 `search`；首屏使用 `cursor: null`，后续读取使用上一页返回的 `next_cursor`。游标是保存排序位置的数据，避免扫描被跳过的历史行；时间位置保留 PostgreSQL 微秒精度。可按 `context_id` 或 `entity: { type, id }` 查看相关上下文及关联。成员按名称搜索，上下文按描述或主题搜索，关联按对象 ID 搜索；每页 25 条，返回 `has_more` 和 `next_cursor`。成员数精确查询；上下文和关联数量使用 PostgreSQL 维护的全表估计，并以 `count_is_estimate` 标记，不是筛选后的匹配数。字段元数据从 Drizzle 表定义生成并在模块内复用，响应最多 2 MiB，超限拒绝返回。
 
-接口仅允许本机访问，不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取与家庭切换共用绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
+接口仅允许本机访问，接纳后端直连、Vite 开发入口和 `https://localhost:8443` 正式页面入口；继续校验实际回环对端、Host 与 Origin，不信任转发头。成员与房间分析接口使用相同入口规则。数据浏览不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取持有共享绑定事务锁，家庭切换持有排他绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
 
 配置协调由后台周期任务执行，状态查询没有维护副作用。保存新的 go2rtc 地址后自动迁移连接；`POST /api/mijia/connection/retry` 只恢复未就绪部分。纯设备识别位于 `devices/mapping.ts`，摄像头共享流规格由 `media/camera-source-spec.ts` 定义。
 

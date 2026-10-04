@@ -59,7 +59,7 @@ const { createMijiaHousehold, createMijiaSpecificationLoader } =
   await import("./mijia/household");
 const { MiotSpecClient } = await import("./mijia/protocols/spec/client");
 const { householdLimits } = await import("./household/config");
-const { DevicePushLogs } = await import("./household/device-logs");
+const { DevicePushLogs } = await import("./mijia/device-logs/service");
 const { createHouseholdRepository } = await import("./household/repository");
 const { loadCollectionPolicy } = await import("./household/collection-policy");
 const collectionPolicy = await loadCollectionPolicy(
@@ -147,32 +147,33 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     (async () => {
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const drained = await Promise.race([
-          Promise.all([
+        const results = await Promise.race([
+          Promise.allSettled([
             server.stop(),
             perception.close(),
             app.closeRecordings(),
             speechInbox.close(),
             deviceLogs.stop("后端停止", "interrupted"),
-            household.close().catch(() => {
-              console.warn(
-                "摄像头会话清理未完成；go2rtc 将在租约到期后自动清理。",
-              );
-            }),
-          ]).then(() => true),
-          new Promise<false>((resolve) => {
+            household.close(),
+          ]),
+          new Promise<null>((resolve) => {
             drainTimer = setTimeout(
-              () => resolve(false),
+              () => resolve(null),
               environment.BACKEND_SHUTDOWN_TIMEOUT_MS,
             );
           }),
         ]);
-        if (!drained) {
+        const failures = results?.flatMap((result) =>
+          result.status === "rejected" ? [result.reason as unknown] : [],
+        );
+        if (!results || failures?.length) {
           console.warn(
-            "Backend shutdown: request drain timed out; closing active connections",
+            "Backend shutdown: cleanup failed or timed out; closing active connections",
           );
           await server.stop(true);
         }
+        if (failures?.length)
+          throw new AggregateError(failures, "Backend resource cleanup failed");
       } finally {
         clearTimeout(drainTimer);
         try {

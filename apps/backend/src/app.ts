@@ -23,7 +23,7 @@ import { createConnectionStatusRoutes } from "./connections/status";
 import { createMijiaRoutes } from "./mijia/routes";
 import type { HouseholdRuntime } from "./household/runtime";
 import type { MijiaService } from "./mijia/service";
-import type { DevicePushLogs } from "./household/device-logs";
+import type { DevicePushLogs } from "./mijia/device-logs/service";
 import type { RoomAnalysisService } from "./room-analysis/service";
 import { createRoomAnalysisRoutes } from "./room-analysis/routes";
 import { createContextRoutes } from "./household-context/routes";
