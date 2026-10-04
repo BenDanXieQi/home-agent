@@ -90,11 +90,20 @@ function distribution(samples: number[]) {
     max: sorted.at(-1) ?? null,
   };
 }
+async function readVideoMetadata(path: string) {
+  const budget = 256 * 1024;
+  const file = Bun.file(resolve(path));
+  if (file.size > budget)
+    throw new Error("Video metadata exceeds the metadata budget");
+  // A lazy file slice bounds the read even if the file grows after the size check.
+  const bytes = Buffer.from(await file.slice(0, budget + 1).arrayBuffer());
+  if (bytes.length > budget)
+    throw new Error("Video metadata exceeds the metadata budget");
+  return bytes;
+}
 async function readVideoProvenance(video: (typeof manifest.videos)[number]) {
   if (!video.provenancePath) return null;
-  const bytes = await readFile(resolve(video.provenancePath));
-  if (bytes.length > 256 * 1024)
-    throw new Error("Source provenance exceeds the metadata budget");
+  const bytes = await readVideoMetadata(video.provenancePath);
   const value = z
     .object({
       source: z.object({ url: z.url() }).passthrough(),
@@ -563,9 +572,7 @@ for (const [index, video] of manifest.videos.entries()) {
     JSON.stringify(frames, null, 2) + "\n",
   );
   if (video.licensePath) {
-    const notice = await readFile(resolve(video.licensePath));
-    if (notice.length > 256 * 1024)
-      throw new Error("License notice exceeds the metadata budget");
+    const notice = await readVideoMetadata(video.licensePath);
     await writeFileAtomic(
       join(output, `source-${index + 1}-license.txt`),
       notice,

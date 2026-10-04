@@ -255,7 +255,7 @@ bun run --cwd apps/backend analyze:appearance-video \
   --identity-model-dir ../../data/perception/member-attribution/identity-models
 ```
 
-manifest 的每个视频可提供 `provenancePath` 与 `licensePath`：来源 JSON 的源 URL 和本地片段 SHA-256 必须与视频项相同，单份元数据不超过 256 KiB；来源信息随报告保留，许可通知另保存为 `source-N-license.txt`。来源 JSON 中的取得命令只作为资料保存，不执行。原帧像素及向量不写入报告。
+manifest 的每个视频可提供 `provenancePath` 与 `licensePath`：来源 JSON 的源 URL 和本地片段 SHA-256 必须与视频项相同，单份元数据不超过 256 KiB，读取前检查大小并限制实际读取字节数；可选路径与视频 `path` 均相对于命令的工作目录解析，省略时不读取或附带对应资料。来源信息随报告保留，许可通知另保存为 `source-N-license.txt`。来源 JSON 中的取得命令只作为资料保存，不执行。原帧像素及向量不写入报告。
 
 已分析的 AMI 素材是官方 `ES2002a.Closeup1_orig.avi` 的源媒体 60–90 秒，720×576、25 fps，30 秒无损 FFV1 片段指纹为 `ab958a50d605b9a4c3859fc84ec8288d1e0911114319f5212fd229a1ea1fe23b`。[AMI 官方发布说明](https://groups.inf.ed.ac.uk/ami/download/)使用 CC BY 4.0；保留 AMI Project 署名、Carletta 2006 语料说明引用及许可。取得资料包含源 ETag、长度、修改日期、原生 FFmpeg 命令和源／本地 750 帧像素校验结果；分析入口另外核对本地文件指纹与实际解码／采样帧数。
 
