@@ -1,3 +1,6 @@
+import { useMemo, useSyncExternalStore } from "react";
+import { associationLabel } from "../../modules/members/attribution";
+import { MemberAssociationEvidence } from "../../components/MemberAssociationEvidence";
 import { useAtomValue } from "jotai";
 import type { z } from "zod";
 import type { perceptionSnapshotSchema } from "@home-agent/api/contracts";
@@ -6,7 +9,7 @@ import type { createPerceptionSourceState } from "../../modules/perception/sourc
 const states = {
   unknown: "未知",
   candidate: "疑似",
-  confirmed: "已识别",
+  confirmed: "已确认",
   inferred: "推测 · 人体外观匹配",
   conflict: "证据冲突",
 };
@@ -40,7 +43,13 @@ function IdentityRow({
       {association ? (
         <p className="break-all text-muted">成员 ID：{association.memberId}</p>
       ) : null}
-      <p>{states[state]}</p>
+      <p>{association ? associationLabel(association) : states[state]}</p>
+      {association ? (
+        <details>
+          <summary className="cursor-pointer text-muted">归因依据</summary>
+          <MemberAssociationEvidence association={association} />
+        </details>
+      ) : null}
       <p className="text-muted">
         观察时间：
         {observedAt === null
@@ -51,6 +60,36 @@ function IdentityRow({
   );
 }
 
+function associationClock(
+  associations: Parameters<typeof IdentityRow>[0]["associations"],
+) {
+  let now = Date.now();
+  return {
+    getSnapshot: () => now,
+    subscribe: (notify: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      function refresh() {
+        now = Date.now();
+        notify();
+        const nextExpiry = Math.min(
+          ...associations
+            .flatMap((association) => [
+              association.expiresAt,
+              ...(association.basis === "appearance"
+                ? association.references.map((reference) => reference.expiresAt)
+                : []),
+            ])
+            .filter((expiry) => expiry > now),
+        );
+        if (Number.isFinite(nextExpiry))
+          timer = setTimeout(refresh, Math.max(0, nextExpiry - now));
+      }
+      refresh();
+      return () => clearTimeout(timer);
+    },
+  };
+}
+
 export function CameraIdentity({
   source,
   frozen,
@@ -59,7 +98,18 @@ export function CameraIdentity({
   frozen: boolean;
 }) {
   const identity = useAtomValue(source.identityAtom);
-  const associations = useAtomValue(source.associationsAtom);
+  const publishedAssociations = useAtomValue(source.associationsAtom);
+  const clock = useMemo(
+    () => associationClock(publishedAssociations),
+    [publishedAssociations],
+  );
+  const now = useSyncExternalStore(clock.subscribe, clock.getSnapshot);
+  const associations = publishedAssociations.filter(
+    (association) =>
+      association.expiresAt > now &&
+      (association.basis !== "appearance" ||
+        association.references.every((reference) => reference.expiresAt > now)),
+  );
   const tracks = [
     ...(identity?.tracks ?? []),
     ...associations

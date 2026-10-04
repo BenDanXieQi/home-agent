@@ -134,7 +134,21 @@ export function createPerceptionSourceState({
         return "来源运行已切换，等待本次运行的身份分析结果。";
       return null;
     }),
-    associationsAtom: atom((get) => get(activeSourceAtom)?.associations ?? []),
+    associationsAtom: atom((get) => {
+      const source = get(activeSourceAtom);
+      if (
+        !source ||
+        source.status !== "reading" ||
+        source.trackingValidity !== "valid"
+      )
+        return [];
+      return source.associations.filter(
+        (association) =>
+          association.sourceRunId === source.run?.runId &&
+          (association.basis === "appearance" ||
+            source.identityValidity === "valid"),
+      );
+    }),
     identityAtom: atom((get) => {
       const source = get(activeSourceAtom);
       if (
