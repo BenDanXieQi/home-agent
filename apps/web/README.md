@@ -6,7 +6,7 @@
 
 ## 运行
 
-在仓库根目录执行 `bun run dev`，首次运行 `bun run web:trust` 完成本地证书信任，访问 <https://localhost:8443/>。Caddy 把页面与热更新连接转发到 Vite，把 `/api` 转发到 `.env` 中配置的 backend；生产环境执行 `bun run start`，使用同一 HTTPS 入口提供构建页面和 API。Vite 的 `5173` 为内部开发端口，静态预览不提供 API 代理。独立启动 Web 时另运行 `bun run web:dev`；入口配置、证书与停止方式见[运行说明](../../docs/running.md#https-与-http2-入口)。
+在仓库根目录执行 `bun run dev`，首次运行 `bun run web:trust` 完成本地证书信任，访问 <https://localhost:8443/>。Caddy 把页面与热更新连接转发到 Vite，把 `/api` 转发到 `.env` 中配置的 backend；生产环境执行 `bun run start`，使用同一 HTTPS 入口提供构建页面和 API。Vite 的 `5173` 为内部开发端口，静态预览不提供 API 代理。独立启动 Web 时另运行 `bun --env-file=.env scripts/web-entry.ts development`；入口配置、证书与停止方式见[运行说明](../../docs/running.md#https-与-http2-入口)。
 
 构建时，`build/precompress.ts` 为 HTML、JavaScript、CSS 和 SVG 生成更小的 Brotli（`.br`）与 gzip（`.gz`）副本，原文件继续保留；字体本身已压缩，不重复处理。压缩副本随 Web 构建产物一起复制到 backend。生产静态响应与缓存策略见 [Backend 静态文件服务](../backend/README.md#静态文件服务)。开发服务器不使用这些预压缩文件。
 
@@ -232,7 +232,7 @@ requestJson(
 
 `requestJsonResponse` 额外返回解析后的 `Retry-After`，`requestEmpty` 验证 204 响应。播放释放沿用 keepalive。重试默认关闭；播放 offer 显式选择 `retryOnceOnTransportFailure`，最多重发一次相同参数。每次请求沿用调用方的 `timeoutMs`，播放器的取消信号统一约束首次请求和重试，总协商期限为 85 秒，不因重试重新计时。HTTP 业务错误和响应校验失败不自动重试，后台生命周期恢复继续由 backend 管理。
 
-RPC 声明由 backend 的 `build:rpc` 生成到 `dist/rpc`，不提交 Git。Turborepo 在 Web 检查和构建前生成声明；根目录 `bun run dev` 或 `bun run dev:web` 同时运行声明 watcher。单独调用 Web 包脚本前需先执行 `bun run --cwd apps/backend build:rpc`。声明和客户端运行时代码都不引入服务端实现到浏览器包；SSE 接口通过类型化客户端返回原始流，不使用 JSON 响应辅助函数。
+RPC 声明由 backend 的 `build:rpc` 生成到 `dist/rpc`，不提交 Git。Turborepo 在 Web 检查和构建前生成声明；根目录 `bun run dev` 或 `bunx turbo run dev --filter=@home-agent/web` 同时运行声明 watcher。单独调用 Web 包脚本前需先执行 `bun run --cwd apps/backend build:rpc`。声明和客户端运行时代码都不引入服务端实现到浏览器包；SSE 接口通过类型化客户端返回原始流，不使用 JSON 响应辅助函数。
 
 家庭设置在首次未绑定或展开“重新绑定家庭”时通过 `GET /api/mijia/setup/homes` 读取候选。设置页显示已绑定家庭；重新绑定需选择其他家庭并确认对设备任务和视频连接的影响，保存期间禁用重复提交。保存后的初始化失败可刷新设备清单重试。设备、看家页标题仅显示对应数量；设置页标题不显示摄像头接入状态，连接问题在具体设置项提示。完整规格与候选家庭不进入公共快照。
 

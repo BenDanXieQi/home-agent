@@ -28,12 +28,12 @@ const [action, ...args] = process.argv.slice(2);
 const requestedMode =
   args.length === 2 && args[0] === "--mode" ? args[1] : undefined;
 if (
-  !["dev", "stop", "status"].includes(action ?? "") ||
+  !["dev", "stop", "status", "migrate"].includes(action ?? "") ||
   (args.length > 0 &&
     (action !== "dev" || !["native", "docker"].includes(requestedMode ?? "")))
 )
   throw new Error(
-    "用法：bun run dev [--mode native|docker]，bun run stop，bun run status",
+    "用法：bun run dev [--mode native|docker]，bun run stop，bun run status，bun run db:migrate",
   );
 const env = {
   ...process.env,
@@ -48,7 +48,7 @@ async function runDocker(arguments_: string[]) {
     stdout: "inherit",
     stderr: "inherit",
   });
-  if (await child.exited) throw new Error("Docker 命令失败，未完成模式切换。");
+  if (await child.exited) throw new Error("Docker 命令失败，服务操作未完成。");
 }
 async function dockerRunning(service: "go2rtc" | "db") {
   const child = Bun.spawn(
@@ -106,6 +106,13 @@ async function runBun(commandArgs: string[]) {
   if (await child.exited)
     throw new Error(`命令失败：bun ${commandArgs.join(" ")}`);
 }
+async function prepareDatabase() {
+  await runDocker([...up, "db"]);
+  await runBun(["run", "--cwd", "apps/backend", "db:migrate"]);
+  await runBun(["run", "--cwd", "apps/agent", "db:setup"]);
+  await runBun(["run", "--cwd", "apps/backend", "db:check"]);
+  await runBun(["run", "--cwd", "apps/agent", "db:check"]);
+}
 if (action === "status") {
   console.info(`已选 go2rtc 模式：${modeLabel(await selectedMode())}`);
   console.info(
@@ -128,7 +135,7 @@ try {
   await mkdir(lock);
 } catch {
   throw new Error(
-    "已有启动或停止命令运行。若前次命令异常退出，请确认没有相关任务后删除 config/runtime/services.lock。",
+    "已有服务管理命令运行。若前次命令异常退出，请确认没有相关任务后删除 config/runtime/services.lock。",
   );
 }
 try {
@@ -138,6 +145,9 @@ try {
     await stopNative();
     await runDocker(["compose", "stop"]);
     console.info("本项目管理的开发应用、go2rtc 和数据库已停止，数据保留。");
+  } else if (action === "migrate") {
+    await runBun(["scripts/setup-local.ts"]);
+    await prepareDatabase();
   } else {
     const modeFile = resolve(runtime, "go2rtc-mode");
     const mode = requestedMode ?? (await selectedMode());
@@ -199,8 +209,7 @@ try {
           "go2rtc 容器已启动，但本机无法访问 1984。Docker Desktop 请在 Settings → Resources → Network 开启 Enable host networking 并 Apply & restart；Linux 请检查 host 网络与端口占用。详见 README.md。",
         );
     }
-    if (await dockerRunning("db")) console.info("数据库容器已运行，跳过启动。");
-    else await runDocker([...up, "db"]);
+    await prepareDatabase();
     await writeFile(modeFile, mode + "\n", { mode: 0o600 });
     console.info(
       `go2rtc: ${mode} · http://127.0.0.1:1984（接口就绪不代表摄像头出帧）`,
@@ -208,7 +217,6 @@ try {
     await startWebEntry("development");
     const pending = await pendingApplications();
     if (pending.length > 0) {
-      await runBun(["run", "db:check"]);
       waitForDev = await startDev(pending);
     } else console.info("所有开发应用均已启动，无需启动新进程。");
   }

@@ -8,7 +8,7 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
-`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；数据库和所选模式的 go2rtc 已运行时跳过启动。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后执行 backend 迁移、Agent 存储初始化和两者的数据库检查，成功后才启动 HTTPS 入口和应用。已有迁移和初始化可重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
 
 两种模式都需要 Docker，分别用于数据库和 go2rtc 构建／运行，无需本机安装 Go。首次构建需联网。模式切换由启动命令管理，会中断现有播放；不要同时手工启动另一套 go2rtc。
 
@@ -28,24 +28,24 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 服务仅面向可信本机，尚无用户认证。数据库与 go2rtc 管理端口限制在本机访问，不应暴露到公网。摄像头用法与限制见[米家与摄像头](mijia.md)，构建说明见 [go2rtc](../docker/go2rtc/README.md)。
 
-生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库迁移需事先准备。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
+生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库迁移需事先准备；本机数据库准备可直接运行 `bun run db:migrate`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，直接执行各应用的数据库命令，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
 
 ## HTTPS 与 HTTP/2 入口
 
 本机需安装 [Caddy](https://caddyserver.com/docs/install)；macOS 使用 `brew install caddy`。开发与生产浏览器统一访问 <https://localhost:8443/>，避免多个 SSE（服务端持续推送事件的连接）占满 HTTP/1.1 浏览器连接。内部 Vite、backend 与 Agent 端口仍用于服务间通信和排障。
 
 ```sh
-bun run web:dev          # 独立启动或重载开发入口；bun run dev 已包含此步骤
+bun --env-file=.env scripts/web-entry.ts development  # 独立启动或重载开发入口
 bun run web:trust        # 首次启动后安装 Caddy 本地根证书，按系统提示授权
-bun run web:production  # 已构建时切换为生产页面；bun run start 已包含此步骤
-bun run web:stop         # 只停止本项目入口，不停止其他服务
+bun --env-file=.env scripts/web-entry.ts production   # 已构建时切换为生产页面
+bun --env-file=.env scripts/web-entry.ts stop         # 只停止本项目入口
 ```
 
 入口由 `scripts/web-entry.ts` 使用 Caddy 原生命令管理。`deploy/web/Caddyfile` 仅绑定回环地址，保留浏览器 Host／Origin；`/api/*` 直接转发至 backend。开发模式通过 `development.caddy` 转发页面及 WebSocket 热更新到 Vite；生产模式通过 `production.caddy` 提供 `apps/backend/dist/public`、预压缩文件和前端路由入口，API 不进入页面回退。开发及生产共用本地证书与管理实例，重载不会启动第二个入口。
 
 `bun run stop` 先停止受管理的开发应用，让 backend 结束持续推送，再停止 Caddy，最后停止 go2rtc 和数据库。Caddy 停止或配置切换时最多等待现有 HTTP 请求 5 秒，随后关闭尚未结束的连接，避免 SSE 长连接阻止退出。停止和重载命令最多等待 15 秒，超过后终止命令并报错；这不代表 Caddy 服务本身已退出。管理接口状态查询最多等待 10 秒；超时会报错，不把仍占用管理 socket 的进程当作未运行，也不自动启动第二个入口。
 
-证书与私钥、管理 socket（本机进程通信端点）及运行日志保存在 Git 忽略的 `config/runtime/caddy/`，目录只允许当前用户访问；管理接口不开放 TCP 端口。Caddy 使用[自动 HTTPS](https://caddyserver.com/docs/automatic-https)签发和续期 `localhost` 证书，首次信任由显式的 `web:trust` 命令完成，不跳过浏览器证书检查。不要复制私钥或把该目录提交 Git；删除证书存储后需要重新信任新根证书。开发终端退出后入口仍运行，可用 `web:stop` 或 `bun run stop` 关闭。
+证书与私钥、管理 socket（本机进程通信端点）及运行日志保存在 Git 忽略的 `config/runtime/caddy/`，目录只允许当前用户访问；管理接口不开放 TCP 端口。Caddy 使用[自动 HTTPS](https://caddyserver.com/docs/automatic-https)签发和续期 `localhost` 证书，首次信任由显式的 `web:trust` 命令完成，不跳过浏览器证书检查。不要复制私钥或把该目录提交 Git；删除证书存储后需要重新信任新根证书。开发终端退出后入口仍运行，可直接调用入口脚本的 `stop` 操作或用 `bun run stop` 关闭。
 
 浏览器入口支持 HTTP/2，内部转发使用 HTTP/1.1；SSE 沿用 Caddy 对 `text/event-stream` 的[即时刷新](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#streaming)，不设置响应缓冲或 `flush_interval -1`，客户端离页时取消上游读取。WebRTC 媒体仍直接连接本机 go2rtc，HTTPS 入口只代理播放信令。backend 验证真实 TCP 对端为回环地址，单独接纳 `localhost:8443` Host 与 `https://localhost:8443` Origin，不信任转发头；Agent 的访问范围不变。
 
@@ -96,16 +96,18 @@ bun --env-file=.env apps/backend/dist/main.js --config ./local-config/config.yam
 
 ## 单独启动与检查
 
+根目录保留完整服务操作和仓库质量检查；单应用开发、数据库生成／浏览／检查使用所属应用命令，独立入口操作直接调用脚本。只读数据库检查分别运行 `bun run --cwd apps/backend db:check` 与 `bun run --cwd apps/agent db:check`。
+
 ```sh
-bun run dev:web
-bun run dev:backend
-bun run dev:agent
+bunx turbo run dev --filter=@home-agent/web
+bun run --cwd apps/backend dev
+bun run --cwd apps/agent dev
 bun run check
 bun run build
 ```
 
 单独启动应用不会管理依赖，也不纳入 `bun run stop` 的进程管理。
 
-仅开发 backend 感知、暂不启动 Agent 时，先准备已配置模式的 go2rtc、backend 数据库及迁移、米家授权，以及检测需要的 FFmpeg 和 `config/perception.json`，再分别运行 `bun run dev:backend`，需要页面时运行 `bun run dev:web` 和 `bun run web:dev`，首次完成 `bun run web:trust`。不要使用会统一启动 Agent 的根目录 `dev`/`start` 代替此方式。根目录 `db:migrate`/`db:check` 也包含 Agent checkpoint；仅准备 backend 可使用 `bun run --cwd apps/backend db:migrate` 和 `bun run --cwd apps/backend db:check`。当前未提供自动准备依赖的“仅感知”启动模式。
+仅开发 backend 感知、暂不启动 Agent 时，先准备已配置模式的 go2rtc、backend 数据库及迁移、米家授权，以及检测需要的 FFmpeg 和 `config/perception.json`，再分别运行 `bun run --cwd apps/backend dev`，需要页面时运行 `bunx turbo run dev --filter=@home-agent/web` 和 `bun --env-file=.env scripts/web-entry.ts development`，首次完成 `bun run web:trust`。不要使用会统一启动 Agent 的根目录 `dev`/`start` 代替此方式。根目录 `db:migrate` 自动准备本机数据库，也包含 Agent checkpoint；仅准备 backend 可使用 `bun run --cwd apps/backend db:migrate` 和 `bun run --cwd apps/backend db:check`。当前未提供自动准备依赖的“仅感知”启动模式。
 
 `bun run check` 执行格式、lint 和类型检查，覆盖各 workspace 及根目录 `scripts/`。共享 lint 与 TypeScript 配置分别由 `@home-agent/oxlint-config` 和 `@home-agent/typescript-config` 提供，各包通过 workspace 依赖引用；Turbo 负责检查任务和构建依赖，前端构建先完成类型检查。
