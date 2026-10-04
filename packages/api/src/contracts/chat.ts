@@ -68,20 +68,23 @@ export const chatTurnSchema = z.object({
   error: z.string(),
   status: z.enum(["running", "completed", "incomplete", "failed", "cancelled"]),
 });
+export const chatThreadSchema = z.object({
+  threadId: z.uuid(),
+  title: z.string().max(80),
+  updatedAt: z.iso.datetime(),
+  running: z.boolean(),
+});
+export const chatThreadCursorSchema = chatThreadSchema.pick({
+  threadId: true,
+  updatedAt: true,
+});
 export const chatHistoryListInputSchema = z.strictObject({
-  before: z.uuid().optional(),
+  before: chatThreadCursorSchema.optional(),
   limit: z.number().int().min(1).max(20).default(10),
 });
 export const chatHistoryListSchema = z.object({
-  threads: z.array(
-    z.object({
-      threadId: z.uuid(),
-      title: z.string(),
-      updatedAt: z.iso.datetime(),
-      running: z.boolean(),
-    }),
-  ),
-  nextBefore: z.uuid().nullable(),
+  threads: z.array(chatThreadSchema),
+  nextBefore: chatThreadCursorSchema.nullable(),
 });
 export const chatHistoryInputSchema = z.strictObject({
   threadId: z.uuid(),

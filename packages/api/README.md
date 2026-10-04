@@ -82,4 +82,4 @@ bun run --cwd packages/api test -- tests/contracts/household.test.ts
 
 ## 聊天历史
 
-`chatHistoryListInputSchema`／`chatHistoryListSchema` 定义历史会话游标分页，`chatHistoryInputSchema`／`chatHistorySchema` 定义固定检查点的消息分页。`chatTurnSchema` 与 `chatToolCallSchema` 是实时聊天和历史展示共用的视图结构，不复制 LangGraph 存储格式。未完成会话不能直接追加输入，返回 `thread_incomplete`。
+`chatHistoryListInputSchema`／`chatHistoryListSchema` 定义历史会话分页，`before`／`nextBefore` 使用 `{ updatedAt, threadId }` 复合游标，按更新时间和会话 ID 倒序排列。`chatHistoryInputSchema`／`chatHistorySchema` 定义固定检查点的消息分页，继续使用 `checkpointId` 与整数 `before`。`chatTurnSchema` 与 `chatToolCallSchema` 是实时聊天和历史展示共用的视图结构，不复制 LangGraph 存储格式。未完成会话不能直接追加输入，返回 `thread_incomplete`。

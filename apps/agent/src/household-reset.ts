@@ -38,7 +38,7 @@ export function createHouseholdReset(database?: AgentDatabase) {
             await client.query("SET LOCAL statement_timeout = '5s'");
             await client.query("SET LOCAL lock_timeout = '5s'");
             await client.query(
-              "TRUNCATE agent_state.checkpoint_writes, agent_state.checkpoint_blobs, agent_state.checkpoints",
+              "TRUNCATE agent_state.chat_threads, agent_state.checkpoint_writes, agent_state.checkpoint_blobs, agent_state.checkpoints",
             );
             await client.query("COMMIT");
           } catch (cause) {

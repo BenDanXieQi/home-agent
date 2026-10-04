@@ -1,6 +1,5 @@
-import { z } from "zod";
+import type { z } from "zod";
 import {
-  isBaseMessage,
   isHumanMessage,
   isAIMessage,
   isToolMessage,
@@ -14,47 +13,7 @@ import {
   type chatHistoryListInputSchema,
 } from "@home-agent/api/contracts";
 import type { AgentDatabase } from "../db";
-
-export function messageText(content: unknown) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((block: unknown) =>
-      typeof block === "object" &&
-      block !== null &&
-      "text" in block &&
-      typeof block.text === "string"
-        ? block.text
-        : "",
-    )
-    .join("");
-}
-
-function checkpointMessages(
-  saved: NonNullable<
-    Awaited<ReturnType<AgentDatabase["checkpointer"]["getTuple"]>>
-  >,
-) {
-  const values: unknown = saved.checkpoint.channel_values.messages;
-  if (values === undefined) return [];
-  if (!Array.isArray(values) || !values.every(isBaseMessage))
-    throw new AppError("persistence_unavailable");
-  return values;
-}
-export function canContinueChat(
-  saved: Awaited<ReturnType<AgentDatabase["checkpointer"]["getTuple"]>>,
-) {
-  if (!saved) return true;
-  const last = checkpointMessages(saved).at(-1);
-  return (
-    saved.metadata?.source === "loop" &&
-    !saved.pendingWrites?.length &&
-    !!last &&
-    isAIMessage(last) &&
-    !last.tool_calls?.length &&
-    !last.invalid_tool_calls?.length
-  );
-}
+import { messageText, checkpointMessages, canContinueChat } from "./state";
 
 export function createChatHistory(
   database: AgentDatabase,
@@ -76,52 +35,36 @@ export function createChatHistory(
   }
   return {
     async list(input: z.infer<typeof chatHistoryListInputSchema>) {
-      // Only enumerate root checkpoint identities here. The official saver owns message decoding.
-      const result = await database.pool.query(
-        `
-        SELECT thread_id, checkpoint_id FROM (
-          SELECT DISTINCT ON (thread_id) thread_id, checkpoint_id
-          FROM agent_state.checkpoints WHERE checkpoint_ns = ''
-          ORDER BY thread_id, checkpoint_id DESC
-        ) latest
-        WHERE ($1::text IS NULL OR checkpoint_id < $1)
-        ORDER BY checkpoint_id DESC LIMIT $2`,
-        [input.before ?? null, input.limit + 1],
-      );
       signal.throwIfAborted();
-      const rows = z
-        .array(z.object({ thread_id: z.uuid(), checkpoint_id: z.uuid() }))
-        .parse(result.rows);
-      const page = rows.slice(0, input.limit);
-      const threads = [];
-      for (const row of page) {
-        const saved = await read(row.thread_id, row.checkpoint_id);
-        const first = checkpointMessages(saved).find(isHumanMessage);
-        threads.push({
-          threadId: row.thread_id,
-          title: first
-            ? messageText(first.content).replace(/\s+/g, " ").slice(0, 80) ||
-              "新对话"
-            : "未完成的对话",
-          updatedAt: saved.checkpoint.ts,
-          running: activeThreads.has(row.thread_id),
-        });
-      }
+      const result = await database.threads.list(input);
+      signal.throwIfAborted();
       return {
-        threads,
-        nextBefore:
-          rows.length > input.limit
-            ? (page.at(-1)?.checkpoint_id ?? null)
-            : null,
+        ...result,
+        threads: result.threads.map((thread) => ({
+          ...thread,
+          running: activeThreads.has(thread.threadId),
+        })),
       };
     },
     async detail(input: z.infer<typeof chatHistoryInputSchema>) {
       const saved = await read(input.threadId, input.checkpointId);
+      const messages = checkpointMessages(saved);
+      const boundaries = messages.flatMap((message, index) =>
+        isHumanMessage(message) ? [index] : [],
+      );
+      const end = Math.min(
+        input.before ?? boundaries.length,
+        boundaries.length,
+      );
+      const start = Math.max(0, end - input.limit);
       const turns: z.infer<typeof chatTurnSchema>[] = [];
-      for (const message of checkpointMessages(saved)) {
+      for (const message of messages.slice(
+        boundaries[start] ?? messages.length,
+        boundaries[end] ?? messages.length,
+      )) {
         if (isHumanMessage(message)) {
           turns.push({
-            id: message.id ?? `${saved.checkpoint.id}:${turns.length}`,
+            id: message.id ?? `${saved.checkpoint.id}:${start + turns.length}`,
             message: messageText(message.content),
             answer: "",
             tools: [],
@@ -162,13 +105,11 @@ export function createChatHistory(
           }
         }
       }
-      const end = Math.min(input.before ?? turns.length, turns.length);
-      const start = Math.max(0, end - input.limit);
       const running = activeThreads.has(input.threadId);
       return {
         threadId: input.threadId,
         checkpointId: saved.checkpoint.id,
-        turns: turns.slice(start, end),
+        turns,
         nextBefore: start > 0 ? start : null,
         canContinue: !running && canContinueChat(saved),
         running,

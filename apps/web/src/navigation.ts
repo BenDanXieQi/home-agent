@@ -11,7 +11,7 @@ import {
 export const navigation = [
   {
     to: "/agent",
-    label: "Agent",
+    label: "AI",
     icon: Bot,
     cornerRadius: 14,
     mobilePrimary: false,

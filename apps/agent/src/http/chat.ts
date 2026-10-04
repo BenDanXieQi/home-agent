@@ -1,8 +1,9 @@
+import { createChatHistory } from "../chat/history";
 import {
-  createChatHistory,
   canContinueChat,
+  checkpointMessages,
   messageText,
-} from "../chat/history";
+} from "../chat/state";
 import { createHouseholdReset } from "../household-reset";
 import type { RunFailedEvent } from "@home-agent/api/contracts";
 import { AppError, errorPayload } from "@home-agent/api/errors";
@@ -13,7 +14,11 @@ import {
   recordFailure,
   currentTraceId,
 } from "@home-agent/observability";
-import { HumanMessage, isToolMessage } from "@langchain/core/messages";
+import {
+  HumanMessage,
+  isHumanMessage,
+  isToolMessage,
+} from "@langchain/core/messages";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
@@ -113,9 +118,12 @@ export function createChatRoutes(
       activeThreads.add(threadId);
       try {
         // Check storage before returning an SSE success status or calling the model.
-        const saved = await database.checkpointer.getTuple({
-          configurable: { thread_id: threadId },
-        });
+        const [saved] = await Promise.all([
+          database.checkpointer.getTuple({
+            configurable: { thread_id: threadId },
+          }),
+          database.threads.assertReady(),
+        ]);
         if (input.threadId && !saved) throw new AppError("not_found");
         if (!canContinueChat(saved)) throw new AppError("thread_incomplete");
       } catch (cause) {
@@ -128,6 +136,20 @@ export function createChatRoutes(
         activeThreads.delete(threadId);
         leave();
         throw new AppError("request_cancelled");
+      }
+      const storage = database;
+      async function saveSummary() {
+        const saved = await storage.checkpointer.getTuple({
+          configurable: { thread_id: threadId },
+        });
+        if (saved) {
+          const first = checkpointMessages(saved).find(isHumanMessage);
+          await storage.threads.touch(
+            threadId,
+            first ? messageText(first.content) || "新对话" : "未完成的对话",
+          );
+        }
+        return saved;
       }
       const runId = crypto.randomUUID();
       c.header("X-Thread-Id", threadId);
@@ -265,8 +287,17 @@ export function createChatRoutes(
                     }
                   }
                   signal.throwIfAborted();
+                  const saved = await saveSummary();
+                  if (!saved || !canContinueChat(saved))
+                    throw new AppError("thread_incomplete");
+                  signal.throwIfAborted();
                   await emit("run_completed", { runId, threadId });
                 } catch (error) {
+                  try {
+                    await saveSummary();
+                  } catch (summaryError) {
+                    recordFailure(span, summaryError);
+                  }
                   if (!signal.aborted) {
                     recordFailure(span, error);
                     await emit("run_failed", {
