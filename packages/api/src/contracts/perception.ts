@@ -277,6 +277,7 @@ export const attributionTriggerSchema = z.object({
   referenceIds: z.array(z.uuid()).max(5),
   references: z.array(appearanceReferenceSchema).max(5),
   reason: z.enum([
+    "target_face_conflict",
     "face_conflict",
     "identity_replaced",
     "terminal_identity_unavailable",
@@ -302,7 +303,7 @@ export const memberAttributionSnapshotSchema = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("unknown"),
-    reason: z.literal("reference_revoked"),
+    reason: z.enum(["reference_revoked", "target_face_conflict"]),
     observedAt: z.number(),
     acceptedAt: z.number(),
     trigger: attributionTriggerSchema,
@@ -321,6 +322,7 @@ export const memberActivityAttributionSchema = z.object({
         "member_changed",
         "direct_confirmation",
         "reference_revoked",
+        "target_face_conflict",
       ]),
       trigger: z.union([memberAssociationSchema, attributionTriggerSchema]),
       processedAt: z.number(),

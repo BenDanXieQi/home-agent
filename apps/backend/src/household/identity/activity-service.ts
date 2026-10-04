@@ -216,7 +216,7 @@ export function createMemberActivityService(
           z.infer<typeof memberActivityAttributionSchema>["lastCorrection"]
         >["reason"]
       | null = null;
-    if (next.kind === "unknown") reason = "reference_revoked";
+    if (next.kind === "unknown") reason = next.reason;
     else if (
       before.kind === "unknown" ||
       before.association.memberId !== next.association.memberId
@@ -291,7 +291,53 @@ export function createMemberActivityService(
     release(key, entry);
   }
   const unsubscribeAppearance = perception.appearance?.subscribe((event) => {
-    if (event.kind === "reference_revoked") {
+    if (event.kind === "target_identity") {
+      const entry = entries.get(event.sourceTargetKey);
+      if (!entry || entry.terminalChecked) return;
+      const current = entry.activity.record.data.attribution.current;
+      if (event.update.kind === "confirmed") {
+        if (
+          current.kind !== "known" ||
+          !isDeepStrictEqual(current.association, event.update.association)
+        ) {
+          accept(entry, {
+            kind: "known",
+            association: event.update.association,
+            acceptedAt: Date.now(),
+          });
+          schedule(event.sourceTargetKey, entry);
+        }
+      } else {
+        if (
+          entry.inFlight &&
+          activityReferenceIds(
+            entry.inFlight.activity.record.data.attribution.current,
+          ).length
+        )
+          entry.inFlight.revoked = true;
+        if (
+          current.kind !== "known" ||
+          current.association.basis !== "appearance"
+        )
+          return;
+        accept(entry, {
+          kind: "unknown",
+          reason: "target_face_conflict",
+          observedAt:
+            event.update.trigger.track.lastEvidenceAt ??
+            entry.activity.record.data.lastObservedAt,
+          acceptedAt: Date.now(),
+          trigger: attributionTriggerSchema.parse({
+            sourceTargetKey: event.sourceTargetKey,
+            referenceIds: current.association.referenceIds,
+            references: current.association.references,
+            reason: "target_face_conflict",
+            trigger: event.update.trigger,
+          }),
+        });
+        schedule(event.sourceTargetKey, entry);
+      }
+    } else if (event.kind === "reference_revoked") {
       const keys = new Set(
         event.referenceIds.flatMap((id) => [...(dependents.get(id) ?? [])]),
       );

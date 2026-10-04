@@ -22,7 +22,7 @@ export function memberActivity(
     : `${camera}镜头 ${data.channel} 的轨迹 ${data.trackId} 成员归属已撤销。`;
   const evidence =
     current.kind === "unknown"
-      ? [{ basis: "reference_revoked", ...current.trigger }]
+      ? [{ basis: current.reason, ...current.trigger }]
       : current.association.basis === "appearance"
         ? [
             {
