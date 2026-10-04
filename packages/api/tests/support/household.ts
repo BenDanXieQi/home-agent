@@ -4,6 +4,7 @@ import {
   initialSpecification,
   snapshotSchema,
 } from "../../src/contracts/household";
+import { initialCollectionStatus } from "../../src/contracts/observations";
 
 export const epoch = "a1000000-0000-4000-8000-000000000001";
 export const accountId = "a2000000-0000-4000-8000-000000000001";
@@ -51,6 +52,10 @@ export function householdSnapshot() {
       home: {},
       room: {},
       device: {},
+      latest: {},
+      source_health: {},
+      device_coverage: {},
+      collection: { collection: initialCollectionStatus() },
     },
   });
 }

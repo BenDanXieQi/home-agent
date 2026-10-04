@@ -68,9 +68,15 @@ export function createApiClient(
           init: { signal, ...(options.keepalive ? { keepalive: true } : {}) },
         });
         if (!response.ok) {
-          const details = apiErrorSchema.safeParse(await response.json());
+          const details = apiErrorSchema.safeParse(
+            await response.json().catch((cause: unknown) => {
+              if (cause instanceof SyntaxError) return null;
+              throw cause;
+            }),
+          );
           throw new RequestError(
             details.success ? details.data : { code: "invalid_response" },
+            response.status,
           );
         }
         const result = await decode(response);
@@ -132,8 +138,17 @@ export function createApiClient(
     );
   }
 
-  return { rpc, requestJson, requestJsonResponse, requestEmpty };
+  function requestBlob(send: RpcRequest, options?: RequestOptions) {
+    return execute(send, (response) => response.blob(), options);
+  }
+
+  return { rpc, requestJson, requestJsonResponse, requestEmpty, requestBlob };
 }
 
-export const { rpc, requestJson, requestJsonResponse, requestEmpty } =
-  createApiClient();
+export const {
+  rpc,
+  requestJson,
+  requestJsonResponse,
+  requestEmpty,
+  requestBlob,
+} = createApiClient();

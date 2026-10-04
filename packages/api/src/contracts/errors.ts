@@ -33,6 +33,10 @@ export const errorCodeSchema = z.enum([
   "perception_unavailable",
   "perception_timeout",
   "perception_failed",
+  "perception_media_unavailable",
+  "perception_media_ineligible",
+  "perception_media_not_ready",
+  "perception_media_capacity",
 ]);
 export type ErrorCode = z.infer<typeof errorCodeSchema>;
 

@@ -1,8 +1,8 @@
 # Agent
 
-当前为本项目自有、独立运行的第一方模型服务，提供流式对话、会话持久化、房间上下文分析和执行追踪，通过 backend 转发请求。房间分析只解释 backend 本次提交的有界设备证据；普通聊天通过四个只读工具查询家庭概览、设备清单、设备状态和成员资料；人宠位置、长期记忆和设备控制未接入。
+当前为本项目自有、独立运行的第一方模型服务，提供流式对话、会话持久化、房间上下文分析、语音请求判断和执行追踪，通过 backend 转发请求。房间分析只解释 backend 本次提交的有界设备证据；普通聊天通过四个只读工具查询家庭概览、设备清单、设备状态和成员资料；人宠位置、长期记忆和设备控制未接入。
 
-当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。后续家庭能力见[家庭语义目标与领域模型](../../docs/plans/household-model.md)与 [第一方 Agent 协作计划](../../docs/plans/household-automation.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；单次房间分析不写对话检查点。
+当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。后续家庭能力见[家庭语义目标与领域模型](../../docs/plans/household-model.md)与 [第一方 Agent 协作计划](../../docs/plans/household-automation.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；房间分析和语音判断各使用单次结构化模型调用，不写对话检查点；它们与聊天共用模型配置。
 
 Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连接 PostgreSQL。默认复用根目录 `DATABASE_URL`；可用 `AGENT_DATABASE_URL` 指定独立账号或数据库。状态表位于固定的 `agent_state` schema，使用普通 PostgreSQL 表，由 checkpointer 管理，不属于 backend 的 Drizzle schema，也不转换为 TimescaleDB hypertable。
 
@@ -16,7 +16,7 @@ Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连�
 
 ## 对话
 
-切换家庭时 backend 调用本机访问范围内的 `POST /api/household-reset`，先清空 `agent_state.checkpoints`、`checkpoint_blobs` 和 `checkpoint_writes`，保留迁移记录。运行账号需要这三张表的 `TRUNCATE` 权限。Agent 有进行中的聊天或房间分析时返回 409；清理到切换完成之间暂停新任务，后台异常断开时暂停最多一分钟，尚未结束的数据库清理仍阻止新任务。该保护与聊天并发约束一样限于单 Agent 进程，同一数据库不能同时由多个 Agent 实例写入。
+切换家庭时 backend 调用本机访问范围内的 `POST /api/household-reset`，先清空 `agent_state.checkpoints`、`checkpoint_blobs` 和 `checkpoint_writes`，保留迁移记录。运行账号需要这三张表的 `TRUNCATE` 权限。Agent 有进行中的聊天、房间分析或语音判断时返回 409；清理到切换完成之间暂停新任务，后台异常断开时暂停最多一分钟，尚未结束的数据库清理仍阻止新任务。该保护与聊天并发约束一样限于单 Agent 进程，同一数据库不能同时由多个 Agent 实例写入。
 
 两个服务的数据库清理不是一个事务，后续绑定保存失败不会恢复已经删除的对话。清理范围、保留项与操作入口见[切换家庭与清理数据](../../docs/household-runtime.md#切换家庭与清理数据)。
 
@@ -78,6 +78,14 @@ backend 转发聊天时注入内部字段 `household_scope`，Agent 将其作为
 Agent 默认通过 `http://127.0.0.1:${BACKEND_PORT}` 查询 backend，`BACKEND_PORT` 默认为 3000；可用 `AGENT_BACKEND_URL` 指定其他本机地址，例如 IPv6 loopback。地址只允许 HTTP(S) loopback，不接受内嵌凭据，查询拒绝重定向。单次返回最多 128 KiB，错误只向模型提供错误码和固定说明，不暴露上游原始异常。
 
 `quality=valid` 表示有效设备事实；待确认、过期或缺失报告不能冒充当前状态。收到时间不等于采样时间，空结果和查询失败也不代表关闭。成员资料不包含已确认位置或活动，不能用来回答“小狗在哪里”。系统提示要求每轮针对实际家庭情况重新查询，不能用历史工具结果冒充当前事实；这一模型行为仍需真实模型验收。完整工具结果会随对话检查点保存，与是否启用追踪内容采集无关。
+
+## 语音请求判断
+
+本机 `POST /api/speech-dialogue` 接收 backend 的短时转写证据，由单次结构化模型调用判断是否向助手提出请求、语义是否完整及其依据。它与房间分析共用现有模型配置和家庭切换互斥入口，最多一个在途请求，处理受证据原期限和 11 秒服务期限约束。请求／响应共享契约位于 `packages/api/src/contracts/speech-dialogue.ts`。
+
+模型输入仅包含助手称呼、当前与前文的转写、停顿／截断边界和相对当前片段开始的时间间隔，前文按采样顺序排列。完整观测的来源身份、期限和处理元数据由请求校验及结果对应处理使用。
+
+该接口只返回结构化判断，不回复用户、不执行设备工具、不将摄像头位置或画面身份当作说话人。backend 拥有逐段交付、来源撤销、去重和调用频率，见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。只有 backend 显式开启 `dialogue.enabled` 才自动调用；默认不因检测到人声而调用语言模型。
 
 ## 验证边界
 

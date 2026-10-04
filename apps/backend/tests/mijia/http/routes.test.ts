@@ -25,7 +25,7 @@ import {
   credentialStore,
   homeSelectionStore,
 } from "../../support/account-fixtures";
-import { deferred, eventually, nextTurn } from "../../support/async";
+import { deferred, nextTurn } from "../../support/async";
 
 const runtimes: HouseholdRuntime[] = [];
 const logStores: DevicePushLogs[] = [];

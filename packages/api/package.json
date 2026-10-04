@@ -20,7 +20,9 @@
     "./room-analysis": "./src/contracts/room-analysis.ts",
     "./household-context": "./src/contracts/household-context.ts",
     "./household-members": "./src/contracts/household-members.ts",
-    "./household-queries": "./src/contracts/household-queries.ts"
+    "./household-queries": "./src/contracts/household-queries.ts",
+    "./mijia-recordings": "./src/mijia/recordings.ts",
+    "./speech-dialogue": "./src/contracts/speech-dialogue.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

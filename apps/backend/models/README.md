@@ -32,3 +32,25 @@
 - 输出名 `output/stateN`；实际输出分别为 float32 `[1,1]` 和 `[2,1,128]`，拒绝非有限值或范围外概率。Silero 适配器为每个音轨运行创建独立实例，拥有状态、64 点上下文和不足 512 点的余量；连续块续接，断流及运行替换后重置。模型输入缓冲区在该实例内复用。
 
 源码及构建后的 `dist/perception/audio/process-entry.js` 使用同一份资产。运行时不下载；模型缺失、哈希不符或推理失败只将 VAD（语音活动检测）报告为不可用，音频能量与视频检测继续运行。
+
+## 语音转写模型
+
+可选语音转写固定使用 SenseVoice-Small INT8，通过 `src/perception/speech/model.ts` 加载 `models/sensevoice/model.int8.onnx` 与 `tokens.txt`。权重不随 Git 仓库分发，目录已忽略；运行时不下载，也不接受任意模型路径。只有启用语音并检测到持续人声后才启动识别进程。
+
+- 原模型：[FunAudioLLM / SenseVoiceSmall](https://huggingface.co/FunAudioLLM/SenseVoiceSmall)，通义实验室；ONNX 量化资产由 [sherpa-onnx 官方模型发布](https://k2-fsa.github.io/sherpa/onnx/sense-voice/pretrained.html)提供。
+- 固定资产包：`sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2`。
+- `model.int8.onnx` SHA-256：`c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51`。
+- `tokens.txt` SHA-256：`f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc`。
+- 输入为单声道 16 kHz float32 PCM；声学特征、模型张量与解码由 `sherpa-onnx-node@1.13.8` 处理。固定 CPU、单线程、自动语言及文本规范化，输出只接纳有界文字，不将模型事件标签当作猫狗声音分类。
+- 权重适用模型卡引用的 [FunASR 模型协议](https://github.com/modelscope/FunASR/blob/main/MODEL_LICENSE)，不沿用运行库的 Apache-2.0 许可；保留资产包中的 LICENSE、模型名称和来源。
+
+在仓库根目录准备资产：
+
+```sh
+mkdir -p data/models apps/backend/models/sensevoice
+curl -fL --retry 2 -o data/models/sensevoice.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2
+tar -xjf data/models/sensevoice.tar.bz2 --strip-components=1 -C apps/backend/models/sensevoice
+```
+
+加载时分块计算并核对两个文件的哈希。源码及构建后的 `dist/perception/speech/process-entry.js` 使用相同资产布局；部署启用语音时一起携带 `models/sensevoice/`，禁用语音不要求它存在。模型缺失或损坏只使语音转写不可用，音频基础分析与视频继续；修复后可通过现有感知重试入口重试。配置及资源语义见[本地语音转写](../../../docs/perception.md#本地语音转写)。

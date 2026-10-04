@@ -36,6 +36,7 @@ export default function CameraViewPage() {
         </Link>
         <Link
           to="/cameras/$deviceId/$channel"
+          search={{ mode: undefined }}
           params={{ deviceId, channel }}
           className={`${buttonStyles.base} ${buttonStyles.secondary}`}
         >

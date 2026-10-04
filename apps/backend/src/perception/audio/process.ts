@@ -1,14 +1,24 @@
 import { fork } from "node:child_process";
 import pTimeout from "p-timeout";
+import type { pcmSchema } from "./pcm";
 import { audioResponseSchema } from "./protocol";
 import type { audioCommandSchema, audioStartSchema } from "./protocol";
-import type { audioTrackSchema } from "@home-agent/api/contracts";
+import type {
+  audioTrackSchema,
+  speechRuntimeSchema,
+  speechObservationSchema,
+} from "@home-agent/api/contracts";
 import type { z } from "zod";
 
 // One additional native process owns every audio decoder and a single VAD CPU thread.
 export function createAudioProcess(options: {
-  track: (track: z.infer<typeof audioTrackSchema>) => void;
+  track: (
+    track: z.infer<typeof audioTrackSchema>,
+    pcm?: z.infer<typeof pcmSchema>,
+  ) => void;
   failure: (error: string) => void;
+  // The return value acknowledges inbox delivery, independently of window history.
+  speech?: (observation: z.infer<typeof speechObservationSchema>) => boolean;
 }) {
   if (process.platform === "win32")
     throw new Error("Audio supervision requires POSIX process groups");
@@ -34,11 +44,12 @@ export function createAudioProcess(options: {
     closingRequested = false;
   let error: string | undefined;
   let model: z.infer<(typeof audioResponseSchema.options)[0]>["model"] = null;
+  let speech: z.infer<typeof speechRuntimeSchema> | undefined;
   let lastPulse = performance.now(),
     inferenceSince: number | null = null;
   let diagnostic = "";
   const exited = Promise.withResolvers<void>();
-  const initialized = Promise.withResolvers<void>();
+  const initialized = Promise.withResolvers<Error | undefined>();
   const waiting = new Map<
     string,
     ReturnType<typeof Promise.withResolvers<void>>
@@ -67,7 +78,7 @@ export function createAudioProcess(options: {
     error = String(cause).slice(0, 4096);
     ready = false;
     clearInterval(watchdogTimer);
-    initialized.reject(new Error(error));
+    initialized.resolve(new Error(error));
     for (const pending of waiting.values()) pending.reject(new Error(error));
     waiting.clear();
     const cleanupError = kill();
@@ -101,12 +112,26 @@ export function createAudioProcess(options: {
       ready = true;
       model = response.model;
       lastPulse = performance.now();
-      initialized.resolve();
+      initialized.resolve(undefined);
     } else if (response.kind === "pulse") {
       lastPulse = performance.now();
       inferenceSince = response.inferenceSince;
-    } else if (response.kind === "track") options.track(response.track);
-    else if (response.kind === "stopped") {
+      speech = response.speech;
+    } else if (response.kind === "track")
+      options.track(response.track, response.pcm);
+    else if (response.kind === "speech") {
+      if (!closingRequested) {
+        try {
+          send({
+            kind: "speech_ack",
+            id: response.observation.id,
+            inboxAccepted: options.speech?.(response.observation) ?? false,
+          });
+        } catch (cause) {
+          fail(cause);
+        }
+      }
+    } else if (response.kind === "stopped") {
       waiting.get(response.trackRunId)?.resolve();
       waiting.delete(response.trackRunId);
     } else if (response.kind === "closed") closed.resolve();
@@ -130,26 +155,30 @@ export function createAudioProcess(options: {
     )
       fail("Audio native processing deadline exceeded");
   }, 100);
-  // The service owns startup failure and recovery; suppress no errors in its callback.
-  initialized.promise.catch((cause) => {
-    if (!error && !stopped && !closingRequested) fail(cause);
-  });
   return {
     get status() {
-      return { ready, error, model, processId: child.pid };
+      return { ready, error, model, processId: child.pid, speech };
     },
     async start(input: z.infer<typeof audioStartSchema>, signal: AbortSignal) {
       if (closingRequested) throw new Error("Audio closing");
-      await pTimeout(initialized.promise, { milliseconds: 30000, signal });
+      const failure = await pTimeout(initialized.promise, {
+        milliseconds: 30000,
+        signal,
+      });
+      if (failure) throw failure;
       signal.throwIfAborted();
       send({ kind: "start", input });
+    },
+    retrySpeech() {
+      if (ready && !error && !closingRequested) send({ kind: "retry_speech" });
     },
     async stop(trackRunId: string) {
       if (error || stopped || closingRequested) return;
       const pending = Promise.withResolvers<void>();
-      waiting.set(trackRunId, pending);
-      send({ kind: "stop", trackRunId });
       try {
+        send({ kind: "stop", trackRunId });
+        if (error) throw new Error(error);
+        waiting.set(trackRunId, pending);
         await pTimeout(pending.promise, {
           milliseconds: 5000,
           message: "Audio track cleanup timed out",
@@ -165,7 +194,7 @@ export function createAudioProcess(options: {
       closingRequested = true;
       closing ??= (async () => {
         clearInterval(watchdogTimer);
-        initialized.reject(new Error("Audio closed"));
+        initialized.resolve(new Error("Audio closed"));
         if (!error && child.connected && ready) {
           try {
             send({ kind: "close" });

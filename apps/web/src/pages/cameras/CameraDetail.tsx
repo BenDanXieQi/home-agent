@@ -1,5 +1,5 @@
 import { twMerge } from "tailwind-merge";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useParams, useSearch } from "@tanstack/react-router";
 import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Pause, Play } from "lucide-react";
@@ -21,6 +21,8 @@ import { playbackPresentation } from "./playback-presentation";
 import { cameraTileClassName, cameraTransitionName } from "./camera-styles";
 import { useCameraReturn } from "./use-camera-return";
 import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
+import { CameraWindows } from "./CameraWindows";
+import { CameraRecordings } from "./CameraRecordings";
 
 export default function CameraDetailPage() {
   useCameraReturn();
@@ -79,7 +81,59 @@ function CameraDetailSource(
         <StatusNotice>正在同步设备清单…</StatusNotice>
       </>
     );
-  return <CameraDetailContent key={epoch} source={source} />;
+  return <CameraDetailModes key={epoch} source={source} scope={epoch} />;
+}
+
+function CameraDetailModes({
+  source,
+  scope,
+}: {
+  source: ReturnType<typeof createPerceptionSourceState>;
+  scope: string;
+}) {
+  const { mode } = useSearch({ from: "/account/cameras/$deviceId/$channel" });
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <CameraBackLink />
+        <nav aria-label="分析内容" className="flex gap-2">
+          {([undefined, "windows", "recordings"] as const).map((value) => (
+            <Link
+              key={value ?? "live"}
+              to="/cameras/$deviceId/$channel"
+              params={{
+                deviceId: source.target.deviceId,
+                channel: String(source.target.channel),
+              }}
+              search={{ mode: value }}
+              aria-current={mode === value ? "page" : undefined}
+              className="rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface focus-visible:outline-2 aria-[current=page]:bg-surface aria-[current=page]:text-ink"
+            >
+              {value === "windows"
+                ? "筛选片段"
+                : value === "recordings"
+                  ? "SD 录像"
+                  : "实时检测"}
+            </Link>
+          ))}
+        </nav>
+      </div>
+      <p className="text-sm text-muted">
+        {mode === "windows"
+          ? "查看窗口中的语音文字、人物判断和采样片段，不影响摄像头持续分析。"
+          : mode === "recordings"
+            ? "按日期查看摄像头 SD 卡中的完整录像。"
+            : "查看摄像头当前画面、检测框和实时分析结果。"}
+      </p>
+      {mode === "windows" ? (
+        <CameraWindows source={source} scope={scope} />
+      ) : mode === "recordings" ? (
+        <CameraRecordings source={source} />
+      ) : (
+        <CameraDetailContent source={source} />
+      )}
+    </div>
+  );
 }
 
 function CameraDetailContent({
@@ -121,8 +175,7 @@ function CameraDetailContent({
 
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
-      <div className="grid min-w-0 gap-3 xl:sticky xl:top-[calc(var(--workspace-header-height)+1rem)] xl:max-h-[calc(100dvh-var(--workspace-header-height)-2rem)] xl:grid-rows-[auto_minmax(0,1fr)]">
-        <CameraBackLink />
+      <div className="grid min-w-0 gap-3 xl:sticky xl:top-[calc(var(--workspace-header-height)+1rem)] xl:max-h-[calc(100dvh-var(--workspace-header-height)-2rem)]">
         <article
           className={`${cameraTileClassName} xl:grid xl:min-h-0 xl:grid-rows-[auto_minmax(0,1fr)_auto] [&_.camera-surface]:max-h-[65dvh] xl:[&_.camera-surface]:min-h-0 xl:[&_.camera-surface]:max-h-[min(65dvh,100%)]`}
         >

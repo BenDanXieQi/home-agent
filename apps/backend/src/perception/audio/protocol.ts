@@ -1,5 +1,11 @@
+import { pcmSchema } from "./pcm";
 import { z } from "zod";
-import { audioRunSchema, audioTrackSchema } from "@home-agent/api/contracts";
+import {
+  audioRunSchema,
+  audioTrackSchema,
+  speechRuntimeSchema,
+  speechObservationSchema,
+} from "@home-agent/api/contracts";
 import { sourceAccessSchema } from "../sources";
 import { perceptionConfigSchema } from "../config";
 export const audioStartSchema = z.object({
@@ -13,6 +19,12 @@ export const audioCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("start"), input: audioStartSchema }),
   z.object({ kind: z.literal("stop"), trackRunId: z.uuid() }),
   z.object({ kind: z.literal("close") }),
+  z.object({ kind: z.literal("retry_speech") }),
+  z.object({
+    kind: z.literal("speech_ack"),
+    id: speechObservationSchema.shape.id,
+    inboxAccepted: z.boolean(),
+  }),
 ]);
 export const audioResponseSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -22,8 +34,17 @@ export const audioResponseSchema = z.discriminatedUnion("kind", [
       .nullable(),
     error: z.string().max(4096).optional(),
   }),
-  z.object({ kind: z.literal("pulse"), inferenceSince: z.number().nullable() }),
-  z.object({ kind: z.literal("track"), track: audioTrackSchema }),
+  z.object({
+    kind: z.literal("pulse"),
+    inferenceSince: z.number().nullable(),
+    speech: speechRuntimeSchema.optional(),
+  }),
+  z.object({
+    kind: z.literal("track"),
+    track: audioTrackSchema,
+    pcm: pcmSchema.optional(),
+  }),
+  z.object({ kind: z.literal("speech"), observation: speechObservationSchema }),
   z.object({ kind: z.literal("stopped"), trackRunId: z.uuid() }),
   z.object({ kind: z.literal("closed") }),
   z.object({ kind: z.literal("fatal"), error: z.string().max(4096) }),

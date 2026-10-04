@@ -82,6 +82,10 @@ export function createTrackingRuntime(options: {
       run: z.infer<typeof runSchema>,
       frame: VideoFrame,
       maxAgeMs: number,
+      onTracked?: (
+        observation: z.infer<typeof trackingObservationSchema>,
+        rgb: Uint8Array | undefined,
+      ) => void,
     ) {
       const entry = runs.get(run.runId);
       if (!entry || closed) return undefined;
@@ -132,6 +136,9 @@ export function createTrackingRuntime(options: {
         release,
         complete(detections: z.infer<typeof observationSchema>["detections"]) {
           const task = (async () => {
+            let observation:
+              | z.infer<typeof trackingObservationSchema>
+              | undefined;
             let tracks: z.infer<typeof trackingObservationSchema>["tracks"] =
               [];
             let status: z.infer<typeof trackingObservationSchema>["status"] =
@@ -244,43 +251,54 @@ export function createTrackingRuntime(options: {
               entry.pets.reset();
               entry.times.clear();
             } finally {
-              release();
+              try {
+                if (
+                  runs.get(run.runId) === entry &&
+                  !closed &&
+                  performance.now() - frame.availableAt < maxAgeMs
+                ) {
+                  observation = {
+                    ...metadata(run, frame),
+                    tracks,
+                    status,
+                    reason,
+                    skippedFrames: entry.skipped,
+                    omittedPets: Math.max(
+                      0,
+                      detections.filter(
+                        (d) =>
+                          (d.className === "cat" || d.className === "dog") &&
+                          d.confidence >= 0.5,
+                      ).length -
+                        tracks.filter(
+                          (track) =>
+                            track.className !== "human" &&
+                            track.state === "measured",
+                        ).length,
+                    ),
+                    omittedHumans: Math.max(
+                      0,
+                      detections.filter(
+                        (d) => d.className === "human" && d.confidence >= 0.5,
+                      ).length -
+                        tracks.filter(
+                          (track) =>
+                            track.className === "human" &&
+                            track.state === "measured",
+                        ).length,
+                    ),
+                  };
+                  try {
+                    onTracked?.(observation, rgb);
+                  } catch (error) {
+                    options.failure(error);
+                  }
+                }
+              } finally {
+                release();
+              }
             }
-            if (
-              runs.get(run.runId) !== entry ||
-              closed ||
-              performance.now() - frame.availableAt >= maxAgeMs
-            )
-              return;
-            await options.emit({
-              ...metadata(run, frame),
-              tracks,
-              status,
-              reason,
-              skippedFrames: entry.skipped,
-              omittedPets: Math.max(
-                0,
-                detections.filter(
-                  (d) =>
-                    (d.className === "cat" || d.className === "dog") &&
-                    d.confidence >= 0.5,
-                ).length -
-                  tracks.filter(
-                    (track) =>
-                      track.className !== "human" && track.state === "measured",
-                  ).length,
-              ),
-              omittedHumans: Math.max(
-                0,
-                detections.filter(
-                  (d) => d.className === "human" && d.confidence >= 0.5,
-                ).length -
-                  tracks.filter(
-                    (track) =>
-                      track.className === "human" && track.state === "measured",
-                  ).length,
-              ),
-            });
+            if (observation) await options.emit(observation);
           })().catch(options.failure);
           pending.add(task);
           task.then(() => {
@@ -295,8 +313,7 @@ export function createTrackingRuntime(options: {
       runs.clear();
       pixelTurns.clear();
       await releasing;
-      await model.close();
-      await Promise.all(pending);
+      await Promise.all([model.close(), ...pending]);
     },
   };
 }

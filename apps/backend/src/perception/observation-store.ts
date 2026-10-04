@@ -1,5 +1,6 @@
 import type {
   sourceMediaSchema,
+  identityObservationSchema,
   trackingObservationSchema,
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
@@ -25,6 +26,10 @@ function initial(source: z.infer<typeof sourceSelectionSchema>) {
     validity: "no_data",
     tracking: null as z.infer<typeof trackingObservationSchema> | null,
     trackingValidity: "no_data",
+    identity: null as z.infer<typeof identityObservationSchema> | null,
+    identityValidity: "no_data",
+    identityRevision: 0,
+    identityExpiresAt: 0,
     trackingSequence: 0,
     trackingExpiresAt: 0,
     sequence: 0,
@@ -49,6 +54,13 @@ export function createObservationStore(maxAgeMs: number) {
   const timer = setInterval(() => {
     let expired = false;
     for (const entry of sources.values()) {
+      if (
+        entry.identityValidity === "valid" &&
+        performance.now() >= entry.identityExpiresAt
+      ) {
+        entry.identityValidity = "expired";
+        expired = true;
+      }
       if (
         entry.trackingValidity === "valid" &&
         performance.now() >= entry.trackingExpiresAt
@@ -100,10 +112,18 @@ export function createObservationStore(maxAgeMs: number) {
       entry.media = null;
       entry.observation = null;
       entry.tracking = null;
+      entry.identity = null;
+      entry.identityValidity = "unavailable";
       entry.trackingValidity = "unavailable";
       changed();
     },
     receive(event: z.infer<typeof videoEventSchema>) {
+      if (
+        event.event === "window_frame" ||
+        event.event === "window_gap" ||
+        event.event === "identity_frame"
+      )
+        return;
       const entry = sources.get(sourceKey(event.run));
       if (
         !entry ||
@@ -111,23 +131,54 @@ export function createObservationStore(maxAgeMs: number) {
         !entry.run ||
         !isCurrentRun(entry.run, event.run)
       ) {
-        if (event.event === "settled" || event.event === "tracking") {
+        if (
+          event.event === "settled" ||
+          event.event === "tracking" ||
+          event.event === "identity"
+        ) {
           rejectedRetiredResults++;
           changed();
         }
         return;
       }
       if (event.event === "media") {
+        if (entry.media?.generation !== event.media.generation) {
+          entry.identity = null;
+          entry.identityValidity = "no_data";
+        }
         entry.media = event.media;
         changed();
         return;
       }
       if (
-        (event.event === "tracking" || event.event === "settled") &&
+        (event.event === "tracking" ||
+          event.event === "settled" ||
+          event.event === "identity") &&
         event.observation &&
         event.observation.mediaTime.generation !== entry.media?.generation
       ) {
         entry.rejected++;
+        changed();
+        return;
+      }
+      if (event.event === "identity") {
+        const result = event.observation;
+        const elapsed = Date.now() - result.receivedAt;
+        const age = Math.max(elapsed, result.ageMs);
+        if (
+          entry.status !== "failed" &&
+          isCurrentRun(entry.run, result.run) &&
+          result.revision > entry.identityRevision &&
+          result.sequence >= (entry.identity?.sequence ?? 0) &&
+          elapsed >= 0 &&
+          age < maxAgeMs
+        ) {
+          entry.identity = { ...result, ageMs: age };
+          entry.identityRevision = result.revision;
+          entry.identityExpiresAt = performance.now() + maxAgeMs - age;
+          entry.identityValidity =
+            result.status === "unavailable" ? "unavailable" : "valid";
+        }
         changed();
         return;
       }
@@ -154,7 +205,11 @@ export function createObservationStore(maxAgeMs: number) {
       entry.metrics = event.metrics;
       if (event.event === "health") {
         entry.status = event.status;
-        if (event.status === "failed") entry.trackingValidity = "unavailable";
+        if (event.status === "failed") {
+          entry.trackingValidity = "unavailable";
+          entry.identityValidity = "unavailable";
+          entry.identity = null;
+        }
         entry.error = event.error;
         entry.metrics = event.metrics;
       }
@@ -209,6 +264,11 @@ export function createObservationStore(maxAgeMs: number) {
             : entry.validity,
         observation: entry.observation,
         tracking: entry.tracking,
+        identity: entry.identity,
+        identityValidity:
+          entry.identityValidity === "valid" && now >= entry.identityExpiresAt
+            ? "expired"
+            : entry.identityValidity,
         trackingValidity:
           entry.trackingValidity === "valid" && now >= entry.trackingExpiresAt
             ? "expired"

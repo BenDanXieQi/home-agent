@@ -1,19 +1,19 @@
 import {
   HumanMessage,
   SystemMessage,
-  isAIMessage,
+  AIMessage,
 } from "@langchain/core/messages";
-import { END, START, StateGraph, StateSchema } from "@langchain/langgraph";
-import { ChatOpenAI } from "@langchain/openai";
+import { createAgentModel } from "./model";
 import {
-  analysisRequestSchema,
+  type analysisRequestSchema,
   analysisResponseSchema,
   roomInterpretationSchema,
   validateInterpretation,
   analysisUsageSchema,
 } from "@home-agent/api/room-analysis";
 import { telemetryStatus, withSpan } from "@home-agent/observability";
-import type { Config } from "../config";
+import type { Config } from "./config";
+import type { z } from "zod";
 
 const instructions = `你负责解释一个房间的设备观测，用简洁中文输出。
 必须调用 describe_room 提交结构化结果，不输出普通文本。该函数仅提交分析结果，不会操作设备。
@@ -33,105 +33,85 @@ quality=unconfirmed 是待确认的报告或云端缓存，并非已确认的当
 初始化读值不能证明刚进入、刚离开或刚操作。changes 只说明相应属性的可信变化，不证明原因或操作者。coverage 提示裁减、缺失或独立事件不支持；没有记录不代表没有发生。
 不将设备报告冒充亲眼观察；不把推测当成已确认事实，不将系统自身的总结作为证据。`;
 
-export function createRoomAnalysisAgent(config: Config) {
-  if (!config.OPENAI_API_KEY || !config.AGENT_MODEL) return undefined;
-  const modelName = config.AGENT_MODEL;
-  const model = new ChatOpenAI({
-    model: modelName,
-    apiKey: config.OPENAI_API_KEY,
+export function createRoomAnalysisInterpreter(config: Config) {
+  const chatModel = createAgentModel(config, {
     streaming: false,
     maxRetries: 0,
     timeout: 80_000,
-    modelKwargs: {
-      max_completion_tokens: 1800,
-      ...(config.AGENT_THINKING
-        ? { thinking: { type: config.AGENT_THINKING } }
-        : {}),
-    },
-    ...(config.OPENAI_BASE_URL
-      ? { configuration: { baseURL: config.OPENAI_BASE_URL } }
-      : {}),
-  }).withStructuredOutput(roomInterpretationSchema, {
+    maxTokens: 1800,
+  });
+  if (!chatModel) return undefined;
+  const modelName = chatModel.model;
+  const model = chatModel.withStructuredOutput(roomInterpretationSchema, {
     name: "describe_room",
     method: "functionCalling",
     strict: true,
     includeRaw: true,
   });
-  const state = new StateSchema({
-    input: analysisRequestSchema,
-    output: analysisResponseSchema.nullable().default(null),
-  });
-  const graph = new StateGraph(state)
-    .addNode("interpret", async ({ input }, options) =>
-      withSpan(
-        "room.interpret",
-        {
-          "langsmith.span.kind": "llm",
-          "gen_ai.operation.name": "chat",
-          "gen_ai.request.model": modelName,
-          "gen_ai.system": config.OPENAI_BASE_URL
-            ? "openai-compatible"
-            : "openai",
-          "room.analysis.run_id": input.run_id,
-        },
-        async (span) => {
-          const started = performance.now();
-          if (telemetryStatus().includeContent)
-            span.setAttribute("gen_ai.prompt", JSON.stringify(input.context));
-          const response = await model.invoke(
-            [
-              new SystemMessage(instructions),
-              new HumanMessage(JSON.stringify(input.context)),
-            ],
-            options,
+  return async (
+    input: z.infer<typeof analysisRequestSchema>,
+    signal: AbortSignal,
+  ) =>
+    withSpan(
+      "room.interpret",
+      {
+        "langsmith.span.kind": "llm",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.request.model": modelName,
+        "gen_ai.system": config.OPENAI_BASE_URL
+          ? "openai-compatible"
+          : "openai",
+        "room.analysis.run_id": input.run_id,
+      },
+      async (span) => {
+        const started = performance.now();
+        if (telemetryStatus().includeContent)
+          span.setAttribute("gen_ai.prompt", JSON.stringify(input.context));
+        const response = await model.invoke(
+          [
+            new SystemMessage(instructions),
+            new HumanMessage(JSON.stringify(input.context)),
+          ],
+          { signal },
+        );
+        const interpretation = response.parsed;
+        if (
+          !interpretation ||
+          !validateInterpretation(input.context, interpretation)
+        )
+          throw new Error("Invalid room observation description or evidence");
+        const usageResult = analysisUsageSchema
+          .pick({ input_tokens: true, output_tokens: true })
+          .safeParse(
+            AIMessage.isInstance(response.raw)
+              ? response.raw.usage_metadata
+              : undefined,
           );
-          const interpretation = roomInterpretationSchema.parse(
-            response.parsed,
-          );
-          if (!validateInterpretation(input.context, interpretation))
-            throw new Error("Invalid room observation description or evidence");
-          const usageResult = analysisUsageSchema
-            .pick({ input_tokens: true, output_tokens: true })
-            .safeParse(
-              isAIMessage(response.raw)
-                ? response.raw.usage_metadata
-                : undefined,
-            );
-          const usage = usageResult.success ? usageResult.data : null;
-          if (usage) {
-            if (usage.input_tokens !== null)
-              span.setAttribute(
-                "gen_ai.usage.input_tokens",
-                usage.input_tokens,
-              );
-            if (usage.output_tokens !== null)
-              span.setAttribute(
-                "gen_ai.usage.output_tokens",
-                usage.output_tokens,
-              );
-          }
-          if (telemetryStatus().includeContent)
+        const usage = usageResult.success ? usageResult.data : null;
+        if (usage) {
+          if (usage.input_tokens !== null)
+            span.setAttribute("gen_ai.usage.input_tokens", usage.input_tokens);
+          if (usage.output_tokens !== null)
             span.setAttribute(
-              "gen_ai.completion",
-              JSON.stringify(interpretation),
+              "gen_ai.usage.output_tokens",
+              usage.output_tokens,
             );
-          return {
-            output: analysisResponseSchema.parse({
-              run_id: input.run_id,
-              interpretation,
-              usage: {
-                model: modelName,
-                input_tokens: usage?.input_tokens ?? null,
-                output_tokens: usage?.output_tokens ?? null,
-                duration_ms: Math.round(performance.now() - started),
-              },
-            }),
-          };
-        },
-      ),
-    )
-    .addEdge(START, "interpret")
-    .addEdge("interpret", END)
-    .compile();
-  return { graph };
+        }
+        if (telemetryStatus().includeContent)
+          span.setAttribute(
+            "gen_ai.completion",
+            JSON.stringify(interpretation),
+          );
+        return analysisResponseSchema.parse({
+          run_id: input.run_id,
+          interpretation,
+          usage: {
+            model: modelName,
+            input_tokens: usage?.input_tokens ?? null,
+            output_tokens: usage?.output_tokens ?? null,
+            duration_ms: Math.round(performance.now() - started),
+          },
+        });
+      },
+    );
 }

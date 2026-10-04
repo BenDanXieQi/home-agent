@@ -1,4 +1,4 @@
-import { createHouseholdReset } from "../household-reset";
+import type { createHouseholdReset } from "../household-reset";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -7,16 +7,15 @@ import {
   analysisRequestSchema,
   roomAnalysisLimits,
 } from "@home-agent/api/room-analysis";
-import type { createRoomAnalysisAgent } from "../graph/room-analysis";
+import type { createRoomAnalysisInterpreter } from "../room-analysis";
 
 export function createRoomAnalysisRoutes(
-  agent: ReturnType<typeof createRoomAnalysisAgent>,
+  interpret: ReturnType<typeof createRoomAnalysisInterpreter>,
   timeoutMs: number,
-  reset = createHouseholdReset(),
+  reset: ReturnType<typeof createHouseholdReset>,
 ) {
-  const app = new Hono();
   let active = 0;
-  return app.post(
+  return new Hono().post(
     "/",
     bodyLimit({
       maxSize: roomAnalysisLimits.contextBytes + 1024,
@@ -24,7 +23,7 @@ export function createRoomAnalysisRoutes(
     }),
     validateJson(analysisRequestSchema),
     async (c) => {
-      if (!agent) throw new AppError("model_not_configured");
+      if (!interpret) throw new AppError("model_not_configured");
       if (active >= roomAnalysisLimits.concurrent)
         throw new AppError("thread_busy");
       const input = c.req.valid("json");
@@ -36,15 +35,14 @@ export function createRoomAnalysisRoutes(
       const leave = reset.enter();
       active++;
       try {
-        const result = await agent.graph.invoke({ input }, { signal });
+        const result = await interpret(input, signal);
         signal.throwIfAborted();
         if (
-          !result.output ||
-          Buffer.byteLength(JSON.stringify(result.output)) >
-            roomAnalysisLimits.responseBytes
+          Buffer.byteLength(JSON.stringify(result)) >
+          roomAnalysisLimits.responseBytes
         )
           throw new AppError("agent_execution_failed");
-        return c.json(result.output);
+        return c.json(result);
       } catch (cause) {
         throw new AppError(
           c.req.raw.signal.aborted

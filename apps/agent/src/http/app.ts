@@ -1,3 +1,5 @@
+import { createSpeechDialogueInterpreter } from "../speech-dialogue";
+import { createSpeechDialogueRoutes } from "./speech-dialogue";
 import { createHouseholdReset } from "../household-reset";
 import { householdResetRequestSchema } from "@home-agent/api/household-reset";
 import { validateJson } from "@home-agent/api/errors/hono";
@@ -11,7 +13,7 @@ import type { Config } from "../config";
 import { createHomeAgent } from "../graph/home-agent";
 import { createChatRoutes } from "./chat";
 import type { AgentDatabase } from "../db";
-import { createRoomAnalysisAgent } from "../graph/room-analysis";
+import { createRoomAnalysisInterpreter } from "../room-analysis";
 import { createRoomAnalysisRoutes } from "./room-analysis";
 
 export function createApp(config: Config, database?: AgentDatabase) {
@@ -39,10 +41,14 @@ export function createApp(config: Config, database?: AgentDatabase) {
   app.route(
     "/api/room-analysis",
     createRoomAnalysisRoutes(
-      createRoomAnalysisAgent(config),
+      createRoomAnalysisInterpreter(config),
       config.AGENT_RUN_TIMEOUT_MS,
       reset,
     ),
+  );
+  app.route(
+    "/api/speech-dialogue",
+    createSpeechDialogueRoutes(createSpeechDialogueInterpreter(config), reset),
   );
   app.post(
     "/api/household-reset",
