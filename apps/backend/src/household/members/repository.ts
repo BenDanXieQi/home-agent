@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { isDeepStrictEqual } from "node:util";
 import type { memberSaveSchema } from "@home-agent/api/household-members";
 import type { Database } from "../../db";
 import { householdSubjects } from "../../db/schema";
@@ -26,6 +27,7 @@ export function createMemberRepository(
         | ReturnType<typeof memberSaveSchema.parse>
         | { id: string; operation: "delete" },
     ) {
+      let changed = false;
       try {
         return await access(identity, assertCurrent, async (tx) => {
           if (command) {
@@ -35,14 +37,28 @@ export function createMemberRepository(
               .from(householdSubjects)
               .where(eq(householdSubjects.id, command.id));
             if (command.operation === "delete") {
-              await revokeMemberReferences(
-                tx,
-                invalidateReferences,
-                command.id,
-              );
-              await tx
-                .delete(householdSubjects)
-                .where(eq(householdSubjects.id, command.id));
+              if (existing) {
+                changed = true;
+                const referencesRevoked = await revokeMemberReferences(
+                  tx,
+                  invalidateReferences,
+                  command.id,
+                );
+                const className = identityClassForSubject(
+                  existing.kind,
+                  existing.details.species,
+                );
+                if (
+                  !referencesRevoked &&
+                  (className === "cat" || className === "dog")
+                ) {
+                  invalidateReferences();
+                  await changeReferenceVersion(tx, false);
+                }
+                await tx
+                  .delete(householdSubjects)
+                  .where(eq(householdSubjects.id, command.id));
+              }
             } else {
               const profile = command.profile;
               const values = {
@@ -60,6 +76,15 @@ export function createMemberRepository(
                 if (existing) throw new HouseholdError("invalid_state");
                 if ((await tx.$count(householdSubjects)) >= 500)
                   throw new HouseholdError("capacity_exceeded");
+                changed = true;
+                const className = identityClassForSubject(
+                  profile.kind,
+                  profile.kind === "pet" ? profile.species : undefined,
+                );
+                if (className === "cat" || className === "dog") {
+                  invalidateReferences();
+                  await changeReferenceVersion(tx, false);
+                }
                 await tx
                   .insert(householdSubjects)
                   .values({ id: command.id, ...values });
@@ -67,19 +92,28 @@ export function createMemberRepository(
                 if (!existing || existing.kind !== profile.kind)
                   throw new HouseholdError("invalid_state");
                 if (
-                  profile.kind === "pet" &&
-                  identityClassForSubject(
-                    existing.kind,
-                    existing.details.species,
-                  ) !== identityClassForSubject(profile.kind, profile.species)
+                  !isDeepStrictEqual(values, {
+                    name: existing.name,
+                    kind: existing.kind,
+                    details: existing.details,
+                  })
                 ) {
-                  invalidateReferences();
-                  await changeReferenceVersion(tx, true);
+                  changed = true;
+                  if (
+                    profile.kind === "pet" &&
+                    identityClassForSubject(
+                      existing.kind,
+                      existing.details.species,
+                    ) !== identityClassForSubject(profile.kind, profile.species)
+                  ) {
+                    invalidateReferences();
+                    await changeReferenceVersion(tx, true);
+                  }
+                  await tx
+                    .update(householdSubjects)
+                    .set(values)
+                    .where(eq(householdSubjects.id, command.id));
                 }
-                await tx
-                  .update(householdSubjects)
-                  .set(values)
-                  .where(eq(householdSubjects.id, command.id));
               }
             }
           }
@@ -104,7 +138,7 @@ export function createMemberRepository(
           };
         });
       } finally {
-        if (command) await cleanupReferences();
+        if (changed) await cleanupReferences();
       }
     },
   };

@@ -1,33 +1,32 @@
-import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import type { z } from "zod";
-import { ChevronRight } from "lucide-react";
+import { Clock3, Play, VideoOff } from "lucide-react";
+import { twMerge } from "tailwind-merge";
 import type { memberActivitySourceSchema } from "../../modules/members/activity";
 import type { useActivityPlayback } from "../../modules/members/use-activity-playback";
+import { buttonStyles } from "../../components/button-styles";
 
 export function MemberActivityPlaybackLink({
   source,
   memberId,
   availability,
-  className,
-  children,
 }: {
   source: z.infer<typeof memberActivitySourceSchema>;
   memberId: string;
   availability: ReturnType<ReturnType<typeof useActivityPlayback>["get"]>;
-  className: string;
-  children: ReactNode;
 }) {
   const { window, clip, checking } = availability ?? {};
-  const arrow = (
-    <ChevronRight
-      size={16}
-      strokeWidth={1.5}
-      aria-hidden="true"
-      className="self-center text-muted group-hover:text-ink max-sm:absolute max-sm:right-4 max-sm:top-4"
-    />
+  const label = (
+    <>
+      <Play size={14} strokeWidth={1.5} aria-hidden="true" />
+      查看画面
+    </>
   );
-  const linkClassName = `group ${className} hover:bg-ink/3 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink`;
+  const linkClassName = twMerge(
+    buttonStyles.base,
+    buttonStyles.secondary,
+    "min-h-8 px-3 py-1.5 text-xs hover:bg-sidebar focus-visible:outline-2",
+  );
   if (window)
     return (
       <Link
@@ -42,14 +41,14 @@ export function MemberActivityPlaybackLink({
         }}
         className={linkClassName}
       >
-        {children}
-        {arrow}
+        {label}
       </Link>
     );
   if (clip)
     return (
       <Link
         to="/cameras/$deviceId/$channel/recording"
+        disabled={checking === true}
         params={{ deviceId: source.deviceId, channel: String(source.channel) }}
         search={{
           recordingAt: clip.startAt,
@@ -58,18 +57,19 @@ export function MemberActivityPlaybackLink({
           activityAt: source.lastObservedAt,
           member: memberId,
         }}
-        className={linkClassName}
+        className={twMerge(linkClassName, checking ? "cursor-progress" : "")}
       >
-        {children}
-        {arrow}
+        {label}
       </Link>
     );
   return (
-    <div
-      className={className}
-      title={checking ? "正在检查对应录像" : "没有可回看的对应录像"}
-    >
-      {children}
-    </div>
+    <span className="inline-flex min-h-8 items-center gap-1.5 text-xs leading-6 text-muted">
+      {checking ? (
+        <Clock3 size={14} strokeWidth={1.5} aria-hidden="true" />
+      ) : (
+        <VideoOff size={14} strokeWidth={1.5} aria-hidden="true" />
+      )}
+      <span>{checking ? "正在查找可回看的画面…" : "暂无可回看的画面"}</span>
+    </span>
   );
 }

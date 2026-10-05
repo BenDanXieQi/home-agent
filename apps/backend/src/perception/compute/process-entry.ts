@@ -78,10 +78,15 @@ async function run(task: z.infer<typeof commandSchema>) {
         releaseCompute: () => {
           pool!.releaseTracking();
         },
-        emit: (observation) =>
+        emit: (observation, appearanceEvidence) =>
           send({
             kind: "video",
-            payload: { event: "tracking", run: observation.run, observation },
+            payload: {
+              event: "tracking",
+              run: observation.run,
+              observation,
+              ...(appearanceEvidence.length ? { appearanceEvidence } : {}),
+            },
           }),
         failure: (error) => {
           console.error("Tracking publication failed", error);

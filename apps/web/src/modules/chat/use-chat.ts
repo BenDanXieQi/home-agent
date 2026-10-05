@@ -11,6 +11,8 @@ import { requestErrorMessage } from "../../messages/zh-CN";
 import { RequestError } from "../../api/errors";
 import { streamChat } from "./stream";
 
+const residentTurnLimit = 50;
+
 function newTurn(message: string) {
   return chatTurnSchema.parse({
     id: crypto.randomUUID(),
@@ -26,10 +28,12 @@ export function useChat(scope: string | undefined) {
   const [turns, setTurns] = useState<ReturnType<typeof newTurn>[]>([]);
   const [threadId, setThreadId] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const [viewingEarlier, setViewingEarlier] = useState(false);
   const [canContinue, setCanContinue] = useState(true);
   const active = useRef<AbortController | null>(null);
-  const [historyPage, setHistoryPage] = useState<ReturnType<
-    typeof chatHistorySchema.parse
+  const [historyPage, setHistoryPage] = useState<Omit<
+    ReturnType<typeof chatHistorySchema.parse>,
+    "turns"
   > | null>(null);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
@@ -49,6 +53,7 @@ export function useChat(scope: string | undefined) {
     getNextPageParam: (page) => page.nextBefore ?? undefined,
     retry: false,
     gcTime: 0,
+    maxPages: 5,
     refetchOnWindowFocus: false,
   });
   const { fetchNextPage, refetch: refetchList, data: listData } = historyList;
@@ -67,7 +72,7 @@ export function useChat(scope: string | undefined) {
         data
           ? {
               pages: data.pages.slice(0, 1),
-              pageParams: data.pageParams.slice(0, 1),
+              pageParams: [undefined],
             }
           : data,
       );
@@ -83,14 +88,20 @@ export function useChat(scope: string | undefined) {
     [],
   );
   async function send(message: string) {
-    if (active.current || reading.current || !canContinue || !message.trim())
+    if (
+      active.current ||
+      reading.current ||
+      viewingEarlier ||
+      !canContinue ||
+      !message.trim()
+    )
       return;
     const input = chatInputSchema.parse({ message, threadId });
     const current = new AbortController();
     active.current = current;
     setBusy(true);
     const turn = newTurn(input.message);
-    setTurns((previous) => [...previous, turn]);
+    setTurns((previous) => [...previous, turn].slice(-residentTurnLimit));
     function update(
       change: (value: ReturnType<typeof newTurn>) => ReturnType<typeof newTurn>,
     ) {
@@ -190,6 +201,7 @@ export function useChat(scope: string | undefined) {
     active.current = null;
     setBusy(false);
     setCanContinue(true);
+    setViewingEarlier(false);
     setThreadId(undefined);
     setTurns([]);
   }, []);
@@ -207,9 +219,10 @@ export function useChat(scope: string | undefined) {
           controller.signal,
         );
         if (reading.current !== controller || controller.signal.aborted) return;
-        setTurns(result.turns);
+        const { turns: savedTurns, ...page } = result;
+        setTurns(savedTurns.slice(-residentTurnLimit));
         setCanContinue(result.canContinue);
-        setHistoryPage(result);
+        setHistoryPage(page);
       } catch (error) {
         if (!controller.signal.aborted)
           setHistoryError(requestErrorMessage(error));
@@ -244,8 +257,10 @@ export function useChat(scope: string | undefined) {
         controller.signal,
       );
       if (reading.current !== controller || controller.signal.aborted) return;
-      setTurns((previous) => [...result.turns, ...previous]);
-      setHistoryPage(result);
+      const { turns: savedTurns, ...page } = result;
+      setTurns(savedTurns.slice(-residentTurnLimit));
+      setViewingEarlier(true);
+      setHistoryPage(page);
     } catch (error) {
       if (!controller.signal.aborted)
         setHistoryError(requestErrorMessage(error));
@@ -269,7 +284,9 @@ export function useChat(scope: string | undefined) {
   );
   return {
     turns,
-    canContinue,
+    canContinue: canContinue && !viewingEarlier,
+    viewingEarlier,
+    residentTurnLimit,
     threadId,
     busy,
     send,

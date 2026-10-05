@@ -46,8 +46,10 @@ export async function revokeMemberReferences(
     .where(memberId ? eq(identityMembers.memberId, memberId) : undefined)
     .returning({ memberId: identityMembers.memberId });
   // A household replacement must invalidate even an empty reference snapshot.
-  if (!memberId || removed.length) {
+  const changed = !memberId || removed.length > 0;
+  if (changed) {
     invalidateReferences();
     await changeReferenceVersion(tx, !memberId || samples.length > 0);
   }
+  return changed;
 }

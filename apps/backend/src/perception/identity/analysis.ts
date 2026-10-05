@@ -193,12 +193,7 @@ export function createIdentityAnalysis(
       statistics.frames++;
       const activeIds = new Set(
         input
-          .filter((track) =>
-            snapshot?.members.some(
-              (member) =>
-                member.className === track.className && member.enabled,
-            ),
-          )
+          .filter((track) => references?.hasCandidates(track.className))
           .map((track) => track.trackId),
       );
       for (const [id, track] of tracks) {
@@ -209,10 +204,7 @@ export function createIdentityAnalysis(
       }
       for (const inputTrack of input) {
         if (
-          !snapshot?.members.some(
-            (member) =>
-              member.className === inputTrack.className && member.enabled,
-          ) ||
+          !references?.hasCandidates(inputTrack.className) ||
           inputTrack.state !== "measured"
         )
           continue;
@@ -228,10 +220,7 @@ export function createIdentityAnalysis(
       return input
         .filter(
           (track) =>
-            snapshot?.members.some(
-              (member) =>
-                member.className === track.className && member.enabled,
-            ) &&
+            references?.hasCandidates(track.className) &&
             track.state === "measured" &&
             track.measuredBox &&
             track.hits >= 2,

@@ -1,12 +1,13 @@
-import { z } from "zod";
+import type { z } from "zod";
+import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import type { WindowListEntry } from "../perception/windows";
 
-export const memberActivitySourceSchema = z.object({
-  deviceId: z.string().min(1),
-  channel: z.union([z.literal(1), z.literal(2)]),
-  sourceRunId: z.uuid(),
-  firstObservedAt: z.number().finite(),
-  lastObservedAt: z.number().finite(),
+export const memberActivitySourceSchema = memberActivityDataSchema.pick({
+  deviceId: true,
+  channel: true,
+  sourceRunId: true,
+  firstObservedAt: true,
+  lastObservedAt: true,
 });
 
 // Sort once per query update and share the run index across all activity rows.

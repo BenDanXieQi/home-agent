@@ -6,7 +6,7 @@ import {
 import { computeBudgetSchema } from "./budget";
 import { perceptionConfigSchema } from "../config";
 import { runSchema } from "../observations";
-import { videoEventSchema } from "../video/events";
+import { videoEventSchema, validAppearanceEvent } from "../video/events";
 import { sourceAccessSchema } from "../sources";
 import { z } from "zod";
 import { inspect } from "node:util";
@@ -150,7 +150,13 @@ export const resultResponseSchema = z.object({
 
 export const responseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("ready") }),
-  z.object({ kind: z.literal("video"), payload: videoEventSchema }),
+  z.object({
+    kind: z.literal("video"),
+    payload: videoEventSchema.refine(
+      (event) => event.event !== "tracking" || validAppearanceEvent(event),
+      "Appearance evidence must belong to this measured tracking frame",
+    ),
+  }),
   resultResponseSchema,
   errorSchema.extend({
     kind: z.literal("error"),
