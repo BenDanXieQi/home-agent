@@ -1,3 +1,14 @@
+import {
+  memberActivityDataSchema,
+  type memberAttributionSnapshotSchema,
+} from "@home-agent/api/contracts";
+import { MemberAssociationEvidence } from "../../components/MemberAssociationEvidence";
+import {
+  attributionLabel,
+  attributionTime,
+  correctionReasons,
+  revocationEvidence,
+} from "../../modules/members/attribution";
 import { useActivityPlayback } from "../../modules/members/use-activity-playback";
 import { useMemo, useState } from "react";
 import { MemberActivityPlaybackLink } from "./MemberActivityPlaybackLink";
@@ -25,6 +36,100 @@ function displayTime(value: unknown) {
       });
 }
 
+function memberSightingData(topic: unknown, data: unknown) {
+  if (topic !== "member_sighting") return undefined;
+  const parsed = memberActivityDataSchema.safeParse(data);
+  return parsed.success ? parsed.data : undefined;
+}
+
+function AttributionSnapshot({
+  label,
+  snapshot,
+}: {
+  label: string;
+  snapshot: ReturnType<typeof memberAttributionSnapshotSchema.parse>;
+}) {
+  return (
+    <div className="space-y-1">
+      <p className="font-medium">
+        {label}：{attributionLabel(snapshot)}
+      </p>
+      <p>接纳时间：{attributionTime(snapshot.acceptedAt)}</p>
+      {snapshot.kind === "known" ? (
+        <MemberAssociationEvidence association={snapshot.association} />
+      ) : (
+        <>
+          <p>撤销观察：{attributionTime(snapshot.observedAt)}</p>
+          <p>{revocationEvidence(snapshot.trigger)}</p>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ActivityAttribution({
+  data,
+}: {
+  data: ReturnType<typeof memberActivityDataSchema.parse>;
+}) {
+  const [open, setOpen] = useState(false);
+  const { attribution } = data;
+  const correction = attribution.lastCorrection;
+  return (
+    <details
+      onToggle={(event) => {
+        setOpen(event.currentTarget.open);
+      }}
+      className="mx-5 mb-4 space-y-3 break-words text-xs leading-6 text-muted"
+    >
+      <summary className="cursor-pointer">
+        归因详情 · 累计纠正 {attribution.correctionCount} 次
+      </summary>
+      {open ? (
+        <>
+          <p>
+            观察来源：{data.deviceName} · 镜头 {data.channel}
+            {data.cameraRoomName
+              ? ` · 摄像头所属房间：${data.cameraRoomName}`
+              : ""}
+            （不证明成员位置）
+          </p>
+          <AttributionSnapshot
+            label="首次归因"
+            snapshot={attribution.original}
+          />
+          <AttributionSnapshot
+            label="当前归因"
+            snapshot={attribution.current}
+          />
+          {correction ? (
+            <div className="space-y-3 border-t border-line pt-3">
+              <p>
+                最近一次纠正：{correctionReasons[correction.reason]} ·{" "}
+                {attributionTime(correction.processedAt)}
+              </p>
+              <AttributionSnapshot
+                label="纠正前"
+                snapshot={correction.before}
+              />
+              <AttributionSnapshot label="纠正后" snapshot={correction.after} />
+              <p>触发依据</p>
+              {"basis" in correction.trigger ? (
+                <MemberAssociationEvidence association={correction.trigger} />
+              ) : (
+                <p>{revocationEvidence(correction.trigger)}</p>
+              )}
+            </div>
+          ) : (
+            <p>尚无语义纠正。</p>
+          )}
+          <p>这里只保留首次、当前和最近一次纠正，不提供完整逐次纠正时间线。</p>
+        </>
+      ) : null}
+    </details>
+  );
+}
+
 export function MemberActivity({
   member,
   scope,
@@ -49,23 +154,28 @@ export function MemberActivity({
     ),
     refetchInterval: page === 0 ? 5000 : false,
   });
-  const activities = useMemo(
-    () =>
-      (query.data?.rows ?? []).flatMap((row) => {
+  const { entries: activityEntries, activities: playableActivities } =
+    useMemo(() => {
+      const entries = (query.data?.rows ?? []).map((row) => {
         const source =
           row.topic === "member_sighting"
             ? memberActivitySourceSchema.safeParse(row.data)
             : undefined;
-        return source?.success && typeof row.id === "string"
-          ? [{ id: row.id, source: source.data }]
-          : [];
-      }),
-    [query.data?.rows],
-  );
-  const sources = new Map(
-    activities.map((activity) => [activity.id, activity.source]),
-  );
-  const playback = useActivityPlayback(activities, scope);
+        return {
+          row,
+          source:
+            source?.success && typeof row.id === "string"
+              ? source.data
+              : undefined,
+          attribution: memberSightingData(row.topic, row.data),
+        };
+      });
+      const activities = entries.flatMap(({ row, source }) =>
+        source && typeof row.id === "string" ? [{ id: row.id, source }] : [],
+      );
+      return { entries, activities };
+    }, [query.data?.rows]);
+  const playback = useActivityPlayback(playableActivities, scope);
   function refresh() {
     if (page > 0) {
       setCursors([null]);
@@ -108,23 +218,24 @@ export function MemberActivity({
         <div className="rounded-2xl bg-surface p-2">
           {query.data.rows.length ? (
             <ol className="space-y-1">
-              {query.data.rows.map((row) => {
-                const source =
-                  typeof row.id === "string" ? sources.get(row.id) : undefined;
-                const uncertain = row.certainty !== "supported";
+              {activityEntries.map(({ row, source, attribution: parsed }) => {
+                const current = parsed?.attribution.current;
+                const uncertain = current
+                  ? current.kind === "unknown" ||
+                    current.association.state !== "confirmed"
+                  : row.certainty !== "supported";
                 const memberSighting = row.topic === "member_sighting";
-                const certainty =
-                  row.certainty === "tentative"
-                    ? memberSighting
-                      ? "疑似"
-                      : "证据不足"
-                    : row.certainty === "conflicting"
-                      ? "存在冲突"
-                      : row.certainty === "supported"
-                        ? memberSighting
-                          ? "已识别"
-                          : "有依据"
-                        : "尚未确认";
+                const certainty = current
+                  ? attributionLabel(current)
+                  : memberSighting
+                    ? "归因摘要不可用"
+                    : row.certainty === "tentative"
+                      ? "证据不足"
+                      : row.certainty === "conflicting"
+                        ? "存在冲突"
+                        : row.certainty === "supported"
+                          ? "有依据"
+                          : "尚未确认";
                 const content = (
                   <>
                     <time
@@ -143,13 +254,6 @@ export function MemberActivity({
                           {row.kind === "assessment" ? "判断记录" : "观察记录"}
                         </span>
                         <span
-                          title={
-                            memberSighting
-                              ? row.certainty === "supported"
-                                ? "多次画面识别结果一致，系统识别为该成员。"
-                                : "画面中的目标可能是该成员，识别依据还不充分。"
-                              : undefined
-                          }
                           className={uncertain ? "text-warning" : "text-sage"}
                         >
                           {certainty}
@@ -191,6 +295,7 @@ export function MemberActivity({
                     ) : (
                       <div className={className}>{content}</div>
                     )}
+                    {parsed ? <ActivityAttribution data={parsed} /> : null}
                   </li>
                 );
               })}

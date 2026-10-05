@@ -144,28 +144,6 @@ export function createContextRepository(db: Database) {
                     contextEntities.role,
                   )
                   .limit(pageSize + 1);
-        const last = rows.length > pageSize ? rows[pageSize - 1] : undefined;
-        const nextCursor = !last
-          ? null
-          : "occurredAt" in last
-            ? {
-                table: "context_records",
-                id: last.id,
-                occurred_at: last.cursorTime,
-              }
-            : "createdAt" in last
-              ? {
-                  table: "household_subjects",
-                  id: last.id,
-                  created_at: last.cursorTime,
-                }
-              : {
-                  table: "context_entities",
-                  context_id: last.contextId,
-                  entity_type: last.entityType,
-                  entity_id: last.entityId,
-                  role: last.role,
-                };
         // PostgreSQL maintains these estimates without scanning history on each page.
         const statistics = await tx.execute(
           sql`select relname, n_live_tup from pg_stat_user_tables where schemaname = current_schema() and relname in ('context_records', 'context_entities')`,
@@ -177,13 +155,10 @@ export function createContextRepository(db: Database) {
           ]),
         );
         const subjects = await tx.$count(householdSubjects);
-        const response = contextBrowseResponseSchema.parse({
+        const responseBase = {
           scope_epoch: input.scope_epoch,
           table: input.table,
           page_size: pageSize,
-          has_more: last !== undefined,
-          next_cursor:
-            nextCursor === null ? null : contextCursorSchema.parse(nextCursor),
           tables: metadata.map((table) => ({
             ...table,
             count:
@@ -192,19 +167,76 @@ export function createContextRepository(db: Database) {
                 : (counts.get(table.name) ?? 0),
             count_is_estimate: table.name !== "household_subjects",
           })),
-          rows: rows.slice(0, pageSize).map((row) =>
-            Object.fromEntries(
-              Object.entries(row)
-                .filter(([key]) => key !== "cursorTime")
-                .map(([key, value]) => [
-                  key,
-                  value instanceof Date ? value.toISOString() : value,
-                ]),
-            ),
+        };
+        const candidates = rows.slice(0, pageSize).map((row) => ({
+          row,
+          view: Object.fromEntries(
+            Object.entries(row)
+              .filter(([key]) => key !== "cursorTime")
+              .map(([key, value]) => [
+                key,
+                value instanceof Date ? value.toISOString() : value,
+              ]),
           ),
-        });
-        if (jsonBytes(response) > 2 * 1024 * 1024)
+        }));
+        const accepted: (typeof candidates)[number]["view"][] = [];
+        let rowsBytes = 0;
+        let nextCursor: ReturnType<typeof contextCursorSchema.parse> | null =
+          null;
+        for (const { row, view } of candidates) {
+          const count = accepted.length + 1;
+          const hasMore = rows.length > count;
+          const continuationCursor = !hasMore
+            ? null
+            : contextCursorSchema.parse(
+                "occurredAt" in row
+                  ? {
+                      table: "context_records",
+                      id: row.id,
+                      occurred_at: row.cursorTime,
+                    }
+                  : "createdAt" in row
+                    ? {
+                        table: "household_subjects",
+                        id: row.id,
+                        created_at: row.cursorTime,
+                      }
+                    : {
+                        table: "context_entities",
+                        context_id: row.contextId,
+                        entity_type: row.entityType,
+                        entity_id: row.entityId,
+                        role: row.role,
+                      },
+              );
+          const rowBytes = jsonBytes(view);
+          const envelopeBytes = jsonBytes({
+            ...responseBase,
+            has_more: hasMore,
+            next_cursor: continuationCursor,
+            rows: [],
+          });
+          // Serialize each complete row once; array separators count toward the
+          // same response budget. The cursor always follows the last accepted row.
+          if (
+            envelopeBytes + rowsBytes + rowBytes + count - 1 >
+            2 * 1024 * 1024
+          )
+            break;
+          accepted.push(view);
+          rowsBytes += rowBytes;
+          nextCursor = continuationCursor;
+        }
+        // A single row must fit intact; no empty continuation page can advance
+        // past it without losing data.
+        if (rows.length && !accepted.length)
           throw new HouseholdError("capacity_exceeded");
+        const response = contextBrowseResponseSchema.parse({
+          ...responseBase,
+          has_more: rows.length > accepted.length,
+          next_cursor: nextCursor,
+          rows: accepted,
+        });
         return response;
       });
     },

@@ -52,7 +52,7 @@ export const imageDetectionResponseSchema = z.object({
 });
 
 const run = z.object({
-  deviceId: z.string(),
+  deviceId: z.string().min(1).max(128),
   channel: z.union([z.literal(1), z.literal(2)]),
   scopeEpoch: z.uuid(),
   runId: z.uuid(),
@@ -204,6 +204,146 @@ export const identityObservationSchema = trackingObservationSchema
       confirmationDelayMsTotal: z.number().nonnegative(),
     }),
   });
+// Public summaries preserve provenance without features or media bytes.
+export const appearanceSummarySchema = trackingObservationSchema
+  .pick({
+    run: true,
+    sequence: true,
+    receivedAt: true,
+    sampledAt: true,
+    mediaTime: true,
+    ageMs: true,
+    width: true,
+    height: true,
+    coordinateBasis: true,
+  })
+  .extend({
+    trackId: z.int().positive(),
+    modelVersion: z.string().min(1).max(128),
+    processingVersion: z.string().min(1).max(128),
+  });
+export const appearanceReferenceSchema = z.object({
+  referenceId: z.uuid(),
+  sourceTargetKey: z.string().min(1).max(1024),
+  memberId: z.uuid(),
+  face: identityTrackSchema.shape.evidence.element,
+  referenceVersions: identityReferenceVersionsSchema,
+  appearance: appearanceSummarySchema,
+  observedAt: z.number(),
+  expiresAt: z.number(),
+});
+const associationTarget = z.object({
+  run,
+  mediaGeneration: z.string().min(1).max(256),
+  sourceRunId: z.uuid(),
+  trackId: z.int().positive(),
+  memberId: z.uuid(),
+  memberName: z.string().max(256),
+  observedAt: z.number(),
+  expiresAt: z.number(),
+});
+export const memberAssociationSchema = z.discriminatedUnion("basis", [
+  associationTarget.extend({
+    basis: z.literal("face"),
+    memberKind: z.literal("person"),
+    className: z.literal("human"),
+    state: z.enum(["candidate", "confirmed"]),
+    referenceVersions: identityReferenceVersionsSchema,
+    evidence: identityTrackSchema.shape.evidence.min(1),
+  }),
+  associationTarget.extend({
+    basis: z.literal("pet"),
+    memberKind: z.literal("pet"),
+    className: z.enum(["cat", "dog"]),
+    state: z.enum(["candidate", "confirmed"]),
+    referenceVersions: identityReferenceVersionsSchema,
+    evidence: identityTrackSchema.shape.evidence.min(1),
+  }),
+  associationTarget.extend({
+    basis: z.literal("appearance"),
+    memberKind: z.literal("person"),
+    className: z.literal("human"),
+    state: z.literal("inferred"),
+    referenceIds: z.array(z.uuid()).length(1),
+    references: z.array(appearanceReferenceSchema).length(1),
+    evidence: z.array(appearanceSummarySchema).length(2),
+    score: z.number().min(-1).max(1),
+    margin: z.number().min(0).max(2),
+    policyVersion: z.string().min(1).max(128),
+  }),
+]);
+export const attributionTriggerSchema = z.object({
+  sourceTargetKey: z.string().min(1).max(1024),
+  referenceIds: z.array(z.uuid()).max(5),
+  references: z.array(appearanceReferenceSchema).max(5),
+  reason: z.enum([
+    "target_face_conflict",
+    "face_conflict",
+    "identity_replaced",
+    "terminal_identity_unavailable",
+  ]),
+  trigger: z
+    .object({
+      observation: identityObservationSchema.pick({
+        revision: true,
+        run: true,
+        sequence: true,
+        mediaTime: true,
+      }),
+      track: identityTrackSchema.extend({ endedAt: z.number().optional() }),
+      omittedEvidence: z.int().nonnegative(),
+    })
+    .nullable(),
+});
+export const memberAttributionSnapshotSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("known"),
+    association: memberAssociationSchema,
+    acceptedAt: z.number(),
+  }),
+  z.object({
+    kind: z.literal("unknown"),
+    reason: z.enum(["reference_revoked", "target_face_conflict"]),
+    observedAt: z.number(),
+    acceptedAt: z.number(),
+    trigger: attributionTriggerSchema,
+  }),
+]);
+export const memberActivityAttributionSchema = z.object({
+  original: memberAttributionSnapshotSchema,
+  current: memberAttributionSnapshotSchema,
+  revision: z.int().positive(),
+  correctionCount: z.int().nonnegative(),
+  lastCorrection: z
+    .object({
+      before: memberAttributionSnapshotSchema,
+      after: memberAttributionSnapshotSchema,
+      reason: z.enum([
+        "member_changed",
+        "direct_confirmation",
+        "reference_revoked",
+        "target_face_conflict",
+      ]),
+      trigger: z.union([memberAssociationSchema, attributionTriggerSchema]),
+      processedAt: z.number(),
+    })
+    .nullable(),
+});
+export const memberActivityDataSchema = z.object({
+  sourceRunId: z.uuid(),
+  run,
+  mediaGeneration: z.string().min(1).max(256),
+  trackId: z.int().positive(),
+  deviceId: run.shape.deviceId,
+  channel: run.shape.channel,
+  deviceName: z.string().max(1024),
+  cameraRoomName: z.string().max(1024).nullable(),
+  firstObservedAt: z.number(),
+  lastObservedAt: z.number(),
+  endedAt: z.number().nullable(),
+  timeBasis: z.literal("host_received_at"),
+  attribution: memberActivityAttributionSchema,
+});
 // Frozen at tracking completion; pending describes that moment, not live work.
 export const identityFrameSnapshotSchema = z.object({
   status: identityObservationSchema.shape.status.or(z.literal("disabled")),
@@ -423,24 +563,16 @@ export const perceptionSnapshotSchema = z.object({
       observation: observation.nullable(),
       tracking: trackingObservationSchema.nullable(),
       identity: identityObservationSchema
+        .omit({ recent: true })
         .extend({
-          associations: z
-            .array(
-              z.object({
-                sourceRunId: z.uuid(),
-                trackId: identityTrackSchema.shape.trackId,
-                memberId: z.uuid(),
-                memberName: z.string(),
-                memberKind: z.enum(["person", "pet"]),
-                className: z.enum(["human", "cat", "dog"]),
-                state: z.enum(["candidate", "confirmed"]),
-                observedAt: z.number(),
-                expiresAt: z.number(),
-              }),
-            )
+          tracks: z
+            .array(identityTrackSchema.omit({ evidence: true }))
             .max(identityCapacity.tracksPerRun),
         })
         .nullable(),
+      associations: z
+        .array(memberAssociationSchema)
+        .max(identityCapacity.tracksPerRun),
       identityValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       trackingValidity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       metrics: z.record(z.string(), z.number()),

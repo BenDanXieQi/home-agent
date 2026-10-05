@@ -363,7 +363,7 @@ function DataBrowser({ scope }: { scope: string }) {
         {data && (data.rows.length > 0 || displayedInput.page > 0) ? (
           <div className="flex flex-wrap items-center justify-between gap-3 py-3 text-xs text-muted">
             <span>
-              第 {displayedInput.page + 1} 页 · 每页 25 条
+              第 {displayedInput.page + 1} 页 · 每页最多 {data.page_size} 条
               {table
                 ? ` · 全表${table.count_is_estimate ? "约" : ""} ${table.count.toLocaleString()} 条`
                 : ""}
