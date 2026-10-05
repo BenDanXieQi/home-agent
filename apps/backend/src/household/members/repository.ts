@@ -2,15 +2,11 @@ import { eq } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import type { memberSaveSchema } from "@home-agent/api/household-members";
 import type { Database } from "../../db";
-import { householdSubjects } from "../../db/schema";
+import { householdSubjects, identityMembers } from "../../db/schema";
 import { createHouseholdBindingAccess } from "../binding-repository";
 import { HouseholdError } from "../errors";
 
-import {
-  changeReferenceVersion,
-  lockIdentityMembers,
-  revokeMemberReferences,
-} from "../identity/repository";
+import { lockIdentityMembers } from "../identity/repository";
 import { identityClassForSubject } from "../identity/subject";
 
 export function createMemberRepository(
@@ -39,22 +35,20 @@ export function createMemberRepository(
             if (command.operation === "delete") {
               if (existing) {
                 changed = true;
-                const referencesRevoked = await revokeMemberReferences(
-                  tx,
-                  invalidateReferences,
-                  command.id,
-                );
+                const [referenceMember] = await tx
+                  .select({ id: identityMembers.memberId })
+                  .from(identityMembers)
+                  .where(eq(identityMembers.memberId, command.id));
                 const className = identityClassForSubject(
                   existing.kind,
                   existing.details.species,
                 );
                 if (
-                  !referencesRevoked &&
-                  (className === "cat" || className === "dog")
-                ) {
+                  referenceMember ||
+                  className === "cat" ||
+                  className === "dog"
+                )
                   invalidateReferences();
-                  await changeReferenceVersion(tx, false);
-                }
                 await tx
                   .delete(householdSubjects)
                   .where(eq(householdSubjects.id, command.id));
@@ -83,7 +77,6 @@ export function createMemberRepository(
                 );
                 if (className === "cat" || className === "dog") {
                   invalidateReferences();
-                  await changeReferenceVersion(tx, false);
                 }
                 await tx
                   .insert(householdSubjects)
@@ -107,7 +100,6 @@ export function createMemberRepository(
                     ) !== identityClassForSubject(profile.kind, profile.species)
                   ) {
                     invalidateReferences();
-                    await changeReferenceVersion(tx, true);
                   }
                   await tx
                     .update(householdSubjects)

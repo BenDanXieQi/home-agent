@@ -234,9 +234,7 @@ try {
   const galleries = (["tune", "holdout"] as const).map((split) => {
     const referenceSnapshot = identityReferenceSnapshotSchema.parse({
       ...faceProcessingVersions(config.minimumSharpness),
-      contentVersion: crypto.randomUUID(),
-      eligibilityVersion: crypto.randomUUID(),
-      matchingVersion: identityMatchingParameters.matchingVersion,
+      revision: crypto.randomUUID(),
       members: [...references].flatMap(([identity, reference]) => {
         const member = members.get(identity)!;
         return reference && member.split === split
@@ -587,7 +585,7 @@ try {
         run: observation.run,
         revision: state.sequence,
         status: "recognizing",
-        referenceRevision: gallery.referenceSnapshot.contentVersion,
+
         referenceVersions: identityReferenceVersionsSchema.parse(
           gallery.referenceSnapshot,
         ),

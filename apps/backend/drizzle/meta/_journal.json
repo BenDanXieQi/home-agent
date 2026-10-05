@@ -71,6 +71,20 @@
       "when": 1791107428180,
       "tag": "0009_member_activity_matches",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791220864609,
+      "tag": "0010_identity_runtime_snapshot",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791221078950,
+      "tag": "0011_identity_sample_features",
+      "breakpoints": true
     }
   ]
 }

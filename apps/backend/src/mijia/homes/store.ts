@@ -15,8 +15,6 @@ import {
   StorageOutcomeUnknownError,
 } from "../../db/transaction-outcome";
 
-import { revokeMemberReferences } from "../../household/identity/repository";
-
 export function createHomeSelectionStore(
   db: Database,
   cleanupReferences: () => Promise<void>,
@@ -69,7 +67,7 @@ export function createHomeSelectionStore(
             if (previousHomeId !== null) {
               // Context links are deleted by the context_records foreign key.
               await tx.delete(contextRecords);
-              await revokeMemberReferences(tx, invalidateReferences);
+              invalidateReferences();
               await tx.delete(householdSubjects);
               await tx.delete(householdDirectories);
             }

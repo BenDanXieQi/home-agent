@@ -10,9 +10,7 @@ import {
 import type { z } from "zod";
 import type { Database } from "../../db";
 import {
-  identityFeatures,
   identityMembers,
-  identityReferenceState,
   identitySamples,
   householdSubjects,
 } from "../../db/schema";
@@ -26,11 +24,7 @@ import {
 } from "../binding-repository";
 import { householdLimits } from "../config";
 import { HouseholdError } from "../errors";
-import {
-  changeReferenceVersion,
-  lockIdentityMembers,
-  readReferenceVersion,
-} from "./repository";
+import { lockIdentityMembers } from "./repository";
 
 /** Household-owned matching parameters and eligibility. No model execution or HTTP here. */
 export function createIdentityMatching(db: Database) {
@@ -41,6 +35,7 @@ export function createIdentityMatching(db: Database) {
     "shared",
   );
   let versions: z.infer<typeof identityRuntimeVersionsSchema> | null = null;
+  let revision = crypto.randomUUID();
   let current: z.infer<typeof identityReferenceSnapshotSchema> | null = null;
   let names = new Map<string, string>();
   let pets: Awaited<ReturnType<typeof configuration>>["pets"] | null = null;
@@ -61,8 +56,12 @@ export function createIdentityMatching(db: Database) {
     pets = nextPets;
     for (const listener of listeners) listener();
   }
+  // One backend owns live evidence. A revoked snapshot never regains its revision.
+  function invalidate() {
+    revision = crypto.randomUUID();
+    install(null);
+  }
   async function configuration(tx: Transaction) {
-    const state = await readReferenceVersion(tx);
     const subjects = await tx
       .select({
         id: householdSubjects.id,
@@ -79,7 +78,6 @@ export function createIdentityMatching(db: Database) {
         : [];
     });
     const petInventory = {
-      eligibilityVersion: state.eligibilityVersion,
       membersByClass: Map.groupBy(petMembers, (member) => member.className),
     };
     const rows = await tx
@@ -91,9 +89,9 @@ export function createIdentityMatching(db: Database) {
         enabled: identityMembers.enabled,
         sampleId: identitySamples.id,
         sha256: identitySamples.sha256,
-        feature: identityFeatures.feature,
-        modelVersion: identityFeatures.modelVersion,
-        processingVersion: identityFeatures.processingVersion,
+        feature: identitySamples.feature,
+        modelVersion: identitySamples.modelVersion,
+        processingVersion: identitySamples.processingVersion,
       })
       .from(identityMembers)
       .innerJoin(
@@ -103,10 +101,6 @@ export function createIdentityMatching(db: Database) {
       .innerJoin(
         identitySamples,
         eq(identitySamples.memberId, identityMembers.memberId),
-      )
-      .innerJoin(
-        identityFeatures,
-        eq(identityFeatures.sampleId, identitySamples.id),
       )
       .orderBy(identityMembers.memberId, identitySamples.id);
     const members = new Map<
@@ -139,50 +133,40 @@ export function createIdentityMatching(db: Database) {
       });
       members.set(row.memberId, member);
     }
-    const activeVersions = versions;
-    const compatible =
-      activeVersions !== null &&
-      state.modelVersion === activeVersions.modelVersion &&
-      state.processingVersion === activeVersions.processingVersion &&
-      members.size > 0;
     return {
-      state,
       pets: petInventory,
       names: new Map(
         rows
           .filter((row) => members.has(row.memberId))
           .map((row) => [row.memberId, row.name]),
       ),
-      members: [...members.values()],
-      compatible,
-      parameters: compatible
-        ? {
-            ...activeVersions,
-            contentVersion: state.contentVersion,
-            matchingVersion: identityMatchingParameters.matchingVersion,
-          }
-        : null,
+      snapshot:
+        versions && members.size
+          ? identityReferenceSnapshotSchema.parse({
+              ...versions,
+              revision,
+              members: [...members.values()],
+            })
+          : null,
     };
   }
-  async function refresh() {
+  async function refresh(next?: typeof versions) {
     try {
       await transaction(householdBindingLock, async (tx) => {
         await lockIdentityMembers(tx);
+        if (next !== undefined && !isDeepStrictEqual(versions, next)) {
+          invalidate();
+          versions = next;
+        }
         const result = await configuration(tx);
         install(
-          result.parameters
-            ? identityReferenceSnapshotSchema.parse({
-                ...result.parameters,
-                eligibilityVersion: result.state.eligibilityVersion,
-                members: result.members,
-              })
-            : null,
-          result.parameters ? result.names : new Map(),
+          result.snapshot,
+          result.snapshot ? result.names : new Map(),
           result.pets,
         );
       });
     } catch (error) {
-      install(null);
+      invalidate();
       throw error;
     }
   }
@@ -204,7 +188,6 @@ export function createIdentityMatching(db: Database) {
       return pets && members?.length
         ? {
             members: members.map(({ memberId, name }) => ({ memberId, name })),
-            eligibilityVersion: pets.eligibilityVersion,
           }
         : null;
     },
@@ -239,37 +222,9 @@ export function createIdentityMatching(db: Database) {
       };
     },
     refresh,
-    invalidate: () => {
-      install(null);
-    },
-    async configure(next: typeof versions) {
-      install(null);
-      versions = next;
-      if (!next) {
-        await refresh();
-        return;
-      }
-      await transaction(householdBindingLock, async (tx) => {
-        await lockIdentityMembers(tx);
-        const state = await readReferenceVersion(tx);
-        if (
-          state.modelVersion !== next.modelVersion ||
-          state.processingVersion !== next.processingVersion
-        ) {
-          await changeReferenceVersion(tx, true);
-          await tx.update(identityReferenceState).set(next);
-        }
-      });
-      await refresh();
-    },
-    async read(
-      identity: Parameters<typeof binding>[0],
-      assertCurrent: () => void,
-    ) {
-      return binding(identity, assertCurrent, async (tx) => {
-        await lockIdentityMembers(tx);
-        return configuration(tx);
-      });
+    invalidate,
+    configure(next: typeof versions) {
+      return refresh(next);
     },
     async toggle(
       identity: Parameters<typeof binding>[0],
@@ -283,8 +238,10 @@ export function createIdentityMatching(db: Database) {
           const result = await configuration(tx);
           if (
             enabled &&
-            (!result.parameters ||
-              !result.members.some((member) => member.memberId === memberId))
+            (!result.snapshot ||
+              !result.snapshot.members.some(
+                (member) => member.memberId === memberId,
+              ))
           )
             throw new HouseholdError("invalid_state");
           const [member] = await tx
@@ -292,12 +249,11 @@ export function createIdentityMatching(db: Database) {
             .from(identityMembers)
             .where(eq(identityMembers.memberId, memberId));
           if (member && member.enabled !== enabled) {
-            install(null);
+            invalidate();
             await tx
               .update(identityMembers)
               .set({ enabled })
               .where(eq(identityMembers.memberId, memberId));
-            await changeReferenceVersion(tx, false);
           }
         });
       } finally {

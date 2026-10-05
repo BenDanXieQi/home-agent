@@ -156,9 +156,7 @@ export async function createVideoIdentityAnalysis(
           reference = referenceSummary(candidate, input, frameSha256);
           gallery = identityReferenceSnapshotSchema.parse({
             ...faceProcessingVersions(config.minimumSharpness),
-            contentVersion: crypto.randomUUID(),
-            eligibilityVersion: crypto.randomUUID(),
-            matchingVersion: identityMatchingParameters.matchingVersion,
+            revision: crypto.randomUUID(),
             members: [
               {
                 memberId,
@@ -308,7 +306,7 @@ export async function createVideoIdentityAnalysis(
       ...observation,
       revision: input.sequence,
       status: "recognizing",
-      referenceRevision: currentGallery.contentVersion,
+
       referenceVersions: identityReferenceVersionsSchema.parse(currentGallery),
       model: null,
       ...state,

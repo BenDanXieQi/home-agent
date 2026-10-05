@@ -104,5 +104,5 @@ export function revocationEvidence(
 export function referenceVersionsLabel(
   versions: ReturnType<typeof identityReferenceVersionsSchema.parse>,
 ) {
-  return `参考内容 ${versions.contentVersion} · 资格 ${versions.eligibilityVersion} · 匹配 ${versions.matchingVersion} · 模型 ${versions.modelVersion} · 处理 ${versions.processingVersion}`;
+  return `识别快照 ${versions.revision} · 模型 ${versions.modelVersion} · 处理 ${versions.processingVersion}`;
 }

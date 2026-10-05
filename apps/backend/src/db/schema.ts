@@ -174,21 +174,6 @@ export const contextEntities = pgTable(
   ],
 );
 
-/** One current household; revisions are opaque and never reused after reset. */
-export const identityReferenceState = pgTable(
-  "identity_reference_state",
-  {
-    id: text("id").primaryKey().default("current"),
-    contentVersion: uuid("content_version").notNull().defaultRandom(),
-    modelVersion: text("model_version"),
-    processingVersion: text("processing_version"),
-    eligibilityVersion: uuid("eligibility_version").notNull().defaultRandom(),
-  },
-  (table) => [
-    check("identity_reference_state_singleton", sql`${table.id} = 'current'`),
-  ],
-);
-
 export const identityMembers = pgTable("identity_members", {
   memberId: uuid("member_id")
     .primaryKey()
@@ -213,6 +198,11 @@ export const identitySamples = pgTable(
     quality: jsonb("quality")
       .$type<z.infer<typeof referenceInputSchema>["quality"]>()
       .notNull(),
+    modelVersion: text("model_version").notNull(),
+    processingVersion: text("processing_version").notNull(),
+    feature: jsonb("feature")
+      .$type<z.infer<typeof referenceInputSchema>["feature"]>()
+      .notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -226,14 +216,3 @@ export const identitySamples = pgTable(
     check("identity_samples_bytes_positive", sql`${table.imageBytes} > 0`),
   ],
 );
-
-export const identityFeatures = pgTable("identity_features", {
-  sampleId: uuid("sample_id")
-    .primaryKey()
-    .references(() => identitySamples.id, { onDelete: "cascade" }),
-  modelVersion: text("model_version").notNull(),
-  processingVersion: text("processing_version").notNull(),
-  feature: jsonb("feature")
-    .$type<z.infer<typeof referenceInputSchema>["feature"]>()
-    .notNull(),
-});

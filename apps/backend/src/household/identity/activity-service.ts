@@ -162,8 +162,7 @@ export function createMemberActivityService(
       const pet = perception.petCandidates(current.association.className);
       return (
         pet?.members.length === 1 &&
-        pet.members[0]?.memberId === current.association.memberId &&
-        pet.eligibilityVersion === current.association.eligibilityVersion
+        pet.members[0]?.memberId === current.association.memberId
       );
     }
     return activitySupportVersions(current).every((version) =>

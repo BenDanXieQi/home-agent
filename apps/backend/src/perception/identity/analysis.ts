@@ -279,9 +279,7 @@ export function createIdentityAnalysis(
           continue;
         }
         const provenance = {
-          contentVersion: snapshot.contentVersion,
-          eligibilityVersion: snapshot.eligibilityVersion,
-          matchingVersion: snapshot.matchingVersion,
+          revision: snapshot.revision,
           modelVersion: snapshot.modelVersion,
           processingVersion: snapshot.processingVersion,
           evidenceKey: `${observation.run.runId}:${observation.mediaTime.generation}:${observation.mediaTime.rtpTimestamp}:${sample.trackId}`,
