@@ -204,6 +204,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     roomAnalysis.close();
     identityEnrollment?.close();
     (async () => {
+      const drain = new AbortController();
       let drainTimer: ReturnType<typeof setTimeout> | undefined;
       try {
         const results = await Promise.race([
@@ -214,15 +215,18 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
             speechInbox.close(),
             deviceLogs.stop("后端停止", "interrupted"),
             (async () => {
-              await memberActivity?.close();
-              await household.close();
+              try {
+                await memberActivity?.close(drain.signal);
+              } finally {
+                await household.close();
+              }
             })(),
           ]),
           new Promise<null>((resolve) => {
-            drainTimer = setTimeout(
-              () => resolve(null),
-              environment.BACKEND_SHUTDOWN_TIMEOUT_MS,
-            );
+            drainTimer = setTimeout(() => {
+              drain.abort(new Error("Backend shutdown deadline exceeded"));
+              resolve(null);
+            }, environment.BACKEND_SHUTDOWN_TIMEOUT_MS);
           }),
         ]);
         const failures = results?.flatMap((result) =>

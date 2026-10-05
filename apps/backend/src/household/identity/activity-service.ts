@@ -1,9 +1,11 @@
 import PQueue from "p-queue";
+import pTimeout from "p-timeout";
 import { isDeepStrictEqual } from "node:util";
 import {
   memberActivityAttributionSchema,
   attributionTriggerSchema,
   type memberAttributionSnapshotSchema,
+  type memberAssociationSchema,
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
 import type { HouseholdRuntime } from "../runtime";
@@ -13,9 +15,11 @@ import { createMemberAccess } from "../members/access";
 import { HouseholdError } from "../errors";
 import {
   memberActivity,
-  activityReferenceIds,
+  activityReferences,
   activitySupportVersions,
 } from "./activity";
+
+const activityCapacity = 256;
 
 function pendingActivity(activity: ReturnType<typeof memberActivity>) {
   return {
@@ -25,6 +29,7 @@ function pendingActivity(activity: ReturnType<typeof memberActivity>) {
     savedAt: 0,
     savedState: "",
     queued: false,
+    waiting: null as AbortController | null,
     suspended: false,
     discardedRevision: null as number | null,
     terminalChecked: false,
@@ -53,28 +58,93 @@ export function createMemberActivityService(
   const queue = new PQueue({ concurrency: 1 });
   const writes = new Set<Promise<void>>();
   const entries = new Map<string, ReturnType<typeof pendingActivity>>();
-  // Current and frozen in-flight dependencies survive successful writes.
+  // Source-target dependencies survive reference expiry and successful writes.
   const dependents = new Map<string, Set<string>>();
   let closed = false;
   let closing: Promise<void> | undefined;
   let capacityWarningAt = 0;
   let scope = household.snapshot().scope_epoch;
   let referenceVersions = perception.referenceVersions();
+  function retireEntries() {
+    for (const entry of entries.values()) {
+      entry.waiting?.abort(new HouseholdError("stale_session"));
+      if (entry.inFlight) entry.inFlight.revoked = true;
+    }
+    entries.clear();
+    dependents.clear();
+  }
   function dependencies() {
     dependents.clear();
     for (const [key, entry] of entries) {
-      for (const id of [
-        ...activityReferenceIds(entry.activity.record.data.attribution.current),
-        ...activityReferenceIds(
+      for (const reference of [
+        ...activityReferences(entry.activity.record.data.attribution.current),
+        ...activityReferences(
           entry.inFlight?.activity.record.data.attribution.current ??
             entry.activity.record.data.attribution.current,
         ),
       ]) {
-        const keys = dependents.get(id) ?? new Set<string>();
+        const keys =
+          dependents.get(reference.sourceTargetKey) ?? new Set<string>();
         keys.add(key);
-        dependents.set(id, keys);
+        dependents.set(reference.sourceTargetKey, keys);
       }
     }
+  }
+  function createEntry(
+    key: string,
+    association: z.infer<typeof memberAssociationSchema>,
+  ) {
+    const state = household.snapshot();
+    const run = association.run;
+    if (closed || !household.ready || run.scopeEpoch !== state.scope_epoch)
+      return undefined;
+    const device = Object.values(state.projection.device).find(
+      (item) => !item.archived && item.device_id === run.deviceId,
+    );
+    if (!device) return undefined;
+    if (entries.size >= activityCapacity) {
+      if (Date.now() >= capacityWarningAt) {
+        console.error("Member activity capacity reached");
+        capacityWarningAt = Date.now() + 5000;
+      }
+      return undefined;
+    }
+    const room = device.room_id
+      ? Object.values(state.projection.room).find(
+          (item) => !item.archived && item.room_id === device.room_id,
+        )
+      : undefined;
+    const current = {
+      kind: "known" as const,
+      association,
+      acceptedAt: Date.now(),
+    };
+    const entry = pendingActivity(
+      memberActivity(crypto.randomUUID(), {
+        run,
+        mediaGeneration: association.mediaGeneration,
+        trackId: association.trackId,
+        sourceRunId: run.runId,
+        deviceId: run.deviceId,
+        channel: run.channel,
+        deviceName: device.alias || device.name,
+        cameraRoomName: room?.name ?? null,
+        firstObservedAt: association.observedAt,
+        lastObservedAt: association.observedAt,
+        endedAt: null,
+        timeBasis: "host_received_at",
+        attribution: {
+          original: current,
+          current,
+          revision: 1,
+          correctionCount: 0,
+          lastCorrection: null,
+        },
+      }),
+    );
+    entries.set(key, entry);
+    dependencies();
+    return entry;
   }
   function discard(entry: ReturnType<typeof pendingActivity>) {
     if (entry.activity.record.data.attribution.current.kind !== "known") return;
@@ -115,6 +185,7 @@ export function createMemberActivityService(
       !household.ready ||
       entry.activity.record.scopeEpoch !== household.snapshot().scope_epoch ||
       entry.queued ||
+      writes.size >= activityCapacity ||
       !eligible(entry) ||
       entry.savedRevision === attribution.revision ||
       (!final && entry.retryAt > Date.now())
@@ -130,56 +201,65 @@ export function createMemberActivityService(
     )
       return;
     entry.queued = true;
+    const waiting = new AbortController();
+    entry.waiting = waiting;
     const writing = queue
-      .add(async () => {
-        if (entries.get(key) !== entry || !eligible(entry)) return;
-        const activity = structuredClone(entry.activity);
-        const selected = { activity, revoked: false };
-        entry.inFlight = selected;
-        dependencies();
-        const context = access(activity.record.scopeEpoch);
-        const assertCurrent = () => {
-          context.assertCurrent();
+      .add(
+        async () => {
+          // The queue signal only cancels waiting tasks. Running storage retains
+          // its serial slot until the transaction has actually settled.
+          entry.waiting = null;
+          if (entries.get(key) !== entry || !eligible(entry)) return;
+          const activity = structuredClone(entry.activity);
+          const selected = { activity, revoked: false };
+          entry.inFlight = selected;
+          dependencies();
+          const context = access(activity.record.scopeEpoch);
+          const assertCurrent = () => {
+            context.assertCurrent();
+            if (
+              entries.get(key) !== entry ||
+              selected.revoked ||
+              (activity.record.data.attribution.current.kind === "known" &&
+                activitySupportVersions(
+                  activity.record.data.attribution.current,
+                ).some(
+                  (version) =>
+                    !isDeepStrictEqual(version, perception.referenceVersions()),
+                ))
+            )
+              throw new HouseholdError("stale_session");
+          };
           if (
-            entries.get(key) !== entry ||
-            selected.revoked ||
-            (activity.record.data.attribution.current.kind === "known" &&
-              activitySupportVersions(
-                activity.record.data.attribution.current,
-              ).some(
-                (version) =>
-                  !isDeepStrictEqual(version, perception.referenceVersions()),
-              ))
+            entry.activity.record.data.attribution.revision !==
+            activity.record.data.attribution.revision
           )
-            throw new HouseholdError("stale_session");
-        };
-        if (
-          entry.activity.record.data.attribution.revision !==
-          activity.record.data.attribution.revision
-        )
-          return;
-        assertCurrent();
-        const receipt = await repository.save(
-          context.identity,
-          assertCurrent,
-          activity,
-        );
-        if (receipt.status === "saved") {
-          entry.savedRevision = activity.record.data.attribution.revision;
-          entry.savedCorrectionCount =
-            activity.record.data.attribution.correctionCount;
-          entry.savedState = stateSignature(activity);
-          entry.savedAt = Date.now();
-          entry.retryAt = 0;
-        } else if (
-          entry.activity.record.data.attribution.revision ===
-          activity.record.data.attribution.revision
-        ) {
-          // Invalid reference or member eligibility cannot become valid by retrying old evidence.
-          discard(entry);
-        }
-      })
+            return;
+          assertCurrent();
+          const receipt = await repository.save(
+            context.identity,
+            assertCurrent,
+            activity,
+          );
+          if (receipt.status === "saved") {
+            entry.savedRevision = activity.record.data.attribution.revision;
+            entry.savedCorrectionCount =
+              activity.record.data.attribution.correctionCount;
+            entry.savedState = stateSignature(activity);
+            entry.savedAt = Date.now();
+            entry.retryAt = 0;
+          } else if (
+            entry.activity.record.data.attribution.revision ===
+            activity.record.data.attribution.revision
+          ) {
+            // Invalid reference or member eligibility cannot become valid by retrying old evidence.
+            discard(entry);
+          }
+        },
+        { signal: waiting.signal },
+      )
       .catch((error: unknown) => {
+        if (waiting.signal.aborted) return;
         if (
           error instanceof HouseholdError &&
           error.reason === "stale_session"
@@ -197,6 +277,7 @@ export function createMemberActivityService(
       .finally(() => {
         writes.delete(writing);
         entry.queued = false;
+        entry.waiting = null;
         entry.inFlight = null;
         dependencies();
         release(key, entry);
@@ -292,7 +373,11 @@ export function createMemberActivityService(
   }
   const unsubscribeAppearance = perception.appearance?.subscribe((event) => {
     if (event.kind === "target_identity") {
-      const entry = entries.get(event.sourceTargetKey);
+      const entry =
+        entries.get(event.sourceTargetKey) ??
+        (event.update.kind === "confirmed"
+          ? createEntry(event.sourceTargetKey, event.update.association)
+          : undefined);
       if (!entry || entry.terminalChecked) return;
       const current = entry.activity.record.data.attribution.current;
       if (event.update.kind === "confirmed") {
@@ -305,12 +390,12 @@ export function createMemberActivityService(
             association: event.update.association,
             acceptedAt: Date.now(),
           });
-          schedule(event.sourceTargetKey, entry);
         }
+        schedule(event.sourceTargetKey, entry);
       } else {
         if (
           entry.inFlight &&
-          activityReferenceIds(
+          activityReferences(
             entry.inFlight.activity.record.data.attribution.current,
           ).length
         )
@@ -338,33 +423,29 @@ export function createMemberActivityService(
         schedule(event.sourceTargetKey, entry);
       }
     } else if (event.kind === "reference_revoked") {
-      const keys = new Set(
-        event.referenceIds.flatMap((id) => [...(dependents.get(id) ?? [])]),
-      );
+      const keys = [...(dependents.get(event.sourceTargetKey) ?? [])];
       for (const key of keys) {
         const entry = entries.get(key);
         if (!entry) continue;
         if (
           entry.inFlight &&
-          activityReferenceIds(
+          activityReferences(
             entry.inFlight.activity.record.data.attribution.current,
-          ).some((id) =>
-            event.referenceIds.some((referenceId) => referenceId === id),
+          ).some(
+            (reference) => reference.sourceTargetKey === event.sourceTargetKey,
           )
         )
           entry.inFlight.revoked = true;
-        const ids = activityReferenceIds(
+        const references = activityReferences(
           entry.activity.record.data.attribution.current,
-        ).filter((id) =>
-          event.referenceIds.some((referenceId) => referenceId === id),
+        ).filter(
+          (reference) => reference.sourceTargetKey === event.sourceTargetKey,
         );
-        if (ids.length) {
+        if (references.length) {
           const trigger = attributionTriggerSchema.parse({
             ...event,
-            referenceIds: ids,
-            references: event.references.filter((reference) =>
-              ids.includes(reference.referenceId),
-            ),
+            referenceIds: references.map((reference) => reference.referenceId),
+            references,
           });
           accept(entry, {
             kind: "unknown",
@@ -404,8 +485,7 @@ export function createMemberActivityService(
     if (closed) return;
     const householdState = household.snapshot();
     if (householdState.scope_epoch !== scope) {
-      entries.clear();
-      dependencies();
+      retireEntries();
       scope = householdState.scope_epoch;
     }
     if (!household.ready) return;
@@ -422,15 +502,10 @@ export function createMemberActivityService(
       }
     }
     const snapshot = perception.snapshot();
-    const devices = new Map(
+    const devices = new Set(
       Object.values(householdState.projection.device)
         .filter((device) => !device.archived)
-        .map((device) => [device.device_id, device]),
-    );
-    const rooms = new Map(
-      Object.values(householdState.projection.room)
-        .filter((room) => !room.archived)
-        .map((room) => [room.room_id, room]),
+        .map((device) => device.device_id),
     );
     for (const source of snapshot.sources) {
       if (
@@ -440,8 +515,7 @@ export function createMemberActivityService(
       )
         continue;
       const run = source.run;
-      const device = devices.get(run.deviceId);
-      if (!device) continue;
+      if (!devices.has(run.deviceId)) continue;
       for (const association of source.associations) {
         const key = JSON.stringify([
           scope,
@@ -449,57 +523,18 @@ export function createMemberActivityService(
           association.mediaGeneration,
           association.trackId,
         ]);
-        let entry = entries.get(key);
-        if (entry?.terminalChecked) continue;
-        if (!entry && entries.size >= 256) {
-          if (Date.now() >= capacityWarningAt) {
-            console.error("Member activity capacity reached");
-            capacityWarningAt = Date.now() + 5000;
-          }
-          continue;
-        }
-        const current = {
-          kind: "known" as const,
-          association,
-          acceptedAt: Date.now(),
-        };
-        if (!entry) {
-          const attribution = memberActivityAttributionSchema.parse({
-            original: current,
-            current,
-            revision: 1,
-            correctionCount: 0,
-            lastCorrection: null,
+        const entry = entries.get(key) ?? createEntry(key, association);
+        if (!entry || entry.terminalChecked) continue;
+        const previous = entry.activity.record.data.attribution.current;
+        if (
+          previous.kind !== "known" ||
+          !isDeepStrictEqual(previous.association, association)
+        )
+          accept(entry, {
+            kind: "known",
+            association,
+            acceptedAt: Date.now(),
           });
-          entry = pendingActivity(
-            memberActivity(crypto.randomUUID(), {
-              run,
-              mediaGeneration: association.mediaGeneration,
-              trackId: association.trackId,
-              sourceRunId: run.runId,
-              deviceId: run.deviceId,
-              channel: run.channel,
-              deviceName: device.alias || device.name,
-              cameraRoomName: device.room_id
-                ? (rooms.get(device.room_id)?.name ?? null)
-                : null,
-              firstObservedAt: association.observedAt,
-              lastObservedAt: association.observedAt,
-              endedAt: null,
-              timeBasis: "host_received_at",
-              attribution,
-            }),
-          );
-          entries.set(key, entry);
-          dependencies();
-        } else {
-          const previous = entry.activity.record.data.attribution.current;
-          if (
-            previous.kind !== "known" ||
-            !isDeepStrictEqual(previous.association, association)
-          )
-            accept(entry, current);
-        }
       }
     }
     for (const [key, entry] of entries) {
@@ -539,7 +574,7 @@ export function createMemberActivityService(
   const timer = setInterval(collect, 1000);
   collect();
   return {
-    close() {
+    close(signal: AbortSignal) {
       if (closing) return closing;
       collect();
       closed = true;
@@ -548,11 +583,20 @@ export function createMemberActivityService(
       unsubscribeHousehold();
       unsubscribeAppearance?.();
       closing = (async () => {
-        await Promise.all(writes);
-        for (const [key, entry] of entries) schedule(key, entry, true);
-        await Promise.all(writes);
-        entries.clear();
-        dependents.clear();
+        try {
+          await pTimeout(Promise.all(writes), {
+            milliseconds: Infinity,
+            signal,
+          });
+          signal.throwIfAborted();
+          for (const [key, entry] of entries) schedule(key, entry, true);
+          await pTimeout(Promise.all(writes), {
+            milliseconds: Infinity,
+            signal,
+          });
+        } finally {
+          retireEntries();
+        }
       })();
       return closing;
     },

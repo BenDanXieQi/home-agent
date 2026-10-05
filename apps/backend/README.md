@@ -20,7 +20,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 默认监听 `http://127.0.0.1:3000`，通过 `BACKEND_HOST`、`BACKEND_PORT` 调整。配置、服务检查、米家和聊天接口同时验证 TCP 对端为 loopback 及 Host／Origin 为允许的本机地址；调整监听地址不会放宽访问限制。当前仅供可信本机使用，尚无用户认证。构建产物需要 workspace 与已安装的依赖。
 
-服务关闭会等待各资源分别完成清理；任一清理失败或总期限到达时强制断开活动连接，再关闭数据库与追踪资源。清理失败保留为关闭错误，不因另一个任务提前失败而取消强制断连。
+服务关闭会等待各资源分别完成清理；任一清理失败或总期限到达时强制断开活动连接，再关闭数据库与追踪资源。活动写入在同一期限内完成收尾；超时取消等待中的写入并使未完成事务失效，随后立即启动家庭连接、采集任务和计时器清理。清理失败保留为关闭错误，不因另一个任务提前失败而取消强制断连。
 
 ## 静态文件服务
 
@@ -50,6 +50,8 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                          |
 | `GET /api/perception/speech/stream`                 | 订阅同一语音收件箱                                                                  |
 | `POST /api/perception/retry`                        | 显式重试检测与音频计算，重新准入失败音轨                                            |
+
+`GET /api/perception`、`/stream` 及 `/retry` 共用 `perceptionSnapshotSchema` 投影公共当前视图：`source.identity` 保留当前身份判断摘要，省略内部 `recent` 和 `tracks[].evidence`，完整当前成员归因依据统一由 `source.associations` 提供。完整 `identityObservationSchema`、内部观测存储及 `service.snapshot()` 仍保留支持证据与有界结束摘要，供匹配、撤销及人宠终态核对，不作为实时公开历史。
 
 窗口详情的 `speech.segments` 保存关联转写，`frames[].identity` 保存采样帧当时的身份判断，`sampledMedia` 表示 backend 生成的采样产物。迟到转写只更新窗口历史与版本，不改写帧身份或重新编码媒体；声音与人物标签不构成说话人身份识别。
 
@@ -260,7 +262,7 @@ bun run db:down      # 停止容器，保留数据卷
 
 `household/identity` 管理人宠参考照片及识别资格，直接使用现有成员 UUID；不增加另一份人物档案，不把图片或特征写入成员 `details`。`perception/identity` 继续负责图像处理及匹配，存储模块接受已完成质量检查的图片与派生特征，不自行解码或提取人脸。
 
-`household/identity/appearance-evidence.ts` 定义私有的人体外观证据边界。跟踪只输出当前原帧新提取、没有明显人体框重叠的向量；感知服务核对来源、运行、媒体代次及帧龄后通过 `appearance.acceptAppearance` 交付。`household/identity/appearance.ts` 由主入口装配，拥有有界短期参照、匹配诊断、冲突阻断和终态核对，向量不进入公共结果或窗口。默认尚未注入实景校准策略，不输出正式外观归属；来源级公共关联与活动保存已接入该契约，默认仍不产生外观归属；活动纠正详情页面尚未接入，当前规则与限制见[家庭短期人体外观参照](../../docs/perception.md#家庭短期人体外观参照)。
+`household/identity/appearance-evidence.ts` 定义私有的人体外观证据边界。跟踪只输出当前原帧新提取、没有明显人体框重叠的向量；感知服务核对来源、运行、媒体代次及帧龄后通过 `appearance.acceptAppearance` 交付。`household/identity/appearance.ts` 由主入口装配，拥有有界短期参照、匹配诊断、冲突阻断和终态核对，向量不进入公共结果或窗口。默认尚未注入实景校准策略，不输出正式外观归属；来源级公共关联与活动保存已接入该契约，默认仍不产生外观归属；活动纠正详情页面已接入，浏览器展示与数据库纠正联动尚未完成运行验收，当前规则与限制见[家庭短期人体外观参照](../../docs/perception.md#家庭短期人体外观参照)。
 
 | 表                         | 内容                                                                                                   |
 | -------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -294,7 +296,7 @@ bun run db:down      # 停止容器，保留数据卷
 
 成员最近活动由 `household/identity/activity-service.ts` 消费有效当前人宠关联，按稳定来源轨迹累计首次／当前归因与纠正，再通过 `activity-repository.ts` 按 revision 更新记录并原子替换成员主体、保留摄像头来源。匹配参数、记录语义、重试及保留边界见[成员最近活动](../../docs/perception.md#成员最近活动)。
 
-`POST /api/household-context/browse` 为 Web 的 `/data` 页面提供三张表的只读浏览。请求包含当前 `scope_epoch`、白名单表名 `table`、`cursor` 和 `search`；首屏使用 `cursor: null`，后续读取使用上一页返回的 `next_cursor`。游标是保存排序位置的数据，避免扫描被跳过的历史行；时间位置保留 PostgreSQL 微秒精度。可按 `context_id` 或 `entity: { type, id }` 查看相关上下文及关联。成员按名称搜索，上下文按描述或主题搜索，关联按对象 ID 搜索；每页 25 条，返回 `has_more` 和 `next_cursor`。成员数精确查询；上下文和关联数量使用 PostgreSQL 维护的全表估计，并以 `count_is_estimate` 标记，不是筛选后的匹配数。字段元数据从 Drizzle 表定义生成并在模块内复用，响应最多 2 MiB，超限拒绝返回。
+`POST /api/household-context/browse` 为 Web 的 `/data` 页面提供三张表的只读浏览。请求包含当前 `scope_epoch`、白名单表名 `table`、`cursor` 和 `search`；首屏使用 `cursor: null`，后续读取使用上一页返回的 `next_cursor`。游标是保存排序位置的数据，避免扫描被跳过的历史行；时间位置保留 PostgreSQL 微秒精度。可按 `context_id` 或 `entity: { type, id }` 查看相关上下文及关联。成员按名称搜索，上下文按描述或主题搜索，关联按对象 ID 搜索；每页最多 25 条，返回 `has_more` 和 `next_cursor`。成员数精确查询；上下文和关联数量使用 PostgreSQL 维护的全表估计，并以 `count_is_estimate` 标记，不是筛选后的匹配数。字段元数据从 Drizzle 表定义生成并在模块内复用，完整响应最多 2 MiB；按字节预算返回完整记录，较大的记录可能使当页少于 25 条，游标定位到实际返回的最后一条并支持继续读取，不截断归因或证据。单条记录连同响应元数据仍无法放入预算时返回 `capacity_exceeded`。
 
 接口仅允许本机访问，接纳后端直连、Vite 开发入口和 `https://localhost:8443` 正式页面入口；继续校验实际回环对端、Host 与 Origin，不信任转发头。成员与房间分析接口使用相同入口规则。数据浏览不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取持有共享绑定事务锁，家庭切换持有排他绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
 

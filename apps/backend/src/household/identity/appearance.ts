@@ -16,7 +16,7 @@ export const appearanceLimits = {
   targets: 256,
   temporarySamples: 8192,
   metadataBytesPerSample: 4096,
-  eventBytes: 34 * 1024 * 1024,
+  eventBytes: 1024 * 1024,
   referencesPerMember: 5,
   members: identityCapacity.members,
   minimumSupportIntervalMs: 500,
@@ -82,7 +82,7 @@ function newTarget(
     blocked: false,
     directMember: null as string | null,
     directConfirmed: false,
-    origins: new Map<string, ReturnType<typeof referenceSummary>>(),
+    referenceMember: null as string | null,
     directDeadline: 0,
     endingAt: null as number | null,
     trackingDeadline: 0,
@@ -329,10 +329,10 @@ export function createAppearanceIdentity(options: {
     target.inferred = null;
     target.appearances.clear();
     target.confirmations.clear();
-    statistics.referencesRevoked += target.origins.size;
-    // The event is synchronous, including for an empty reference set: activity owns its own dependencies.
-    emit(revokedEvent(target, [...target.origins.values()], reason, trigger));
-    target.origins.clear();
+    target.referenceMember = null;
+    statistics.referencesRevoked += removed.length;
+    // Activity owns historical dependencies by source target, even after references expire.
+    emit(revokedEvent(target, removed.map(referenceSummary), reason, trigger));
   }
   function finish(
     target: ReturnType<typeof newTarget>,
@@ -379,8 +379,7 @@ export function createAppearanceIdentity(options: {
         total +
         target.appearances.size +
         target.confirmations.size +
-        target.supports.length +
-        target.origins.size,
+        target.supports.length,
       0,
     );
   }
@@ -477,7 +476,7 @@ export function createAppearanceIdentity(options: {
       return;
     }
     references.set(reference.referenceId, reference);
-    target.origins.set(reference.referenceId, referenceSummary(reference));
+    target.referenceMember = reference.memberId;
     statistics.referencesCreated++;
   }
   function rank(
@@ -570,7 +569,8 @@ export function createAppearanceIdentity(options: {
       .filter(
         ([, score]) =>
           score >= policy.threshold &&
-          score - (second?.score ?? -1) >= policy.margin,
+          score - (second?.score ?? -1) >= policy.margin &&
+          (!second || score > second.score),
       )
       .map(([id]) => id);
     target.supports = target.supports.filter(
@@ -595,36 +595,44 @@ export function createAppearanceIdentity(options: {
       target.supports.every((support) => support.referenceIds.includes(id)),
     );
     const first = target.supports[0];
-    const deadline = Math.min(
-      clock + policy.inferenceTtlMs,
-      ...common.map((id) => references.get(id)!.deadline),
+    const [referenceId] = common.toSorted(
+      (a, b) => best.scores.get(b)! - best.scores.get(a)!,
     );
+    const reference = referenceId ? references.get(referenceId) : undefined;
     if (
       !first ||
       target.supports.length < 2 ||
       clock - first.clock < appearanceLimits.minimumSupportIntervalMs ||
       evidence.receivedAt - first.evidence.receivedAt <
         appearanceLimits.minimumSupportIntervalMs ||
-      !common.length ||
-      Math.min(deadline, target.trackingDeadline) <= now
+      !reference
     ) {
       target.reason = "insufficient_support";
       return;
     }
+    const deadline = Math.min(
+      clock + policy.inferenceTtlMs,
+      reference.deadline,
+    );
+    if (Math.min(deadline, target.trackingDeadline) <= now) {
+      target.reason = "insufficient_support";
+      return;
+    }
+    const score = best.scores.get(reference.referenceId)!;
     target.inferred = {
       memberId: best.memberId,
-      referenceIds: common,
-      references: common.map((id) => referenceSummary(references.get(id)!)),
+      referenceIds: [reference.referenceId],
+      references: [referenceSummary(reference)],
       observedAt: evidence.receivedAt,
       expiresAt:
         evidence.receivedAt +
         Math.min(deadline, target.trackingDeadline) -
         clock,
       deadline,
-      score: best.score,
-      margin,
+      score,
+      margin: score - (second?.score ?? -1),
       policyVersion: policy.policyVersion,
-      evidence: target.supports.map((support) => support.evidence),
+      evidence: [first.evidence, summary],
     };
     target.reason = "appearance_support";
   }
@@ -823,8 +831,10 @@ export function createAppearanceIdentity(options: {
           target.supports.some(
             (support) => frameKey(support.evidence) === key,
           ) ||
-          [...target.origins.values()].some(
-            (reference) => reference.face.provenance.evidenceKey === key,
+          [...references.values()].some(
+            (reference) =>
+              reference.sourceTargetKey === target.key &&
+              reference.face.provenance.evidenceKey === key,
           )
         ) {
           statistics.duplicateEvidence++;
@@ -923,9 +933,8 @@ export function createAppearanceIdentity(options: {
         const replacement =
           confirmed?.state === "confirmed" &&
           latestSequence > target.faceSequence &&
-          [...target.origins.values()].some(
-            (reference) => reference.memberId !== confirmed.memberId,
-          );
+          target.referenceMember !== null &&
+          target.referenceMember !== confirmed.memberId;
         if (
           (track.state === "conflict" && latestSequence > target.cutoff) ||
           replacement
