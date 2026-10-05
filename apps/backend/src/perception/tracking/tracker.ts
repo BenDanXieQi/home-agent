@@ -1,3 +1,4 @@
+import { appearanceOverlapIou } from "./feature-version";
 import { createTrackIds } from "./track-ids";
 import type { z } from "zod";
 import type { detectionSchema } from "../observations";
@@ -73,11 +74,22 @@ export function createHumanTracker(allocateId = createTrackIds()) {
       const vector = t.features.at(-1);
       if (vector) cached[di] = { vector, trackId: t.id, at: t.featureAt };
     }
-    return { humans, cached, step };
+    const appearanceEligible = humans.map(
+      (box) =>
+        !detections.some(
+          (other) =>
+            other !== box &&
+            other.className === "human" &&
+            other.confidence >= 0.5 &&
+            iou(box, other) >= appearanceOverlapIou,
+        ),
+    );
+    return { humans, cached, appearanceEligible, step };
   }
   function finish(
     input: ReturnType<typeof begin>,
     features: (number[] | null)[],
+    onAppearance?: (feature: { trackId: number; vector: number[] }) => void,
   ) {
     if (input.step !== step || features.length !== input.humans.length)
       throw new Error("Stale tracking update");
@@ -161,6 +173,13 @@ export function createHumanTracker(allocateId = createTrackIds()) {
       retainFeature(track, index);
       tracks.push(track);
       matched.set(track.id, index);
+    }
+    for (const t of tracks) {
+      const index = matched.get(t.id);
+      if (index === undefined || input.cached[index]) continue;
+      const vector = features[index];
+      if (vector && input.appearanceEligible[index])
+        onAppearance?.({ trackId: t.id, vector: [...vector] });
     }
     return tracks.map((t) => {
       const index = matched.get(t.id);

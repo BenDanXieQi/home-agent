@@ -284,6 +284,14 @@ test("a deployment missing its fixed model fails with the asset path", async () 
       join(directory, "src/perception"),
       { recursive: true },
     );
+    await mkdir(join(directory, "src/household/identity"), { recursive: true });
+    await cp(
+      new URL(
+        "../../src/household/identity/appearance-evidence.ts",
+        import.meta.url,
+      ),
+      join(directory, "src/household/identity/appearance-evidence.ts"),
+    );
     await mkdir(join(directory, "src/mijia/media"), { recursive: true });
     await cp(
       new URL("../../src/mijia/media/analysis-stream.ts", import.meta.url),

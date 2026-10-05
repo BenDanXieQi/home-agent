@@ -171,6 +171,15 @@ export function createIdentityMatching(db: Database) {
     }
   }
   return {
+    member(memberId: string) {
+      const member = current?.members.find(
+        (item) => item.memberId === memberId && item.enabled,
+      );
+      const name = names.get(memberId);
+      return member && name !== undefined
+        ? { memberId, className: member.className, name }
+        : null;
+    },
     associate(
       observation: Parameters<typeof associateMembers>[2],
       evidenceTtlMs: number,

@@ -1,3 +1,5 @@
+import { appearanceEvidenceSchema } from "../../household/identity/appearance-evidence";
+import { isCurrentRun } from "../observations";
 import {
   windowFrameEventSchema,
   windowGapEventSchema,
@@ -42,6 +44,7 @@ export const videoEventSchema = z.discriminatedUnion("event", [
     event: z.literal("tracking"),
     run: runSchema,
     observation: trackingObservationSchema,
+    appearanceEvidence: z.array(appearanceEvidenceSchema).max(8).optional(),
   }),
   z.object({
     event: z.literal("submitted"),
@@ -64,3 +67,42 @@ export const videoEventSchema = z.discriminatedUnion("event", [
     metrics: videoMetricsSchema,
   }),
 ]);
+
+// Validate frame/target binding before any internal consumer sees vectors.
+export function validAppearanceEvent(
+  event: Extract<z.infer<typeof videoEventSchema>, { event: "tracking" }>,
+) {
+  const observation = event.observation;
+  const ids = new Set<number>();
+  return (
+    isCurrentRun(event.run, observation.run) &&
+    (event.appearanceEvidence ?? []).every((evidence) => {
+      const track = observation.tracks.find(
+        (item) => item.trackId === evidence.trackId,
+      );
+      if (
+        ids.has(evidence.trackId) ||
+        observation.status === "failed" ||
+        !isCurrentRun(observation.run, evidence.run) ||
+        evidence.sequence !== observation.sequence ||
+        evidence.receivedAt !== observation.receivedAt ||
+        evidence.sampledAt !== observation.sampledAt ||
+        evidence.ageMs !== observation.ageMs ||
+        evidence.width !== observation.width ||
+        evidence.height !== observation.height ||
+        evidence.mediaTime.generation !== observation.mediaTime.generation ||
+        evidence.mediaTime.pts !== observation.mediaTime.pts ||
+        evidence.mediaTime.rtpTimestamp !==
+          observation.mediaTime.rtpTimestamp ||
+        track?.className !== "human" ||
+        track.state !== "measured" ||
+        track.feature !== "extracted" ||
+        track.featureAt !== observation.receivedAt ||
+        !track.measuredBox
+      )
+        return false;
+      ids.add(evidence.trackId);
+      return true;
+    })
+  );
+}

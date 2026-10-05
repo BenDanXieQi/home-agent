@@ -304,6 +304,8 @@ export async function createFaceModel(directory: string) {
           samples.push({
             trackId,
             className: "human" as const,
+            // Local model diagnostics; the identity IPC schema strips this box.
+            faceBox: { x: face[0]!, y: face[1]!, w: face[2]!, h: face[3]! },
             ...result.face,
           });
       }

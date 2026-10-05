@@ -13,20 +13,17 @@ import { imageLimits } from "../src/perception/detection/image-request";
 const require = createRequire(import.meta.url);
 const packageMetadata = z.object({ version: z.string().min(1) });
 
-async function dependencyVersion(name: string) {
+export async function readDependencyVersion(path: string | URL) {
   // Read package metadata without importing the native inference runtime here.
-  const source = await readFile(
-    require.resolve(`${name}/package.json`),
-    "utf8",
-  );
+  const source = await readFile(path, "utf8");
   return packageMetadata.parse(JSON.parse(source)).version;
 }
 
 export async function createPerceptionEnvironment() {
   const [ort, piscina, sharp] = await Promise.all([
-    dependencyVersion("onnxruntime-node"),
-    dependencyVersion("piscina"),
-    dependencyVersion("sharp"),
+    readDependencyVersion(require.resolve("onnxruntime-node/package.json")),
+    readDependencyVersion(require.resolve("piscina/package.json")),
+    readDependencyVersion(require.resolve("sharp/package.json")),
   ]);
   return {
     environment: {

@@ -1,3 +1,6 @@
+import { useMemo, useSyncExternalStore } from "react";
+import { associationLabel } from "../../modules/members/attribution";
+import { MemberAssociationEvidence } from "../../components/MemberAssociationEvidence";
 import { useAtomValue } from "jotai";
 import type { z } from "zod";
 import type { perceptionSnapshotSchema } from "@home-agent/api/contracts";
@@ -6,7 +9,8 @@ import type { createPerceptionSourceState } from "../../modules/perception/sourc
 const states = {
   unknown: "未知",
   candidate: "疑似",
-  confirmed: "已识别",
+  confirmed: "已确认",
+  inferred: "推测 · 人体外观匹配",
   conflict: "证据冲突",
 };
 type LiveIdentity = NonNullable<
@@ -14,15 +18,19 @@ type LiveIdentity = NonNullable<
 >;
 
 function IdentityRow({
-  identity,
+  associations,
   track,
 }: {
-  identity: LiveIdentity;
-  track: LiveIdentity["tracks"][number];
+  associations: z.infer<
+    typeof perceptionSnapshotSchema
+  >["sources"][number]["associations"];
+  track: Pick<
+    LiveIdentity["tracks"][number],
+    "trackId" | "state" | "lastEvidenceAt"
+  >;
 }) {
-  const association = identity.associations.find(
-    (item) =>
-      item.trackId === track.trackId && item.sourceRunId === identity.run.runId,
+  const association = associations.find(
+    (item) => item.trackId === track.trackId,
   );
   const state =
     association?.state ?? (track.state === "conflict" ? "conflict" : "unknown");
@@ -35,7 +43,13 @@ function IdentityRow({
       {association ? (
         <p className="break-all text-muted">成员 ID：{association.memberId}</p>
       ) : null}
-      <p>{states[state]}</p>
+      <p>{association ? associationLabel(association) : states[state]}</p>
+      {association ? (
+        <details>
+          <summary className="cursor-pointer text-muted">归因依据</summary>
+          <MemberAssociationEvidence association={association} />
+        </details>
+      ) : null}
       <p className="text-muted">
         观察时间：
         {observedAt === null
@@ -46,6 +60,36 @@ function IdentityRow({
   );
 }
 
+function associationClock(
+  associations: Parameters<typeof IdentityRow>[0]["associations"],
+) {
+  let now = Date.now();
+  return {
+    getSnapshot: () => now,
+    subscribe: (notify: () => void) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      function refresh() {
+        now = Date.now();
+        notify();
+        const nextExpiry = Math.min(
+          ...associations
+            .flatMap((association) => [
+              association.expiresAt,
+              ...(association.basis === "appearance"
+                ? association.references.map((reference) => reference.expiresAt)
+                : []),
+            ])
+            .filter((expiry) => expiry > now),
+        );
+        if (Number.isFinite(nextExpiry))
+          timer = setTimeout(refresh, Math.max(0, nextExpiry - now));
+      }
+      refresh();
+      return () => clearTimeout(timer);
+    },
+  };
+}
+
 export function CameraIdentity({
   source,
   frozen,
@@ -54,6 +98,33 @@ export function CameraIdentity({
   frozen: boolean;
 }) {
   const identity = useAtomValue(source.identityAtom);
+  const publishedAssociations = useAtomValue(source.associationsAtom);
+  const clock = useMemo(
+    () => associationClock(publishedAssociations),
+    [publishedAssociations],
+  );
+  const now = useSyncExternalStore(clock.subscribe, clock.getSnapshot);
+  const associations = publishedAssociations.filter(
+    (association) =>
+      association.expiresAt > now &&
+      (association.basis !== "appearance" ||
+        association.references.every((reference) => reference.expiresAt > now)),
+  );
+  const tracks = [
+    ...(identity?.tracks ?? []),
+    ...associations
+      .filter(
+        (association) =>
+          !identity?.tracks.some(
+            (track) => track.trackId === association.trackId,
+          ),
+      )
+      .map((association) => ({
+        trackId: association.trackId,
+        state: "unknown" as const,
+        lastEvidenceAt: association.observedAt,
+      })),
+  ];
   const unavailableMessage = useAtomValue(
     source.identityUnavailableMessageAtom,
   );
@@ -68,16 +139,16 @@ export function CameraIdentity({
           ? "画面已定格；此面板仍实时更新，结果不属于定格画面。"
           : "实时后台结果，仅关联当前来源运行中的人宠轨迹。"}
       </p>
-      {!identity ? (
+      {!identity && !associations.length ? (
         <p className="text-xs text-muted">{unavailableMessage}</p>
-      ) : !identity.tracks.length ? (
+      ) : !tracks.length ? (
         <p className="text-xs text-muted">当前没有成员识别轨迹。</p>
       ) : (
         <ul className="space-y-3">
-          {identity.tracks.map((track) => (
+          {tracks.map((track) => (
             <IdentityRow
-              key={`${identity.run.runId}:${track.trackId}`}
-              identity={identity}
+              key={track.trackId}
+              associations={associations}
               track={track}
             />
           ))}

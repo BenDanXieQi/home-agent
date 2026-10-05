@@ -1,3 +1,7 @@
+import { createMemberAssociations } from "../household/identity/associations";
+import type { createAppearanceIdentity } from "../household/identity/appearance";
+import { identityLimits } from "./identity/config";
+import { reidSha256, reidProcessingVersion } from "./tracking/feature-version";
 import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
 import type { createIdentityMatching } from "../household/identity/matching";
 import { identityProcessingVersions } from "./identity/processing-version";
@@ -23,9 +27,10 @@ export function createPerceptionService(options: {
   identityReferences?:
     | Pick<
         ReturnType<typeof createIdentityMatching>,
-        "configure" | "snapshot" | "subscribe" | "associate"
+        "configure" | "snapshot" | "subscribe" | "associate" | "member"
       >
     | undefined;
+  appearance?: ReturnType<typeof createAppearanceIdentity>;
   configPath: string;
   executable: string;
   sources: PerceptionSources;
@@ -77,10 +82,33 @@ export function createPerceptionService(options: {
   >();
   const retryAfter = new Map<string, number>();
   const cleanup = new Set<Promise<void>>();
+  const associations = createMemberAssociations(
+    options.identityReferences,
+    options.appearance,
+  );
+  let publicationDepth = 0;
+  let publicationPending = false;
   const changed = () => {
+    if (publicationDepth) {
+      publicationPending = true;
+      return;
+    }
+    updateAssociations();
     sequence++;
     for (const listener of listeners) listener();
   };
+  function publishTogether(action: () => void) {
+    publicationDepth++;
+    try {
+      action();
+    } finally {
+      publicationDepth--;
+      if (!publicationDepth && publicationPending) {
+        publicationPending = false;
+        changed();
+      }
+    }
+  }
   const windows = createWindowStore({
     config: () => config,
     authorized: (run, identity) => {
@@ -122,14 +150,19 @@ export function createPerceptionService(options: {
         referenceDelivery = undefined;
       });
   }
-  const unsubscribeReferences = options.identityReferences?.subscribe(() => {
-    const previousVersion = referenceVersion(referenceSnapshot);
-    referenceSnapshot = options.identityReferences?.snapshot() ?? null;
-    if (previousVersion !== referenceVersion(referenceSnapshot))
-      store.invalidateIdentity();
-    else changed();
-    syncIdentityReferences();
-  });
+  options.appearance?.replaceReferences(performance.now());
+  const unsubscribeAppearance = options.appearance?.subscribe(changed);
+  const unsubscribeReferences = options.identityReferences?.subscribe(() =>
+    publishTogether(() => {
+      options.appearance?.replaceReferences(performance.now());
+      const previousVersion = referenceVersion(referenceSnapshot);
+      referenceSnapshot = options.identityReferences?.snapshot() ?? null;
+      if (previousVersion !== referenceVersion(referenceSnapshot))
+        store.invalidateIdentity();
+      else changed();
+      syncIdentityReferences();
+    }),
+  );
   const unsubscribeWindows = windows.subscribe(media.capture);
   const audio = createAudioService({
     retainSpeech(observation) {
@@ -145,37 +178,41 @@ export function createPerceptionService(options: {
   });
   let unsubscribeStore = store.subscribe(changed);
   function retire(key: string, reason: string) {
-    const entry = desired.get(key);
-    if (!entry) return;
-    windows.stopVideo(entry.runId);
-    store.revoke(key, reason);
-    desired.delete(key);
-    entry.controller.abort();
-    const owned = pool;
-    const task = entry.pending
-      .then(async () => {
-        if (owned?.getStatus().status === "ready")
-          await owned.stopVideo(entry.runId);
-      })
-      .catch((cause: unknown) => {
-        error = errorDetails(cause).message;
-        changed();
-      });
-    cleanup.add(task);
-    task.then(
-      () => {
-        cleanup.delete(task);
-        changed();
-      },
-      (cause: unknown) => {
-        error = errorDetails(cause).message;
-        changed();
-      },
-    );
+    publishTogether(() => {
+      const entry = desired.get(key);
+      if (!entry) return;
+      options.appearance?.stop(entry.runId);
+      windows.stopVideo(entry.runId);
+      store.revoke(key, reason);
+      desired.delete(key);
+      entry.controller.abort();
+      const owned = pool;
+      const task = entry.pending
+        .then(async () => {
+          if (owned?.getStatus().status === "ready")
+            await owned.stopVideo(entry.runId);
+        })
+        .catch((cause: unknown) => {
+          error = errorDetails(cause).message;
+          changed();
+        });
+      cleanup.add(task);
+      task.then(
+        () => {
+          cleanup.delete(task);
+          changed();
+        },
+        (cause: unknown) => {
+          error = errorDetails(cause).message;
+          changed();
+        },
+      );
+    });
   }
   function reconcile() {
     if (stopped) return;
     syncIdentityReferences();
+    options.appearance?.tick(performance.now());
     windows.tick(Date.now());
     media.prune();
     const selected =
@@ -254,6 +291,16 @@ export function createPerceptionService(options: {
         runId: crypto.randomUUID(),
       };
       const controller = new AbortController();
+      options.appearance?.start({
+        run,
+        householdVersion: access.householdVersion,
+        sampleFps: config.sampleFps,
+        maxFrameAgeMs: config.maxFrameAgeMs,
+        evidenceTtlMs: config.identity?.evidenceTtlMs ?? 30_000,
+        recentTtlMs: identityLimits.recentTtlMs,
+        modelVersion: reidSha256,
+        processingVersion: reidProcessingVersion,
+      });
       store.grant(run);
       windows.bindVideo(run);
       const entry = {
@@ -316,26 +363,88 @@ export function createPerceptionService(options: {
       );
       pool = created;
       created.subscribeStatus(reconcile);
-      created.subscribeVideo((event) => {
-        if (event.event === "identity" || event.event === "identity_frame") {
-          const value =
-            event.event === "identity" ? event.observation : event.identity;
-          if (
-            JSON.stringify(value.referenceVersions) !==
-            referenceVersion(referenceSnapshot)
-          )
-            return;
-        }
-        windows.video(event, Date.now());
-        store.receive(event);
-        if (event.event === "health" && event.status === "failed") {
-          const key = sourceKey(event.run);
-          if (desired.get(key)?.runId === event.run.runId) {
-            retryAfter.set(key, performance.now() + 5000);
-            retire(key, event.error ?? "Video unavailable");
+      created.subscribeVideo((event) =>
+        publishTogether(() => {
+          if (event.event === "identity" || event.event === "identity_frame") {
+            const value =
+              event.event === "identity" ? event.observation : event.identity;
+            if (
+              JSON.stringify(value.referenceVersions) !==
+              referenceVersion(referenceSnapshot)
+            )
+              return;
           }
-        }
-      });
+          if (event.event === "tracking") {
+            const access = options.sources.eligibility(event.run);
+            const entry = desired.get(sourceKey(event.run));
+            if (
+              !access ||
+              access.scopeEpoch !== event.run.scopeEpoch ||
+              entry?.runId !== event.run.runId ||
+              entry.identity !== access.identity
+            )
+              return;
+            // Window history admits original-frame results on its own deadline,
+            // independently of live tracking and appearance freshness.
+            windows.video(
+              {
+                event: "tracking",
+                run: event.run,
+                observation: event.observation,
+              },
+              Date.now(),
+            );
+            const accepted = store.receive(event);
+            if (accepted) {
+              options.appearance?.tracking(
+                { ...event.observation, ageMs: accepted.ageMs },
+                accepted.acceptedAt,
+              );
+            }
+            if (accepted && event.appearanceEvidence?.length) {
+              try {
+                options.appearance?.acceptAppearance({
+                  evidence: event.appearanceEvidence.map((evidence) => ({
+                    ...evidence,
+                    ageMs: accepted.ageMs,
+                  })),
+                  householdVersion: access.householdVersion,
+                  acceptedAt: accepted.acceptedAt,
+                  remainingMs: config.maxFrameAgeMs - accepted.ageMs,
+                });
+              } catch (cause) {
+                console.error("Appearance evidence delivery failed", cause);
+              }
+            }
+            return;
+          }
+          windows.video(event, Date.now());
+          const accepted = store.receive(event);
+          const access = options.sources.eligibility(event.run);
+          const entry = desired.get(sourceKey(event.run));
+          const authorized =
+            access &&
+            access.scopeEpoch === event.run.scopeEpoch &&
+            entry?.runId === event.run.runId &&
+            entry.identity === access.identity;
+          if (event.event === "media" && authorized)
+            options.appearance?.media(event.run, event.media.generation);
+          if (event.event === "identity" && accepted && authorized) {
+            options.appearance?.identity(
+              { ...event.observation, ageMs: accepted.ageMs },
+              accepted.acceptedAt,
+              Date.now(),
+            );
+          }
+          if (event.event === "health" && event.status === "failed") {
+            const key = sourceKey(event.run);
+            if (desired.get(key)?.runId === event.run.runId) {
+              retryAfter.set(key, performance.now() + 5000);
+              retire(key, event.error ?? "Video unavailable");
+            }
+          }
+        }),
+      );
       reconcile();
       return created;
     })().finally(() => {
@@ -390,44 +499,39 @@ export function createPerceptionService(options: {
     });
     return initializing;
   }
+  function updateAssociations() {
+    associations.update(
+      store.snapshot().filter((source) => {
+        if (!source.run) return false;
+        const entry = desired.get(sourceKey(source.source));
+        const access = options.sources.eligibility(source.run);
+        return (
+          entry?.runId === source.run.runId &&
+          access?.scopeEpoch === source.run.scopeEpoch &&
+          access.identity === entry.identity
+        );
+      }),
+      config.identity?.evidenceTtlMs,
+      Date.now(),
+    );
+  }
   function currentSources() {
-    return store.snapshot().map((source) => {
-      const runId = source.run?.runId;
-      const active =
-        runId && desired.get(sourceKey(source.source))?.runId === runId;
-      const projected =
-        active &&
-        source.identity &&
-        source.identityValidity === "valid" &&
-        source.trackingValidity === "valid" &&
-        config.identity
-          ? (
-              options.identityReferences?.associate(
-                source.identity,
-                config.identity.evidenceTtlMs,
-                Date.now(),
-              ) ?? []
-            ).filter((association) =>
-              source.tracking?.tracks.some(
-                (track) =>
-                  track.trackId === association.trackId &&
-                  track.className === association.className,
-              ),
-            )
-          : [];
-      return {
-        ...source,
-        identity: source.identity
-          ? {
-              ...source.identity,
-              associations: projected,
-            }
-          : null,
-        authorizedAt: source.run
-          ? (desired.get(sourceKey(source.source))?.authorizedAt ?? null)
-          : null,
-      };
-    });
+    return store.snapshot().map((source) => ({
+      ...source,
+      associations:
+        source.trackingValidity === "valid"
+          ? associations
+              .source(source.run?.runId, Date.now())
+              .filter(
+                (association) =>
+                  association.basis === "appearance" ||
+                  source.identityValidity === "valid",
+              )
+          : [],
+      authorizedAt: source.run
+        ? (desired.get(sourceKey(source.source))?.authorizedAt ?? null)
+        : null,
+    }));
   }
   return {
     start: initialize,
@@ -467,7 +571,12 @@ export function createPerceptionService(options: {
       const compute = await ensurePool();
       return compute.enrollment(command);
     },
+    appearance: options.appearance,
     identityConfig: () => config.identity,
+    referenceVersions: () =>
+      referenceSnapshot
+        ? identityReferenceVersionsSchema.parse(referenceSnapshot)
+        : null,
     async identityModelStatus(
       className: Extract<
         z.infer<typeof enrollmentCommandSchema>,
@@ -558,6 +667,7 @@ export function createPerceptionService(options: {
           error = errorDetails(cause).message;
           throw cause;
         } finally {
+          unsubscribeAppearance?.();
           unsubscribeStore();
           store.close();
           windows.close();
