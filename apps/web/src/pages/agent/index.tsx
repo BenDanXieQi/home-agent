@@ -116,9 +116,11 @@ function ChatWorkspace({ scope }: { scope: string | undefined }) {
         !chat.historyError ? (
           <output className="mx-auto flex w-full max-w-3xl shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line py-2 text-xs leading-5 text-muted">
             <span>
-              {chat.historyRunning
-                ? "会话仍在执行，可重新加载查看进展。"
-                : "只读会话 · 执行未完成，可新建对话继续提问。"}
+              {chat.viewingEarlier
+                ? "正在查看较早消息，返回最新消息后可继续提问。"
+                : chat.historyRunning
+                  ? "会话仍在执行，可重新加载查看进展。"
+                  : "只读会话 · 执行未完成，可新建对话继续提问。"}
             </span>
             {chat.threadId ? (
               <Button
@@ -144,6 +146,26 @@ function ChatWorkspace({ scope }: { scope: string | undefined }) {
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
           aria-label="对话记录"
         >
+          {chat.threadId &&
+          (chat.viewingEarlier ||
+            chat.turns.length >= chat.residentTurnLimit) ? (
+            <div className="mb-4 flex items-center gap-3 text-xs text-muted">
+              <span>
+                {chat.viewingEarlier
+                  ? "较早消息按页展示"
+                  : `页面最多保留最近 ${chat.residentTurnLimit} 轮`}
+              </span>
+              <Button
+                size="small"
+                disabled={chat.historyLoading || chat.busy}
+                onClick={async () => {
+                  if (chat.threadId) await openHistory(chat.threadId);
+                }}
+              >
+                {chat.viewingEarlier ? "返回最新消息" : "浏览已保存消息"}
+              </Button>
+            </div>
+          ) : null}
           {chat.hasEarlier ? (
             <Button
               size="small"

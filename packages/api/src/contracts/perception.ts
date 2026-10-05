@@ -264,9 +264,9 @@ export const memberAssociationSchema = z.discriminatedUnion("basis", [
     memberKind: z.literal("person"),
     className: z.literal("human"),
     state: z.literal("inferred"),
-    referenceIds: z.array(z.uuid()).min(1).max(5),
-    references: z.array(appearanceReferenceSchema).min(1).max(5),
-    evidence: z.array(appearanceSummarySchema).min(2).max(151),
+    referenceIds: z.array(z.uuid()).length(1),
+    references: z.array(appearanceReferenceSchema).length(1),
+    evidence: z.array(appearanceSummarySchema).length(2),
     score: z.number().min(-1).max(1),
     margin: z.number().min(0).max(2),
     policyVersion: z.string().min(1).max(128),
@@ -562,7 +562,14 @@ export const perceptionSnapshotSchema = z.object({
       validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
       observation: observation.nullable(),
       tracking: trackingObservationSchema.nullable(),
-      identity: identityObservationSchema.nullable(),
+      identity: identityObservationSchema
+        .omit({ recent: true })
+        .extend({
+          tracks: z
+            .array(identityTrackSchema.omit({ evidence: true }))
+            .max(identityCapacity.tracksPerRun),
+        })
+        .nullable(),
       associations: z
         .array(memberAssociationSchema)
         .max(identityCapacity.tracksPerRun),

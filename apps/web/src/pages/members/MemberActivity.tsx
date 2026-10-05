@@ -154,23 +154,28 @@ export function MemberActivity({
     ),
     refetchInterval: page === 0 ? 5000 : false,
   });
-  const activities = useMemo(
-    () =>
-      (query.data?.rows ?? []).flatMap((row) => {
+  const { entries: activityEntries, activities: playableActivities } =
+    useMemo(() => {
+      const entries = (query.data?.rows ?? []).map((row) => {
         const source =
           row.topic === "member_sighting"
             ? memberActivitySourceSchema.safeParse(row.data)
             : undefined;
-        return source?.success && typeof row.id === "string"
-          ? [{ id: row.id, source: source.data }]
-          : [];
-      }),
-    [query.data?.rows],
-  );
-  const sources = new Map(
-    activities.map((activity) => [activity.id, activity.source]),
-  );
-  const playback = useActivityPlayback(activities, scope);
+        return {
+          row,
+          source:
+            source?.success && typeof row.id === "string"
+              ? source.data
+              : undefined,
+          attribution: memberSightingData(row.topic, row.data),
+        };
+      });
+      const activities = entries.flatMap(({ row, source }) =>
+        source && typeof row.id === "string" ? [{ id: row.id, source }] : [],
+      );
+      return { entries, activities };
+    }, [query.data?.rows]);
+  const playback = useActivityPlayback(playableActivities, scope);
   function refresh() {
     if (page > 0) {
       setCursors([null]);
@@ -213,10 +218,7 @@ export function MemberActivity({
         <div className="rounded-2xl bg-surface p-2">
           {query.data.rows.length ? (
             <ol className="space-y-1">
-              {query.data.rows.map((row) => {
-                const source =
-                  typeof row.id === "string" ? sources.get(row.id) : undefined;
-                const parsed = memberSightingData(row.topic, row.data);
+              {activityEntries.map(({ row, source, attribution: parsed }) => {
                 const current = parsed?.attribution.current;
                 const uncertain = current
                   ? current.kind === "unknown" ||

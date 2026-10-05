@@ -5,17 +5,22 @@ import { execFile, spawn } from "node:child_process";
 import { promisify, parseArgs } from "node:util";
 import { resolve, join } from "node:path";
 import { z } from "zod";
+import { getFFmpegInfo } from "node-av/lib";
 import writeFileAtomic from "write-file-atomic";
 import { createDetector } from "../src/perception/detection/detector";
 import { detectionModelPath } from "../src/perception/detection/model";
 import { createReid } from "../src/perception/tracking/reid";
+import { readNutFrames } from "../src/perception/media/nut-frames";
 import { createHumanTracker } from "../src/perception/tracking/tracker";
 import {
   reidProcessingVersion,
   appearanceOverlapIou,
 } from "../src/perception/tracking/feature-version";
-import { frameSchema, frameLimits } from "../src/perception/detection/frame";
-import { createPerceptionEnvironment } from "./perception-report";
+import { frameLimits } from "../src/perception/detection/frame";
+import {
+  createPerceptionEnvironment,
+  readDependencyVersion,
+} from "./perception-report";
 
 const manifestSchema = z.strictObject({
   sourcePage: z.url(),
@@ -56,6 +61,25 @@ const probeSchema = z.object({
     )
     .min(1),
 });
+const probeVersionsSchema = z.object({
+  program_version: z.object({
+    version: z.string().min(1).max(1024),
+    compiler_ident: z.string().max(1024),
+    configuration: z.string().max(16_384),
+  }),
+  library_versions: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(128),
+        major: z.int().nonnegative(),
+        minor: z.int().nonnegative(),
+        micro: z.int().nonnegative(),
+        version: z.int().nonnegative(),
+      }),
+    )
+    .min(1)
+    .max(16),
+});
 const { values } = parseArgs({
   options: {
     manifest: { type: "string" },
@@ -71,7 +95,8 @@ if (!values.manifest || !values["output-dir"])
   throw new Error(
     "Usage: analyze-appearance-video --manifest <licensed video input JSON> --output-dir <report> [--seconds 302] [--identity-model-dir <YuNet/SFace>]",
   );
-const seconds = z.coerce.number().positive().max(3600).parse(values.seconds);
+const seconds = z.coerce.number().min(0.000001).max(3600).parse(values.seconds);
+const durationUs = Math.round(seconds * 1_000_000);
 const registrationStartMs =
   z.coerce
     .number()
@@ -85,6 +110,36 @@ if (values["compare-appearance"] && !values["identity-model-dir"])
 const manifestBytes = await readFile(resolve(values.manifest));
 const manifest = manifestSchema.parse(JSON.parse(manifestBytes.toString()));
 const output = resolve(values["output-dir"]);
+const [
+  environment,
+  ffmpegVersion,
+  ffprobeVersions,
+  nodeAvVersion,
+  scriptBytes,
+] = await Promise.all([
+  createPerceptionEnvironment(),
+  promisify(execFile)("ffmpeg", ["-version"], {
+    timeout: 3000,
+    maxBuffer: 64 * 1024,
+  }),
+  promisify(execFile)(
+    "ffprobe",
+    ["-v", "error", "-show_versions", "-of", "json"],
+    { timeout: 3000, maxBuffer: 64 * 1024 },
+  ),
+  readDependencyVersion(
+    new URL("../package.json", import.meta.resolve("node-av")),
+  ),
+  readFile(new URL(import.meta.url)),
+]);
+const execution = {
+  scriptSha256: createHash("sha256").update(scriptBytes).digest("hex"),
+  mediaRuntime: {
+    ffmpeg: z.string().trim().min(1).parse(ffmpegVersion.stdout),
+    ffprobe: probeVersionsSchema.parse(JSON.parse(ffprobeVersions.stdout)),
+    nodeAv: { version: nodeAvVersion, ffmpeg: getFFmpegInfo() },
+  },
+};
 async function hashFile(path: string) {
   const hash = createHash("sha256");
   for await (const bytes of createReadStream(path)) hash.update(bytes);
@@ -181,14 +236,24 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     )
   )
     throw new Error("Decoded presentation timestamps must strictly increase");
+  const originUs = Math.round(origin * 1_000_000);
   const selected = probe.frames.flatMap((frame, index) => {
     if (index % stride !== 0) return [];
     const pts = frame.best_effort_timestamp_time;
     if (pts === undefined)
       throw new Error(`Sampled frame ${index} has no presentation timestamp`);
-    const time = (pts - origin) * 1000;
-    return time < seconds * 1000
-      ? [{ sourceFrameIndex: index, time, presentationTimeMs: pts * 1000 }]
+    // FFprobe renders time to microseconds. Subtract integers so an exact
+    // cutoff cannot round below FFmpeg's half-open output duration.
+    const ptsUs = Math.round(pts * 1_000_000);
+    const timeUs = ptsUs - originUs;
+    return timeUs < durationUs
+      ? [
+          {
+            sourceFrameIndex: index,
+            time: timeUs / 1000,
+            presentationTimeMs: ptsUs / 1000,
+          },
+        ]
       : [];
   });
   const detector = await createDetector();
@@ -265,8 +330,7 @@ async function analyze(video: (typeof manifest.videos)[number]) {
   }
   const frames: ReturnType<typeof frameReport>[] = [];
   const durations: number[] = [];
-  let pending = Buffer.alloc(0);
-  const pixelBytes = metadata.width * metadata.height * 3;
+  const controller = new AbortController();
   let peakRss = process.memoryUsage().rss;
   const started = performance.now();
   const cpuStart = process.cpuUsage();
@@ -283,15 +347,25 @@ async function analyze(video: (typeof manifest.videos)[number]) {
       "-map",
       "0:v:0",
       "-t",
-      String(seconds),
+      `${durationUs}us`,
       "-vf",
-      `select=not(mod(n\\,${stride}))`,
+      `select=not(mod(n\\,${stride})),setpts=PTS-STARTPTS`,
       "-fps_mode",
-      "vfr",
-      "-f",
+      "passthrough",
+      "-c:v",
       "rawvideo",
       "-pix_fmt",
       "rgb24",
+      "-f",
+      "nut",
+      "-enc_time_base",
+      "1:90000",
+      "-avoid_negative_ts",
+      "disabled",
+      "-write_index",
+      "0",
+      "-flush_packets",
+      "1",
       "pipe:1",
     ],
     { stdio: ["ignore", "pipe", "pipe"] },
@@ -306,128 +380,130 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     decoder.once("close", done);
   });
   try {
-    for await (const chunk of decoder.stdout) {
-      pending = Buffer.concat([pending, chunk]);
-      while (pending.length >= pixelBytes) {
-        const sample = selected[frames.length];
-        if (!sample)
-          throw new Error("Decoder produced an unexpected sampled frame");
-        const rgb = new Uint8Array(pending.subarray(0, pixelBytes));
-        pending = pending.subarray(pixelBytes);
-        const frame = frameSchema.parse({
-          width: metadata.width,
-          height: metadata.height,
-          rgb,
+    for await (const frame of readNutFrames(
+      decoder.stdout,
+      controller.signal,
+    )) {
+      const sample = selected[frames.length];
+      if (!sample)
+        throw new Error("Decoder produced an unexpected sampled frame");
+      if (
+        frame.width !== metadata.width ||
+        frame.height !== metadata.height ||
+        Math.abs(frame.pts - Math.round(sample.time * 90)) > 1
+      )
+        throw new Error(
+          "Decoded frame dimensions or timestamp differ from probe",
+        );
+      const at = performance.now();
+      const detections = (await detector.detect(frame)).detections;
+      const input = tracker.begin(sample.time, detections);
+      const features = input.cached.map((cached) => cached?.vector ?? null);
+      const missing = input.humans.flatMap((_, index) =>
+        features[index] ? [] : [index],
+      );
+      if (missing.length) {
+        const vectors = await model.extract({
+          frame,
+          boxes: missing.map((index) => input.humans[index]!),
         });
-        const at = performance.now();
-        const detections = (await detector.detect(frame)).detections;
-        const input = tracker.begin(sample.time, detections);
-        const features = input.cached.map((cached) => cached?.vector ?? null);
-        const missing = input.humans.flatMap((_, index) =>
-          features[index] ? [] : [index],
-        );
-        if (missing.length) {
-          const vectors = await model.extract({
-            frame,
-            boxes: missing.map((index) => input.humans[index]!),
-          });
-          missing.forEach((index, offset) => {
-            features[index] = vectors[offset]!;
-          });
-        }
-        const fresh: Pick<
-          z.infer<
-            typeof import("../src/household/identity/appearance-evidence").appearanceEvidenceSchema
-          >,
-          "trackId" | "vector"
-        >[] = [];
-        const tracks = tracker.finish(input, features, (item) => {
-          fresh.push(item);
+        missing.forEach((index, offset) => {
+          features[index] = vectors[offset]!;
         });
-        const freshTrackIds = fresh.map((item) => item.trackId);
-        const measured = tracks.filter((track) => track.state === "measured");
-        const faces = detections.filter(
-          (detection) => detection.className === "face",
-        );
-        const faceTrackIds = new Set<number>();
-        for (const face of faces) {
-          const x = face.x + face.w / 2,
-            y = face.y + face.h / 2;
-          const matching = measured.filter((track) => {
-            const box = track.measuredBox;
-            return (
-              box &&
-              x >= box.x &&
-              x < box.x + box.w &&
-              y >= box.y &&
-              y < box.y + box.h
-            );
-          });
-          if (matching.length === 1) faceTrackIds.add(matching[0]!.trackId);
-        }
-        for (const trackId of freshTrackIds) {
-          const previous = trackFeatures.get(trackId);
-          if (previous) {
-            previous.intervalsMs.push(sample.time - previous.lastAt);
-            previous.lastAt = sample.time;
-            previous.fresh++;
-          } else
-            trackFeatures.set(trackId, {
-              firstAt: sample.time,
-              lastAt: sample.time,
-              fresh: 1,
-              intervalsMs: [],
-            });
-        }
-        durations.push(performance.now() - at);
-        const identityResult = identity
-          ? await identity.step({
-              frame,
-              tracks,
-              fresh,
-              timeMs: sample.time,
-              ptsMs: sample.presentationTimeMs,
-              sourceFrameIndex: sample.sourceFrameIndex,
-              sequence: frames.length + 1,
-              omittedHumans: Math.max(
-                0,
-                detections.filter((item) => item.className === "human").length -
-                  measured.length,
-              ),
-              omittedPets: detections.filter(
-                (item) => item.className === "cat" || item.className === "dog",
-              ).length,
-            })
-          : null;
-        frames.push(
-          frameReport(
-            frames.length + 1,
-            sample,
-            detections,
-            input,
-            tracks,
-            freshTrackIds,
-            faceTrackIds,
-            missing,
-            identityResult,
-          ),
-        );
-        peakRss = Math.max(peakRss, process.memoryUsage().rss);
-        if (frames.length % 100 === 0)
-          console.log(
-            `${path}: ${frames.length}/${selected.length} sampled frames`,
-          );
       }
+      const fresh: Pick<
+        z.infer<
+          typeof import("../src/household/identity/appearance-evidence").appearanceEvidenceSchema
+        >,
+        "trackId" | "vector"
+      >[] = [];
+      const tracks = tracker.finish(input, features, (item) => {
+        fresh.push(item);
+      });
+      const freshTrackIds = fresh.map((item) => item.trackId);
+      const measured = tracks.filter((track) => track.state === "measured");
+      const faces = detections.filter(
+        (detection) => detection.className === "face",
+      );
+      const faceTrackIds = new Set<number>();
+      for (const face of faces) {
+        const x = face.x + face.w / 2,
+          y = face.y + face.h / 2;
+        const matching = measured.filter((track) => {
+          const box = track.measuredBox;
+          return (
+            box &&
+            x >= box.x &&
+            x < box.x + box.w &&
+            y >= box.y &&
+            y < box.y + box.h
+          );
+        });
+        if (matching.length === 1) faceTrackIds.add(matching[0]!.trackId);
+      }
+      for (const trackId of freshTrackIds) {
+        const previous = trackFeatures.get(trackId);
+        if (previous) {
+          previous.intervalsMs.push(sample.time - previous.lastAt);
+          previous.lastAt = sample.time;
+          previous.fresh++;
+        } else
+          trackFeatures.set(trackId, {
+            firstAt: sample.time,
+            lastAt: sample.time,
+            fresh: 1,
+            intervalsMs: [],
+          });
+      }
+      durations.push(performance.now() - at);
+      const identityResult = identity
+        ? await identity.step({
+            frame,
+            tracks,
+            fresh,
+            timeMs: sample.time,
+            ptsMs: sample.presentationTimeMs,
+            sourceFrameIndex: sample.sourceFrameIndex,
+            sequence: frames.length + 1,
+            omittedHumans: Math.max(
+              0,
+              detections.filter((item) => item.className === "human").length -
+                measured.length,
+            ),
+            omittedPets: detections.filter(
+              (item) => item.className === "cat" || item.className === "dog",
+            ).length,
+          })
+        : null;
+      frames.push(
+        frameReport(
+          frames.length + 1,
+          sample,
+          detections,
+          input,
+          tracks,
+          freshTrackIds,
+          faceTrackIds,
+          missing,
+          identityResult,
+        ),
+      );
+      peakRss = Math.max(peakRss, process.memoryUsage().rss);
+      if (frames.length % 100 === 0)
+        console.log(
+          `${path}: ${frames.length}/${selected.length} sampled frames`,
+        );
     }
     const code = await exited;
     if (launchError) throw launchError;
     if (code !== 0 || stderr)
       throw new Error(`FFmpeg failed (${code}): ${stderr}`);
-    if (pending.length || frames.length !== selected.length)
+    if (frames.length !== selected.length)
       throw new Error(
         `Incomplete decoding: ${frames.length}/${selected.length} sampled frames`,
       );
   } finally {
+    controller.abort();
     decoder.kill("SIGKILL");
     await exited;
     try {
@@ -478,7 +554,7 @@ async function analyze(video: (typeof manifest.videos)[number]) {
       height: metadata.height,
       sourceFps,
       probedSourceFrames: probe.frames.length,
-      originPresentationTimeMs: origin * 1000,
+      originPresentationTimeMs: originUs / 1000,
       unselectedFramesWithoutTimestamp: probe.frames.filter(
         (frame) => frame.best_effort_timestamp_time === undefined,
       ).length,
@@ -497,6 +573,7 @@ async function analyze(video: (typeof manifest.videos)[number]) {
       requestedFps: 3,
       nominalFps: sourceFps / stride,
       requestedSeconds: seconds,
+      decodedDurationUs: durationUs,
       frames: frames.length,
       firstMediaMs: frames[0]?.time ?? null,
       lastMediaMs: frames.at(-1)?.time ?? null,
@@ -603,7 +680,8 @@ for (const [index, video] of manifest.videos.entries()) {
         manifestSha256: createHash("sha256")
           .update(manifestBytes)
           .digest("hex"),
-        ...(await createPerceptionEnvironment()),
+        ...environment,
+        execution,
         limitations: [
           "face detector outputs are not quality-accepted or confirmed face identity",
           "no global person identity or family reference labels",

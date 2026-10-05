@@ -56,11 +56,11 @@ export function memberActivity(
     },
   };
 }
-export function activityReferenceIds(
+export function activityReferences(
   current: z.infer<typeof memberActivityDataSchema>["attribution"]["current"],
 ) {
   return current.kind === "known" && current.association.basis === "appearance"
-    ? current.association.referenceIds
+    ? current.association.references
     : [];
 }
 export function activitySupportVersions(
