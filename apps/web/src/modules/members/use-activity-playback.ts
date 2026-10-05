@@ -98,15 +98,14 @@ export function useActivityPlayback(
   const recordings = useQueries({
     queries: groups.map((group, index) => {
       const target = targets[index];
-      const at = activityCacheSettled(windows[index])
-        ? [
-            ...new Set(
-              group.activities
-                .filter((activity) => !matched[index]?.get(activity.id))
-                .map((activity) => activity.source.lastObservedAt),
-            ),
-          ]
-        : [];
+      // Refresh status gates execution, not the query identity or cached result.
+      const at = [
+        ...new Set(
+          group.activities
+            .filter((activity) => !matched[index]?.get(activity.id))
+            .map((activity) => activity.source.lastObservedAt),
+        ),
+      ];
       const options = recordingAvailabilityOptions(
         target?.scope_epoch === scope && at.length
           ? { ...target, at }
@@ -115,7 +114,10 @@ export function useActivityPlayback(
       return {
         ...options,
         queryKey: [...options.queryKey, JSON.stringify(group.state.target)],
-        enabled: target?.scope_epoch === scope && at.length > 0,
+        enabled:
+          target?.scope_epoch === scope &&
+          at.length > 0 &&
+          activityCacheSettled(windows[index]),
       };
     }),
   });
@@ -135,10 +137,12 @@ export function useActivityPlayback(
               window: matched[index]?.get(activity.id),
               clip:
                 targets[index]?.scope_epoch === scope &&
-                activityCacheSettled(windows[index])
+                windows[index]?.isSuccess
                   ? clips.get(activity.source.lastObservedAt)
                   : undefined,
-              checking: !!recording?.isFetching || !!windows[index]?.isFetching,
+              checking:
+                windows[index]?.fetchStatus !== "idle" ||
+                !!recording?.isFetching,
             },
           ] as const,
       );

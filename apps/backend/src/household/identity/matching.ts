@@ -1,6 +1,6 @@
 import { associateMembers } from "./association";
 import { isDeepStrictEqual } from "node:util";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { identityClassForSubject } from "./subject";
 import { identityMatchingParameters } from "./matching-parameters";
 import {
@@ -43,25 +43,51 @@ export function createIdentityMatching(db: Database) {
   let versions: z.infer<typeof identityRuntimeVersionsSchema> | null = null;
   let current: z.infer<typeof identityReferenceSnapshotSchema> | null = null;
   let names = new Map<string, string>();
+  let pets: Awaited<ReturnType<typeof configuration>>["pets"] | null = null;
   const listeners = new Set<() => void>();
   function install(
     next: typeof current,
     nextNames = new Map<string, string>(),
+    nextPets: typeof pets = null,
   ) {
-    if (isDeepStrictEqual(next, current) && isDeepStrictEqual(names, nextNames))
+    if (
+      isDeepStrictEqual(next, current) &&
+      isDeepStrictEqual(names, nextNames) &&
+      isDeepStrictEqual(pets, nextPets)
+    )
       return;
     current = next;
     names = nextNames;
+    pets = nextPets;
     for (const listener of listeners) listener();
   }
   async function configuration(tx: Transaction) {
     const state = await readReferenceVersion(tx);
+    const subjects = await tx
+      .select({
+        id: householdSubjects.id,
+        name: householdSubjects.name,
+        species: sql`${householdSubjects.details}->>'species'`,
+      })
+      .from(householdSubjects)
+      .where(eq(householdSubjects.kind, "pet"))
+      .orderBy(householdSubjects.id);
+    const petMembers = subjects.flatMap((subject) => {
+      const className = identityClassForSubject("pet", subject.species);
+      return className === "cat" || className === "dog"
+        ? [{ memberId: subject.id, name: subject.name, className }]
+        : [];
+    });
+    const petInventory = {
+      eligibilityVersion: state.eligibilityVersion,
+      membersByClass: Map.groupBy(petMembers, (member) => member.className),
+    };
     const rows = await tx
       .select({
         memberId: identityMembers.memberId,
         name: householdSubjects.name,
         kind: householdSubjects.kind,
-        details: householdSubjects.details,
+        species: sql`${householdSubjects.details}->>'species'`,
         enabled: identityMembers.enabled,
         sampleId: identitySamples.id,
         sha256: identitySamples.sha256,
@@ -88,7 +114,7 @@ export function createIdentityMatching(db: Database) {
       z.infer<typeof identityReferenceSnapshotSchema>["members"][number]
     >();
     for (const row of rows) {
-      const className = identityClassForSubject(row.kind, row.details.species);
+      const className = identityClassForSubject(row.kind, row.species);
       if (!className || !versions) continue;
       const expected = versions.adapters[className];
       const parameters = identityMatchingParameters.classes[className];
@@ -121,6 +147,7 @@ export function createIdentityMatching(db: Database) {
       members.size > 0;
     return {
       state,
+      pets: petInventory,
       names: new Map(
         rows
           .filter((row) => members.has(row.memberId))
@@ -151,6 +178,7 @@ export function createIdentityMatching(db: Database) {
               })
             : null,
           result.parameters ? result.names : new Map(),
+          result.pets,
         );
       });
     } catch (error) {
@@ -171,6 +199,15 @@ export function createIdentityMatching(db: Database) {
     }
   }
   return {
+    petCandidates(className: "cat" | "dog") {
+      const members = pets?.membersByClass.get(className);
+      return pets && members?.length
+        ? {
+            members: members.map(({ memberId, name }) => ({ memberId, name })),
+            eligibilityVersion: pets.eligibilityVersion,
+          }
+        : null;
+    },
     member(memberId: string) {
       const member = current?.members.find(
         (item) => item.memberId === memberId && item.enabled,
@@ -208,7 +245,10 @@ export function createIdentityMatching(db: Database) {
     async configure(next: typeof versions) {
       install(null);
       versions = next;
-      if (!next) return;
+      if (!next) {
+        await refresh();
+        return;
+      }
       await transaction(householdBindingLock, async (tx) => {
         await lockIdentityMembers(tx);
         const state = await readReferenceVersion(tx);

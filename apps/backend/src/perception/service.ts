@@ -27,7 +27,12 @@ export function createPerceptionService(options: {
   identityReferences?:
     | Pick<
         ReturnType<typeof createIdentityMatching>,
-        "configure" | "snapshot" | "subscribe" | "associate" | "member"
+        | "configure"
+        | "snapshot"
+        | "subscribe"
+        | "associate"
+        | "member"
+        | "petCandidates"
       >
     | undefined;
   appearance?: ReturnType<typeof createAppearanceIdentity>;
@@ -154,12 +159,12 @@ export function createPerceptionService(options: {
   const unsubscribeAppearance = options.appearance?.subscribe(changed);
   const unsubscribeReferences = options.identityReferences?.subscribe(() =>
     publishTogether(() => {
-      options.appearance?.replaceReferences(performance.now());
       const previousVersion = referenceVersion(referenceSnapshot);
       referenceSnapshot = options.identityReferences?.snapshot() ?? null;
-      if (previousVersion !== referenceVersion(referenceSnapshot))
+      if (previousVersion !== referenceVersion(referenceSnapshot)) {
+        options.appearance?.replaceReferences(performance.now());
         store.invalidateIdentity();
-      else changed();
+      } else changed();
       syncIdentityReferences();
     }),
   );
@@ -525,6 +530,7 @@ export function createPerceptionService(options: {
               .filter(
                 (association) =>
                   association.basis === "appearance" ||
+                  association.basis === "species" ||
                   source.identityValidity === "valid",
               )
           : [],
@@ -573,6 +579,11 @@ export function createPerceptionService(options: {
     },
     appearance: options.appearance,
     identityConfig: () => config.identity,
+    petCandidates: (
+      className: Parameters<
+        ReturnType<typeof createIdentityMatching>["petCandidates"]
+      >[0],
+    ) => options.identityReferences?.petCandidates(className) ?? null,
     referenceVersions: () =>
       referenceSnapshot
         ? identityReferenceVersionsSchema.parse(referenceSnapshot)
