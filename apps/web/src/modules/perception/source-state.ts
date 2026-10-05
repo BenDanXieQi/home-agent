@@ -146,6 +146,7 @@ export function createPerceptionSourceState({
         (association) =>
           association.sourceRunId === source.run?.runId &&
           (association.basis === "appearance" ||
+            association.basis === "species" ||
             source.identityValidity === "valid"),
       );
     }),

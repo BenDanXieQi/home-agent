@@ -17,7 +17,10 @@ type Source = Pick<
 /** Owns the selected source results. Updates consume accepted domain state; reads never confirm. */
 export function createMemberAssociations(
   matching:
-    | Pick<ReturnType<typeof createIdentityMatching>, "associate" | "member">
+    | Pick<
+        ReturnType<typeof createIdentityMatching>,
+        "associate" | "member" | "petCandidates"
+      >
     | undefined,
   appearance: ReturnType<typeof createAppearanceIdentity> | undefined,
 ) {
@@ -34,21 +37,61 @@ export function createMemberAssociations(
           source.tracking.mediaTime.generation !== source.media?.generation
         )
           continue;
-        const generation = source.tracking.mediaTime.generation;
+        const tracking = source.tracking;
+        const generation = tracking.mediaTime.generation;
         const direct =
           source.identity &&
           source.identityValidity === "valid" &&
           evidenceTtlMs !== undefined
             ? (matching?.associate(source.identity, evidenceTtlMs, now) ?? [])
             : [];
-        const associations = source.tracking.tracks.flatMap((track) => {
-          const confirmed = direct.find(
+        const associations = tracking.tracks.flatMap((track) => {
+          const directAssociation = direct.find(
             (item) =>
               item.trackId === track.trackId &&
-              item.className === track.className,
+              (item.className === "human") === (track.className === "human"),
           );
-          if (confirmed?.state === "confirmed")
-            return [memberAssociationSchema.parse(confirmed)];
+          // Pet features can correct detection species, including tentative matches.
+          if (
+            directAssociation &&
+            (directAssociation.state === "confirmed" ||
+              directAssociation.basis === "pet")
+          )
+            return [memberAssociationSchema.parse(directAssociation)];
+          if (
+            track.className !== "human" &&
+            track.state === "measured" &&
+            track.measuredBox
+          ) {
+            const pet = matching?.petCandidates(track.className);
+            if (pet?.members.length === 1)
+              return [
+                memberAssociationSchema.parse({
+                  run,
+                  sourceRunId: run.runId,
+                  mediaGeneration: generation,
+                  trackId: track.trackId,
+                  memberId: pet.members[0]!.memberId,
+                  memberName: pet.members[0]!.name,
+                  memberKind: "pet",
+                  className: track.className,
+                  basis: "species",
+                  state: "inferred",
+                  eligibilityVersion: pet.eligibilityVersion,
+                  observedAt: tracking.sampledAt,
+                  expiresAt: tracking.sampledAt + (evidenceTtlMs ?? 30_000),
+                  evidence: [
+                    {
+                      ...tracking,
+                      trackId: track.trackId,
+                      measuredBox: track.measuredBox,
+                    },
+                  ],
+                }),
+              ];
+          }
+          if (directAssociation)
+            return [memberAssociationSchema.parse(directAssociation)];
           const target = appearance?.target(
             JSON.stringify([
               run.scopeEpoch,
@@ -81,7 +124,7 @@ export function createMemberAssociations(
                 basis: "appearance",
               }),
             ];
-          return confirmed ? [memberAssociationSchema.parse(confirmed)] : [];
+          return [];
         });
         next.set(run.runId, associations);
       }

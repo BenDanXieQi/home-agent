@@ -16,9 +16,11 @@ export function memberActivity(
     ? `${data.cameraRoomName}的「${data.deviceName}」`
     : `「${data.deviceName}」`;
   const summary = association
-    ? association.basis === "appearance"
-      ? `${camera}镜头 ${data.channel} 推测观察到${association.memberName}（人体外观匹配）。`
-      : `${camera}镜头 ${data.channel} ${association.state === "confirmed" ? "观察到" : "可能观察到"}${association.memberName}。`
+    ? association.basis === "species"
+      ? `${camera}镜头 ${data.channel} 归因到${association.memberName}（家庭唯一${association.className === "dog" ? "狗" : "猫"}）。`
+      : association.basis === "appearance"
+        ? `${camera}镜头 ${data.channel} 推测观察到${association.memberName}（人体外观匹配）。`
+        : `${camera}镜头 ${data.channel} ${association.state === "confirmed" ? "观察到" : "可能观察到"}${association.memberName}。`
     : `${camera}镜头 ${data.channel} 的轨迹 ${data.trackId} 成员归属已撤销。`;
   const evidence =
     current.kind === "unknown"
@@ -68,6 +70,7 @@ export function activitySupportVersions(
 ) {
   if (current.kind === "unknown") return [];
   const association = current.association;
+  if (association.basis === "species") return [];
   return association.basis === "appearance"
     ? association.references.flatMap((reference) => [
         reference.referenceVersions,

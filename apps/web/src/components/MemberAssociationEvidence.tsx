@@ -1,8 +1,10 @@
 import { useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { useAtomValue } from "jotai";
 import type { memberAssociationSchema } from "@home-agent/api/contracts";
 import { devicesAtom } from "../modules/devices/state";
 import {
+  associationReason,
   attributionTime,
   referenceVersionsLabel,
 } from "../modules/members/attribution";
@@ -21,19 +23,29 @@ export function MemberAssociationEvidence({
   }
   return (
     <div className="space-y-1 break-words text-xs leading-6 text-muted">
-      <p>成员 ID：{association.memberId}</p>
-      <p>
-        观察：{attributionTime(association.observedAt)} · 证据{" "}
-        {association.evidence.length} 份 · 轨迹 {association.trackId}
-      </p>
+      <p>{associationReason(association)}</p>
       <details
+        className="group/evidence"
         onToggle={(event) => {
           setOpen(event.currentTarget.open);
         }}
       >
-        <summary className="cursor-pointer">来源与技术依据</summary>
+        <summary className="flex min-h-9 w-fit cursor-pointer list-none items-center gap-1.5 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink [&::-webkit-details-marker]:hidden">
+          技术详情
+          <ChevronDown
+            size={13}
+            strokeWidth={1.5}
+            aria-hidden="true"
+            className="group-open/evidence:rotate-180"
+          />
+        </summary>
         {open ? (
-          <>
+          <div className="mt-2 space-y-1 rounded-lg bg-surface px-3 py-2">
+            <p>成员 ID：{association.memberId}</p>
+            <p>
+              观察时间：{attributionTime(association.observedAt)} · 证据{" "}
+              {association.evidence.length} 份 · 跟踪编号 {association.trackId}
+            </p>
             <p>
               来源：
               {sourceName(association.run.deviceId, association.run.channel)} ·
@@ -50,7 +62,9 @@ export function MemberAssociationEvidence({
                 )
                 .join("、")}
             </p>
-            {association.basis === "appearance" ? (
+            {association.basis === "species" ? (
+              <p>家庭资料版本：{association.eligibilityVersion}</p>
+            ) : association.basis === "appearance" ? (
               <>
                 <p>
                   余弦相似度：{association.score.toFixed(3)} · 领先差值：
@@ -74,23 +88,25 @@ export function MemberAssociationEvidence({
                 <ul className="space-y-2">
                   {association.references.map((reference) => (
                     <li key={reference.referenceId}>
-                      <p>实际参照：{reference.referenceId}</p>
+                      <p>参考画面 ID：{reference.referenceId}</p>
                       <p>
-                        参照来源：
+                        参考画面来源：
                         {sourceName(
                           reference.appearance.run.deviceId,
                           reference.appearance.run.channel,
                         )}{" "}
-                        · 轨迹 {reference.appearance.trackId} · 帧{" "}
+                        · 跟踪编号 {reference.appearance.trackId} · 帧{" "}
                         {reference.appearance.sequence}
                       </p>
                       <p>
-                        人脸确认依据观察：
+                        人脸确认时间：
                         {attributionTime(reference.face.observedAt)} ·
-                        人体观察：{attributionTime(reference.observedAt)}
+                        人体外观采样时间：
+                        {attributionTime(reference.observedAt)}
                       </p>
                       <p>
-                        参照运行：{reference.appearance.run.runId} · 媒体代次：
+                        参考画面来源运行：{reference.appearance.run.runId} ·
+                        媒体代次：
                         {reference.appearance.mediaTime.generation}
                       </p>
                       <p>人脸证据：{reference.face.provenance.evidenceKey}</p>
@@ -102,7 +118,9 @@ export function MemberAssociationEvidence({
                         人体模型：{reference.appearance.modelVersion} · 处理：
                         {reference.appearance.processingVersion}
                       </p>
-                      <p>参照有效至：{attributionTime(reference.expiresAt)}</p>
+                      <p>
+                        参考画面有效至：{attributionTime(reference.expiresAt)}
+                      </p>
                     </li>
                   ))}
                 </ul>
@@ -114,22 +132,26 @@ export function MemberAssociationEvidence({
                   {referenceVersionsLabel(association.referenceVersions)}
                 </p>
                 <p>
+                  识别方式：
                   {association.basis === "pet"
-                    ? "宠物直接识别"
-                    : "人脸直接识别"}
-                  ：
-                  {association.state === "confirmed"
-                    ? "多次采样支持，系统已确认；不是人工确认。"
-                    : "目标疑似该成员，直接识别依据尚不充分。"}
+                    ? "宠物照片匹配"
+                    : "人脸照片匹配"}
+                </p>
+                <p>
+                  最新匹配分数：
+                  {association.evidence.at(-1)?.score?.toFixed(3) ?? "暂无"}
+                  （匹配分数，不是身份概率）
                 </p>
               </>
             )}
             <details>
-              <summary className="cursor-pointer">目标证据摘要</summary>
+              <summary className="cursor-pointer">采样证据明细</summary>
               <p>
-                展示前 {shownEvidence.length} 份；省略{" "}
-                {association.evidence.length - shownEvidence.length}{" "}
-                份目标证据。保存的证据不变。
+                展示 {shownEvidence.length} 份采样证据
+                {association.evidence.length > shownEvidence.length
+                  ? `，另有 ${association.evidence.length - shownEvidence.length} 份未展示`
+                  : ""}
+                。
               </p>
               <ul className="space-y-1">
                 {shownEvidence.map((item) => {
@@ -148,7 +170,7 @@ export function MemberAssociationEvidence({
                 })}
               </ul>
             </details>
-          </>
+          </div>
         ) : null}
       </details>
     </div>

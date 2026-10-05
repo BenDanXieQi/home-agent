@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import type { Database } from "../../db";
@@ -11,6 +11,7 @@ import {
 import { createHouseholdBindingAccess } from "../binding-repository";
 import { lockIdentityMembers, readReferenceVersion } from "./repository";
 import { identityMatchingParameters } from "./matching-parameters";
+import { identityClassForSubject } from "./subject";
 import { activitySupportVersions, type memberActivity } from "./activity";
 
 export function createMemberActivityRepository(db: Database) {
@@ -135,38 +136,65 @@ export function createMemberActivityRepository(db: Database) {
         }
         if (current.kind === "known") {
           const association = current.association;
-          const [member] = await tx
-            .select({ id: householdSubjects.id })
-            .from(householdSubjects)
-            .where(
-              and(
-                eq(householdSubjects.id, association.memberId),
-                eq(householdSubjects.kind, association.memberKind),
-              ),
+          if (association.basis === "species") {
+            const subjects = await tx
+              .select({
+                id: householdSubjects.id,
+                kind: householdSubjects.kind,
+                species: sql`${householdSubjects.details}->>'species'`,
+              })
+              .from(householdSubjects)
+              .where(eq(householdSubjects.kind, "pet"))
+              .orderBy(householdSubjects.id);
+            const pets = subjects.filter(
+              (subject) =>
+                identityClassForSubject(subject.kind, subject.species) ===
+                association.className,
             );
-          const [eligibility] = await tx
-            .select()
-            .from(identityMembers)
-            .where(eq(identityMembers.memberId, association.memberId));
-          const version = await readReferenceVersion(tx);
-          const expected = {
-            contentVersion: version.contentVersion,
-            eligibilityVersion: version.eligibilityVersion,
-            matchingVersion: identityMatchingParameters.matchingVersion,
-            modelVersion: version.modelVersion,
-            processingVersion: version.processingVersion,
-          };
-          if (
-            !member ||
-            !eligibility?.enabled ||
-            activitySupportVersions(current).some(
-              (support) => !isDeepStrictEqual(support, expected),
+            const version = await readReferenceVersion(tx);
+            if (
+              pets.length !== 1 ||
+              pets[0]?.id !== association.memberId ||
+              version.eligibilityVersion !== association.eligibilityVersion
             )
-          )
-            return {
-              status: "ineligible" as const,
-              revision: data.attribution.revision,
+              return {
+                status: "ineligible" as const,
+                revision: data.attribution.revision,
+              };
+          } else {
+            const [member] = await tx
+              .select({ id: householdSubjects.id })
+              .from(householdSubjects)
+              .where(
+                and(
+                  eq(householdSubjects.id, association.memberId),
+                  eq(householdSubjects.kind, association.memberKind),
+                ),
+              );
+            const [eligibility] = await tx
+              .select()
+              .from(identityMembers)
+              .where(eq(identityMembers.memberId, association.memberId));
+            const version = await readReferenceVersion(tx);
+            const expected = {
+              contentVersion: version.contentVersion,
+              eligibilityVersion: version.eligibilityVersion,
+              matchingVersion: identityMatchingParameters.matchingVersion,
+              modelVersion: version.modelVersion,
+              processingVersion: version.processingVersion,
             };
+            if (
+              !member ||
+              !eligibility?.enabled ||
+              activitySupportVersions(current).some(
+                (support) => !isDeepStrictEqual(support, expected),
+              )
+            )
+              return {
+                status: "ineligible" as const,
+                revision: data.attribution.revision,
+              };
+          }
         }
         assertCurrent();
         if (!saved) await tx.insert(contextRecords).values(activity.record);

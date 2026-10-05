@@ -5,6 +5,8 @@ import {
 import { MemberAssociationEvidence } from "../../components/MemberAssociationEvidence";
 import {
   attributionLabel,
+  attributionObservation,
+  attributionReason,
   attributionTime,
   correctionReasons,
   revocationEvidence,
@@ -15,7 +17,7 @@ import { MemberActivityPlaybackLink } from "./MemberActivityPlaybackLink";
 import { memberActivitySourceSchema } from "../../modules/members/activity";
 import type { contextCursorSchema } from "@home-agent/api/household-context";
 import { useQuery } from "@tanstack/react-query";
-import { Clock3, RefreshCw } from "lucide-react";
+import { Camera, ChevronDown, Clock3, RefreshCw } from "lucide-react";
 import type { Member } from "../../modules/members/queries";
 import { contextBrowseOptions } from "../../modules/household-context/queries";
 import { Button } from "../../components/Button";
@@ -50,17 +52,21 @@ function AttributionSnapshot({
   snapshot: ReturnType<typeof memberAttributionSnapshotSchema.parse>;
 }) {
   return (
-    <div className="space-y-1">
-      <p className="font-medium">
+    <div className="space-y-1 border-l border-line pl-4">
+      <p className="font-medium text-ink">
         {label}：{attributionLabel(snapshot)}
       </p>
-      <p>接纳时间：{attributionTime(snapshot.acceptedAt)}</p>
+      <p>判断更新时间：{attributionTime(snapshot.acceptedAt)}</p>
       {snapshot.kind === "known" ? (
         <MemberAssociationEvidence association={snapshot.association} />
       ) : (
         <>
-          <p>撤销观察：{attributionTime(snapshot.observedAt)}</p>
-          <p>{revocationEvidence(snapshot.trigger)}</p>
+          <p>{attributionReason(snapshot)}</p>
+          <details>
+            <summary className="cursor-pointer">来源与技术依据</summary>
+            <p>相关观察时间：{attributionTime(snapshot.observedAt)}</p>
+            <p>{revocationEvidence(snapshot.trigger)}</p>
+          </details>
         </>
       )}
     </div>
@@ -80,51 +86,115 @@ function ActivityAttribution({
       onToggle={(event) => {
         setOpen(event.currentTarget.open);
       }}
-      className="mx-5 mb-4 space-y-3 break-words text-xs leading-6 text-muted"
+      className="mt-2 break-words text-xs leading-6 text-muted sm:mt-0"
     >
-      <summary className="cursor-pointer">
-        归因详情 · 累计纠正 {attribution.correctionCount} 次
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ink sm:absolute sm:right-0 sm:top-3 sm:min-h-8 [&::-webkit-details-marker]:hidden">
+        {open ? "收起详情" : "查看详情"}
+        <ChevronDown
+          size={14}
+          strokeWidth={1.5}
+          aria-hidden="true"
+          className={open ? "rotate-180" : undefined}
+        />
       </summary>
       {open ? (
-        <>
-          <p>
-            观察来源：{data.deviceName} · 镜头 {data.channel}
-            {data.cameraRoomName
-              ? ` · 摄像头所属房间：${data.cameraRoomName}`
-              : ""}
-            （不证明成员位置）
-          </p>
-          <AttributionSnapshot
-            label="首次归因"
-            snapshot={attribution.original}
-          />
-          <AttributionSnapshot
-            label="当前归因"
-            snapshot={attribution.current}
-          />
-          {correction ? (
-            <div className="space-y-3 border-t border-line pt-3">
-              <p>
-                最近一次纠正：{correctionReasons[correction.reason]} ·{" "}
-                {attributionTime(correction.processedAt)}
-              </p>
-              <AttributionSnapshot
-                label="纠正前"
-                snapshot={correction.before}
+        <div className="mt-3 space-y-4 border-t border-line pt-4">
+          <div className="space-y-1.5">
+            <p className="font-medium text-ink">判断依据</p>
+            {attribution.current.kind === "known" ? (
+              <MemberAssociationEvidence
+                association={attribution.current.association}
               />
-              <AttributionSnapshot label="纠正后" snapshot={correction.after} />
-              <p>触发依据</p>
-              {"basis" in correction.trigger ? (
-                <MemberAssociationEvidence association={correction.trigger} />
-              ) : (
-                <p>{revocationEvidence(correction.trigger)}</p>
-              )}
+            ) : (
+              <p>{attributionReason(attribution.current)}</p>
+            )}
+          </div>
+          {correction ? (
+            <div className="space-y-1 border-l-2 border-line pl-3">
+              <p className="flex flex-wrap items-baseline gap-x-2">
+                <span className="font-medium text-ink">最近一次判断变更</span>
+                <span className="tabular-nums">
+                  {attributionTime(correction.processedAt)}
+                </span>
+              </p>
+              <p>
+                从“{attributionLabel(correction.before)}”改为“
+                {attributionLabel(correction.after)}”。
+              </p>
             </div>
-          ) : (
-            <p>尚无语义纠正。</p>
-          )}
-          <p>这里只保留首次、当前和最近一次纠正，不提供完整逐次纠正时间线。</p>
-        </>
+          ) : null}
+          <div className="divide-y divide-line border-t border-line">
+            {correction ? (
+              <details className="group/history py-1">
+                <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink [&::-webkit-details-marker]:hidden">
+                  判断记录
+                  <ChevronDown
+                    size={14}
+                    strokeWidth={1.5}
+                    aria-hidden="true"
+                    className="group-open/history:rotate-180"
+                  />
+                </summary>
+                <div className="space-y-4 pb-3 pt-2">
+                  <AttributionSnapshot
+                    label="首次判断"
+                    snapshot={attribution.original}
+                  />
+                  <AttributionSnapshot
+                    label="最近变更前"
+                    snapshot={correction.before}
+                  />
+                  <AttributionSnapshot
+                    label="最近变更后"
+                    snapshot={correction.after}
+                  />
+                  <p>变更说明：{correctionReasons[correction.reason]}</p>
+                  <p>保留首次判断和最近一次变更，不含完整历史。</p>
+                </div>
+              </details>
+            ) : null}
+            <details className="group/source py-1">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink [&::-webkit-details-marker]:hidden">
+                来源与时间
+                <ChevronDown
+                  size={14}
+                  strokeWidth={1.5}
+                  aria-hidden="true"
+                  className="group-open/source:rotate-180"
+                />
+              </summary>
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pb-3 pt-2">
+                <dt>摄像头</dt>
+                <dd className="text-ink">
+                  {data.deviceName} · 镜头 {data.channel}
+                </dd>
+                {data.cameraRoomName ? (
+                  <>
+                    <dt>登记房间</dt>
+                    <dd>{data.cameraRoomName}（摄像头归属）</dd>
+                  </>
+                ) : null}
+                <dt>首次拍到</dt>
+                <dd className="tabular-nums">
+                  {attributionTime(data.firstObservedAt)}
+                </dd>
+                <dt>最近拍到</dt>
+                <dd className="tabular-nums">
+                  {attributionTime(data.lastObservedAt)}
+                </dd>
+                <dt>判断更新</dt>
+                <dd className="tabular-nums">
+                  {attributionTime(attribution.current.acceptedAt)}
+                </dd>
+              </dl>
+              {attribution.current.kind === "unknown" ? (
+                <p className="pb-3">
+                  {revocationEvidence(attribution.current.trigger)}
+                </p>
+              ) : null}
+            </details>
+          </div>
+        </div>
       ) : null}
     </details>
   );
@@ -194,7 +264,7 @@ export function MemberActivity({
             最近活动
           </h2>
           <p className="mt-1.5 text-xs text-muted">
-            与{member.name}关联的观察和判断，按时间倒序展示。
+            可能与{member.name}有关的观察记录，最新记录在前。
           </p>
         </div>
         <Button
@@ -215,20 +285,20 @@ export function MemberActivity({
       ) : null}
       {query.isPending ? <Skeleton className="h-40 rounded-2xl" /> : null}
       {query.isSuccess ? (
-        <div className="rounded-2xl bg-surface p-2">
+        <div>
           {query.data.rows.length ? (
-            <ol className="space-y-1">
+            <ol className="space-y-3">
               {activityEntries.map(({ row, source, attribution: parsed }) => {
                 const current = parsed?.attribution.current;
-                const uncertain = current
-                  ? current.kind === "unknown" ||
-                    current.association.state !== "confirmed"
-                  : row.certainty !== "supported";
                 const memberSighting = row.topic === "member_sighting";
                 const certainty = current
-                  ? attributionLabel(current)
+                  ? current.kind === "unknown"
+                    ? "判断已撤回"
+                    : current.association.state === "confirmed"
+                      ? "系统已确认"
+                      : null
                   : memberSighting
-                    ? "归因摘要不可用"
+                    ? "身份判断暂不可用"
                     : row.certainty === "tentative"
                       ? "证据不足"
                       : row.certainty === "conflicting"
@@ -236,66 +306,84 @@ export function MemberActivity({
                         : row.certainty === "supported"
                           ? "有依据"
                           : "尚未确认";
-                const content = (
-                  <>
-                    <time
-                      className="pt-0.5 text-xs tabular-nums text-muted"
-                      dateTime={
-                        typeof row.occurredAt === "string"
-                          ? row.occurredAt
-                          : undefined
-                      }
-                    >
-                      {displayTime(row.occurredAt)}
-                    </time>
-                    <div className="min-w-0">
-                      <div className="mb-2 flex flex-wrap gap-2 text-[11px]">
-                        <span className="text-muted">
-                          {row.kind === "assessment" ? "判断记录" : "观察记录"}
-                        </span>
-                        <span
-                          className={uncertain ? "text-warning" : "text-sage"}
-                        >
-                          {certainty}
-                        </span>
-                        {typeof row.expiresAt === "string" &&
-                        Date.parse(row.expiresAt) <= query.dataUpdatedAt ? (
-                          <span className="text-muted">已过期</span>
-                        ) : null}
-                      </div>
-                      <p className="max-w-3xl whitespace-pre-wrap break-words text-sm leading-7">
-                        {typeof row.summary === "string"
-                          ? row.summary
-                          : "记录暂无描述"}
-                      </p>
-                    </div>
-                  </>
-                );
-                const className =
-                  "relative grid gap-3 rounded-xl bg-white px-5 py-4 shadow-surface sm:grid-cols-[120px_minmax(0,1fr)_16px]";
+                const description = current
+                  ? attributionObservation(current)
+                  : memberSighting
+                    ? "摄像头观察记录，身份判断暂不可用。"
+                    : typeof row.summary === "string"
+                      ? row.summary
+                      : "记录暂无描述";
                 return (
                   <li
                     key={
                       typeof row.id === "string" ? row.id : JSON.stringify(row)
                     }
+                    className="min-w-0 rounded-2xl border border-line bg-white p-4 sm:p-5"
                   >
-                    {source ? (
-                      <MemberActivityPlaybackLink
-                        source={source}
-                        memberId={member.id}
-                        availability={
-                          typeof row.id === "string"
-                            ? playback.get(row.id)
+                    <header className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-xs leading-6 text-muted">
+                      {parsed ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Camera
+                            size={14}
+                            strokeWidth={1.5}
+                            aria-hidden="true"
+                          />
+                          {parsed.cameraRoomName
+                            ? `${parsed.cameraRoomName}摄像头`
+                            : parsed.deviceName}
+                          {` · 镜头 ${parsed.channel}`}
+                        </span>
+                      ) : (
+                        <span>
+                          {row.kind === "assessment" ? "判断记录" : "观察记录"}
+                        </span>
+                      )}
+                      <time
+                        className="tabular-nums"
+                        dateTime={
+                          typeof row.occurredAt === "string"
+                            ? row.occurredAt
                             : undefined
                         }
-                        className={className}
                       >
-                        {content}
-                      </MemberActivityPlaybackLink>
-                    ) : (
-                      <div className={className}>{content}</div>
-                    )}
-                    {parsed ? <ActivityAttribution data={parsed} /> : null}
+                        {displayTime(row.occurredAt)}
+                      </time>
+                    </header>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      <p className="min-w-0 whitespace-pre-wrap break-words text-sm font-medium leading-7">
+                        {description}
+                      </p>
+                      {certainty ? (
+                        <span className="text-xs text-muted">{certainty}</span>
+                      ) : null}
+                      {typeof row.expiresAt === "string" &&
+                      Date.parse(row.expiresAt) <= query.dataUpdatedAt ? (
+                        <span className="text-xs text-muted">已过期</span>
+                      ) : null}
+                    </div>
+                    {current?.kind === "unknown" ? (
+                      <p className="mt-1 text-xs leading-6 text-muted">
+                        {attributionReason(current)}
+                      </p>
+                    ) : null}
+                    {source || parsed ? (
+                      <div className="relative mt-4 border-t border-line pt-3">
+                        {source ? (
+                          <div className={parsed ? "sm:pr-44" : undefined}>
+                            <MemberActivityPlaybackLink
+                              source={source}
+                              memberId={member.id}
+                              availability={
+                                typeof row.id === "string"
+                                  ? playback.get(row.id)
+                                  : undefined
+                              }
+                            />
+                          </div>
+                        ) : null}
+                        {parsed ? <ActivityAttribution data={parsed} /> : null}
+                      </div>
+                    ) : null}
                   </li>
                 );
               })}
@@ -308,7 +396,7 @@ export function MemberActivity({
                   {page ? "这一页没有活动记录" : "还没有相关活动记录"}
                 </p>
                 <p className="mt-1.5 text-xs">
-                  摄像头识别到该成员后，观察记录会自动显示在这里。
+                  摄像头拍到可能是{member.name}的目标后，观察记录会显示在这里。
                 </p>
               </div>
             </div>

@@ -50,7 +50,11 @@ export function createMemberActivityService(
   household: HouseholdRuntime,
   perception: Pick<
     ReturnType<typeof createPerceptionService>,
-    "snapshot" | "subscribe" | "appearance" | "referenceVersions"
+    | "snapshot"
+    | "subscribe"
+    | "appearance"
+    | "referenceVersions"
+    | "petCandidates"
   >,
   repository: ReturnType<typeof createMemberActivityRepository>,
 ) {
@@ -151,14 +155,25 @@ export function createMemberActivityService(
     entry.suspended = true;
     entry.discardedRevision = entry.activity.record.data.attribution.revision;
   }
+  function attributionEligible(
+    current: z.infer<typeof memberAttributionSnapshotSchema>,
+  ) {
+    if (current.kind === "known" && current.association.basis === "species") {
+      const pet = perception.petCandidates(current.association.className);
+      return (
+        pet?.members.length === 1 &&
+        pet.members[0]?.memberId === current.association.memberId &&
+        pet.eligibilityVersion === current.association.eligibilityVersion
+      );
+    }
+    return activitySupportVersions(current).every((version) =>
+      isDeepStrictEqual(version, perception.referenceVersions()),
+    );
+  }
   function eligible(entry: ReturnType<typeof pendingActivity>) {
-    const current = entry.activity.record.data.attribution.current;
     return (
       !entry.suspended &&
-      (current.kind === "unknown" ||
-        activitySupportVersions(current).every((version) =>
-          isDeepStrictEqual(version, perception.referenceVersions()),
-        ))
+      attributionEligible(entry.activity.record.data.attribution.current)
     );
   }
   function release(key: string, entry: ReturnType<typeof pendingActivity>) {
@@ -220,13 +235,7 @@ export function createMemberActivityService(
             if (
               entries.get(key) !== entry ||
               selected.revoked ||
-              (activity.record.data.attribution.current.kind === "known" &&
-                activitySupportVersions(
-                  activity.record.data.attribution.current,
-                ).some(
-                  (version) =>
-                    !isDeepStrictEqual(version, perception.referenceVersions()),
-                ))
+              !attributionEligible(activity.record.data.attribution.current)
             )
               throw new HouseholdError("stale_session");
           };
@@ -304,7 +313,7 @@ export function createMemberActivityService(
     )
       reason = "member_changed";
     else if (
-      before.association.basis === "appearance" &&
+      before.association.state !== "confirmed" &&
       next.association.basis !== "appearance" &&
       next.association.state === "confirmed"
     )
@@ -461,7 +470,12 @@ export function createMemberActivityService(
       }
     } else if (event.kind === "references_invalidated") {
       for (const entry of entries.values()) {
-        if (event.reason === "reference_versions_changed") {
+        if (
+          event.reason === "reference_versions_changed" &&
+          activitySupportVersions(
+            entry.activity.record.data.attribution.current,
+          ).length
+        ) {
           discard(entry);
           if (
             entry.inFlight?.activity.record.data.attribution.current.kind ===
@@ -493,6 +507,12 @@ export function createMemberActivityService(
     if (!isDeepStrictEqual(versions, referenceVersions)) {
       referenceVersions = versions;
       for (const entry of entries.values()) {
+        if (
+          !activitySupportVersions(
+            entry.activity.record.data.attribution.current,
+          ).length
+        )
+          continue;
         discard(entry);
         if (
           entry.inFlight?.activity.record.data.attribution.current.kind ===

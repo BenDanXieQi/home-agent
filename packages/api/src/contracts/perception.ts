@@ -244,10 +244,26 @@ const associationTarget = z.object({
 });
 export const memberAssociationSchema = z.discriminatedUnion("basis", [
   associationTarget.extend({
+    basis: z.literal("species"),
+    memberKind: z.literal("pet"),
+    className: z.enum(["cat", "dog"]),
+    state: z.literal("inferred"),
+    eligibilityVersion: z.uuid(),
+    evidence: z
+      .array(
+        appearanceSummarySchema
+          .omit({ modelVersion: true, processingVersion: true })
+          .extend({
+            measuredBox: trackingBox,
+          }),
+      )
+      .length(1),
+  }),
+  associationTarget.extend({
     basis: z.literal("face"),
     memberKind: z.literal("person"),
     className: z.literal("human"),
-    state: z.enum(["candidate", "confirmed"]),
+    state: z.enum(["candidate", "confirmed", "inferred"]),
     referenceVersions: identityReferenceVersionsSchema,
     evidence: identityTrackSchema.shape.evidence.min(1),
   }),
@@ -255,7 +271,7 @@ export const memberAssociationSchema = z.discriminatedUnion("basis", [
     basis: z.literal("pet"),
     memberKind: z.literal("pet"),
     className: z.enum(["cat", "dog"]),
-    state: z.enum(["candidate", "confirmed"]),
+    state: z.enum(["candidate", "confirmed", "inferred"]),
     referenceVersions: identityReferenceVersionsSchema,
     evidence: identityTrackSchema.shape.evidence.min(1),
   }),
