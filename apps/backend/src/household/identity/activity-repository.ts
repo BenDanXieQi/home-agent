@@ -1,18 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import type { Database } from "../../db";
-import {
-  contextEntities,
-  contextRecords,
-  householdSubjects,
-  identityMembers,
-} from "../../db/schema";
+import { contextEntities, contextRecords } from "../../db/schema";
 import { createHouseholdBindingAccess } from "../binding-repository";
-import { lockIdentityMembers, readReferenceVersion } from "./repository";
-import { identityMatchingParameters } from "./matching-parameters";
-import { identityClassForSubject } from "./subject";
-import { activitySupportVersions, type memberActivity } from "./activity";
+import { lockIdentityMembers } from "./repository";
+import type { memberActivity } from "./activity";
 
 export function createMemberActivityRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
@@ -134,68 +127,8 @@ export function createMemberActivityRepository(db: Database) {
           )
             throw new Error("Member activity correction count decreased");
         }
-        if (current.kind === "known") {
-          const association = current.association;
-          if (association.basis === "species") {
-            const subjects = await tx
-              .select({
-                id: householdSubjects.id,
-                kind: householdSubjects.kind,
-                species: sql`${householdSubjects.details}->>'species'`,
-              })
-              .from(householdSubjects)
-              .where(eq(householdSubjects.kind, "pet"))
-              .orderBy(householdSubjects.id);
-            const pets = subjects.filter(
-              (subject) =>
-                identityClassForSubject(subject.kind, subject.species) ===
-                association.className,
-            );
-            const version = await readReferenceVersion(tx);
-            if (
-              pets.length !== 1 ||
-              pets[0]?.id !== association.memberId ||
-              version.eligibilityVersion !== association.eligibilityVersion
-            )
-              return {
-                status: "ineligible" as const,
-                revision: data.attribution.revision,
-              };
-          } else {
-            const [member] = await tx
-              .select({ id: householdSubjects.id })
-              .from(householdSubjects)
-              .where(
-                and(
-                  eq(householdSubjects.id, association.memberId),
-                  eq(householdSubjects.kind, association.memberKind),
-                ),
-              );
-            const [eligibility] = await tx
-              .select()
-              .from(identityMembers)
-              .where(eq(identityMembers.memberId, association.memberId));
-            const version = await readReferenceVersion(tx);
-            const expected = {
-              contentVersion: version.contentVersion,
-              eligibilityVersion: version.eligibilityVersion,
-              matchingVersion: identityMatchingParameters.matchingVersion,
-              modelVersion: version.modelVersion,
-              processingVersion: version.processingVersion,
-            };
-            if (
-              !member ||
-              !eligibility?.enabled ||
-              activitySupportVersions(current).some(
-                (support) => !isDeepStrictEqual(support, expected),
-              )
-            )
-              return {
-                status: "ineligible" as const,
-                revision: data.attribution.revision,
-              };
-          }
-        }
+        // The activity owner checks live member/reference eligibility here,
+        // under the same lock used to revoke matching before member mutations.
         assertCurrent();
         if (!saved) await tx.insert(contextRecords).values(activity.record);
         else

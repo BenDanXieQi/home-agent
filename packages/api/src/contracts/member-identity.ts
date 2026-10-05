@@ -111,9 +111,7 @@ export const identityRuntimeVersionsSchema = identityModelVersionsSchema.extend(
 );
 export const identityReferenceVersionsSchema =
   identityModelVersionsSchema.extend({
-    contentVersion: z.uuid(),
-    eligibilityVersion: z.uuid(),
-    matchingVersion: z.uuid(),
+    revision: z.uuid(),
   });
 export const identityFeatureSchema = z
   .array(z.number())

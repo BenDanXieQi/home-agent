@@ -62,9 +62,8 @@ export function MemberAssociationEvidence({
                 )
                 .join("、")}
             </p>
-            {association.basis === "species" ? (
-              <p>家庭资料版本：{association.eligibilityVersion}</p>
-            ) : association.basis === "appearance" ? (
+            {association.basis === "species" ? null : association.basis ===
+              "appearance" ? (
               <>
                 <p>
                   余弦相似度：{association.score.toFixed(3)} · 领先差值：

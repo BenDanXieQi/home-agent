@@ -172,7 +172,6 @@ export const identityObservationSchema = trackingObservationSchema
       "unavailable",
     ]),
     error: z.string().max(4096).optional(),
-    referenceRevision: z.string().nullable(),
     referenceVersions: identityReferenceVersionsSchema.nullable(),
     model: z
       .object({
@@ -248,7 +247,6 @@ export const memberAssociationSchema = z.discriminatedUnion("basis", [
     memberKind: z.literal("pet"),
     className: z.enum(["cat", "dog"]),
     state: z.literal("inferred"),
-    eligibilityVersion: z.uuid(),
     evidence: z
       .array(
         appearanceSummarySchema
@@ -365,7 +363,6 @@ export const identityFrameSnapshotSchema = z.object({
   status: identityObservationSchema.shape.status.or(z.literal("disabled")),
   evaluatedAt: z.number(),
   inference: z.enum(["not_requested", "pending"]),
-  referenceRevision: identityObservationSchema.shape.referenceRevision,
   referenceVersions: identityObservationSchema.shape.referenceVersions,
   tracks: z
     .array(

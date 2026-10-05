@@ -97,7 +97,7 @@ function frameSnapshot(
         : identityStatus(error, session),
     evaluatedAt: Date.now(),
     inference,
-    referenceRevision: snapshot?.contentVersion ?? null,
+
     referenceVersions: snapshot
       ? identityReferenceVersionsSchema.parse(snapshot)
       : null,
@@ -257,7 +257,7 @@ export function createIdentityRuntime(options: {
               ? ("recognizing" as const)
               : identityStatus(error, owner),
           error,
-          referenceRevision: snapshot?.contentVersion ?? null,
+
           referenceVersions: snapshot
             ? identityReferenceVersionsSchema.parse(snapshot)
             : null,
@@ -443,7 +443,7 @@ export function createIdentityRuntime(options: {
           status: "disabled" as const,
           evaluatedAt: Date.now(),
           inference: "not_requested" as const,
-          referenceRevision: null,
+
           referenceVersions: null,
           tracks: [],
         } satisfies z.infer<typeof identityFrameSnapshotSchema>;

@@ -11,7 +11,6 @@ import {
   householdSubjects,
   identityMembers,
   identitySamples,
-  identityFeatures,
 } from "../../db/schema";
 import {
   createHouseholdBindingAccess,
@@ -21,11 +20,7 @@ import { householdLimits } from "../config";
 import { HouseholdError } from "../errors";
 import { referenceInputSchema, referenceStorageLimits } from "./contracts";
 import type { createReferenceFiles } from "./files";
-import {
-  changeReferenceVersion,
-  lockIdentityMembers,
-  readReferenceVersion,
-} from "./repository";
+import { lockIdentityMembers } from "./repository";
 
 /** Owns reference storage, not image extraction, matching, or HTTP. */
 export function createIdentityReferences(
@@ -109,7 +104,13 @@ export function createIdentityReferences(
           .from(identityMembers)
           .where(eq(identityMembers.memberId, memberId));
         const samples = await tx
-          .select()
+          .select({
+            id: identitySamples.id,
+            sha256: identitySamples.sha256,
+            source: identitySamples.source,
+            quality: identitySamples.quality,
+            createdAt: identitySamples.createdAt,
+          })
           .from(identitySamples)
           .where(eq(identitySamples.memberId, memberId))
           .orderBy(identitySamples.createdAt, identitySamples.id);
@@ -120,7 +121,6 @@ export function createIdentityReferences(
             member.details.species,
           ),
           enabled: eligibility?.enabled ?? false,
-          version: await readReferenceVersion(tx),
           samples,
         };
       });
@@ -183,7 +183,13 @@ export function createIdentityReferences(
               )
             )
               throw new HouseholdError("invalid_state");
-            const all = await tx.select().from(identitySamples);
+            const all = await tx
+              .select({
+                memberId: identitySamples.memberId,
+                sha256: identitySamples.sha256,
+                imageBytes: identitySamples.imageBytes,
+              })
+              .from(identitySamples);
             const own = all.filter((sample) => sample.memberId === memberId);
             if (
               samples.some((sample) =>
@@ -209,10 +215,14 @@ export function createIdentityReferences(
               await files.write(sample.imageKey, sample.bytes);
               assertCurrent();
             }
+            matching.invalidate();
             await tx
               .insert(identityMembers)
               .values({ memberId, enabled: true })
-              .onConflictDoNothing();
+              .onConflictDoUpdate({
+                target: identityMembers.memberId,
+                set: { enabled: true },
+              });
             await tx.insert(identitySamples).values(
               samples.map(({ id, data, bytes, imageKey, sha256 }) => ({
                 id,
@@ -223,27 +233,13 @@ export function createIdentityReferences(
                 sha256,
                 source: data.source,
                 quality: data.quality,
-              })),
-            );
-            await tx.insert(identityFeatures).values(
-              samples.map(({ id, data }) => ({
-                sampleId: id,
                 modelVersion: data.modelVersion,
                 processingVersion: data.processingVersion,
                 feature: data.feature,
               })),
             );
-            {
-              await tx
-                .update(identityMembers)
-                .set({ enabled: true })
-                .where(eq(identityMembers.memberId, memberId));
-              matching.invalidate();
-              await changeReferenceVersion(tx, true);
-            }
             return {
               count: samples.length,
-              version: await readReferenceVersion(tx),
             };
           },
         );
@@ -259,7 +255,12 @@ export function createIdentityReferences(
     ) {
       return access(identity, assertCurrent, memberId, async (tx) => {
         const [sample] = await tx
-          .select()
+          .select({
+            imageKey: identitySamples.imageKey,
+            imageBytes: identitySamples.imageBytes,
+            sha256: identitySamples.sha256,
+            contentType: identitySamples.contentType,
+          })
           .from(identitySamples)
           .where(
             and(
@@ -290,7 +291,7 @@ export function createIdentityReferences(
                 eq(identitySamples.id, sampleId),
               ),
             )
-            .returning();
+            .returning({ id: identitySamples.id });
           if (removed.length) {
             if (
               (await tx.$count(
@@ -303,9 +304,7 @@ export function createIdentityReferences(
                 .set({ enabled: false })
                 .where(eq(identityMembers.memberId, memberId));
             matching.invalidate();
-            await changeReferenceVersion(tx, true);
           }
-          return readReferenceVersion(tx);
         });
       } finally {
         await cleanupAfterMutation();

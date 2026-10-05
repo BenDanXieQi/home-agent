@@ -77,7 +77,6 @@ export function createMemberAssociations(
                   className: track.className,
                   basis: "species",
                   state: "inferred",
-                  eligibilityVersion: pet.eligibilityVersion,
                   observedAt: tracking.sampledAt,
                   expiresAt: tracking.sampledAt + (evidenceTtlMs ?? 30_000),
                   evidence: [
