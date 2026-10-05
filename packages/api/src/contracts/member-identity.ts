@@ -157,7 +157,7 @@ export const identityMatchProvenanceSchema =
     evidenceKey: z.string().min(1).max(512),
     sourceRunId: z.uuid(),
     sequence: z.int().positive(),
-    mediaGeneration: z.string().min(1),
+    mediaGeneration: z.string().min(1).max(256),
     rtpTimestamp: z.number(),
     trackId: z.int().positive(),
   });

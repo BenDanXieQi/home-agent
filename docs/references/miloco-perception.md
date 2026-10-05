@@ -1,6 +1,6 @@
 # MiLoCo 媒体感知与身份识别参考
 
-本文记录 MiLoCo 如何筛选媒体、调用多模态模型、核验人宠身份及保存参考样本，供本项目核对参考行为与设计差异。MiLoCo 的登记成员身份判断主要由多模态 LLM（大语言模型）完成，本地检测、跟踪和状态机负责定位目标、组织候选及接纳结果；主模型请求频率与单个人物的身份重审频率是两个独立问题。
+本文记录 MiLoCo 如何筛选媒体、调用多模态模型、核验人宠身份、保存参考样本，以及感知事件进入 Agent 后的会话与上下文管理，供本项目核对参考行为与设计差异。MiLoCo 的登记成员身份判断主要由多模态 LLM（大语言模型）完成，本地检测、跟踪和状态机负责定位目标、组织候选及接纳结果；主模型请求频率与单个人物的身份重审频率是两个独立问题。
 
 源码范围固定为 [XiaoMi/xiaomi-miloco 提交 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`][mi-commit]。下文参数来自该提交的默认配置与实际分支，不代表某台机器的覆盖配置、实测请求率或识别准确率。引用路径相对于 MiLoCo 仓库；本机 checkout 位置由根目录 `AGENTS.local.md` 指定，不写入共享文档。本项目已实现能力见[本地感知](../perception.md)，待实施契约见[媒体计划](../plans/media-perception.md)和[Agent 协作计划](../plans/household-automation.md)。
 
@@ -90,6 +90,26 @@
 
 依据：[宠物功能开关][mi-settings]、[人体跟踪默认范围][mi-identity-defaults]、[`PET_IDENTITIES` 与字段选择][mi-fields]。
 
+## Agent 事件、会话与上下文管理
+
+感知模型与办事 Agent 是两条上下文路径。感知模型每次重新组装本窗媒体、家庭档案、待判断规则及必要短期信息，不追加完整的历次模型对话；fused 请求中的只读历史目前仅用于尚未完成的跨窗语音，旧画面描述和旧建议不再注入。感知结果产生的交互、规则或建议再按各自条件进入 Agent 派发，不把所有窗口结果送入主聊天。依据：[感知消息组装][mi-prompt]、[事件生产与筛选][mi-perception-client]。
+
+`AgentDispatcher` 按会话维护有界内存队列，批量取出同一类型的待发事件，再调用 Agent。建议在感知路径先抑制重复事件链并按紧迫度筛选；派发器另按优先级、容量与入队年龄淘汰。默认每会话最多 10 个待发项，待发消息有效期 300 秒；这些限制不约束已进入会话的历史或单个消息大小。停止时待发项被丢弃，不保证跨重启可靠交接。依据：[Agent 派发器][mi-agent-dispatcher]、[默认配置][mi-settings]。
+
+| 输入 | OpenClaw 插件路径 | Hermes 适配器路径 |
+| --- | --- | --- |
+| 交互 | 使用固定 `agent:main:miloco` 会话 | 按会话键与 lane（执行通路）映射稳定会话 |
+| 规则 | 使用固定的独立规则会话 | 按会话键与 lane 映射稳定会话 |
+| 建议 | 使用固定的独立建议会话 | 每次派发生成新会话 ID，批内合并项在该次执行中评估 |
+
+因此“每批事件都开新会话”不适用于全部路径；固定会话键也不证明底层完整历史永久驻留。插件管理的 OpenClaw 感知摘要、巡检等定时任务使用 `sessionTarget: isolated`（隔离会话）及轻量上下文，实际启用取决于调度管理配置。普通交互、规则与建议按提示词 profile（按执行角色选择的注入内容）加载材料，定时任务采用最小注入并自行读取所需资料。依据：[派发路由][mi-agent-dispatcher]、[Hermes 会话选择][mi-hermes-adapter]、[定时任务装配][mi-agent-scheduler]、[提示词注入][mi-agent-prompt]。
+
+OpenClaw 插件预设每 15 分钟运行感知摘要，读取增量日志，由模型筛选有意义的活动、合并同段行为，追加到工作区每日 `memory/<date>-miloco-perception.md`。非最小 profile 每轮从文件读取今日摘要，今日无正文时读取昨日并标明日期；注入正文最多 2,000 字符，超限保留最近部分并提示 `memory_search` 查询更早材料。家庭档案通过 `home-profile list` 按需读取。这里既有模型摘要，也有确定性的近期截取与检索，不是纯粹的非压缩管理；2,000 字符仅约束感知记忆块，不约束会话总历史、系统提示词或设备清单。依据：[摘要技能][mi-agent-digest]、[调度装配][mi-agent-scheduler]、[注入与字符上限][mi-agent-prompt]。
+
+巡检通过外部感知记忆和已处理台账接续，技能要求每轮先读取台账，处理后写回，以避免隔离会话重复提醒或操作。这是技能要求与模型行为，不能当作数据库级去重保证。固定会话仍可能增长；OpenClaw 插件检测到 `context overflow`（上下文溢出）后，尝试删除后台会话及 transcript（消息历史）并重建重试一次，主人实际 IM 会话不走该删除路径。宿主自身的压缩、裁剪和历史加载策略及实机效果需另行核对，插件代码不能证明固定会话永不溢出。依据：[巡检技能][mi-agent-patrol]、[溢出处理][mi-agent-webhook]。
+
+这些机制说明 MiLoCo 采用“来源筛选与分流、部分固定会话、部分独立执行、外部摘要与按需读取”的混合方案，不证明存在一份长期装入全部家庭经历的主上下文。本项目的持续责任与模型上下文边界、证据保留和恢复约束由[协作实施计划](../plans/household-automation.md#持续责任会话与模型上下文)维护，不照搬其删除会话重试作为动作恢复机制。
+
 ## 与本项目的职责对齐
 
 | 对齐项               | MiLoCo 参考行为                          | 本项目当前实现或现行计划                                                           |
@@ -117,3 +137,11 @@
 [mi-state]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miloco/src/miloco/perception/engine/identity/state.py
 [mi-fields]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miloco/src/miloco/perception/engine/omni/field_registry.py
 [mi-library]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miloco/src/miloco/perception/engine/identity/library.py
+[mi-perception-client]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miloco/src/miloco/perception/client.py
+[mi-agent-dispatcher]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miloco/src/miloco/dispatch/dispatcher.py
+[mi-hermes-adapter]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/plugins/hermes/miloco-plugin/hermes_adapter/adapter.py
+[mi-agent-scheduler]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/plugins/openclaw/src/home-profile/scheduler.ts
+[mi-agent-prompt]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/plugins/openclaw/src/hooks/prompt.ts
+[mi-agent-digest]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/plugins/skills/miloco-perception-digest/SKILL.md
+[mi-agent-patrol]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/plugins/skills/miloco-home-patrol/SKILL.md
+[mi-agent-webhook]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/plugins/openclaw/src/webhooks/agent.ts

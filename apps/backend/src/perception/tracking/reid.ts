@@ -5,8 +5,7 @@ import { InferenceSession, Tensor } from "onnxruntime-node";
 import type { z } from "zod";
 import type { reidRequestSchema } from "./reid-protocol";
 
-export const reidSha256 =
-  "dc70121835336bcd342be0d3f5baba350e94c605b8da886a6efd2f3357fa3f29";
+import { reidSha256 } from "./feature-version";
 export async function createReid() {
   const bytes = await readFile(
     new URL("../../../models/human_body_reid_v2.onnx", import.meta.url),

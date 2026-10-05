@@ -38,6 +38,10 @@ export function LogEvents({
   const { scrollY } = useScroll({ container: scroller });
   // React schedules fresh rows separately from the urgent return-button exit.
   const visible = useDeferredValue(reading ?? rows);
+  const visibleSequences = useMemo(
+    () => new Set(visible.map((row) => row.sequence)),
+    [visible],
+  );
   const [expanded, setExpanded] = useState(() => new Set<number>());
   const [focused, setFocused] = useState<number | null>(null);
   const changeExpanded = useCallback((sequence: number, open: boolean) => {
@@ -76,6 +80,24 @@ export function LogEvents({
       [retainedIndexes],
     ),
   });
+  useLayoutEffect(() => {
+    // TanStack retains measured sizes by key after rows leave the list. Delete
+    // only retired keys so current row heights and the reading position survive.
+    for (const key of virtualizer.itemSizeCache.keys()) {
+      if (typeof key !== "number" || !visibleSequences.has(key))
+        virtualizer.itemSizeCache.delete(key);
+    }
+    setExpanded((previous) => {
+      if ([...previous].every((sequence) => visibleSequences.has(sequence)))
+        return previous;
+      return new Set(
+        [...previous].filter((sequence) => visibleSequences.has(sequence)),
+      );
+    });
+    setFocused((previous) =>
+      previous !== null && !visibleSequences.has(previous) ? null : previous,
+    );
+  }, [visibleSequences, virtualizer]);
   // Growing rows must not move a reader who is following the newest reports.
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange =
     reading && !returning ? undefined : () => false;

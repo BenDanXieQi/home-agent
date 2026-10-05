@@ -7,9 +7,9 @@
 | 文档                                             | 唯一维护的内容                                                           |
 | ------------------------------------------------ | ------------------------------------------------------------------------ |
 | [家庭模型](household-model.md)                   | 实体、证据、判断、要求、状态归属及即时动作的领域规则                     |
-| [第一方 Agent 协作实施](household-automation.md) | 主交付顺序、持续情景、长期任务、规则与语义触发、统一执行、观察接口及预算 |
+| [第一方 Agent 协作实施](household-automation.md) | 主交付顺序、持续情景、Agent 工作与问询、可靠输入、长期自动化、统一执行、观察接口及预算 |
 | [媒体与本地感知](media-perception.md)            | P2 剩余实景验收、P3 音频、P4 筛选与证据、媒体期限和模型输入边界          |
-| [成员短期外观归因](member-attribution.md) | 任意来源确认后的短期人体外观参照、归因、活动纠正及最小交付验收 |
+| [成员短期外观归因](member-attribution.md)        | 成员外观归因剩余校准、专项验收与属性模型后续条件                         |
 | [设备采集](device-collection.md)                 | 属性仲裁、当前质量、连续性、读取及采集资源                               |
 | [设备历史](device-history.md)                    | 选定观测的保存、缺口、查询与清理                                         |
 | [设备状态页面](device-state-ui.md)               | 待接入的历史、活动、画像与动作条件展示，不重复已实现订阅协议             |
@@ -18,7 +18,7 @@
 
 ## 交付方向
 
-家庭情景由 backend 与第一方 Agent 持续协作维护；规则和动作消费已有情景，媒体与设备模块提供有来源的证据。主实施顺序、场景依赖和分阶段验收统一见[家庭情景与自动化](household-automation.md#9-实施顺序与改动位置)，不在索引复制批次与进度。
+Home Agent 面向持续负责家庭事务的 personal agent：Agent 维护关注、承诺、调查、问询与等待，家庭变化和可靠工作输入驱动后续处理；backend 与第一方 Agent 协作维护家庭情景，backend 拥有已启用自动化、证据接纳和动作结果。情景不完整时可按授权继续调查，工作与家庭事实分别维护。主实施顺序、场景依赖和分阶段验收统一见[家庭情景与自动化](household-automation.md#9-实施顺序与改动位置)，不在索引复制批次与进度。
 
 本地感知可独立交付，Agent、历史和页面按具体用途接入。领域语义以家庭模型为准，来源质量以各来源契约为准；尚未实现的能力不得写入当前功能说明作为可用行为。全部文档的层次与维护边界见[文档导航](../README.md)。
 
@@ -26,7 +26,7 @@
 
 ### 原生能力与成熟库优先
 
-通用实现遵守仓库原生能力／成熟库优先规则。当前 SSE 流处理见 [Web 说明](../../apps/web/README.md#状态订阅与播放)，跟踪求解与原生性能统计见[感知说明](../perception.md)。待实施的持久任务采用 [Graphile Worker](household-automation.md#backend-本地规则运行器)，历史清理采用 [TimescaleDB 保留策略](device-history.md#查询与清理)，音视频处理采用 [FFmpeg、sharp 与 Silero VAD](media-perception.md#后续能力契约)；具体边界只在各自计划维护，不提前安装无使用方依赖或创建空模块。
+通用实现遵守仓库原生能力／成熟库优先规则。当前 SSE 流处理见 [Web 说明](../../apps/web/README.md#状态订阅与播放)，跟踪求解与原生性能统计见[感知说明](../perception.md)。待实施的 backend 自动化持久调度采用 [Graphile Worker](household-automation.md#backend-本地规则运行器)，Agent 持续工作的等待与恢复随[运行框架选型](household-automation.md#输入分类与可靠交接)核验；历史清理采用 [TimescaleDB 保留策略](device-history.md#查询与清理)，音视频处理采用 [FFmpeg、sharp 与 Silero VAD](media-perception.md#后续能力契约)；具体边界只在各自计划维护，不提前安装无使用方依赖或创建空模块。
 
 静态文件服务已使用 Hono，状态更新使用 Mutative，生命周期使用 XState，图片处理使用 sharp，模型线程使用 Piscina。替换须减少总体维护成本并保留行为，不能仅为减少本地行数引入第二套媒体栈或运行时。
 
