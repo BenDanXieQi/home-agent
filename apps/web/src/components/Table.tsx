@@ -1,4 +1,11 @@
-import { Fragment, useId, type ReactNode } from "react";
+import {
+  Fragment,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { flexRender, type Table as TableModel } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 
@@ -23,11 +30,36 @@ export function Table<T>({
   empty?: ReactNode;
 }) {
   const id = useId();
+  const scrollRegion = useRef<HTMLElement>(null);
+  const tableElement = useRef<HTMLTableElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  useLayoutEffect(() => {
+    const region = scrollRegion.current;
+    const element = tableElement.current;
+    if (!region || !element) return undefined;
+    const measure = () =>
+      setOverflowing(
+        region.clientWidth > 0 && region.scrollWidth > region.clientWidth,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(region);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const columns = table.getVisibleLeafColumns();
   const interactive = Boolean(onRowClick);
+  // Keep absolutely positioned screen-reader labels inside the scroll boundary.
+  // oxlint-disable jsx-a11y/no-noninteractive-tabindex -- Native scroll regions need keyboard focus.
   return (
-    <div className="overflow-x-auto rounded-2xl bg-surface p-2">
+    <section
+      ref={scrollRegion}
+      aria-label={label}
+      tabIndex={overflowing ? 0 : -1}
+      className="relative min-w-0 max-w-full overflow-x-auto overscroll-x-contain rounded-2xl bg-surface p-2 focus-visible:-outline-offset-2"
+    >
       <table
+        ref={tableElement}
         className="w-full table-fixed border-separate border-spacing-0 text-left text-[13px]"
         style={{ minWidth: columns.length * 140 + (interactive ? 40 : 0) }}
       >
@@ -194,6 +226,7 @@ export function Table<T>({
           ) : null}
         </tbody>
       </table>
-    </div>
+    </section>
   );
+  // oxlint-enable jsx-a11y/no-noninteractive-tabindex
 }
