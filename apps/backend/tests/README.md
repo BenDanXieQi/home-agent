@@ -44,6 +44,14 @@ bun run --cwd apps/web test -- tests/modules/mijia/commands.test.ts
 
 参考 [Hono 测试指南](https://hono.dev/docs/guides/testing)。新增测试前需遵循仓库规则，取得用户明确许可。
 
+## 声音观察与推理所有权
+
+`perception/audio-observations.test.ts` 通过真实窗口存储入口验证人声和宠物结果在关闭后接纳、重复交付、跨窗分析上下文、撤权、媒体到期与容量上限。`perception/audio-inference.test.ts` 仅替换原生子进程边界，验证慢推理期间采样继续推进、待处理上下文替换、取消和重建以及独立 CPU 预留；不替换领域判断，也不用于证明模型准确率。
+
+```sh
+bun test apps/backend/tests/perception/audio-observations.test.ts apps/backend/tests/perception/audio-inference.test.ts
+```
+
 ## 音频业务回归
 
 音频测试从可观察的业务结果出发，不以分支覆盖或参数校验数量作为目标：
@@ -67,3 +75,11 @@ bun test apps/backend/tests/perception/audio-facts.test.ts \
 Go overlay 的 `TestAudioTimelineSurvivesOpusPackaging` 用真实 FFmpeg 检查封装前后的声音时长；`TestMalformedAudioDoesNotInterruptVideo` 检查异常音频后的正常视频仍可交付。在应用补丁并复制 overlay 的 go2rtc 源码内运行这两项，环境需要 Go 与 FFmpeg，不运行整个上游测试集。
 
 性能、压力和实机验证入口见 [感知评估](../scripts/perception-evaluation/README.md#音频链路与资源)。这类结果不能替代回归断言，也不能用一次短时采样证明长期部署容量。
+
+## 视频观察与共用原生监督
+
+`perception/video-observations.test.ts` 从真实窗口存储入口核对检测、跟踪、身份的到达顺序、完整帧匹配、重复冻结、关闭期限与来源撤销。`perception/native-inference.test.ts` 在操作系统边界控制超时与 IPC 失败，核对退出确认重试；真实身份子进程用缺失资产验证局部模型不可用不会破坏通信。`perception/reid-native.test.ts` 验证真实 ReID 输出、硬期限和退出。仅运行受改动影响的文件，不以这些检查替代摄像头长时验收。
+
+```sh
+bun test apps/backend/tests/perception/video-observations.test.ts apps/backend/tests/perception/native-inference.test.ts apps/backend/tests/perception/reid-native.test.ts
+```

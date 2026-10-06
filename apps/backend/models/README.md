@@ -54,3 +54,24 @@ tar -xjf data/models/sensevoice.tar.bz2 --strip-components=1 -C apps/backend/mod
 ```
 
 加载时分块计算并核对两个文件的哈希。源码及构建后的 `dist/perception/speech/process-entry.js` 使用相同资产布局；部署启用语音时一起携带 `models/sensevoice/`，禁用语音不要求它存在。模型缺失或损坏只使语音转写不可用，音频基础分析与视频继续；修复后可通过现有感知重试入口重试。配置及资源语义见[本地语音转写](../../../docs/perception.md#本地语音转写)。
+
+## 猫狗声音模型
+
+可选猫狗声音分类使用 `models/pet-sounds/model.int8.onnx` 与 `class_labels_indices.csv`，由 `src/perception/pet-sound/model.ts` 定位并核验。权重目录已被 Git 忽略，禁用时不要求资产存在，运行时不下载。
+
+- 固定官方资产包：`sherpa-onnx-zipformer-small-audio-tagging-2024-04-15.tar.bz2`，来源为 [sherpa-onnx 音频分类发布](https://k2-fsa.github.io/sherpa/onnx/audio-tagging/pretrained_models.html)。
+- 模型 SHA-256：`69304b8a1b96bbe6b7d16c24079f0732c65faf3568a14cb82a8238c709afe76c`。
+- 标签 SHA-256：`cdd1049833c4b86127c2773ac0d14a2754b6a6d0d1798002ed5c66e699708429`。
+- 模型包 README 声明 Apache-2.0；部署保留其中 README、来源和适用的 [Apache-2.0 许可](PET-SOUNDS-LICENSE)。
+- 输入固定单声道 16 kHz float32 PCM，特征处理和 527 类分数由现有 `sherpa-onnx-node@1.13.8` 计算，使用 CPU 单线程。本项目使用四秒完整窗口，分类结果没有精确事件时间定位。
+
+准备资产：
+
+```sh
+mkdir -p data/models apps/backend/models/pet-sounds
+curl -fL --retry 2 -o data/models/pet-sounds.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/audio-tagging-models/sherpa-onnx-zipformer-small-audio-tagging-2024-04-15.tar.bz2
+tar -xjf data/models/pet-sounds.tar.bz2 --strip-components=1 -C apps/backend/models/pet-sounds
+```
+
+源码和构建后的 `dist/perception/pet-sound/process-entry.js` 使用同一资产布局。部署启用分类时携带这两个资产与许可；可以省略未使用的浮点模型和示例音频。配置、接纳规则、模型限制与验证范围见[猫狗声音识别与捕获](../../../docs/perception.md#猫狗声音识别与捕获)。

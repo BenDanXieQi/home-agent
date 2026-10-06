@@ -8,7 +8,8 @@ export const windowLimits = Object.freeze({
   inputBytes: 96 * 1024 * 1024,
   windowBytes: 12 * 1024 * 1024,
   summaries: 4096,
-  pendingSpeechPerSource: 64,
+  pendingAnalysisPerSource: 64,
+  pendingVideoPerKind: 16,
   summaryBytes: 64 * 1024 * 1024,
   mediaRetentionMs: 30 * 60_000,
   encodingQueue: 8,
@@ -26,3 +27,11 @@ export const windowLimits = Object.freeze({
   reads: 4,
   readChunkBytes: 64 * 1024,
 });
+
+export function windowAdmissionDeadline(observedAt: number) {
+  return (
+    (Math.floor(observedAt / windowLimits.durationMs) + 1) *
+      windowLimits.durationMs +
+    windowLimits.graceMs
+  );
+}

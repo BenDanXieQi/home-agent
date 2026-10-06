@@ -24,7 +24,7 @@ export function windowTime(time: number) {
   return windowClock.format(time);
 }
 export function candidateLabel(window: Pick<WindowListEntry, "gate">) {
-  return { video: "画面变化", audio: "语音片段", none: "仅文字" }[
+  return { video: "画面变化", audio: "声音片段", none: "仅文字" }[
     window.gate.candidate
   ];
 }
@@ -65,3 +65,10 @@ export const identityReasons = new Map([
   ["below_identity_threshold", "身份分数或分差未达到阈值"],
   ["no_fresh_face", "缺少有效的人脸证据"],
 ]);
+
+export const petSoundLabels = { dog: "狗声", cat: "猫声" };
+export const petSoundStatuses = {
+  insufficient_input: "等待完整声音窗口",
+  ready: "分类可用",
+  unavailable: "分类不可用",
+};

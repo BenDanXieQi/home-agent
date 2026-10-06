@@ -5,6 +5,7 @@ import {
   audioTrackSchema,
   speechRuntimeSchema,
   speechObservationSchema,
+  audioObservationEventSchema,
 } from "@home-agent/api/contracts";
 import { sourceAccessSchema } from "../sources";
 import { perceptionConfigSchema } from "../config";
@@ -19,7 +20,7 @@ export const audioCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("start"), input: audioStartSchema }),
   z.object({ kind: z.literal("stop"), trackRunId: z.uuid() }),
   z.object({ kind: z.literal("close") }),
-  z.object({ kind: z.literal("retry_speech") }),
+  z.object({ kind: z.literal("retry_analysis") }),
   z.object({
     kind: z.literal("speech_ack"),
     id: speechObservationSchema.shape.id,
@@ -44,7 +45,7 @@ export const audioResponseSchema = z.discriminatedUnion("kind", [
     track: audioTrackSchema,
     pcm: pcmSchema.optional(),
   }),
-  z.object({ kind: z.literal("speech"), observation: speechObservationSchema }),
+  ...audioObservationEventSchema.options,
   z.object({ kind: z.literal("stopped"), trackRunId: z.uuid() }),
   z.object({ kind: z.literal("closed") }),
   z.object({ kind: z.literal("fatal"), error: z.string().max(4096) }),

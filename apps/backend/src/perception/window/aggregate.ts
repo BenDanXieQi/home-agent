@@ -19,6 +19,44 @@ type Frame = z.infer<typeof sampledFrameSchema> &
     "detections" | "tracks" | "identity"
   >;
 
+export function windowPetSoundDetected(
+  audio: z.infer<typeof windowSummarySchema>["audio"],
+) {
+  return (
+    audio.status === "available" &&
+    audio.petSounds?.status === "ready" &&
+    audio.petSounds.chunks.some((chunk) => chunk.detections.length > 0)
+  );
+}
+
+export function windowAdmitted(
+  summary: Pick<
+    z.infer<typeof windowSummarySchema>,
+    "gate" | "speech" | "audio"
+  >,
+) {
+  return (
+    summary.gate.visual === "changed" ||
+    summary.speech.segments.length > 0 ||
+    windowPetSoundDetected(summary.audio)
+  );
+}
+
+export function applyWindowAudioObservations(
+  summary: Parameters<typeof windowAdmitted>[0],
+) {
+  const { audio, gate } = summary;
+  gate.audioPassed =
+    audio.status === "available" &&
+    (audio.activeEnergyBlocks > 0 || windowPetSoundDetected(audio));
+  if (
+    gate.candidate === "none" &&
+    audio.status === "available" &&
+    windowAdmitted(summary)
+  )
+    gate.candidate = "audio";
+}
+
 export function windowIdentities(
   frames: z.infer<typeof windowSummarySchema>["frames"],
 ) {
@@ -145,7 +183,8 @@ export function summarizeWindow(
     value.gaps.add("video_sampling_gap");
   const audio = summarizeWindowAudio(value, entry.audioTrack);
   const audioPassed =
-    audio.status === "available" && audio.activeEnergyBlocks > 0;
+    audio.status === "available" &&
+    (audio.activeEnergyBlocks > 0 || windowPetSoundDetected(audio));
   const decision = evaluateScene({
     hasVideo: value.frames.length > 0,
     failed,

@@ -1,19 +1,15 @@
+import { inferenceRequest } from "../compute/inference-protocol";
+import { sendProcessMessage } from "../compute/ipc";
 import { createSpeechModel } from "./model";
 import { speechJobSchema, speechResponseSchema } from "./protocol";
 import { senseVoiceModel } from "./limits";
 import type { z } from "zod";
 
-function send(message: z.infer<typeof speechResponseSchema>) {
-  return new Promise<void>((resolve, reject) => {
-    if (!process.send || !process.connected) {
-      reject(new Error("Speech IPC unavailable"));
-      return;
-    }
-    process.send(message, (error) => {
-      if (error) reject(error);
-      else resolve();
-    });
-  });
+function send(
+  message: z.infer<typeof speechResponseSchema>,
+  requestId: string | null = null,
+) {
+  return sendProcessMessage(message, requestId);
 }
 let failed = false;
 function fatal(error: unknown) {
@@ -32,14 +28,18 @@ try {
   const model = await createSpeechModel();
   process.on("message", (input: unknown) => {
     try {
-      const job = speechJobSchema.parse(input);
+      const { input: job, requestId } =
+        inferenceRequest(speechJobSchema).parse(input);
       const result = model.recognize(job.samples);
-      send({
-        kind: "result",
-        id: job.id,
-        ...result,
-        rssBytes: process.memoryUsage().rss,
-      }).catch(fatal);
+      send(
+        {
+          kind: "result",
+          id: job.id,
+          ...result,
+          rssBytes: process.memoryUsage().rss,
+        },
+        requestId,
+      ).catch(fatal);
     } catch (error) {
       fatal(error);
     }

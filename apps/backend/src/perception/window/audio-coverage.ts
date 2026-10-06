@@ -15,6 +15,9 @@ export function createWindowAudio() {
     audioTrack: null as z.infer<typeof audioTrackSchema> | null,
   };
 }
+export function createWindowAudioContext() {
+  return { ...createWindowAudio(), gaps: new Set<string>() };
+}
 type AudioWindow = ReturnType<typeof createWindowAudio> & {
   startedAt: number;
   endedAt: number;
@@ -33,7 +36,7 @@ export function recordAudioStatus(
   if (track.vadStatus === "unavailable") value.gaps.add("vad_unavailable");
 }
 export function appendWindowAudio(
-  value: AudioWindow,
+  value: Pick<AudioWindow, "audio" | "audioTrack" | "gaps">,
   track: z.infer<typeof audioTrackSchema>,
   pcm: z.infer<typeof pcmSchema>,
   offset: number,
@@ -96,6 +99,14 @@ export function summarizeWindowAudio(
     value.gaps.add("audio_head_gap");
   if (last && value.endedAt - last.endedAt > 1 / 16)
     value.gaps.add("audio_tail_gap");
+  // Preceding context is copied from a rolling buffer, so recheck its internal
+  // coverage rather than inheriting historical gap flags after they age out.
+  for (let index = 1; index < value.audio.length; index++) {
+    const difference =
+      value.audio[index]!.startedAt - value.audio[index - 1]!.endedAt;
+    if (difference > 1) value.gaps.add("audio_gap");
+    else if (difference < -0.1) value.gaps.add("audio_overlap");
+  }
   const interrupted = [
     "audio_gap",
     "audio_head_gap",
@@ -118,8 +129,22 @@ export function summarizeWindowAudio(
               ? ("insufficient_input" as const)
               : ("missing" as const);
   if (status !== "available") value.gaps.add(`audio_${status}`);
+  const petStatus =
+    track?.petSounds?.status === "unavailable"
+      ? ("unavailable" as const)
+      : ("insufficient_input" as const);
   return {
     status,
+    petSounds: track?.petSounds && {
+      ...track.petSounds,
+      status: petStatus,
+      validity:
+        petStatus === "unavailable"
+          ? ("unavailable" as const)
+          : ("no_data" as const),
+      error: petStatus === "unavailable" ? track.petSounds.error : undefined,
+      chunks: [],
+    },
     run: track?.run ?? null,
     generation: track?.generation ?? null,
     startedAt: first?.startedAt ?? null,

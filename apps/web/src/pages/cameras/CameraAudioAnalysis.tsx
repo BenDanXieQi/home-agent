@@ -1,3 +1,4 @@
+import { petSoundLabels, petSoundStatuses } from "./window-presentation";
 import type { ExtractAtomValue } from "jotai";
 import type { createPerceptionSourceState } from "../../modules/perception/source-state";
 
@@ -54,6 +55,16 @@ export function CameraAudioAnalysis({ audio }: { audio: AudioAnalysis }) {
             <dd>{validity[track.validity]}</dd>
             <dt className="text-muted">人声分析</dt>
             <dd>{vadStatus[track.vadStatus]}</dd>
+            {track.petSounds ? (
+              <>
+                <dt className="text-muted">猫狗声音</dt>
+                <dd>
+                  {track.petSounds.validity === "expired"
+                    ? validity.expired
+                    : petSoundStatuses[track.petSounds.status]}
+                </dd>
+              </>
+            ) : null}
           </>
         ) : null}
       </dl>
@@ -66,6 +77,26 @@ export function CameraAudioAnalysis({ audio }: { audio: AudioAnalysis }) {
       {track?.vadError ? (
         <p className="break-words text-xs text-danger">{track.vadError}</p>
       ) : null}
+      {track?.petSounds?.error ? (
+        <p className="text-xs text-danger">{track.petSounds.error}</p>
+      ) : null}
+      {track?.validity === "valid" &&
+        track.petSounds?.validity === "valid" &&
+        track.petSounds.status === "ready" &&
+        track.petSounds?.chunks.map((chunk) => (
+          <p key={chunk.startSample} className="text-xs">
+            最近完成窗口 · {(chunk.startSample / 16000).toFixed(2)}–
+            {(chunk.endSample / 16000).toFixed(2)} 秒：
+            {chunk.detections.length
+              ? chunk.detections
+                  .map(
+                    (detection) =>
+                      `${petSoundLabels[detection.kind]} · ${detection.label} · 分数 ${detection.score.toFixed(3)}`,
+                  )
+                  .join("、")
+              : "未检出猫狗声"}
+          </p>
+        ))}
       {track ? (
         <>
           <p className="text-xs leading-6 text-muted">

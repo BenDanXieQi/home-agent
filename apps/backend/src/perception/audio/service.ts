@@ -1,3 +1,4 @@
+import { petSoundPolicy } from "../pet-sound/limits";
 import type { createSpeechInbox } from "../../conversation/speech-inbox";
 import { isDeepStrictEqual } from "node:util";
 import { speechLimits } from "../speech/limits";
@@ -14,6 +15,7 @@ export function createAudioService(options: {
   executable: string;
   changed: () => void;
   media?: Parameters<typeof createAudioProcess>[0]["track"];
+  retainPetSound?: Parameters<typeof createAudioProcess>[0]["petSound"];
   retainSpeech?: (
     observation: Parameters<
       NonNullable<Parameters<typeof createAudioProcess>[0]["speech"]>
@@ -30,6 +32,9 @@ export function createAudioService(options: {
   let process: ReturnType<typeof createAudioProcess> | undefined;
   let speechConfiguration:
     | z.infer<typeof perceptionConfigSchema>["speech"]
+    | undefined;
+  let petConfiguration:
+    | z.infer<typeof perceptionConfigSchema>["petSounds"]
     | undefined;
   let stopped = false,
     started = false,
@@ -96,7 +101,11 @@ export function createAudioService(options: {
     selected: z.infer<typeof sourceSelectionSchema>[],
   ) {
     if (stopped || !started) return;
-    if (process && !isDeepStrictEqual(speechConfiguration, config.speech))
+    if (
+      process &&
+      (!isDeepStrictEqual(speechConfiguration, config.speech) ||
+        !isDeepStrictEqual(petConfiguration, config.petSounds))
+    )
       restartRequested = true;
     if (selected.length > 8) {
       for (const key of tracks.keys()) retire(key);
@@ -176,7 +185,12 @@ export function createAudioService(options: {
       status = "starting";
       try {
         speechConfiguration = { ...config.speech };
+        petConfiguration = { ...config.petSounds };
         process = createAudioProcess({
+          petSound(observation) {
+            if (currentTrack(observation.run))
+              options.retainPetSound?.(observation);
+          },
           speech(observation) {
             if (!currentTrack(observation.run)) return false;
             options.retainSpeech?.(observation);
@@ -217,6 +231,11 @@ export function createAudioService(options: {
                 error: reason,
                 energy: [],
                 vad: [],
+                petSounds: entry.view.petSounds && {
+                  ...entry.view.petSounds,
+                  status: "unavailable",
+                  chunks: [],
+                },
                 speech: entry.view.speech && {
                   ...entry.view.speech,
                   status: "unavailable",
@@ -334,9 +353,13 @@ export function createAudioService(options: {
       )
         restartRequested = true;
       for (const [key, entry] of tracks) {
-        if (entry.view.speech?.validity === "unavailable") retire(key);
+        if (
+          entry.view.speech?.validity === "unavailable" ||
+          entry.view.petSounds?.validity === "unavailable"
+        )
+          retire(key);
       }
-      process?.retrySpeech();
+      process?.retryAnalysis();
       failures = 0;
       nextProcessAt = 0;
       nextCleanupAt = 0;
@@ -368,6 +391,18 @@ export function createAudioService(options: {
         },
         tracks: [...tracks.values()].map(({ view, expiresAt }) => ({
           ...view,
+          petSounds: view.petSounds && {
+            ...view.petSounds,
+            validity:
+              view.petSounds.validity === "valid" &&
+              view.petSounds.chunks.some(
+                (observation) =>
+                  Date.now() - observation.observedEndAt >=
+                  petSoundPolicy.resultAgeMs,
+              )
+                ? ("expired" as const)
+                : view.petSounds.validity,
+          },
           speech: view.speech && {
             ...view.speech,
             validity:

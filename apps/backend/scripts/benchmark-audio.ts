@@ -18,6 +18,7 @@ import {
 import { createAudioService } from "../src/perception/audio/service";
 import { createSnapshotStream } from "../src/http/snapshot-stream";
 import { readAudioStream } from "../src/mijia/media/audio-stream";
+import { petSoundPolicy } from "../src/perception/pet-sound/limits";
 import { perceptionConfigSchema } from "../src/perception/config";
 
 const { values } = parseArgs({
@@ -26,6 +27,7 @@ const { values } = parseArgs({
     sources: { type: "string", default: "1" },
     seconds: { type: "string", default: "30" },
     subscribers: { type: "string", default: "0" },
+    "pet-sounds": { type: "boolean", default: false },
   },
 });
 const variant = z.enum(["ffmpeg", "libav", "service"]).parse(values.variant);
@@ -39,6 +41,9 @@ const subscribers = z.coerce
   .parse(values.subscribers);
 if (subscribers && variant !== "service")
   throw new Error("SSE load belongs to the service variant");
+const petSounds = values["pet-sounds"];
+if (petSounds && variant !== "service")
+  throw new Error("Pet sound load requires the production service variant");
 const executable = process.env.PERCEPTION_FFMPEG_PATH ?? "ffmpeg";
 const { stdout: versionOutput } = await promisify(execFile)(
   executable,
@@ -53,10 +58,15 @@ const environment = {
   nodeAvFfmpeg: ffmpegVersion(),
 };
 const source = await createAudioSource(count);
-const config = perceptionConfigSchema.parse({ sources: source.selected });
+const config = perceptionConfigSchema.parse({
+  sources: source.selected,
+  petSounds: { enabled: petSounds },
+});
 const stop = new AbortController();
 const errors: string[] = [];
 const age = createHistogram();
+const classificationAge = createHistogram();
+const classifications = new Map<string, { endSample: number; count: number }>();
 const loop = monitorEventLoopDelay({ resolution: 10 });
 const decoded = Array.from({ length: count }, () => 0);
 let pcmBatches = 0,
@@ -69,6 +79,22 @@ const service =
   variant === "service"
     ? createAudioService({
         sources: source.sources,
+        media(track) {
+          for (const chunk of track.petSounds?.chunks ?? []) {
+            const previous = classifications.get(track.run.deviceId);
+            if (previous && chunk.endSample <= previous.endSample) continue;
+            classifications.set(track.run.deviceId, {
+              endSample: chunk.endSample,
+              count: (previous?.count ?? 0) + 1,
+            });
+            classificationAge.record(
+              Math.max(
+                1,
+                Math.round((Date.now() - chunk.observedEndAt) * 1000),
+              ),
+            );
+          }
+        },
         executable,
         changed() {
           notifications++;
@@ -169,7 +195,25 @@ try {
       decoders.push(decoder);
     }
   }
-  await delay(5000);
+  if (petSounds && service) {
+    const deadline = performance.now() + config.firstFrameTimeoutMs;
+    while (true) {
+      const tracks = service.snapshot().tracks;
+      if (tracks.some((track) => track.petSounds?.status === "unavailable"))
+        throw new Error("Pet sound classification unavailable during warm-up");
+      if (
+        tracks.length === count &&
+        tracks.every(
+          (track) =>
+            track.validity === "valid" && track.petSounds?.status === "ready",
+        )
+      )
+        break;
+      if (performance.now() >= deadline)
+        throw new Error("Audio classification warm-up timed out");
+      await delay(100);
+    }
+  } else await delay(5000);
   const totals = () => {
     const tracks = service?.snapshot().tracks;
     return tracks
@@ -181,6 +225,10 @@ try {
       : [...decoded];
   };
   const before = totals();
+  const classificationsBefore = source.selected.map(
+    ({ deviceId }) => classifications.get(deviceId)?.count ?? 0,
+  );
+  classificationAge.reset();
   const resourceSampler = createAudioResourceSampler();
   const resourceStart = await resourceSampler.sample();
   let resourceEnd = resourceStart;
@@ -211,7 +259,8 @@ try {
         tracks.some(
           (track) =>
             track.validity !== "valid" ||
-            !initialRuns.has(track.run.trackRunId),
+            !initialRuns.has(track.run.trackRunId) ||
+            (petSounds && track.petSounds?.status !== "ready"),
         )
       )
         invalid++;
@@ -236,9 +285,20 @@ try {
   loop.disable();
   const elapsedMs = performance.now() - started;
   const after = totals();
+  const classificationDeltas = source.selected.map(
+    ({ deviceId }, index) =>
+      (classifications.get(deviceId)?.count ?? 0) -
+      classificationsBefore[index]!,
+  );
   if (
     errors.length ||
     invalid ||
+    (petSounds &&
+      classificationDeltas.some(
+        (value) =>
+          value <
+          Math.max(1, Math.floor((seconds * 1000) / petSoundPolicy.hopMs) - 1),
+      )) ||
     after.some(
       (value, index) => value - before[index]! < seconds * 16000 * 0.95,
     )
@@ -250,6 +310,15 @@ try {
       environment,
       sources: count,
       subscribers,
+      petSounds,
+      classificationDeltas,
+      classificationDeliveryAgeMs: petSounds
+        ? {
+            p50: classificationAge.percentile(50) / 1000,
+            p95: classificationAge.percentile(95) / 1000,
+            p99: classificationAge.percentile(99) / 1000,
+          }
+        : null,
       seconds,
       elapsedMs,
       sourceFormat: "PCMA 8kHz mono",

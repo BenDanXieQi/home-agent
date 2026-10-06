@@ -8,6 +8,8 @@ import {
   windowTime,
   visualReasons,
   candidateLabel,
+  petSoundLabels,
+  petSoundStatuses,
 } from "./window-presentation";
 import { WindowIdentity } from "./WindowIdentity";
 import { WindowRecording } from "./WindowRecording";
@@ -89,6 +91,34 @@ export function WindowDetail({
             }[window.audio.vad]
           }
         </dd>
+        {window.audio.petSounds ? (
+          <>
+            <dt className="text-muted">猫狗声音</dt>
+            <dd>
+              {petSoundStatuses[window.audio.petSounds.status]}
+              {window.audio.petSounds.chunks.flatMap((chunk) =>
+                chunk.detections.map((detection) => (
+                  <p key={`${chunk.startSample}:${detection.kind}`}>
+                    {petSoundLabels[detection.kind]} · {detection.label} · 分数{" "}
+                    {detection.score.toFixed(3)}
+                    {" · "}
+                    {windowTime(chunk.observedStartAt)}–
+                    {windowTime(chunk.observedEndAt)}
+                  </p>
+                )),
+              )}
+              {window.audio.petSounds.status === "ready" &&
+              !window.audio.petSounds.chunks.some(
+                (chunk) => chunk.detections.length > 0,
+              )
+                ? " · 已完成的分析未达到猫狗声阈值"
+                : null}
+              {window.audio.petSounds.error ? (
+                <p className="text-danger">{window.audio.petSounds.error}</p>
+              ) : null}
+            </dd>
+          </>
+        ) : null}
         <dt className="text-muted">完整性</dt>
         <dd>
           {window.incomplete ? "不完整窗口" : "完整区间"} ·{" "}

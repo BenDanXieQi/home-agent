@@ -1,3 +1,4 @@
+import { createPetSoundRuntime } from "../pet-sound/runtime";
 import pTimeout from "p-timeout";
 import { createSpeechRuntime } from "../speech/runtime";
 import type { speechTrackSchema } from "@home-agent/api/contracts";
@@ -66,6 +67,7 @@ let delivery:
   | undefined;
 let closing = false;
 let speech: ReturnType<typeof createSpeechRuntime> | undefined;
+let petSounds: ReturnType<typeof createPetSoundRuntime> | undefined;
 const pulseTimer = setInterval(() => {
   send({ kind: "pulse", inferenceSince, speech: speech?.snapshot() }).catch(
     fatal,
@@ -88,6 +90,7 @@ async function handleCommand(message: unknown) {
     clearInterval(pulseTimer);
     await closeTracks();
     await speech?.close();
+    await petSounds?.close();
     await inference;
     await model?.close();
     await send({ kind: "closed" });
@@ -95,8 +98,9 @@ async function handleCommand(message: unknown) {
     return;
   }
   if (closing) return;
-  if (command.kind === "retry_speech") {
+  if (command.kind === "retry_analysis") {
     speech?.retry();
+    petSounds?.retry();
     return;
   }
   if (command.kind === "stop") {
@@ -105,6 +109,7 @@ async function handleCommand(message: unknown) {
       entry.stopped = true;
       if (delivery?.runId === command.trackRunId) delivery.resolve(false);
       speech?.end(command.trackRunId);
+      petSounds?.end(command.trackRunId);
       await entry.decoder.close();
       tracks.delete(command.trackRunId);
     }
@@ -143,8 +148,19 @@ async function handleCommand(message: unknown) {
       },
     });
   }
+  if (input.config.petSounds.enabled && !petSounds) {
+    petSounds = createPetSoundRuntime({
+      threshold: input.config.petSounds.threshold,
+      fatal,
+      deliver: (observation) => send({ kind: "pet_sound", observation }),
+      update(runId, value) {
+        tracks.get(runId)?.updatePetSounds(value);
+      },
+    });
+  }
   tracks.set(input.run.trackRunId, createTrack(input));
   if (input.config.speech.enabled) speech?.start(input.run);
+  if (input.config.petSounds.enabled) petSounds?.start(input.run);
 }
 
 function createTrack(input: z.infer<typeof audioStartSchema>) {
@@ -168,6 +184,15 @@ function createTrack(input: z.infer<typeof audioStartSchema>) {
   );
   const entry = {
     stopped: false,
+    updatePetSounds(
+      value: Parameters<
+        Parameters<typeof createPetSoundRuntime>[0]["update"]
+      >[1],
+    ) {
+      if (entry.stopped || closing) return;
+      view = { ...view, petSounds: value };
+      send({ kind: "track", track: view }).catch(fatal);
+    },
     updateSpeech(value: z.infer<typeof speechTrackSchema>) {
       if (entry.stopped || closing) return;
       view = { ...view, speech: value };
@@ -180,6 +205,7 @@ function createTrack(input: z.infer<typeof audioStartSchema>) {
       onMedia(media) {
         view = { ...view, ...media };
         speech?.media(input.run.trackRunId, media.generation);
+        petSounds?.media(input.run.trackRunId, media.generation);
       },
       async onPcm(pcm, observedAt, receivedAt) {
         origin = observedAt - view.samples / 16;
@@ -203,6 +229,13 @@ function createTrack(input: z.infer<typeof audioStartSchema>) {
           vadError: result.vadError ?? modelError,
         };
         await send({ kind: "track", track: view, pcm });
+        if (!entry.stopped && !closing)
+          petSounds?.accept(
+            input.run.trackRunId,
+            pcm,
+            view.samples - pcm.length,
+            observedAt,
+          );
       },
     }),
   };
@@ -210,6 +243,7 @@ function createTrack(input: z.infer<typeof audioStartSchema>) {
     .catch(async (error: unknown) => {
       if (entry.stopped || closing) return;
       speech?.end(input.run.trackRunId);
+      petSounds?.end(input.run.trackRunId);
       view = {
         ...view,
         status: error instanceof AudioTrackMissing ? "no_track" : "failed",
@@ -218,6 +252,12 @@ function createTrack(input: z.infer<typeof audioStartSchema>) {
         energy: [],
         vad: [],
         vadStatus: "unavailable",
+        petSounds: view.petSounds && {
+          ...view.petSounds,
+          status: "unavailable",
+          validity: "unavailable",
+          chunks: [],
+        },
         energyRemainder: 0,
         vadRemainder: 0,
         speech: view.speech && {
@@ -250,7 +290,7 @@ process.on("disconnect", () => {
   closing = true;
   delivery?.resolve(false);
   clearInterval(pulseTimer);
-  Promise.all([speech?.close(), closeTracks()]).then(
+  Promise.all([speech?.close(), petSounds?.close(), closeTracks()]).then(
     () => process.exit(0),
     (error) => {
       console.error("Audio orphan cleanup failed", error);

@@ -1,3 +1,4 @@
+import { audioInferenceResponse } from "../audio/inference-protocol";
 import { z } from "zod";
 import { speechObservationSchema } from "@home-agent/api/contracts";
 import { speechLimits, senseVoiceModel } from "./limits";
@@ -12,12 +13,7 @@ export const speechJobSchema = z.object({
         samples.every(Number.isFinite),
     ),
 });
-export const speechResponseSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("ready"),
-    modelSha256: z.literal(senseVoiceModel.sha256),
-    rssBytes: z.number().positive(),
-  }),
+export const speechResponseSchema = audioInferenceResponse(
   z.object({
     kind: z.literal("result"),
     id: speechJobSchema.shape.id,
@@ -25,6 +21,5 @@ export const speechResponseSchema = z.discriminatedUnion("kind", [
     elapsedMs: speechObservationSchema.shape.inferenceMs,
     rssBytes: z.number().positive(),
   }),
-  z.object({ kind: z.literal("pulse"), rssBytes: z.number().positive() }),
-  z.object({ kind: z.literal("fatal"), error: z.string().max(4096) }),
-]);
+  senseVoiceModel.sha256,
+);

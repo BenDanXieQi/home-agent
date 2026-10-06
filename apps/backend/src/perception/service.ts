@@ -170,6 +170,9 @@ export function createPerceptionService(options: {
   );
   const unsubscribeWindows = windows.subscribe(media.capture);
   const audio = createAudioService({
+    retainPetSound(observation) {
+      windows.petSound(observation, Date.now());
+    },
     retainSpeech(observation) {
       windows.speech(observation, Date.now());
     },

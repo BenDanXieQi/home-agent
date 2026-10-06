@@ -1,3 +1,4 @@
+import { matchesWindowAudio } from "./audio-observation";
 import type { z } from "zod";
 import {
   windowSpeechSegmentLimit,
@@ -32,19 +33,11 @@ export function appendWindowSpeech(
   observation: z.infer<typeof speechObservationSchema>,
   now: number,
 ) {
-  const { audio, speech } = window;
+  const { speech } = window;
   if (
     !speech.enabled ||
     now >= speech.acceptingUntil ||
-    !audio.run ||
-    audio.startedAt === null ||
-    audio.endedAt === null ||
-    audio.run.trackRunId !== observation.run.trackRunId ||
-    audio.run.scopeEpoch !== observation.run.scopeEpoch ||
-    audio.run.deviceId !== observation.run.deviceId ||
-    audio.generation !== observation.generation ||
-    Math.max(window.startedAt, audio.startedAt, observation.observedStartAt) >=
-      Math.min(window.endedAt, audio.endedAt, observation.observedEndAt) ||
+    !matchesWindowAudio(window, observation) ||
     !observation.text.trim() ||
     speech.segments.some((segment) => segment.id === observation.id)
   )

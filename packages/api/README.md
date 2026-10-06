@@ -14,7 +14,7 @@ Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agen
 
 完整规格由后端按 URN 共享，不进入公共状态。设备记录仅包含 `spec_id/spec_status/spec_error`、分类和能力标签；初始准备值由 `initialSpecification` 提供。候选家庭只由设置专用接口返回，当前协议不包含 `latest/source_health/rule_status` 空占位字段。
 
-`src/contracts/perception.ts` 定义本地检测的健康、音轨和语音转写快照，通过 `@home-agent/api/contracts` 导出。`@home-agent/api/speech-dialogue` 定义短时语音收件箱及 backend／Agent 的判断请求和响应；采样区间、时间关系及判断字段的一致性由共享 schema 约束，接收边界完整校验，内部使用已校验数据。用法与期限见[语音交付](../../docs/perception.md#语音片段交付与对话判断)。这些契约不提供媒体读取或设备执行；聊天接口仍只承载文本对话。持续观察、长期任务、事件及动作提交的拟实施 API 见[第一方协作计划](../../docs/plans/household-automation.md#6-具体接口与工具)。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
+`src/contracts/perception.ts` 定义本地检测的健康、音轨、可选猫狗声音分类和语音转写快照，通过 `@home-agent/api/contracts` 导出。`@home-agent/api/speech-dialogue` 定义短时语音收件箱及 backend／Agent 的判断请求和响应；采样区间、时间关系及判断字段的一致性由共享 schema 约束，接收边界完整校验，内部使用已校验数据。用法与期限见[语音交付](../../docs/perception.md#语音片段交付与对话判断)。这些契约不提供媒体读取或设备执行；聊天接口仍只承载文本对话。持续观察、长期任务、事件及动作提交的拟实施 API 见[第一方协作计划](../../docs/plans/household-automation.md#6-具体接口与工具)。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
 
 `@home-agent/api/immutable` 集中配置 Mutative，更新时只复制变化部分、复用未变化对象，称为“结构共享”：
 
