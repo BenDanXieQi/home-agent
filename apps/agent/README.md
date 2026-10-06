@@ -36,6 +36,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 - `context/receipts.ts`：受接收器管理的有限内存接收记录与当时上下文；`context/receipt-changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
 - `context/material-client.ts`：按成员记录或窗口 ID 读取引用材料，核对当前接收资格，不修改接收状态。
 - `context/history-client.ts`：Backend 三类历史的只读客户端，校验响应与接收资格。
+- `context/model-view/`：Agent 家庭视图筛选、语义查询键、JSON 编码与解码；`cli.ts` 提供保存快照的离线转换和查询。
 - `workflows/spatial-planning/index.ts`：空间规划专项 Agent 工厂，使用同一模型配置，由调用方注入共用的 backend 能力。
 - `workflows/spatial-planning/instructions.ts`：空间证据使用、记录匹配、配置写入与结果核对指令。
 
@@ -68,3 +69,41 @@ Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代
 `src/context/history-client.ts` 导出 `createHistoryClient({ backendUrl, receiver })`，启动入口将客户端装配为 `readHistory`。receiver 提供当前接收资格；调用者传入 `kind=device_reports|member_sightings|perception_windows`、UTC 区间、相应对象条件、分页参数及取消信号。设备分支沿用原读取条件；成员使用可选 member_ids/sources，音视频使用可选 sources，返回完整窗口与匹配引用。用法与字段见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 
 客户端组合调用方取消与共享请求截止时间，通过共用的有界 HTTP 工具读取并校验响应。返回前重新核对连接代次、绑定身份、家庭运行资格及请求区间；失败、超时或资格改变拒绝结果，不用当前值或旧缓存代替历史。接收数据仅存在于内存，重启重新读取，不保存 SSE 消费进度。客户端未注册为模型工具。实机与专项边界统一见[Agent 通路验证边界](../../docs/household-runtime.md#agent-通路验证边界)。
+
+## 家庭模型视图
+
+`context/model-view/view.ts` 的 `createHouseholdModelView(context)` 接受已校验的接收快照，生成设备清单、能力与有值状态，并提供受相同规则约束的 `spec/state` 查询。输入必须有家庭范围和五部分 ready 数据；缺少规格的设备仍在设备清单中，不编造能力。该模块属于 Agent 的输入组织，Backend 和接收器继续保存完整来源事实。当前聊天入口尚未调用此模块。
+
+模块直接接收数据，不依赖接收器、模型框架或 CLI。`createHouseholdModelView` 与 `encodeHouseholdContext` 在内存中同步执行，没有订阅、定时器、网络／文件读写或跨调用缓存；CLI 单独负责文件读写。进程内用法如下（`snapshot` 为已校验的接收快照）：
+
+```ts
+import { createHouseholdModelView } from "./context/model-view/view";
+import { encodeHouseholdContext } from "./context/model-view/encoding";
+
+const view = createHouseholdModelView(snapshot);
+const contextJson = JSON.stringify(encodeHouseholdContext(view.semantic));
+```
+
+`view.query(deviceId, keys, "spec" | "state")` 始终查询创建该视图时的同一份快照，返回的 `source` 为 `snapshot`。转换时隔离所使用的来源数据，调用方之后修改输入不会改变该视图的查询结果；查询结果也不会修改来源数据。读取更新后的状态需要向转换函数传入新快照，已有视图不会自动更新。能力规格仅在单次转换内复用。
+
+接收器继续拥有当前快照、版本、连接状态和家庭范围；调用方负责选择快照及判断连接新鲜度。接收时间不等于属性测量时间，转换不会把旧状态升级成实时状态。输入缺少家庭范围或任一部分未 ready 时抛出错误，不隐式复用上一次结果。当前没有模型上下文自动注入逻辑。
+
+摄像头只展示切换常看位置、巡航开关／模式／位置；人在传感器只展示可明确辨认的整体有人／无人属性，无法确认整体项时不选某个分区替代。人体移动传感器保留移动事件，不由此推断持续有人。自检、开发者模式、码库匹配、协议载荷和内部标识等细节由 `policy.ts` 排除。摄像头分析及事件归 Backend。缺值和未知规格不生成状态占位；缓存、待验证、过期等原始质量及时间保持不变。
+
+能力不因当前缺值而消失，也没有每设备数量或 token 上限。语义键在设备内消歧，完整规格查询包含当前视图允许的属性、动作和事件；没有独立访问权限的事件参数不会伪装成可查询属性。`capabilities.ts` 处理 MIoT 名称、权限、单位和来源型号过滤；型号排除数据的固定官方来源见相邻 `miot-exclusions.json`。这不依赖 Home Assistant 运行时，不执行供应商代码，也不表示复现了所有 HA 平台组件行为。
+
+`encoding.ts` 将相同能力与规格集合合并，按权限、类型分组，用固定位置数组和本文件内数字索引表达。`schema` 说明字段位置和权限位；原始设备 ID 和语义键可以直接查询，索引不作为设备身份。解码会校验格式说明、权限与类型、索引、设备归属、重复语义键、重复状态、关注项及连续编号，保留合法的 `false`、`0` 和 `null`。
+
+从仓库根目录运行，输入是 `GET /api/context-receipts/current` 保存的完整 `{ journal_id, context }` JSON：
+
+```sh
+bun run --cwd apps/agent context:format --input /path/current.json overview --output /path/model-context
+bun run --cwd apps/agent context:format --input /path/current.json devices
+bun run --cwd apps/agent context:format --input /path/current.json spec <device-id> [semantic-key...]
+bun run --cwd apps/agent context:format --input /path/current.json state <device-id> [semantic-key...]
+bun run --cwd apps/agent context:format --input /path/model-context/context.json decode
+```
+
+输出 `context.json` 是紧凑模型输入，`context.pretty.json` 和 `context.formatted.json` 是同内容缩进版，`context.decoded.json` 是还原的语义视图。`capability-audit.json` 给出每项能力的排除原因，`manifest.json` 统计设备、能力、报告、Unicode 码点和 UTF-8 字节数；token 数需用目标模型分词器另算，不能用字符数固定换算。CLI 在写入前核对编码和解码内容一致，并拒绝输出或关注记录覆盖输入文件；输出文件之间以及输出与关注文件之间也不能指向同一文件。
+
+`spec/state` 的显式键查询可附带 `--attention <file> --remember`，成功后记录关注键；`overview` 读取同一 `--attention` 文件时只突出仍有效的关注项，不删减其他能力。全量查询不记录关注。查询仅读取保存快照，不刷新设备、不执行动作，不重新带入领域规则排除的内容。原始快照和输出应放在本地数据位置，不提交设备及成员资料。
