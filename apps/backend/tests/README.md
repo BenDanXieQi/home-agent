@@ -4,6 +4,8 @@
 
 `bunfig.toml` 保留 Bun 脚本 shell，但尊重 CLI 的解释器声明，让 Vitest 使用 Node；后端和应用脚本需要 Bun 时显式调用 `bun`。不要用 `bun --bun` 强制运行 Vitest。
 
+使用本机 HTTP 服务的测试需要允许监听本机回环地址（如 `127.0.0.1`）的随机端口，包括依赖 `support/household-harness.ts` 的家庭与集成测试、米家媒体测试、感知事件流和音频生命周期测试。受限沙箱可能让 `Bun.serve({ port: 0 })` 报 `EADDRINUSE`；此处 `0` 表示由系统分配端口，不能仅凭该错误认定端口被占用。遇到这类初始化失败，应在允许本机监听的执行环境中重跑原失败文件，再判断业务断言；不要通过固定端口、跳过用例或修改断言掩盖环境限制。
+
 ```sh
 bun test ./apps/backend/tests/household/lifecycle.test.ts
 bun run --cwd apps/web test -- tests/modules/mijia/commands.test.ts

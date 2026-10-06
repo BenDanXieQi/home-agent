@@ -50,6 +50,6 @@ Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代
 
 ## 只读设备历史客户端
 
-`src/context/history-client.ts` 导出 `createHistoryClient({ backendUrl, timeoutMs, currentScope })`。`backendUrl` 要求 HTTP(S)；`currentScope` 返回当前已接收且可用的 `{ account_id, home_id, scope_epoch }`，无可用资格时返回 null。调用者传入 `kind=device_reports`、UTC 区间、可选属性／表达方式／分页参数及取消信号。专用上下文接收模块尚未实现，客户端未在启动或模型工具中注册。
+`src/context/history-client.ts` 导出 `createHistoryClient({ backendUrl, timeoutMs, currentScope })`。`backendUrl` 要求 HTTP(S)；`currentScope` 返回当前已接收且可用的 `{ account_id, home_id, scope_epoch }`，无可用资格时返回 null。调用者传入 `kind=device_reports`、UTC 区间、可选设备／记录类型／属性／表达方式／分页参数及取消信号。专用上下文接收模块尚未实现，客户端未在启动或模型工具中注册。
 
-客户端组合调用方取消与截止时间，以共用的有界 HTTP 工具读取并校验响应，在返回前再次核对绑定和运行资格。失败、超时或资格变化拒绝结果。接口、来源及分页语义见[设备属性历史](../../docs/household-runtime.md#设备属性历史)，实机和容量验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。
+客户端组合调用方取消与截止时间，以共用的有界 HTTP 工具读取并校验响应，在返回前再次核对绑定和运行资格。失败、超时或资格变化拒绝结果。接口、来源及分页语义见[设备状态历史](../../docs/household-runtime.md#设备状态历史)，实机和容量验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。

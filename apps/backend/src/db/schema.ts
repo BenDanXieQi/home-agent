@@ -338,17 +338,62 @@ export const devicePropertyDefinitions = pgTable(
     ),
   ],
 );
-export const devicePropertyObservations = pgTable(
-  "device_property_observations",
+/** Last successfully saved state for each device item; independent of history retention and wall-clock order. */
+export const deviceHistoryState = pgTable(
+  "device_history_state",
+  {
+    deviceId: text("device_id").notNull(),
+    item: text("item").notNull(),
+    value: jsonb("value")
+      .$type<
+        z.infer<
+          typeof import("@home-agent/api/observations").propertyValueSchema
+        >
+      >()
+      .notNull(),
+    metadata:
+      jsonb("metadata").$type<
+        z.infer<
+          typeof import("@home-agent/api/device-history").deviceHistoryMetadataSchema
+        >
+      >(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.deviceId, table.item] }),
+    check(
+      "device_history_state_device_nonempty",
+      sql`length(${table.deviceId}) > 0`,
+    ),
+    check(
+      "device_history_state_value_scalar",
+      sql`jsonb_typeof(${table.value}) IN ('number', 'boolean', 'string', 'null')`,
+    ),
+    check(
+      "device_history_state_item",
+      sql`(${table.item} = 'online' AND jsonb_typeof(${table.value}) = 'boolean' AND ${table.metadata} IS NULL)
+      OR (${table.item} ~ '^[1-9][0-9]*[.][1-9][0-9]*$' AND ${table.metadata} IS NOT NULL AND jsonb_typeof(${table.metadata}) = 'object')`,
+    ),
+  ],
+);
+export const deviceObservations = pgTable(
+  "device_observations",
   {
     receivedAt: timestamp("received_at", {
       withTimezone: true,
       mode: "string",
     }).notNull(),
     observationId: uuid("observation_id").notNull(),
-    definitionId: uuid("definition_id")
-      .notNull()
-      .references(() => devicePropertyDefinitions.id),
+    kind: text("kind")
+      .$type<
+        z.infer<
+          typeof import("@home-agent/api/device-history").deviceHistoryKindSchema
+        >
+      >()
+      .notNull(),
+    deviceId: text("device_id").notNull(),
+    definitionId: uuid("definition_id").references(
+      () => devicePropertyDefinitions.id,
+    ),
     scopeEpoch: uuid("scope_epoch").notNull(),
     inputSequence: bigint("input_sequence", { mode: "bigint" }).notNull(),
     value: jsonb("value")
@@ -369,18 +414,31 @@ export const devicePropertyObservations = pgTable(
   (table) => [
     primaryKey({ columns: [table.receivedAt, table.observationId] }),
     check(
-      "device_property_observations_sequence_nonnegative",
+      "device_observations_sequence_nonnegative",
       sql`${table.inputSequence} >= 0`,
     ),
     check(
-      "device_property_observations_value_scalar",
+      "device_observations_value_scalar",
       sql`jsonb_typeof(${table.value}) IN ('number', 'boolean', 'string', 'null')`,
     ),
     check(
-      "device_property_observations_source",
-      sql`${table.source} IN ('push', 'retained', 'read')`,
+      "device_observations_device_nonempty",
+      sql`length(${table.deviceId}) > 0`,
     ),
-    index("device_property_observations_definition_time_idx").on(
+    check(
+      "device_observations_record",
+      sql`(${table.kind} = 'property' AND ${table.definitionId} IS NOT NULL AND ${table.source} IN ('push', 'retained', 'read'))
+        OR (${table.kind} = 'online' AND ${table.definitionId} IS NULL AND jsonb_typeof(${table.value}) = 'boolean' AND ${table.source} IN ('push', 'retained', 'directory'))`,
+    ),
+    index("device_observations_device_kind_time_idx").on(
+      table.deviceId,
+      table.kind,
+      table.receivedAt,
+      table.scopeEpoch,
+      table.inputSequence,
+      table.observationId,
+    ),
+    index("device_observations_definition_time_idx").on(
       table.definitionId,
       table.receivedAt,
       table.scopeEpoch,

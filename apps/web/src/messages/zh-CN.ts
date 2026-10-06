@@ -26,6 +26,13 @@ const errorMessages = {
   request_too_large: "请求内容过大，请缩短后重试。",
   local_access_required: "请从本机 backend 或 Vite 页面访问管理接口。",
   not_found: "请求的资源不存在。",
+  device_history_export_too_large:
+    "导出超过 64 MiB，请缩小时间范围或设备筛选后重试。",
+  household_scope_changed: "家庭访问资格已变化，请重新读取当前家庭。",
+  household_unavailable: "家庭数据暂时不可用，请检查家庭连接。",
+  household_capacity_exceeded: "请求超过资源限制，请缩小范围或稍后重试。",
+  household_storage_unavailable:
+    "家庭数据存储暂时不可用，请检查数据库连接后重试。",
   spatial_record_changed: "这条资料已被修改，请读取最新内容后重新编辑。",
   spatial_scope_changed: "家庭绑定已变化，请重新读取当前家庭的空间资料。",
   spatial_record_exists: "该空间资料已存在，请刷新后编辑。",
@@ -44,7 +51,7 @@ const errorMessages = {
   connection_config_read_only: "配置文件或所在目录不可写，请检查权限。",
   connection_config_too_large: "保存后的配置过大，请缩短注释或地址。",
   connection_config_save_failed: "配置保存失败，请检查磁盘空间和文件权限。",
-  agent_timeout: "Agent 请求超时，请稍后重试。",
+  agent_timeout: "请求超时，请稍后重试。",
   agent_unavailable: "无法连接 Agent，请检查地址和服务进程。",
   model_not_configured: "请配置 AGENT_MODEL 和 OPENAI_API_KEY。",
   request_cancelled: "请求已取消。",

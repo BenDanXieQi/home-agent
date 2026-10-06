@@ -59,8 +59,7 @@ export function createHistoryClient(options: {
       result.account_id !== scope.account_id ||
       result.home_id !== scope.home_id ||
       result.start !== input.start ||
-      result.end !== input.end ||
-      result.representation !== input.representation
+      result.end !== input.end
     )
       throw new Error("History response qualification changed");
     return result;

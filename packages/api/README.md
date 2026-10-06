@@ -88,6 +88,10 @@ bun run --cwd packages/api test -- tests/contracts/household.test.ts
 
 ## 设备历史契约
 
-`@home-agent/api/device-history` 从设备能力、属性地址和值 schema 派生固定说明、接纳报告、查询和两种响应。共享 `deviceHistoryPolicy` 定义 365 天保留、页大小与请求／响应容量。`@home-agent/api/agent-context` 复用设备历史契约并增加 `kind=device_reports`；专用 SSE、成员出现与音视频历史分支尚未实现。
+`@home-agent/api/device-history` 从设备能力、属性地址和值 schema 派生固定说明、接纳报告、查询、两种页响应与 Web 历史 SSE。记录按 `kind=property|online` 区分，在线 `value` 为布尔值，不附带 MIoT 地址或属性说明；在线来源 `directory` 表示设备清单读取。共享 `deviceHistoryPolicy` 定义 365 天保留、页大小、请求／响应容量，`deviceHistoryStreamPolicy` 定义历史流的连接、事件与等待预算。`@home-agent/api/agent-context` 复用设备历史契约并增加 `kind=device_reports`；专用 Agent SSE、成员出现与音视频历史分支尚未实现。
 
-时间区间校验 UTC、至多微秒精度及 `start < end`；属性编号 `siid/piid` 复用共享地址 schema，只接受 `1..2147483647` 的整数。默认 `runs` 返回同值报告段，`observations` 返回原始报告。Backend 对属性筛选去重并固定排序，校验游标及当前家庭资格；调用方不解释游标内部内容。来源、分页、保留与容量语义见[设备属性历史](../../docs/household-runtime.md#设备属性历史)，支持基线与验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。
+时间区间校验 UTC、至多微秒精度及 `start < end`；属性编号 `siid/piid` 复用共享地址 schema，只接受 `1..2147483647` 的整数。查询统一返回已保存变化记录，不含表达方式参数或同值段字段；历史写入跳过连续同值，不保留每次重复报告。查询支持 device_ids、kinds 和 properties；kinds 默认两类，properties 仅匹配原生属性，筛选条件取交集。`order` 默认 `asc`，Web 使用 `desc` 按最新优先读取。Backend 对筛选去重并固定排序，校验游标、查询方向及当前家庭资格；调用方不解释游标内部内容。
+
+Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=live|page|export`。live 要求降序且不带游标，首批为 `page`，后续 `change` 携带变化记录、完整有序 `record_ids` 与 `removed_ids`；记录 ID 使用 observation_id。`page` 固定区间返回一页后发送 `complete`；`export` 按固定区间在单个 SQL 查询快照内生成最多 64 MiB 的临时页文件，事务结束后连续交付有界数据批次（next_cursor 为 null），期限沿用 Backend 读取配置，完成后发送 `complete`，两者随后关闭。空心跳使用 `heartbeat`，流内失败使用公共 `error` 契约。Agent 历史入口继续使用一次性 JSON 响应。来源、分页、保留与容量语义见[设备状态历史](../../docs/household-runtime.md#设备状态历史)，支持基线与验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。
+
+家庭历史 HTTP 边界使用公共 `household_scope_changed`、`household_unavailable`、`household_capacity_exceeded` 与 `household_storage_unavailable` 错误码，复用统一错误响应结构和展示映射；家庭领域异常不引入供应商协议。

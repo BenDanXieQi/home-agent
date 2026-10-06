@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { streamSSE } from "hono/streaming";
-import pTimeout from "p-timeout";
 import { addAbortListener } from "node:events";
+import { createSseTransport } from "./sse-transport";
 
 export function createSnapshotStream(
   source: { subscribe: (listener: () => void) => () => void },
@@ -29,6 +29,13 @@ export function createSnapshotStream(
       return c.json({ error: "Snapshot subscription unavailable" }, 503);
     connections++;
     return streamSSE(c, async (stream) => {
+      const transport = createSseTransport(stream, {
+        signal: AbortSignal.any([shutdown, c.req.raw.signal]),
+        writeTimeoutMs: 15000,
+        eventBytes: 2 * 1024 * 1024 + 128,
+        queuedBytes: 2 * 1024 * 1024 + 128,
+        queuedEvents: 1,
+      });
       let wake = Promise.withResolvers<void>();
       let dirty = true;
       function notify() {
@@ -36,33 +43,31 @@ export function createSnapshotStream(
         dirty = true;
         wake.resolve();
       }
-      stream.onAbort(() => {
+      const stopping = addAbortListener(transport.signal, () => {
         wake.resolve();
       });
       const unsubscribe = source.subscribe(notify);
-      const stopping = addAbortListener(shutdown, () => {
-        stream.abort();
-      });
       const heartbeat = setInterval(() => wake.resolve(), 15000);
       try {
-        while (!shutdown.aborted && !stream.aborted) {
+        while (!transport.closed) {
           const data = dirty ? publication() : "{}";
           const event = dirty ? "snapshot" : "heartbeat";
           dirty = false;
-          await pTimeout(stream.writeSSE({ event, data }), {
-            milliseconds: 15000,
-          });
-          if (!dirty && !stream.aborted) await wake.promise;
+          await transport.send({ event, data });
+          if (!dirty && !transport.closed) await wake.promise;
           wake = Promise.withResolvers<void>();
         }
       } catch (error) {
-        if (!stream.aborted)
+        if (
+          !shutdown.aborted &&
+          !(error instanceof DOMException && error.name === "AbortError")
+        )
           console.warn(
             "Snapshot subscription closed",
             error instanceof Error ? error.message : "write failed",
           );
-        stream.abort();
       } finally {
+        transport.close();
         clearInterval(heartbeat);
         unsubscribe();
         stopping[Symbol.dispose]();

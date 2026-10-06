@@ -1,17 +1,17 @@
 # Backend 向 Agent 交付当前数据与可查询历史
 
-**状态：专用推送、接收及成员／音视频历史待实施。** 设备历史的现有实现与验证边界见[家庭运行时](../household-runtime.md#设备属性历史)。本计划交付 Backend 整理后的持续推送和按时间补查历史的能力，以及 Agent 接收与只读访问适配。完成条件是当前数据持续送达，相关历史可按时间与对象取回。Agent 如何关联材料、推理和回写另行确定。
+**状态：专用推送、Agent 接收及成员／音视频历史待实施。** 本计划交付 Backend 整理后的持续推送、成员与音视频历史读取，以及 Agent 接收装配和现有客户端的历史分支扩展。设备状态历史及 Web 查询已实现，作为现有依赖复用，用法与验证边界见[家庭运行时](../household-runtime.md#设备状态历史)。完成条件是当前数据持续送达，相关历史可按时间与对象取回。Agent 如何关联材料、推理和回写另行确定。
 
 ## 本次范围
 
-持续推送已有设备资料与当前报告、成员登记资料、音视频感知产出；另提供按时间与对象读取设备报告、成员出现及整体音视频窗口的历史入口。成员出现读取数据库记录，音视频读取当前仍在内存中保留的窗口；设备报告复用现有属性历史保存与查询。本次不实施模型自动调查或语义回写。
+持续推送已有设备资料、当前属性报告与在线值、成员登记资料及音视频感知产出；扩展现有 Agent 历史入口，增加成员出现和整体音视频窗口的按时间与对象读取。成员出现读取数据库记录，音视频读取当前仍在内存中保留的窗口；设备报告与 Agent 只读客户端复用现有实现，待接入专用接收模块。本次不实施模型自动调查或语义回写。
 
 ## 数据来源清单与初始交付范围
 
 | 数据                   | 内部读取入口                                                      | 必须保留                                               |
 | ---------------------- | ----------------------------------------------------------------- | ------------------------------------------------------ |
 | 家庭、房间、设备与规格 | `household/runtime.ts`、`specifications.ts`                       | 对象 ID、归属、属性含义、单位及枚举                    |
-| 设备属性观察           | 家庭投影 `latest`、采集与来源状态                                 | 最近报告、实际时间、覆盖、缺值及来源限制               |
+| 设备状态               | 家庭投影 `latest`、设备 `online`、采集与来源状态                  | 最近属性报告、在线值、实际可用时间、覆盖与来源限制     |
 | 成员登记               | `household/members/repository.ts`                                 | 人物／宠物登记资料                                     |
 | 音视频感知             | `perception.snapshot()`、`windows(selection)`、`window(id)`       | 视觉、跟踪、身份、声音、转写、来源／音轨关联及媒体引用 |
 | 感知形成的出现记录     | `household/identity/activity-repository.ts`，本次补充内部有界读取 | `member_sighting` 当前归因、依据、对象与来源引用       |
@@ -36,39 +36,35 @@
 - `window/store.ts` 现有 `subscribe` 用于候选媒体捕获。本次补充窗口内容变化通知，经感知服务统一暴露，覆盖接纳、晚到补充、移除和失效；不改变捕获订阅或额外触发编码。
 - `media/window-media.ts` 的产物状态可独立于窗口版本变化。生成完成、失败、过期和撤销也须触发刷新，可复用现有维护周期，不能只按窗口版本去重。
 
-## 历史数据现状与缺口
+## 成员与音视频历史缺口
 
-现有 `context_records` 保存成员出现记录 `member_sighting`，`context_entities` 保存记录关联的对象与来源。目前没有设备属性报告或整体音视频窗口写入该表的生产者。
+现有 `context_records` 保存成员出现记录 `member_sighting`，`context_entities` 保存记录关联的对象与来源；整体音视频窗口由感知服务保留在内存中。两类材料按各自现有存储读取。
 
-设备报告由独立属性历史通路保存，`device_reports` 接口和 Agent 只读客户端已实现，用法与验证限制见[设备属性历史](../household-runtime.md#设备属性历史)。本计划只补齐专用接收及成员／音视频的查询与交付。
-
-| 需要的材料                               | 已核实的实现                                                                                                                                             | 本次需要补齐                                                               |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 空调开关、模式、设定温度、温度传感器报告 | `HouseholdRuntime` 的 `latest` 是当前值；`household/history` 独立保存当次接纳报告并提供按时间读取                                                        | 复用现有设备历史接口与客户端，不另建保存通路                               |
-| 某成员在相关时段是否出现                 | member_sighting 已入库，含 firstObservedAt、lastObservedAt、endedAt、来源摄像头和当前归因。现有数据库浏览有实体与游标筛选，没有观察区间查询              | 在原身份仓库补按区间重叠、成员、摄像头筛选的读取；不把来源摄像头当当前位置 |
-| 同期音视频及转写                         | 窗口详情在内存里整体保留 `frames/audio/speech`，最长约 30 分钟，可因容量或访问资格提前移除，重启不恢复；媒体另有保留期限，见[感知文档](../perception.md) | 感知服务增加时间筛选，读取仍保留的完整相关窗口及媒体状态                   |
+| 需要的材料               | 已核实的实现                                                                                                                                             | 本次需要补齐                                                               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 某成员在相关时段是否出现 | member_sighting 已入库，含 firstObservedAt、lastObservedAt、endedAt、来源摄像头和当前归因。现有数据库浏览有实体与游标筛选，没有观察区间查询              | 在原身份仓库补按区间重叠、成员、摄像头筛选的读取；不把来源摄像头当当前位置 |
+| 同期音视频及转写         | 窗口详情在内存里整体保留 `frames/audio/speech`，最长约 30 分钟，可因容量或访问资格提前移除，重启不恢复；媒体另有保留期限，见[感知文档](../perception.md) | 感知服务增加时间筛选，读取仍保留的完整相关窗口及媒体状态                   |
 
 转写历史随整体音视频窗口读取 `speech.segments`。成员记录按归因原地更新，历史查询返回当前修订。
 
-没有保存过的设备报告不能通过新接口补回，设备历史只返回成功保存的报告，不登记断网或写入失败区间。音视频只返回当前仍保留的材料，并说明内存保留、提前淘汰和重启丢失的限制；不为已经移除的窗口建立缺失索引或追溯其删除原因。当前剩余最早一条记录不能证明它之前从未采集，也不能证明查询区间完整。
+音视频只返回当前仍保留的材料，并说明内存保留、提前淘汰和重启丢失的限制；不为已经移除的窗口建立缺失索引或追溯其删除原因。当前剩余最早一条记录不能证明它之前从未采集，也不能证明查询区间完整。
 
 ## 按时间补查历史
 
-扩展现有 `POST /api/agent/context/history`，在 `device_reports` 之外增加成员出现和感知窗口分支，通过 Backend 内部读取能力查询本地数据库记录及仍保留的感知窗口。实时通路使用 SSE（服务端持续向客户端推送数据）交付当前数据，历史查询独立读取已保留材料。
+扩展现有 `POST /api/agent/context/history`，在 `device_reports` 之外增加成员出现和感知窗口分支，通过 Backend 内部读取能力查询本地数据库记录及仍保留的感知窗口。设备分支完整复用现有[设备历史契约](../../packages/api/README.md#设备历史契约)，包含状态类型、设备与属性筛选、表达方式、排序方向、分页及容量边界；本计划不另定义其字段和行为。实时通路使用 SSE（服务端持续向客户端推送数据）交付当前数据，历史查询独立读取已保留材料。
 
-| 输入                | 用途                                                                                                                                                                                                                                                     |
-| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| kind                | device_reports、member_sightings 或 perception_windows；音视频按整体窗口返回                                                                                                                                                                             |
-| account_id、home_id | 预期的当前绑定账号与家庭；Backend 在查询及响应前核验，响应携带归属供 Agent 校验                                                                                                                                                                          |
-| start、end          | 必填 UTC 时间，start 必须早于 end；半开区间 `[start,end)`，匹配规则见下文                                                                                                                                                                                |
-| 对象条件            | device_reports 使用设备历史契约的 properties；member_sightings 使用可选 member_ids 和 sources；perception_windows 使用可选 sources。sources 是 `{ device_id, channel }` 数组，channel 可省略以匹配该设备全部镜头；省略数组不筛选该类对象，显式空数组拒绝 |
-| limit、cursor       | 有界分页；游标绑定查询条件，不能用一页结果声称完整历史                                                                                                                                                                                                   |
+| 输入                | 用途                                                                                                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| kind                | 新增 member_sightings 和 perception_windows；音视频按整体窗口返回                                                                                                                                          |
+| account_id、home_id | 预期的当前绑定账号与家庭；Backend 在查询及响应前核验，响应携带归属供 Agent 校验                                                                                                                            |
+| start、end          | 必填 UTC 时间，start 必须早于 end；半开区间 `[start,end)`，匹配规则见下文                                                                                                                                  |
+| 对象条件            | member_sightings 使用可选 member_ids 和 sources；perception_windows 使用可选 sources。sources 是 `{ device_id, channel }` 数组，channel 可省略以匹配该设备全部镜头；省略数组不筛选该类对象，显式空数组拒绝 |
+| limit、cursor       | 有界分页；游标绑定查询条件，不能用一页结果声称完整历史                                                                                                                                                     |
 
-共享输入按 kind 定义判别联合，每种 kind 只接受本分支的字段。数组非空、去重并固定排序；channel 取已有镜头 schema 的值，成员与设备 ID 非空。设备分支另接受 representation，直接复用设备历史契约，不重复定义字段。
+共享输入按 kind 定义判别联合，每种 kind 只接受本分支的字段。新增分支复用现有时间、对象 ID 与分页边界。数组非空、去重并固定排序；channel 取已有镜头 schema 的值，成员与设备 ID 非空。
 
-响应按 kind 定义判别联合，公共字段为 kind、account_id、home_id、start、end、records 和 next_cursor；设备分支再复用 representation 和 retention_days，其他分支返回各自的保留限制。设备报告返回数据库中实际保存的记录及固定 365 天保留期限，不评估历史完整性；存储不可用返回错误，成功但无匹配项返回空记录。成员和音视频按各自现有的记录与保留状态说明限制。每条记录带原时间、时间依据、对象与来源引用。游标绑定 kind、家庭身份、绑定记录 updated_at、规范化对象条件和请求区间；设备分支再绑定 representation。每页重新核验访问资格；家庭切换后拒绝旧请求，相同绑定的设备／成员数据库查询可跨进程重启续页。音视频游标还绑定现有 perception.instanceId，Backend 重启后拒绝旧音视频游标。limit 只控制页大小，使用共享配置的默认值和上限；无下一页时 next_cursor=null。游标格式错误或条件不符返回请求错误，不退回首屏。
+响应按 kind 定义判别联合，新增分支的公共字段为 kind、account_id、home_id、start、end、records 和 next_cursor，并按成员和音视频各自的记录与保留状态说明限制。每条记录带原时间、时间依据、对象与来源引用。新增分支的游标绑定 kind、家庭身份、绑定记录 updated_at、规范化对象条件和请求区间。每页重新核验访问资格；家庭切换后拒绝旧请求，相同绑定的成员数据库查询可跨进程重启续页。音视频游标还绑定现有 perception.instanceId，Backend 重启后拒绝旧音视频游标。limit 只控制页大小，使用共享配置的默认值和上限；无下一页时 next_cursor=null。游标格式错误或条件不符返回请求错误，不退回首屏。
 
-- **设备报告**复用[设备属性历史](../household-runtime.md#设备属性历史)的接收时间查询、连续同值报告段及逐条读取，沿用其来源标识、保留和分页规则。报告不代表已经更新当前值，也不证明设备即时采样。
 - **成员出现**将 firstObservedAt／lastObservedAt 视为包含首末观测点的范围，以 `firstObservedAt < end && lastObservedAt >= start` 筛选，单点出现在 start 时匹配、出现在 end 时不匹配；不只过滤首次观察时间。该跨度不证明持续在场，endedAt 不证明离开房间。返回记录 ID、原记录内容、当前归因与原依据。member_ids 按当前归因中已关联的成员匹配，不按历史上曾经归因的成员匹配；sources 按记录中的 deviceId/channel 匹配。两类条件同时提供时取交集。按 firstObservedAt、记录 ID 升序分页，游标保存同一排序键；SQL 在区间与对象筛选后应用游标和 limit + 1，不按 createdAt 或 updatedAt 分页。旧记录的 scopeEpoch 不作为当前运行筛选条件。
 - **音视频**先取得当前有资格访问来源的窗口详情，再按时间筛选；不得只用窗口索引或视觉区间提前排除候选。窗口 startedAt/endedAt、非空 audio.startedAt/endedAt、每条 speech.segments 的 observedStartAt/observedEndAt 分别按同一规则 `开始 < end && 结束 >= start` 匹配，任一匹配即返回整体窗口，并列出匹配的视觉／音频／转写引用。sources 按窗口设备与镜头匹配，音频关联沿用原 run；不另造独立音频记录。共享音轨及跨窗口引用按原结果 ID 识别，不制造重复事件。窗口按 startedAt、窗口 ID 升序分页，先筛选匹配详情再应用游标和 limit + 1。读取时已撤销或已经不存在的窗口不返回；仍有详情但媒体过期的窗口返回原内容及已有媒体状态，不调用编码接口生成新媒体。
 
@@ -76,9 +72,7 @@
 
 ### 设备历史依赖
 
-设备分支已由现有历史入口调用所属读取服务；存储、保留、故障行为、查询预算及验证限制统一见[设备属性历史](../household-runtime.md#设备属性历史)。本计划复用该能力，不另建保存通路，也不以历史页面或独立设备事件为前提。
-
-推送快照不用于反推设备历史；设备历史只返回成功保存的报告，不登记断网或写入失败区间，消费者不能据空结果认定区间完整。
+Agent 的 `device_reports` 分支与 Web 的设备历史入口共用 `household/history` 读取服务。专用接收模块接入现有 Agent 只读客户端，复用已实现的保存、查询、绑定资格与取消处理。设备历史不依赖专用推送连接、Agent 或页面；推送快照不用于反推逐条历史，空结果也不证明区间完整。存储及验证限制统一见[设备状态历史](../household-runtime.md#设备状态历史)。
 
 空调场景要求调查时段内历史保存已运行，实际采集到空调开关／设定温度及相关环境温度属性。属性 ID 从真实规格选取；不存在对应温度传感器时如实说明，不把空调设定温度替代室温。
 
@@ -95,11 +89,11 @@
 - 启用且本应可读取的来源失败时发布 failed 状态、清空该部分交付数据，并有界退避重试；未启用或未配置的来源发布 unavailable 状态及原因，配置或资格变化后再读取，其他来源继续工作。各部分保留实际读取时间；首次尚未完成为 loading，不用空列表表示。
 - 每次异步读取捕获现有家庭运行资格，完成后重新核验；家庭切换、退出、撤权或关闭后丢弃旧结果，A→B→A 不能只比较账号和家庭 ID。各来源分别读取，不承诺所有部分来自同一个数据库快照。
 - 多条 SSE 连接共享整理结果和来源监听；连接关闭仅释放本连接资源。Backend 退出时释放监听、停止重试并隔离迟到读取。
-- `household/stream.ts`、`http/snapshot-stream.ts` 可参考或复用。后者要求同步快照，数据库异步读取须先在整理服务完成。
+- 传输复用现有 `http/sse-transport.ts` 的有界写入、心跳与取消。`household/stream.ts` 与 `http/snapshot-stream.ts` 维护各自协议，后者要求同步快照；数据库异步读取须先在整理服务完成。
 
 ### 共享契约
 
-扩展现有 `packages/api/src/contracts/agent-context.ts`，从已有 schema 派生推送部分与新增历史分支。推送分为 household（家庭、房间、设备与规格）、device_state（最新属性及采集／来源状态）、members（登记资料）、member_sightings（最近出现记录）、perception（当前综合音视频观察及有界窗口详情）五个部分，各自使用现有字段派生。
+扩展现有 `packages/api/src/contracts/agent-context.ts`，从已有 schema 派生推送部分与新增历史分支。推送分为 household（家庭、房间、设备与规格）、device_state（最新属性、设备在线值及采集／来源状态）、members（登记资料）、member_sightings（最近出现记录）、perception（当前综合音视频观察及有界窗口详情）五个部分，各自使用现有字段派生。
 
 SSE 使用 snapshot 和 heartbeat 事件。snapshot 数据固定为 `{ scope, parts }`；scope 为 null 或 `{ account_id, home_id, scope_epoch }`，账号／家庭来自当前绑定，scope_epoch 直接复用家庭运行标识。该字段仅由传输适配器核对资格。初始 snapshot 明确给出全部五部分，即使某部分仍为 loading 或 unavailable。后续 snapshot 只携带发生更新的部分：省略某部分表示保留接收端该部分；出现某部分表示整体替换，ready 的空集合明确清空原集合，不能只追加或逐项合并。heartbeat 不携带业务变化，也不能将未收到的数据标为已同步。
 
@@ -121,19 +115,19 @@ SSE 使用 snapshot 和 heartbeat 事件。snapshot 数据固定为 `{ scope, pa
 
 ## 实施文件与职责
 
-| 文件                                                                                                                                         | 本次改动                                                                         |
-| -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `packages/api/src/contracts/agent-context.ts`                                                                                                | 推送部分、状态、历史 kind 分支及公共查询边界；设备分支引用 device-history 契约   |
-| `apps/backend/src/household/members/repository.ts`                                                                                           | 成员提交成功后、参考文件清理前发通知，沿用已有绑定访问                           |
-| `apps/backend/src/household/identity/activity-repository.ts`                                                                                 | 出现记录内部读取与提交成功通知，保持当前归因语义                                 |
-| `apps/backend/src/perception/window/store.ts`、`apps/backend/src/perception/service.ts`、`apps/backend/src/perception/media/window-media.ts` | 内容／媒体状态通知与按观察区间读取，复用原窗口和媒体状态                         |
-| `apps/backend/src/agent-context/service.ts`                                                                                                  | 常驻来源整理、各部分刷新、缓存和资格隔离                                         |
-| `apps/backend/src/agent-context/routes.ts`                                                                                                   | 专用 SSE 与 history 路由、输入校验、本机访问及截止时间；按 kind 调用所属读取服务 |
-| `apps/backend/src/main.ts`、`apps/backend/src/app.ts`                                                                                        | 装配常驻服务、注入依赖、挂载路由和关闭处理                                       |
-| `apps/agent/src/context/receiver.ts`、`apps/agent/src/context/history-client.ts`                                                             | 专用接收与只读历史客户端；通用 HTTP/SSE 能力复用现有 util 或成熟库               |
-| `apps/agent/src/config.ts`、`apps/agent/src/main.ts`                                                                                         | Backend 地址、启动／停止接收、本机诊断路由                                       |
+| 文件                                                                                                                                         | 本次改动                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `packages/api/src/contracts/agent-context.ts`                                                                                                | 推送部分、状态、历史 kind 分支及公共查询边界；设备分支引用 device-history 契约          |
+| `apps/backend/src/household/members/repository.ts`                                                                                           | 成员提交成功后、参考文件清理前发通知，沿用已有绑定访问                                  |
+| `apps/backend/src/household/identity/activity-repository.ts`                                                                                 | 出现记录内部读取与提交成功通知，保持当前归因语义                                        |
+| `apps/backend/src/perception/window/store.ts`、`apps/backend/src/perception/service.ts`、`apps/backend/src/perception/media/window-media.ts` | 内容／媒体状态通知与按观察区间读取，复用原窗口和媒体状态                                |
+| `apps/backend/src/agent-context/service.ts`                                                                                                  | 常驻来源整理、各部分刷新、缓存和资格隔离                                                |
+| `apps/backend/src/agent-context/routes.ts`                                                                                                   | 增加专用 SSE 与成员／音视频历史分支，按 kind 调用所属读取服务；设备分支沿用现有读取适配 |
+| `apps/backend/src/main.ts`、`apps/backend/src/app.ts`                                                                                        | 装配常驻服务、注入依赖、挂载路由和关闭处理                                              |
+| `apps/agent/src/context/receiver.ts`、`apps/agent/src/context/history-client.ts`                                                             | 专用接收与只读历史客户端；通用 HTTP/SSE 能力复用现有 util 或成熟库                      |
+| `apps/agent/src/config.ts`、`apps/agent/src/main.ts`                                                                                         | Backend 地址、启动／停止接收、本机诊断路由                                              |
 
-设备历史两表、生命周期、迁移和查询的当前实现与验证限制见[设备属性历史](../household-runtime.md#设备属性历史)。`agent-context/routes.ts` 和只读历史客户端已存在；上表只扩展专用推送、接收与其他历史分支。
+上表只列待实施的新增与扩展职责。现有设备历史的模块边界见[Backend README](../../apps/backend/README.md)，Agent 只读客户端用法见[Agent README](../../apps/agent/README.md#只读设备历史客户端)。
 
 ## 实施顺序
 
@@ -154,7 +148,7 @@ SSE 使用 snapshot 和 heartbeat 事件。snapshot 数据固定为 `{ scope, pa
 - 历史核对 start/end 边界单点、成员当前归因筛选、多镜头条件、视觉区间外匹配转写、媒体过期但详情仍存、容量截断游标及 Backend 重启后音视频旧游标失效。
 - Agent 无模型配置也能接收，不调用模型或写回；停止 Agent 不影响采集，现有 Web 功能正常。诊断不泄露凭据，不把家庭数据写入共享文档或无界日志。
 
-以一次真实空调开启／设定温度变化的报告为锚点，在已启用设备历史、音视频仍保留时查询前后几分钟：取回空调报告序列、环境温度、相关成员出现和整体音视频窗口中的转写。核对同一区间的原时间与来源，包括可能出现的“小爱同学”请求。再核对历史尚未开始、存储不可用、跨区间成员记录、超期窗口和分页的返回行为。
+以一次真实空调开启／设定温度变化的报告为锚点，在已配置历史数据库、音视频仍保留时查询前后几分钟：取回空调报告序列、环境温度、相关成员出现和整体音视频窗口中的转写。核对同一区间的原时间与来源，包括可能出现的“小爱同学”请求。再核对区间无已保存设备报告、存储不可用、跨区间成员记录、超期窗口和分页的返回行为。
 
 验收是材料可查，不是证明因果：当前属性报告没有证明操作发起者；人出现、语音请求与设备变化时间接近，不等于 Backend 能确认由谁通过小爱执行。未查到转写也不证明无人说过。
 
@@ -162,4 +156,4 @@ SSE 使用 snapshot 和 heartbeat 事件。snapshot 数据固定为 `{ scope, pa
 
 ## 代码依据
 
-[Backend](../../apps/backend/README.md)、[设备事实](../contracts/device-facts.md)、[家庭运行时](../household-runtime.md)、[感知](../perception.md)、[设备属性历史](../household-runtime.md#设备属性历史)、[Backend 测试规则](../../apps/backend/tests/README.md)。
+[Backend](../../apps/backend/README.md)、[设备事实](../contracts/device-facts.md)、[家庭运行时](../household-runtime.md)、[感知](../perception.md)、[设备状态历史](../household-runtime.md#设备状态历史)、[Backend 测试规则](../../apps/backend/tests/README.md)。

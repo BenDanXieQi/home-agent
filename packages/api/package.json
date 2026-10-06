@@ -14,7 +14,6 @@
     "./http/retry-after": "./src/http/retry-after.ts",
     "./http/read-body": "./src/http/read-body.ts",
     "./household": "./src/contracts/household.ts",
-    "./device-logs": "./src/contracts/device-logs.ts",
     "./observations": "./src/contracts/observations.ts",
     "./household-context": "./src/contracts/household-context.ts",
     "./household-members": "./src/contracts/household-members.ts",

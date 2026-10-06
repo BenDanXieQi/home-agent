@@ -172,7 +172,6 @@ export function MemberBrowser({ scope }: { scope: string }) {
           />
         ) : selected ? (
           <MemberOverview
-            key={selected.id}
             member={selected}
             scope={scope}
             onEdit={() => {

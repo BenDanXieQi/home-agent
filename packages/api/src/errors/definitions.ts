@@ -12,6 +12,27 @@ export const errorDefinitions = {
     message: "Use the local management interface.",
   },
   not_found: { status: 404, message: "The requested resource was not found." },
+  household_scope_changed: {
+    status: 409,
+    message: "The household scope has changed. Reload its data.",
+  },
+  household_unavailable: {
+    status: 503,
+    message: "The household is unavailable.",
+  },
+  household_capacity_exceeded: {
+    status: 503,
+    message: "The household request exceeds its resource budget.",
+  },
+  household_storage_unavailable: {
+    status: 503,
+    message: "Household storage is unavailable.",
+  },
+  device_history_export_too_large: {
+    status: 413,
+    message:
+      "The device history export exceeds its size limit. Narrow the time range or device selection.",
+  },
   spatial_record_changed: {
     status: 409,
     message: "The spatial record has changed. Reload before editing.",

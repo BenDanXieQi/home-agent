@@ -47,7 +47,7 @@ OAuth 与 MQTT 使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，
 
 `MijiaService.observeDevices(deviceIds, onObservation, signal)` 校验当前账号、所选家庭和设备清单中的明确设备集合，按需创建一个 MQTT 采集实例。多个观察者共用连接与 topic，按各观察者的引用计数增加或移除订阅；返回 `cancel()`、`snapshot()` 和 `retry()`。`snapshot()` 提供逐 topic 的期望、确认、在途、获准 QoS、失败原因及接收／丢弃计数；`retry()` 只重试临时失败，包括配额不足等临时 SUBACK 拒绝，不反复尝试权限、topic 或能力不支持等永久拒绝。新 topic 权限拒绝通知账号管理模块刷新设备清单一次，不将 ACL 拒绝误判为 token 失效；永久拒绝跨断线保留，直到授权条件变化。临时拒绝保留原始原因码，等待显式重试或重连，不立即循环订阅。
 
-观察入口本身不自动选择全家庭，不提交家庭 latest 或 online；家庭采集模块负责全家庭观察、当前值与有效性，见[设备事实与房间快照](device-facts.md)。设备上报日志通过独立的限时诊断采样调用此入口，并向页面提供 MQTT 记录；诊断日志没有接入家庭实时状态，使用方式见[米家业务](../mijia.md)。
+观察入口本身不自动选择全家庭，不提交家庭 latest 或 online；家庭采集模块负责全家庭观察、当前值与有效性，见[设备事实与房间快照](device-facts.md)。历史服务只保存家庭运行时已接纳的属性与在线报告，来源、保留与查询边界见[设备状态历史](../household-runtime.md#设备状态历史)。
 
 `protocols/miot/mqtt.ts` 负责 MQTT 5/TLS 连接、订阅与取消，`messages.ts` 校验和规范化属性及在线消息。连接使用 clean start、60 秒 keepalive 和 15 秒 CONNACK 期限；关闭 MQTT.js 的自动重连和重订（`reconnectPeriod=0`、`resubscribe=false`），恢复由账号观察模块统一管理。每设备请求 QoS 2 的 `device/{did}/up/properties_changed/#` 和 `device/{did}/state/#`；两类 topic 独立接受 QoS 0/1/2 的 SUBACK，连接成功不代替订阅确认。在途操作共用 16 个名额、确认期限 10 秒。订阅确认超时或退订失败／超时关闭当前连接代次，释放 MQTT.js 未确认请求，再由账号观察模块按既有退避恢复活动订阅。迟到确认不能复活旧代次；单项 SUBACK 明确拒绝仍按其临时或永久原因处理。
 
@@ -182,7 +182,7 @@ Home Agent 自有应用准入、温湿度计实际属性推送、床头灯以外
 
 独立设备事件须先验证真实订阅与解码通路，再按 `siid/eiid` 和规格接入共享结构；属性变化、首次值和恢复基线不冒充事件。扩大在线状态适用范围前验证型号的实时消息及断线恢复，属性读取、摄像头连接和清单缓存不能单独证明在线。供应商重传只按已验证消息身份或序号去重，无可靠依据时保持未知，不按相同值吞掉独立报告。
 
-新增来源沿用运行标识、连接代次、撤权和迟到结果门禁。真实型号的属性映射、读取、推送及有效期核实后配置现有 `config/collection.json`，不另建策略来源。已接纳的属性报告由[设备属性历史](../household-runtime.md#设备属性历史)保存，历史独立于本机新鲜度和当前值使用策略；当前配置不支持 `history_enabled`。
+新增来源沿用运行标识、连接代次、撤权和迟到结果门禁。真实型号的属性映射、读取、推送及有效期核实后配置现有 `config/collection.json`，不另建策略来源。已接纳的属性报告由[设备状态历史](../household-runtime.md#设备状态历史)保存，历史独立于本机新鲜度和当前值使用策略；当前配置不支持 `history_enabled`。
 
 ## 验证规范
 

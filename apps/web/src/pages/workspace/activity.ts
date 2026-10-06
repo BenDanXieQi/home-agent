@@ -11,11 +11,6 @@ import {
   saveConfigurationAtom,
   servicesQueryAtom,
 } from "../../modules/connections/state";
-import {
-  deviceLogCaptureAtom,
-  deviceLogScopeAtom,
-  deviceLogStateAtom,
-} from "../../modules/device-logs/state";
 import { householdAtom } from "../../modules/household/state";
 import {
   homeChoicesEnabledAtom,
@@ -53,11 +48,6 @@ const activities = {
   binding: { state: "thinking", label: "正在绑定家庭" },
   cameras: { state: "thinking", label: "正在连接摄像头画面" },
   camerasError: { state: "attention", label: "有摄像头暂时无法播放" },
-  logs: { state: "thinking", label: "正在加载设备日志" },
-  reconnectingLogs: { state: "thinking", label: "正在重连日志" },
-  capture: { state: "thinking", label: "正在更新日志采集" },
-  logsError: { state: "attention", label: "日志采集需要检查" },
-  listening: { state: "listening", label: "正在监听设备上报" },
 } as const;
 
 /** The router supplies scope; Jotai derives presentation directly from feature owners. */
@@ -122,22 +112,6 @@ export function createWorkspaceActivityAtom(path: string, navigating: boolean) {
         candidates.push(activities.cameras);
       if (binding?.status === "error" || get(playbackFailedAtom))
         candidates.push(activities.camerasError);
-    }
-    if (path === "/device-logs") {
-      const logs = get(deviceLogStateAtom);
-      const capture = get(deviceLogCaptureAtom);
-      if (capture.pending) candidates.push(activities.capture);
-      else if (logs.scope !== get(deviceLogScopeAtom) || !logs.loaded)
-        candidates.push(activities.logs);
-      else if (!logs.connected) candidates.push(activities.reconnectingLogs);
-      else if (
-        capture.status === "error" ||
-        logs.data.run?.status === "error" ||
-        logs.data.run?.status === "interrupted"
-      )
-        candidates.push(activities.logsError);
-      else if (logs.data.run?.status === "capturing")
-        candidates.push(activities.listening);
     }
     if (path === "/settings") {
       const config = get(configurationQueryAtom);

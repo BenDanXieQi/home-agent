@@ -1,21 +1,23 @@
 import { streamSSE } from "hono/streaming";
 import type { Context } from "hono";
 import { resyncSchema, stateVersionSchema } from "@home-agent/api/household";
+import { addAbortListener } from "node:events";
+import { createSseTransport } from "../http/sse-transport";
 import { householdLimits } from "./config";
 import type { HouseholdRuntime } from "./runtime";
 
-/** All writes, including heartbeats, share a bounded per-client FIFO. */
 const noop = () => {};
-const encoder = new TextEncoder();
+
 function serialize(
   event: "snapshot" | "state_change" | "heartbeat" | "resync_required",
   payload: unknown,
   end = false,
 ) {
-  const data = encoder.encode(
-    `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`,
-  );
-  return { data, bytes: data.byteLength, snapshot: event === "snapshot", end };
+  return {
+    message: { event, data: JSON.stringify(payload) },
+    snapshot: event === "snapshot",
+    end,
+  };
 }
 export function createHouseholdStream(runtime: HouseholdRuntime) {
   let connections = 0;
@@ -83,81 +85,34 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
     connections++;
     c.header("X-Accel-Buffering", "no");
     const response = streamSSE(c, async (stream) => {
-      let closed = false;
-      let sending = false;
-      let queuedBytes = 0;
-      let queuedChanges = 0;
-      let last: ReturnType<typeof current>["version"] | undefined;
-      const queue: ReturnType<typeof serialize>[] = [];
-      let detach = noop;
-      let heartbeat: ReturnType<typeof setInterval> | undefined;
-      let deadline: ReturnType<typeof setTimeout> | undefined;
-      let finish = noop;
-      const done = new Promise<void>((resolve) => {
-        finish = resolve;
+      const transport = createSseTransport(stream, {
+        signal: c.req.raw.signal,
+        eventBytes: householdLimits.snapshotBytes,
+        queuedBytes: householdLimits.changesBytes,
+        queuedEvents: householdLimits.queuedChanges,
+        heartbeat: {
+          intervalMs: householdLimits.heartbeatMs,
+          message: () => current().heartbeat().message,
+        },
+        writeTimeoutMs: householdLimits.writeTimeoutMs,
       });
-      function close() {
-        if (closed) return;
-        closed = true;
+      let last: ReturnType<typeof current>["version"] | undefined;
+      let detach = noop;
+      let released = false;
+      function release() {
+        if (released) return;
+        released = true;
         connections--;
         detach();
-        clearInterval(heartbeat);
-        clearTimeout(deadline);
-        queue.length = 0;
-        queuedBytes = 0;
-        queuedChanges = 0;
-        stream.abort();
-        finish();
       }
-      async function pump() {
-        if (sending || closed) return;
-        sending = true;
-        try {
-          while (queue.length && !closed) {
-            const item = queue[0]!;
-            deadline = setTimeout(close, householdLimits.writeTimeoutMs);
-            await stream.write(item.data);
-            clearTimeout(deadline);
-            if (closed) return;
-            queue.shift();
-            if (!item.snapshot) {
-              queuedBytes -= item.bytes;
-              queuedChanges--;
-            }
-            if (item.end) {
-              close();
-              return;
-            }
-          }
-        } catch {
-          close();
-        } finally {
-          sending = false;
-        }
-      }
+      const aborted = addAbortListener(transport.signal, release);
       function enqueue(item: ReturnType<typeof serialize>) {
-        if (closed) return;
-        const { bytes, snapshot } = item;
-        if (
-          bytes > householdLimits.snapshotBytes ||
-          (!snapshot &&
-            (queuedChanges + 1 > householdLimits.queuedChanges ||
-              queuedBytes + bytes > householdLimits.changesBytes))
-        ) {
-          close();
-          return;
-        }
-        if (!snapshot) {
-          queuedBytes += bytes;
-          queuedChanges++;
-        }
-        queue.push(item);
-        pump().catch((backgroundError: unknown) => {
-          console.error("stream: pump failed", backgroundError);
+        transport.enqueue(item.message, {
+          queued: !item.snapshot,
+          end: item.end,
         });
       }
       try {
-        stream.onAbort(close);
         // No await between registration and the single committed snapshot.
         detach = runtime.subscribe(() => {
           const next = current();
@@ -181,14 +136,11 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
         const initial = current();
         last = initial.version;
         enqueue(initial.snapshot());
-        if (closed) return;
-        heartbeat = setInterval(
-          () => enqueue(current().heartbeat()),
-          householdLimits.heartbeatMs,
-        );
-        await done;
+        await transport.done;
       } finally {
-        close();
+        transport.close();
+        release();
+        aborted[Symbol.dispose]();
       }
     });
     response.headers.set("Cache-Control", "no-store");

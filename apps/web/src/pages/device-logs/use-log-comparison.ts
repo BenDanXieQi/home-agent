@@ -1,17 +1,20 @@
 import { maximumComparedDevices } from "./log-data";
 import { useCallback, useMemo, useState } from "react";
-import type { DeviceLogSnapshot } from "@home-agent/api/device-logs";
+import type {
+  historyDevices,
+  LogEntry,
+} from "../../modules/device-history/presentation";
 
-/** Comparison selection survives display refinements; its time anchor belongs to a capture. */
+/** Comparison selection survives display refinements; its time anchor belongs to a query. */
 export function useLogComparison(
-  devices: NonNullable<DeviceLogSnapshot["run"]>["devices"],
-  runId: string | undefined,
+  devices: ReturnType<typeof historyDevices>,
+  queryKey: string,
 ) {
   const [comparing, setComparing] = useState(false);
   const [savedCompareIds, setCompareIds] = useState<string[]>([]);
   const [savedAnchor, saveAnchor] = useState<{
-    runId: typeof runId;
-    row: DeviceLogSnapshot["entries"][number];
+    queryKey: typeof queryKey;
+    row: LogEntry;
   } | null>(null);
   const available = useMemo(
     () => new Map(devices.map((device) => [device.id, device])),
@@ -35,14 +38,13 @@ export function useLogComparison(
             ? [...current, id]
             : current;
       });
-      saveAnchor((previous) =>
-        previous?.row.device_id === id ? null : previous,
-      );
+      saveAnchor(null);
     },
     [available],
   );
   const enterComparison = useCallback(
     (deviceId: string | null) => {
+      saveAnchor(null);
       setComparing(true);
       setCompareIds((previous) =>
         previous.some((id) => available.has(id)) || !deviceId
@@ -52,19 +54,24 @@ export function useLogComparison(
     },
     [available],
   );
-  const leaveComparison = useCallback(() => setComparing(false), []);
+  const leaveComparison = useCallback(() => {
+    saveAnchor(null);
+    setComparing(false);
+  }, []);
+  const clearAnchor = useCallback(() => saveAnchor(null), []);
   const clearComparison = useCallback(() => {
     setCompareIds([]);
     saveAnchor(null);
   }, []);
   const setAnchor = useCallback(
-    (row: DeviceLogSnapshot["entries"][number] | null) => {
-      saveAnchor(row ? { runId, row } : null);
+    (row: LogEntry | null) => {
+      saveAnchor(row ? { queryKey, row } : null);
     },
-    [runId],
+    [queryKey],
   );
+  if (savedAnchor && savedAnchor.queryKey !== queryKey) saveAnchor(null);
   const anchor =
-    savedAnchor?.runId === runId ? (savedAnchor?.row ?? null) : null;
+    savedAnchor?.queryKey === queryKey ? (savedAnchor?.row ?? null) : null;
   return useMemo(
     () => ({
       comparing,
@@ -76,6 +83,7 @@ export function useLogComparison(
       enterComparison,
       leaveComparison,
       clearComparison,
+      clearAnchor,
     }),
     [
       comparing,
@@ -87,6 +95,7 @@ export function useLogComparison(
       enterComparison,
       leaveComparison,
       clearComparison,
+      clearAnchor,
     ],
   );
 }

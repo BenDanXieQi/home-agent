@@ -1,6 +1,6 @@
 {
-  "id": "32ba6e78-bee9-4560-8a3e-776f9adc83d8",
-  "prevId": "c07b31c2-3b0e-4d44-873c-011e19ef06f7",
+  "id": "e3b461cb-31f7-487b-b8b7-ddc7c10191ad",
+  "prevId": "32ba6e78-bee9-4560-8a3e-776f9adc83d8",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -250,6 +250,61 @@
       "uniqueConstraints": {},
       "policies": {},
       "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.device_history_state": {
+      "name": "device_history_state",
+      "schema": "",
+      "columns": {
+        "device_id": {
+          "name": "device_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item": {
+          "name": "item",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "metadata": {
+          "name": "metadata",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "device_history_state_device_id_item_pk": {
+          "name": "device_history_state_device_id_item_pk",
+          "columns": ["device_id", "item"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "device_history_state_device_nonempty": {
+          "name": "device_history_state_device_nonempty",
+          "value": "length(\"device_history_state\".\"device_id\") > 0"
+        },
+        "device_history_state_value_scalar": {
+          "name": "device_history_state_value_scalar",
+          "value": "jsonb_typeof(\"device_history_state\".\"value\") IN ('number', 'boolean', 'string', 'null')"
+        },
+        "device_history_state_item": {
+          "name": "device_history_state_item",
+          "value": "(\"device_history_state\".\"item\" = 'online' AND jsonb_typeof(\"device_history_state\".\"value\") = 'boolean' AND \"device_history_state\".\"metadata\" IS NULL)\n      OR (\"device_history_state\".\"item\" ~ '^[1-9][0-9]*[.][1-9][0-9]*$' AND \"device_history_state\".\"metadata\" IS NOT NULL AND jsonb_typeof(\"device_history_state\".\"metadata\") = 'object')"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.device_observations": {

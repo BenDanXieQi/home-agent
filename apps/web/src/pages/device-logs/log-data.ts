@@ -1,60 +1,27 @@
-import type { DeviceLogSnapshot } from "@home-agent/api/device-logs";
+import type { LogEntry } from "../../modules/device-history/presentation";
 
 export const maximumComparedDevices = 4;
 export const logViews = [
-  { value: "signals", label: "设备信号" },
-  { value: "connection", label: "连接与订阅" },
+  { value: "all", label: "全部记录" },
+  { value: "property", label: "属性报告" },
+  { value: "online", label: "在线状态" },
 ] as const;
 
-export function selectLogEntries(
-  entries: DeviceLogSnapshot["entries"],
-  {
-    comparing,
-    compareIds,
-    deviceId,
-    filtering,
-    visibleIds,
-  }: {
-    comparing: boolean;
-    compareIds: readonly string[];
-    deviceId: string | null;
-    filtering: boolean;
-    visibleIds: ReadonlySet<string>;
-  },
-) {
-  return entries
-    .filter((row) =>
-      comparing
-        ? row.device_id !== null && compareIds.includes(row.device_id)
-        : deviceId
-          ? row.device_id === deviceId
-          : !filtering ||
-            (row.device_id !== null && visibleIds.has(row.device_id)),
-    )
-    .toReversed();
-}
-
 export function filterLogEntries(
-  entries: DeviceLogSnapshot["entries"],
+  entries: LogEntry[],
   {
     view,
-    showRepeated,
     search,
   }: {
     view: (typeof logViews)[number]["value"];
-    showRepeated: boolean;
     search: string;
   },
 ) {
   return entries.filter((row) => {
-    const matchesView =
-      view === "connection"
-        ? row.kind === "connection" || row.kind === "subscription"
-        : row.kind === "property" || row.kind === "online";
+    const matchesView = view === "all" || row.kind === view;
     return (
       matchesView &&
-      (showRepeated || row.change !== "same") &&
-      `${row.device_name} ${row.description} ${row.property} ${row.value}`
+      `${row.device_name} ${row.description ?? ""} ${row.property} ${row.displayValue}`
         .toLowerCase()
         .includes(search)
     );
@@ -62,23 +29,19 @@ export function filterLogEntries(
 }
 
 /** Entries are newest first; the first signal for each property is its displayed value. */
-export function latestLogValues(entries: DeviceLogSnapshot["entries"]) {
-  const values = new Map<string, DeviceLogSnapshot["entries"][number]>();
+export function latestLogValues(entries: LogEntry[]) {
+  const values = new Map<string, LogEntry>();
   for (const row of entries) {
-    if (row.kind !== "property" && row.kind !== "online") continue;
     const key = JSON.stringify([row.device_id, row.kind, row.property]);
     if (!values.has(key)) values.set(key, row);
   }
   return [...values.values()];
 }
 
-export function groupLogEntriesBySecond(rows: DeviceLogSnapshot["entries"]) {
-  const bySecond = new Map<
-    number,
-    Map<string | null, DeviceLogSnapshot["entries"]>
-  >();
-  const deviceCounts = new Map<string | null, number>();
-  const rowSequences = new Set<number>();
+export function groupLogEntriesBySecond(rows: LogEntry[]) {
+  const bySecond = new Map<number, Map<string, LogEntry[]>>();
+  const deviceCounts = new Map<string, number>();
+  const rowIds = new Set<string>();
   for (const row of rows) {
     const second = Math.floor(Date.parse(row.received_at) / 1000);
     let deviceRows = bySecond.get(second);
@@ -90,11 +53,17 @@ export function groupLogEntriesBySecond(rows: DeviceLogSnapshot["entries"]) {
     if (group) group.push(row);
     else deviceRows.set(row.device_id, [row]);
     deviceCounts.set(row.device_id, (deviceCounts.get(row.device_id) ?? 0) + 1);
-    rowSequences.add(row.sequence);
+    rowIds.add(row.id);
   }
   return {
     buckets: [...bySecond].toSorted(([left], [right]) => right - left),
     counts: deviceCounts,
-    sequences: rowSequences,
+    ids: rowIds,
   };
 }
+export const historyRangePresets = [
+  { label: "近 15 分钟", duration: 15 * 60_000 },
+  { label: "近 1 小时", duration: 60 * 60_000 },
+  { label: "近 6 小时", duration: 6 * 60 * 60_000 },
+  { label: "近 24 小时", duration: 24 * 60 * 60_000 },
+];

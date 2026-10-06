@@ -88,7 +88,6 @@ const { createMijiaHousehold, createMijiaSpecificationLoader } =
   await import("./mijia/household");
 const { MiotSpecClient } = await import("./mijia/protocols/spec/client");
 const { householdLimits } = await import("./household/config");
-const { DevicePushLogs } = await import("./mijia/device-logs/service");
 const { createHouseholdRepository } = await import("./household/repository");
 const { loadCollectionPolicy } = await import("./household/collection-policy");
 const collectionPolicy = await loadCollectionPolicy(
@@ -109,11 +108,6 @@ const deviceHistory = deviceHistoryRepository
   ? createDeviceHistoryService(household, deviceHistoryRepository)
   : undefined;
 household.start();
-const deviceLogs = new DevicePushLogs(
-  household,
-  resolvePath(import.meta.dir, "../../..", "data/mqtt-logs"),
-  mijiaService,
-);
 mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
@@ -165,6 +159,7 @@ identityEnrollment = identityReferences
     )
   : undefined;
 const app = createApp({
+  deviceHistory,
   deviceHistoryQuery: deviceHistoryRepository
     ? createDeviceHistoryQuery(deviceHistoryRepository)
     : undefined,
@@ -205,7 +200,6 @@ const app = createApp({
   connectionStore,
   household,
   mijiaService,
-  deviceLogs,
   shutdownSignal: shutdown.signal,
   readAgentUrl,
 });
@@ -231,7 +225,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
             perception.close(),
             app.closeRecordings(),
             speechInbox.close(),
-            deviceLogs.stop("后端停止", "interrupted"),
             (async () => {
               try {
                 await Promise.all([
