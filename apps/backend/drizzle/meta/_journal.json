@@ -92,6 +92,13 @@
       "when": 1791253784112,
       "tag": "0012_spatial_relations",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791257937308,
+      "tag": "0013_device_property_history",
+      "breakpoints": true
     }
   ]
 }

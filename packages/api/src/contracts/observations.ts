@@ -1,9 +1,10 @@
 import { z } from "zod";
 
+const instanceIdSchema = z.int32().positive();
 export const propertyAddressSchema = z.object({
   did: z.string().min(1).max(512),
-  siid: z.number().int().positive(),
-  piid: z.number().int().positive(),
+  siid: instanceIdSchema,
+  piid: instanceIdSchema,
 });
 export const propertyValueSchema = z.union([
   z.string(),
@@ -55,8 +56,8 @@ export const latestPropertySchema = z.object({
   home_id: z.string(),
   device_id: z.string(),
   room_id: z.string().nullable(),
-  siid: z.number().int().positive(),
-  piid: z.number().int().positive(),
+  siid: propertyAddressSchema.shape.siid,
+  piid: propertyAddressSchema.shape.piid,
   spec_id: z.string().nullable(),
   description: z.string(),
   type_name: z.string().nullable(),

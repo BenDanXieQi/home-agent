@@ -1,3 +1,4 @@
+import { deviceHistoryMetadataSchema } from "@home-agent/api/device-history";
 import { produce } from "@home-agent/api/immutable";
 import { entityKey, type Projection } from "@home-agent/api/household";
 import {
@@ -218,6 +219,7 @@ export function reduceFacts(
       event: HouseholdObservation;
       observation_id: string;
       input_sequence: number;
+      metadata?: ReturnType<typeof deviceHistoryMetadataSchema.parse>;
     } | null;
   } = { observation: null };
   const edges: { key: string; before: Latest; after: Latest }[] = [];
@@ -483,12 +485,18 @@ export function reduceFacts(
       spec_id: device.spec_id,
     };
     const candidate = event.kind === "read" && fact.has_value;
+    const metadata = deviceHistoryMetadataSchema.parse({
+      property_name: definition.capability?.description ?? null,
+      unit: definition.capability?.unit ?? null,
+      value_list: definition.capability?.value_list ?? null,
+    });
     if (ignored) {
       status.accepted++;
       accepted.observation = {
         event,
         observation_id: input.observation_id,
         input_sequence: sequence,
+        metadata,
       };
       return;
     }
@@ -570,6 +578,7 @@ export function reduceFacts(
       event,
       observation_id: input.observation_id,
       input_sequence: sequence,
+      metadata,
     };
   });
   // Control transitions can alter many records; property reports only account for their own delta.

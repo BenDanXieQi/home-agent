@@ -6,6 +6,7 @@ import {
   contextEntityRoleSchema,
 } from "@home-agent/api/household-context";
 import {
+  bigint,
   boolean,
   integer,
   unique,
@@ -301,5 +302,90 @@ export const identitySamples = pgTable(
       table.sha256,
     ),
     check("identity_samples_bytes_positive", sql`${table.imageBytes} > 0`),
+  ],
+);
+
+export const devicePropertyDefinitions = pgTable(
+  "device_property_definitions",
+  {
+    id: uuid("id").primaryKey(),
+    deviceId: text("device_id").notNull(),
+    siid: integer("siid").notNull(),
+    piid: integer("piid").notNull(),
+    metadata: jsonb("metadata")
+      .$type<
+        z.infer<
+          typeof import("@home-agent/api/device-history").deviceHistoryMetadataSchema
+        >
+      >()
+      .notNull(),
+  },
+  (table) => [
+    check(
+      "device_property_definitions_device_nonempty",
+      sql`length(${table.deviceId}) > 0`,
+    ),
+    check("device_property_definitions_siid_positive", sql`${table.siid} > 0`),
+    check("device_property_definitions_piid_positive", sql`${table.piid} > 0`),
+    check(
+      "device_property_definitions_metadata_object",
+      sql`jsonb_typeof(${table.metadata}) = 'object'`,
+    ),
+    index("device_property_definitions_property_idx").on(
+      table.deviceId,
+      table.siid,
+      table.piid,
+    ),
+  ],
+);
+export const devicePropertyObservations = pgTable(
+  "device_property_observations",
+  {
+    receivedAt: timestamp("received_at", {
+      withTimezone: true,
+      mode: "string",
+    }).notNull(),
+    observationId: uuid("observation_id").notNull(),
+    definitionId: uuid("definition_id")
+      .notNull()
+      .references(() => devicePropertyDefinitions.id),
+    scopeEpoch: uuid("scope_epoch").notNull(),
+    inputSequence: bigint("input_sequence", { mode: "bigint" }).notNull(),
+    value: jsonb("value")
+      .$type<
+        z.infer<
+          typeof import("@home-agent/api/observations").propertyValueSchema
+        >
+      >()
+      .notNull(),
+    source: text("source")
+      .$type<
+        z.infer<
+          typeof import("@home-agent/api/device-history").deviceHistoryReportSchema
+        >["source"]
+      >()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.receivedAt, table.observationId] }),
+    check(
+      "device_property_observations_sequence_nonnegative",
+      sql`${table.inputSequence} >= 0`,
+    ),
+    check(
+      "device_property_observations_value_scalar",
+      sql`jsonb_typeof(${table.value}) IN ('number', 'boolean', 'string', 'null')`,
+    ),
+    check(
+      "device_property_observations_source",
+      sql`${table.source} IN ('push', 'retained', 'read')`,
+    ),
+    index("device_property_observations_definition_time_idx").on(
+      table.definitionId,
+      table.receivedAt,
+      table.scopeEpoch,
+      table.inputSequence,
+      table.observationId,
+    ),
   ],
 );

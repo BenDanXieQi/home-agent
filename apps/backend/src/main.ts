@@ -1,3 +1,6 @@
+import { createDeviceHistoryQuery } from "./household/history/query";
+import { createDeviceHistoryRepository } from "./household/history/repository";
+import { createDeviceHistoryService } from "./household/history/service";
 import { createAppearanceIdentity } from "./household/identity/appearance";
 import { createReferenceEnrollment } from "./household/identity/enrollment";
 import { createMemberActivityRepository } from "./household/identity/activity-repository";
@@ -100,6 +103,12 @@ const household = createMijiaHousehold(
   ),
   collectionPolicy,
 );
+const deviceHistoryRepository = database
+  ? createDeviceHistoryRepository(database.db)
+  : undefined;
+const deviceHistory = deviceHistoryRepository
+  ? createDeviceHistoryService(household, deviceHistoryRepository)
+  : undefined;
 household.start();
 const deviceLogs = new DevicePushLogs(
   household,
@@ -172,6 +181,9 @@ identityEnrollment = identityReferences
     )
   : undefined;
 const app = createApp({
+  deviceHistoryQuery: deviceHistoryRepository
+    ? createDeviceHistoryQuery(deviceHistoryRepository)
+    : undefined,
   spatialService: createSpatialService(
     database ? createSpatialRepository(database.db) : undefined,
     (scope) => {
@@ -240,7 +252,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
             deviceLogs.stop("后端停止", "interrupted"),
             (async () => {
               try {
-                await memberActivity?.close(drain.signal);
+                await Promise.all([
+                  memberActivity?.close(drain.signal),
+                  deviceHistory?.close(drain.signal),
+                ]);
               } finally {
                 await household.close();
               }

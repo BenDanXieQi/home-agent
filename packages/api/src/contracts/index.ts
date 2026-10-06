@@ -128,3 +128,6 @@ export {
 export * from "./perception-window";
 
 export * from "./member-identity";
+
+export * from "./device-history";
+export * from "./agent-context";
