@@ -59,6 +59,11 @@ const membersRoute = createRoute({
   }),
   component: lazyRouteComponent(() => import("./pages/members/index")),
 });
+const automationsRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/automations",
+  component: lazyRouteComponent(() => import("./pages/automations/index")),
+});
 const addMemberRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/members/new",
@@ -172,6 +177,7 @@ export const router = createRouter({
       agentRoute,
       devicesRoute,
       membersRoute,
+      automationsRoute,
       addMemberRoute,
       camerasRoute.addChildren([
         camerasIndexRoute,

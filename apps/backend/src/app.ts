@@ -1,3 +1,5 @@
+import { createAutomationRoutes } from "./household/automations/routes";
+import type { AutomationService } from "./household/automations/service";
 import { createAgentReceiverRoutes } from "./agent-context/receiver-routes";
 import { createAgentContextRoutes } from "./agent-context/routes";
 import type { createAgentContextService } from "./agent-context/service";
@@ -38,6 +40,7 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  automations?: AutomationService | undefined;
   agentContext: ReturnType<typeof createAgentContextService>;
   memberActivityRepository:
     | ReturnType<typeof createMemberActivityRepository>
@@ -70,6 +73,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  automations,
   agentContext,
   memberActivityRepository,
   deviceHistory,
@@ -124,6 +128,10 @@ export function createApp({
           timestamp: new Date().toISOString(),
         }),
       ),
+    )
+    .route(
+      "/api/household/automations",
+      createAutomationRoutes(environment.BACKEND_PORT, automations),
     )
     .route(
       "/api/agent/context",

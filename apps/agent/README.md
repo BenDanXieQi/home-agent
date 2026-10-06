@@ -19,7 +19,7 @@ bun run --cwd apps/agent dev
 
 生成能力位于 `src/workflows/automation-generation/`，复用共享模型工厂，使用一次结构化模型调用；规则结构、设备引用、读写权限、枚举及动作参数按 `@home-agent/api/automations` 校验。输入中的能力用于约束草稿，不构成设备操作授权；保存或执行前仍需 Backend 核验当前家庭及设备能力。它不保存或启用规则、不操作设备、不使用聊天历史或 Agent 数据库。
 
-入口请求上限 256 KiB，响应上限 128 KiB，同时执行一项 workflow，繁忙返回 `workflow_busy`；运行期限取 `AGENT_RUN_TIMEOUT_MS` 与 90 秒的较小值，取消和超时传递到模型调用，结束后释放执行名额。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，专项模块不另建 HTTP 或客户端层。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面尚未接入，旧分支调用方需改用 Backend 公共入口；动作选择与 AI 复核尚未接入。真实模型生成效果尚未验证。
+入口请求上限 256 KiB，响应上限 128 KiB，同时执行一项 workflow，繁忙返回 `workflow_busy`；运行期限取 `AGENT_RUN_TIMEOUT_MS` 与 90 秒的较小值，取消和超时传递到模型调用，结束后释放执行名额。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，专项模块不另建 HTTP 或客户端层。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实模型生成效果尚未验证。
 
 进程复用 `@home-agent/observability` 初始化 OpenTelemetry。workflow 入口接续 Backend 的 W3C 追踪上下文，生成调用记录 `automation.generate` span、耗时、草稿校验结果及供应商返回的输入／输出 token 用量。默认不采集正文；`OTEL_INCLUDE_CONTENT=true` 时才记录输入资料和生成结果，导出方式沿用[共享追踪配置](../../packages/observability/README.md)。供应商没有返回用量时不估算 token 数。聊天与 Deep Agents 内部步骤没有新增 span。关闭时停止请求并关闭 exporter。
 

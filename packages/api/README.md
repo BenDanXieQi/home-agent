@@ -4,7 +4,7 @@
 
 ## 模块边界
 
-`@home-agent/api/agent-workflows` 定义 Agent 公共任务入口的输入、结果及容量限制，当前支持 `automation-generation`。`householdWorkflowInputSchema` 用于 Backend 入口，包含家庭运行标识及用户要求；`agentWorkflowInputSchema` 用于 Backend 到 Agent 的调用，携带 Backend 准备的设备能力。`@home-agent/api/automations` 提供生成草稿使用的规则树、设备能力、输入输出 schema 与能力校验；它不表示 Backend 已接入规则存储或执行。任务调用方式与未接入范围见 [Agent 接口](../../apps/agent/README.md#接口)。
+`@home-agent/api/agent-workflows` 定义 Agent 公共任务入口的输入、结果及容量限制，当前支持 `automation-generation`。`householdWorkflowInputSchema` 用于 Backend 入口，包含家庭运行标识及用户要求；`agentWorkflowInputSchema` 用于 Backend 到 Agent 的调用，携带 Backend 准备的设备能力。`@home-agent/api/automations` 提供生成草稿使用的规则树、设备能力、输入输出 schema 与能力校验；Backend 的规则存储与固定动作执行使用同一契约，AI 复核与动作选择尚未启用。任务调用方式与未接入范围见 [Agent 接口](../../apps/agent/README.md#接口)。
 
 Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agent/api/household` 等入口使用 `src/contracts/`。契约层包含定义数据格式并执行校验的 Zod schema、由它推导的类型，以及不涉及网络或数据库的协议数据转换，不依赖 Hono、追踪或服务端错误处理。backend 与 Agent 按需导入 `@home-agent/api/errors` 和 `@home-agent/api/errors/hono`，服务端错误处理层向契约层依赖。
 
@@ -135,3 +135,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 ## 设备标识与筛选
 
 `@home-agent/api/devices` 的 `deviceRoomKey` 根据家庭与房间 ID 生成筛选标识，房间名称只用于显示。中文值、单位和枚举说明的展示由 Web 的设备展示模块负责。
+
+## 自动化规则契约
+
+`@home-agent/api/automations` 提供条件树、触发与固定动作契约，以及属性、时间窗口和三值逻辑求值。设备数值与动作参数共用 `@home-agent/api/devices` 的格式、枚举、范围及步长校验，动作输入保留规格中的 `piid`。AI 条件和动作选择契约仍可表达停用定义，但当前能力校验拒绝启用或生成这些配置；它们不代表可用执行能力。公共生成入口使用 `@home-agent/api/agent-workflows`，详细语义见[家庭自动化](../../docs/automations.md)。

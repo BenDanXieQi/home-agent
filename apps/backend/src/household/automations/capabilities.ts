@@ -6,12 +6,15 @@ import { deriveDeviceValue } from "@home-agent/api/devices";
 import type { z } from "zod";
 import type { HouseholdRuntime } from "../runtime";
 
-export function readAutomationCapabilities(household: HouseholdRuntime) {
+export function readAutomationCapabilities(
+  household: HouseholdRuntime,
+  eventTypes: string[] = [],
+) {
   const result: z.infer<typeof automationCapabilitiesSchema> = {
     properties: [],
     actions: [],
-    event_types: [],
-    notification: false,
+    event_types: eventTypes,
+    notification: true,
   };
   for (const device of Object.values(household.snapshot().projection.device)) {
     if (device.archived || device.spec_status !== "ready") continue;

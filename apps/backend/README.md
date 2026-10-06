@@ -346,4 +346,8 @@ JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middl
 
 `POST /api/workflows` 复用本机访问限制，接受 `{ scope_epoch, workflow: "automation-generation", input: { text, definition? } }`，返回 `{ workflow, result: { definition, behavior, clarifications } }`。Backend 从当前家庭的已加载规格生成设备能力，不接受调用方提供的 capabilities，通过已配置的 Agent 地址调用公共任务入口。家庭切换、请求取消和服务关闭会取消在途调用；返回前再次校验家庭资格及草稿引用的当前设备能力，失效结果不作为可用草稿交付。
 
-当前只生成草稿，不保存、启用或执行规则。主干尚未接入自动化事件生产者与通知执行通路，所以交付的事件类型为空、通知能力为 false；不能把生成契约中的动作类型当成已实现的执行能力。自动化页面、动作选择和 AI 复核尚未接入。容量沿用共享 workflow 契约，调用期限不超过 Backend 请求期限与 workflow 期限。调用链通过现有 `tracedFetch` 传播追踪上下文；配置见[可观测性](../../packages/observability/README.md)。真实家庭与模型的完整生成链路尚未验收。
+该 workflow 只生成草稿，不保存、启用或执行规则。自动化页面已接入；固定动作支持米家属性写入、设备动作和执行记录中的网页通知。家庭事件生产者尚未接入，事件类型为空；通知能力为 true。AI 复核与动作选择尚未启用，含这些配置的规则不能启用。容量沿用共享 workflow 契约，调用期限不超过 Backend 请求期限与 workflow 期限。调用链通过现有 `tracedFetch` 传播追踪上下文；配置见[可观测性](../../packages/observability/README.md)。真实家庭与模型的完整生成链路尚未验收。
+
+## 家庭自动化
+
+`household/automations/` 提供规则管理、内存条件求值、固定动作调度及执行记录；`mijia/control/` 负责设备控制边界。规则 API 挂载于 `/api/household/automations`，生成沿用 `/api/workflows`。启动需要数据库与 `0016_automations.sql`，不启动 AI 复核、动作选择或模型任务 worker。8 张自动化相关表统一登记为家庭数据，切换家庭沿用 `clearHouseholdData` 清理。条件语义、动作资格、容量和验收边界统一见[家庭自动化](../../docs/automations.md)。

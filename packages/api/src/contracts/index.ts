@@ -131,3 +131,8 @@ export * from "./member-identity";
 
 export * from "./device-history";
 export * from "./agent-context";
+export * from "./automations";
+
+export * from "./household-events";
+
+export * from "./automation-reviews";

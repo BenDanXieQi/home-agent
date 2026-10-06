@@ -8,6 +8,7 @@ import {
   Settings2,
   Video,
   Waypoints,
+  Workflow,
 } from "lucide-react";
 
 export const navigation = [
@@ -45,6 +46,13 @@ export const navigation = [
     icon: Video,
     cornerRadius: 22,
     mobilePrimary: true,
+  },
+  {
+    to: "/automations",
+    label: "规则",
+    icon: Workflow,
+    cornerRadius: 14,
+    mobilePrimary: false,
   },
   {
     to: "/device-logs",
