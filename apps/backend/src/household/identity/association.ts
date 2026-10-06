@@ -44,28 +44,51 @@ export function associateMembers(
     );
   }
   return observation.tracks.flatMap((track) => {
-    const latest = track.evidence.at(-1);
-    const rankedMember = latest?.bestMemberId
-      ? members.get(latest.bestMemberId)
+    // Pet inference follows the strongest still-valid sample in this track.
+    // A weaker new view must not replace a better identity observation.
+    const petEvidence = track.evidence.filter((evidence) => {
+      const candidate = evidence.bestMemberId
+        ? members.get(evidence.bestMemberId)
+        : undefined;
+      return (
+        candidate &&
+        candidate.className !== "human" &&
+        evidence.score !== null &&
+        evidence.observedAt <= now &&
+        evidence.observedAt + evidenceTtlMs > now
+      );
+    });
+    const rankedEvidence =
+      petEvidence.toSorted(
+        (a, b) =>
+          (b.score ?? -Infinity) - (a.score ?? -Infinity) ||
+          b.observedAt - a.observedAt,
+      )[0] ?? track.evidence.at(-1);
+    const rankedMember = rankedEvidence?.bestMemberId
+      ? members.get(rankedEvidence.bestMemberId)
       : undefined;
     const rankedName = rankedMember && names.get(rankedMember.memberId);
     const ranked =
-      latest &&
+      rankedEvidence &&
       rankedMember &&
       rankedName !== undefined &&
-      latest.score !== null &&
-      latest.observedAt <= now &&
-      latest.observedAt + evidenceTtlMs > now
+      rankedEvidence.score !== null &&
+      rankedEvidence.observedAt <= now &&
+      rankedEvidence.observedAt + evidenceTtlMs > now
         ? {
             member: rankedMember,
             memberName: rankedName,
-            evidence: [latest],
+            evidence: [rankedEvidence],
             state: "inferred" as const,
-            observedAt: latest.observedAt,
-            expiresAt: latest.observedAt + evidenceTtlMs,
+            observedAt: rankedEvidence.observedAt,
+            expiresAt: rankedEvidence.observedAt + evidenceTtlMs,
           }
         : null;
-    if (latest && ranked && !hasCurrentProvenance(latest, track.trackId))
+    if (
+      rankedEvidence &&
+      ranked &&
+      !hasCurrentProvenance(rankedEvidence, track.trackId)
+    )
       return [];
     const member = track.label ? members.get(track.label) : undefined;
     const memberName = member && names.get(member.memberId);
