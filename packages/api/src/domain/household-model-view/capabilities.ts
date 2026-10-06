@@ -1,3 +1,4 @@
+import { groupBy } from "es-toolkit/array";
 import { z } from "zod";
 import exclusions from "./miot-exclusions.json";
 import type { Capability, Specification } from "./source";
@@ -112,22 +113,22 @@ export function createCapabilityCatalog(spec: Specification) {
     return { address, metadata, reason };
   });
   const eligible = audit.filter((entry) => entry.reason === null);
-  const byType = Map.groupBy(
-    eligible,
-    ({ address, metadata }) => metadata.type_name || address,
+  // JSON keys keep arbitrary capability names separate from object prototype keys.
+  const byType = groupBy(eligible, ({ address, metadata }) =>
+    JSON.stringify(metadata.type_name || address),
   );
   const keys = eligible.map((entry) => {
     const { address, metadata } = entry;
     let key = metadata.type_name || address;
-    if ((byType.get(key)?.length ?? 0) > 1)
+    if ((byType[JSON.stringify(key)]?.length ?? 0) > 1)
       key += `@${metadata.service_description || metadata.service_type_name || address}`;
     return { ...entry, key };
   });
-  const byName = Map.groupBy(keys, ({ key }) => key);
+  const byName = groupBy(keys, ({ key }) => JSON.stringify(key));
   const entries = keys.map((entry) => ({
     ...entry,
     key:
-      (byName.get(entry.key)?.length ?? 0) > 1
+      (byName[JSON.stringify(entry.key)]?.length ?? 0) > 1
         ? `${entry.key}@${entry.address}`
         : entry.key,
     stateReason: stateExclusion(entry.address, entry.metadata, spec),
@@ -147,6 +148,15 @@ export function stateExclusion(
   meta: Capability,
   spec: Specification,
 ) {
+  if (
+    [
+      "default-power-on-state",
+      "detection-sensitivity",
+      "has-someone-detection-sensitivity",
+      "alarm",
+    ].includes(meta.type_name ?? "")
+  )
+    return "configuration_detail";
   if (
     hasStandardNumericReading(meta) &&
     ["voltage", "electric-current", "power-consumption"].includes(

@@ -87,6 +87,7 @@ function VideoInspection({
           value={video}
           label="视频分析 JSON"
           name="video-analysis"
+          live
           defaultOpen
         />
       ) : null}
@@ -98,7 +99,12 @@ function AudioInspectionJson({
   audio,
 }: Parameters<typeof CameraAudioAnalysis>[0]) {
   return (
-    <JsonData value={audio} label="声音原始数据 JSON" name="audio-analysis" />
+    <JsonData
+      value={audio}
+      label="声音原始数据 JSON"
+      name="audio-analysis"
+      live
+    />
   );
 }
 

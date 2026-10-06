@@ -1,3 +1,5 @@
+import { groupBy } from "es-toolkit/array";
+import { latestObservations } from "./observations";
 import type { z } from "zod";
 import type { agentDevicePropertySchema } from "@home-agent/api/agent-context";
 import {
@@ -10,6 +12,7 @@ import {
   attentionSchema,
   compareText,
   requireReadyContext,
+  ModelContextError,
   type Household,
   type ReceivedContext,
 } from "./source";
@@ -98,22 +101,35 @@ export function createHouseholdModelView(
         compareText(a.device_id, b.device_id),
     );
   if (devices.some((d) => d.account_id !== scope.account_id))
-    throw new Error("Device outside household account scope");
+    throw new ModelContextError(
+      "invalid_identity",
+      "Device outside household account scope",
+    );
   const devicesById = new Map(devices.map((d) => [d.device_id, d]));
   if (devicesById.size !== devices.length)
-    throw new Error("Duplicate device identity");
+    throw new ModelContextError(
+      "invalid_identity",
+      "Duplicate device identity",
+    );
   const facts = new Map<string, Fact>();
   for (const fact of Object.values(state.latest)) {
     if (
       fact.account_id !== scope.account_id ||
       !devicesById.has(fact.device_id)
     )
-      throw new Error("Unresolved property device identity");
+      throw new ModelContextError(
+        "invalid_identity",
+        "Unresolved property device identity",
+      );
     const key = JSON.stringify([
       fact.device_id,
       `prop.${fact.siid}.${fact.piid}`,
     ]);
-    if (facts.has(key)) throw new Error("Duplicate property identity");
+    if (facts.has(key))
+      throw new ModelContextError(
+        "invalid_identity",
+        "Duplicate property identity",
+      );
     facts.set(key, fact);
   }
   const rooms = new Map(
@@ -159,13 +175,12 @@ export function createHouseholdModelView(
         return [];
       return [{ timing: reportGroup(fact), value: stateValue(entry, fact) }];
     });
-    const reports = Map.groupBy(values, ({ timing }) => JSON.stringify(timing))
-      .values()
-      .map((items) => ({
-        ...items[0]!.timing,
-        属性: items.map(({ value }) => value),
-      }))
-      .toArray();
+    const reports = Object.values(
+      groupBy(values, ({ timing }) => JSON.stringify(timing)),
+    ).map((items) => ({
+      ...items[0]!.timing,
+      属性: items.map(({ value }) => value),
+    }));
     return {
       device: describeDevice(
         device,
@@ -185,21 +200,19 @@ export function createHouseholdModelView(
       })),
     };
   });
-  const groups = Map.groupBy(rows, ({ capabilities }) =>
-    JSON.stringify(capabilities),
-  )
-    .values()
-    .map((items) => ({
-      设备: items.map(({ device }) => device),
-      能力: items[0]!.capabilities,
-    }))
-    .toArray();
+  const groups = Object.values(
+    groupBy(rows, ({ capabilities }) => JSON.stringify(capabilities)),
+  ).map((items) => ({
+    设备: items.map(({ device }) => device),
+    能力: items[0]!.capabilities,
+  }));
   const reports = rows
     .filter((row) => row.reports.length)
     .map((row) => ({
       设备ID: row.device.设备ID,
       报告组: row.reports,
-    }));
+    }))
+    .toSorted((a, b) => compareText(a.设备ID, b.设备ID));
   const audit = rows.flatMap((row) => row.audit);
   const recent = Object.fromEntries(
     Object.entries(attention).flatMap(([id, keys]) => {
@@ -214,19 +227,15 @@ export function createHouseholdModelView(
     家庭: Object.values(household.home)
       .filter((h) => !h.archived)
       .map((h) => ({ 名称: h.name, id: h.home_id })),
-    成员: source.members.map(({ species, description, ...member }) => ({
-      ...member,
-      ...(species ? { species } : {}),
-      ...(description ? { description } : {}),
-    })),
     说明: {
-      范围: "设备和符合规则的能力完整展示，不限制数量；报告仅列有值且含义明确的状态，其他详情通过spec/state读取",
+      范围: "完整展示领域规则允许的设备能力；spec/state仅接受该设备已列出的能力键，不能查询被规则排除的能力。报告仅列有值且含义明确的状态；已列出能力的配置值可通过state读取，规格详情通过spec读取",
       能力键: "能力按权限、数据类型分组；语义键可直接传入查询命令；同名以服务名称消歧",
       报告质量: "cloud_cache=云缓存、测量时间未知；unverified=待验证。在线不表示属性实时",
       来源: "仅反映传入快照，不现场刷新或控制设备",
     },
     设备组: groups,
     状态报告: reports,
+    最新观察: latestObservations(source),
     ...(Object.keys(recent).length ? { 最近关注: recent } : {}),
   };
 

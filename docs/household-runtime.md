@@ -121,7 +121,7 @@ Backend 的 `GET /api/agent/context/stream` 持续交付当前家庭资料，不
 
 ### Web 接收端观察
 
-Web “数据”页面 `/agent-context` 通过本机只读代理读取 Agent 进程的真实接收索引、单次消息及合并结果，不独立订阅 Backend 发布流。页面展示接收记录和当前上下文；Agent 不可用不回退为发送端数据。接收记录有条数和字节上限，仅保留当前连接与家庭资格下的数据，淘汰、断线与重启不补录。访问限制、阅读和导出说明见[Web 接收数据观察](../apps/web/README.md#agent-接收数据观察)，接收接口与保留策略见[Agent README](../apps/agent/README.md#当前数据接收与只读历史客户端)。原 Backend stream 与 history 通路不变。
+Web “数据”页面 `/agent-context` 通过本机只读代理读取 Agent 进程的真实接收索引、单次消息及合并结果，不独立订阅 Backend 发布流。页面展示接收记录、原始上下文和由同一读取快照生成的压缩后上下文；Agent 不可用不回退为发送端数据。接收记录有条数和字节上限，仅保留当前连接与家庭资格下的数据，淘汰、断线与重启不补录。访问限制、阅读和导出说明见[Web 接收数据观察](../apps/web/README.md#agent-接收数据观察)，接收接口与保留策略见[Agent README](../apps/agent/README.md#当前数据接收与只读历史客户端)。原 Backend stream 与 history 通路不变。
 
 ### 分部状态与刷新
 

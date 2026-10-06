@@ -6,7 +6,7 @@ import type { exportJson } from "./json-export.worker";
 export function JsonExport({
   source,
   name,
-  label = "导出 JSON",
+  label = "下载 JSON 文件",
 }: {
   source:
     | { kind: "value"; value: unknown }

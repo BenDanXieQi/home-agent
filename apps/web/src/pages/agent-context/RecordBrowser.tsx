@@ -5,7 +5,6 @@ import {
   getCoreRowModel,
   getFilteredRowModel,
   getSortedRowModel,
-  getPaginationRowModel,
   getFacetedRowModel,
   getFacetedUniqueValues,
   useReactTable,
@@ -13,7 +12,6 @@ import {
   type CellContext,
   type SortingState,
 } from "@tanstack/react-table";
-import { Select } from "../../components/Select";
 import { SearchSelect } from "../../components/SearchSelect";
 import { Button } from "../../components/Button";
 import { JsonData } from "../../components/json/JsonData";
@@ -93,7 +91,6 @@ export function RecordBrowser<T>({
     state: { globalFilter: search.trim(), expanded },
     onGlobalFilterChange: setSearch,
     initialState: {
-      pagination: { pageSize: 25 },
       sorting: initialSorting,
       columnVisibility: { [searchColumnId]: false },
     },
@@ -101,12 +98,10 @@ export function RecordBrowser<T>({
     getCoreRowModel: getCoreRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
     getFacetedRowModel: getFacetedRowModel(),
     getFacetedUniqueValues: getFacetedUniqueValues(),
   });
   const total = table.getFilteredRowModel().rows.length;
-  const { pageIndex, pageSize } = table.getState().pagination;
   function collapseDetails() {
     setExpanded({});
   }
@@ -128,7 +123,6 @@ export function RecordBrowser<T>({
           className="w-full sm:w-72"
           onChange={(value) => {
             table.setGlobalFilter(value);
-            table.setPageIndex(0);
             collapseDetails();
           }}
         />
@@ -137,7 +131,6 @@ export function RecordBrowser<T>({
             size="small"
             onClick={() => {
               table.setGlobalFilter("");
-              table.setPageIndex(0);
               collapseDetails();
             }}
           >
@@ -187,7 +180,6 @@ export function RecordBrowser<T>({
                   ]}
                   onValueChange={(value) => {
                     column.setFilterValue(value || undefined);
-                    table.setPageIndex(0);
                     collapseDetails();
                   }}
                 />
@@ -200,7 +192,6 @@ export function RecordBrowser<T>({
               onClick={() => {
                 table.resetColumnFilters();
                 table.setGlobalFilter("");
-                table.setPageIndex(0);
                 collapseDetails();
               }}
             >
@@ -218,7 +209,6 @@ export function RecordBrowser<T>({
           setExpanded(expanded[id] ? {} : { [id]: true });
         }}
         onSort={() => {
-          table.setPageIndex(0);
           collapseDetails();
         }}
         renderDetails={(record) => (
@@ -231,75 +221,6 @@ export function RecordBrowser<T>({
           rows.length ? "没有匹配记录，试试其他筛选条件。" : "这部分尚无记录。"
         }
       />
-      <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-muted">
-        <label className="m-0 flex items-center gap-2 whitespace-nowrap">
-          <span className="shrink-0">每页</span>
-          <Select
-            label="每页记录数"
-            value={String(pageSize)}
-            className="w-24 border-line bg-paper"
-            options={[25, 50, 100].map((size) => ({
-              value: String(size),
-              label: `${size} 条`,
-            }))}
-            onValueChange={(value) => {
-              table.setPageSize(Number(value));
-              table.setPageIndex(0);
-              collapseDetails();
-            }}
-          />
-          <span>
-            {total
-              ? `${pageIndex * pageSize + 1}–${Math.min((pageIndex + 1) * pageSize, total)} / ${total}`
-              : "0 条"}
-          </span>
-        </label>
-        <div className="flex items-center gap-2">
-          <Button
-            size="small"
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => {
-              table.firstPage();
-              collapseDetails();
-            }}
-          >
-            首页
-          </Button>
-          <Button
-            size="small"
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => {
-              table.previousPage();
-              collapseDetails();
-            }}
-          >
-            上一页
-          </Button>
-          <span>
-            {pageIndex + 1} / {Math.max(1, table.getPageCount())}
-          </span>
-          <Button
-            size="small"
-            disabled={!table.getCanNextPage()}
-            onClick={() => {
-              table.nextPage();
-              collapseDetails();
-            }}
-          >
-            下一页
-          </Button>
-          <Button
-            size="small"
-            disabled={!table.getCanNextPage()}
-            onClick={() => {
-              table.lastPage();
-              collapseDetails();
-            }}
-          >
-            末页
-          </Button>
-        </div>
-      </div>
     </div>
   );
 }

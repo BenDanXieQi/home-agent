@@ -45,7 +45,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 - `context/receiver.ts`：Backend 专用 SSE 接收、五部分内存状态、连接和家庭资格。
 - `context/receipts.ts`：受接收器管理的有限内存接收记录与当时上下文；`context/receipt-changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
 - `context/reader.ts`：历史与引用材料读取；使用共享 Backend RPC 客户端，负责当前接收资格及响应与请求的匹配校验。
-- `context/model-view/`：Agent 家庭视图筛选、语义查询键、JSON 编码与解码；`cli.ts` 提供保存快照的离线转换和查询。
+- 家庭模型视图：转换、编码、解码及离线 CLI 均由根目录共享包 `packages/api/` 提供；Agent 的 `context:format` 命令直接运行共享 CLI。
 - `workflows/spatial-planning/index.ts`：空间规划专项 Agent 工厂，使用同一模型配置，由调用方注入共用的 backend 能力。
 - `workflows/spatial-planning/instructions.ts`：空间证据使用、记录匹配、配置写入与结果核对指令。
 
@@ -81,13 +81,15 @@ Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；�
 
 ## 家庭模型视图
 
-`context/model-view/view.ts` 的 `createHouseholdModelView(context)` 接受已校验的接收快照，生成设备清单、能力与有值状态，并提供受相同规则约束的 `spec/state` 查询。输入必须有家庭范围和五部分 ready 数据；缺少规格的设备仍在设备清单中，不编造能力。该模块属于 Agent 的输入组织，Backend 和接收器继续保存完整来源事实。当前聊天入口尚未调用此模块。
+共享包 `@home-agent/api/household-model-view` 的 `createHouseholdModelView(context)` 接受已校验的接收快照，生成设备清单、能力、有值状态与最新观察摘要，并提供受相同规则约束的 `spec/state` 查询。输入必须有家庭范围和五部分 ready 数据；缺少规格的设备仍在设备清单中，不编造能力。该模块由 Agent 和 Web 压缩上下文页共用，Backend 和接收器继续保存完整来源事实。当前聊天入口尚未调用此模块。
 
 模块直接接收数据，不依赖接收器、模型框架或 CLI。`createHouseholdModelView` 与 `encodeHouseholdContext` 在内存中同步执行，没有订阅、定时器、网络／文件读写或跨调用缓存；CLI 单独负责文件读写。进程内用法如下（`snapshot` 为已校验的接收快照）：
 
 ```ts
-import { createHouseholdModelView } from "./context/model-view/view";
-import { encodeHouseholdContext } from "./context/model-view/encoding";
+import {
+  createHouseholdModelView,
+  encodeHouseholdContext,
+} from "@home-agent/api/household-model-view";
 
 const view = createHouseholdModelView(snapshot);
 const contextJson = JSON.stringify(encodeHouseholdContext(view.semantic));
@@ -99,9 +101,17 @@ const contextJson = JSON.stringify(encodeHouseholdContext(view.semantic));
 
 摄像头只展示切换常看位置、巡航开关／模式／位置；人在传感器只展示可明确辨认的整体有人／无人属性，无法确认整体项时不选某个分区替代。人体移动传感器保留移动事件，不由此推断持续有人。自检、开发者模式、码库匹配、协议载荷和内部标识等细节由 `policy.ts` 排除。摄像头分析及事件归 Backend。缺值和未知规格不生成状态占位；缓存、待验证、过期等原始质量及时间保持不变。
 
-能力不因当前缺值而消失，也没有每设备数量或 token 上限。语义键在设备内消歧，完整规格查询包含当前视图允许的属性、动作和事件；没有独立访问权限的事件参数不会伪装成可查询属性。`capabilities.ts` 处理 MIoT 名称、权限、单位和来源型号过滤；型号排除数据的固定官方来源见相邻 `miot-exclusions.json`。这不依赖 Home Assistant 运行时，不执行供应商代码，也不表示复现了所有 HA 平台组件行为。
+能力不因当前缺值而消失，也没有每设备数量或 token 上限。领域规则先决定哪些能力可见，`spec/state` 仅接受设备已列出的能力键，不能重新查询被规则排除的内容。在允许的能力中，默认上电状态、检测灵敏度、提示音和具有独立开关的指示灯配置值不进入概览，但对应能力及 `state` 查询保留。摄像头及存在传感器服务中的检测灵敏度仍受前述能力规则排除，不承诺可查询。这属于概览筛选；编码和解码对筛选后的语义视图无损。语义键在设备内消歧，完整规格查询包含当前视图允许的属性、动作和事件；没有独立访问权限的事件参数不会伪装成可查询属性。`capabilities.ts` 处理 MIoT 名称、权限、单位和来源型号过滤；型号排除数据的固定官方来源见相邻 `miot-exclusions.json`。这不依赖 Home Assistant 运行时，不执行供应商代码，也不表示复现了所有 HA 平台组件行为。
 
-`encoding.ts` 将相同能力与规格集合合并，按权限、类型分组，用固定位置数组和本文件内数字索引表达。`schema` 说明字段位置和权限位；原始设备 ID 和语义键可以直接查询，索引不作为设备身份。解码会校验格式说明、权限与类型、索引、设备归属、重复语义键、重复状态、关注项及连续编号，保留合法的 `false`、`0` 和 `null`。
+`encoding.ts` 共享相同的能力定义和能力集合：`C` 按权限与直接可读的类型分组，每条定义显式保存全局编号、查询键和名称；`S` 保存能力编号集合；`D` 保存设备 ID、名称、房间名称、类别及能力集合索引。只有能力集合与定义使用索引，房间、类别和类型无需查字典。能力缺少状态报告不表示设备不支持它。
+
+`states` 按设备合并在线状态与属性报告，每条直接带设备 ID 和名称，通过 ID 与设备清单对应，不依赖数组位置；没有属性报告的设备仍保留在线状态和空报告数组。报告组共享质量与时间，值行直接保存查询键、原始值、单位、枚举标签及可信变化时间。省略的尾部字段表示未知；合法的 `false`、`0` 和 `null` 原样保留。报告接收时间不是测量时间，顶层 `received_at` 只表示快照接收时间。解码校验格式、能力索引与权限、设备身份和名称、每台设备唯一状态、属性归属、重复查询键及关注项。
+
+序列化顺序为 `schema / instructions / C / S / D / meta / attention（可选）/ received_at / states / observations`。格式说明、共享能力、设备清单和家庭资料位于稳定前部，动态状态和观察放在后部；成员资料与最近出现合并，不再单独放入 `meta`。调用方应保留该顺序，以便支持前缀缓存的模型服务复用稳定内容。实际缓存命中取决于服务端支持、缓存保留和完整请求布局；当前格式在实际聊天入口的命中率、费用及延迟收益尚未验证。
+
+`observations.members` 每位成员只出现一次，包含 ID、名字、类型、物种、简介和 `last_seen`；成员资料取自同一快照，ID 用于区分同名成员。最近出现保留时间、观测区域或摄像头来源及已确认／待确认／推断状态。`observations.clues` 按摄像头汇总未识别目标、画面变化、语音和猫狗声，直接包含设备 ID、别名或名称和镜头编号。同类线索只保留最后时间，详细依据、材料引用和修订信息不进入摘要；需要细节时读取原始观察或历史。时间使用 ISO 字符串。
+
+摘要直接格式化 Backend 已选取的最新状态集合，不再次按时间筛选或裁剪，也不跨调用保存位置；成员最后出现由 Backend 从数据库选取，可早于 30 分钟，`as_of` 仅表示整理时间。成员没有保留的出现记录时 `last_seen` 为空，来源状态区分无记录与读取不可用，均不表示离家。最后出现不等于当前位置，同一时刻的多个来源一并保留。观测区域先要求当前设备／镜头的启用绑定唯一，再检查该绑定最后更新时间不晚于首次观察；否则标明摄像头来源和位置未确认，不把摄像头所在房间当作成员位置。摄像头来源优先显示设备别名，无别名时显示名称，并保留设备 ID 和镜头编号以区分同名设备；设备已不在设备清单中时仍显示 ID 和镜头编号。窗口声音不归因给同窗成员。
 
 从仓库根目录运行，输入是 `GET /api/context-receipts/current` 保存的完整 `{ journal_id, context }` JSON：
 
@@ -113,6 +123,20 @@ bun run --cwd apps/agent context:format --input /path/current.json state <device
 bun run --cwd apps/agent context:format --input /path/model-context/context.json decode
 ```
 
-输出 `context.json` 是紧凑模型输入，`context.pretty.json` 和 `context.formatted.json` 是同内容缩进版，`context.decoded.json` 是还原的语义视图。`capability-audit.json` 给出每项能力的排除原因，`manifest.json` 统计设备、能力、报告、Unicode 码点和 UTF-8 字节数；token 数需用目标模型分词器另算，不能用字符数固定换算。CLI 在写入前核对编码和解码内容一致，并拒绝输出或关注记录覆盖输入文件；输出文件之间以及输出与关注文件之间也不能指向同一文件。
+输出 `context.json` 是紧凑模型输入，`context.pretty.json` 和 `context.formatted.json` 是同内容缩进版，`context.decoded.json` 是还原的语义视图。`capability-audit.json` 给出每项能力的排除原因，`manifest.json` 记录输入文件和紧凑输出的 SHA-256 指纹，统计设备、能力、属性值条数（`reports`）、Unicode 码点和 UTF-8 字节数。`semantic_bytes` 是筛选后语义视图的紧凑 JSON 字节数，`bytes` 是编码后紧凑 JSON 字节数，两者比较仅衡量编码效果。原始快照到语义视图还包含领域筛选，不能将其缩减全部计为无损编码收益。token 数需用目标模型分词器另算，不能用字符数固定换算。CLI 在写入前核对编码和解码内容一致，并拒绝输出或关注记录覆盖输入文件；输出文件之间以及输出与关注文件之间也不能指向同一文件。
 
 `spec/state` 的显式键查询可附带 `--attention <file> --remember`，成功后记录关注键；`overview` 读取同一 `--attention` 文件时只突出仍有效的关注项，不删减其他能力。全量查询不记录关注。查询仅读取保存快照，不刷新设备、不执行动作，不重新带入领域规则排除的内容。原始快照和输出应放在本地数据位置，不提交设备及成员资料。
+
+### 格式比较与模型理解检查
+
+压缩方案比较须固定同一输入指纹，并分别记录筛选后的属性值数量与目标分词器的 token 数。单项编码候选先比较 token 收益，再组合；字符或字节减少不保证 token 减少。CLI 的还原校验只证明筛选后视图的编解码一致性，不证明模型理解准确率。
+
+`scripts/context-understanding.ts` 对同一份 CLI 产出的语义 JSON 和编码 JSON 执行小范围理解对照。它核对输入指纹、输出指纹和两种格式语义一致性，以相反顺序各运行两次，共四次独立模型请求。使用 `.env` 中的 MiMo 中国区 Token Plan 配置，关闭思考，每次最多输出 2,048 token；请求会发送这份家庭视图并产生模型费用，运行前须获得授权。
+
+```sh
+bun --env-file=.env apps/agent/scripts/context-understanding.ts --context /path/model-context --cases /path/cases.json --output /path/new-results
+```
+
+题目文件包含 `input_sha256`（取自 CLI manifest）和 `questions` 数组，每题具有唯一 `id`、说明返回 JSON 结构的 `question` 和人工核对的 `expected`。标准答案应依据固定快照的设备、规格与事实核实，不能直接采用被测模型的回答。标准答案只用于本地判分，不发送给模型；按题比较 JSON 值、类型和结构，数组顺序也参与判分。题目及结果含家庭资料时只保存在本地数据位置。
+
+输出目录必须不存在。结果保存模型原文、逐题得分、请求用量、输入指纹和调用条件，需逐条检查失败是否来自模型理解、题目歧义或标准答案错误。网络与服务错误中断运行，不能算作模型理解失败。小样本结果只覆盖所选问题，不代表完整 Agent 的工具调用、长期理解准确率或实时场景判断。依据失败题修改格式后的同题重跑属于修复验证，不是独立泛化评估；泛化判断需要另外冻结未参与修改的新题和快照。缓存验证另看完整请求返回的缓存 token，不能以公共前缀长度或短请求耗时替代。

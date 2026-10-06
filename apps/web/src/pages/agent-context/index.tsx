@@ -1,5 +1,5 @@
 import { SearchField } from "../../components/SearchField";
-import { useState } from "react";
+import { memo, useState } from "react";
 import {
   ArrowDownToLine,
   ChevronDown,
@@ -16,7 +16,8 @@ import { PageHeaderContent } from "../../components/PageHeaderContent";
 import { SegmentedControl } from "../../components/SegmentedControl";
 import { Notice } from "../../components/Notice";
 import { useReceiptIndex } from "../../modules/agent-context/receipts";
-import { ReceiptDetail, ReceivedContext } from "./ReceiptDetail";
+import { ReceivedContext } from "./ReceivedContext";
+import { ReceiptChanges } from "./ReceiptChanges";
 import { presentReceiptChange } from "./receipt-presentation";
 import { partLabels, time, formatBytes } from "./presentation";
 
@@ -26,6 +27,30 @@ const connectionLabels = {
   connected: "已连接 Backend",
   disconnected: "与 Backend 断开",
 };
+
+// Receipt polling must not update the header when its connection state is unchanged.
+const ConnectionStatus = memo(function ConnectionStatus({
+  connected,
+  label,
+}: {
+  connected: boolean;
+  label: string | undefined;
+}) {
+  return (
+    <PageHeaderContent slot="details">
+      <span
+        aria-hidden={label === undefined ? true : undefined}
+        className={`flex items-center gap-2 whitespace-nowrap text-xs text-muted ${label === undefined ? "invisible" : ""}`}
+      >
+        <span
+          className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-sage" : "bg-muted"}`}
+        />
+        {/* Reserve the usual status width until the first read supplies evidence. */}
+        {label ?? connectionLabels.connected}
+      </span>
+    </PageHeaderContent>
+  );
+});
 
 function ReceiptTimeline({
   data,
@@ -186,7 +211,7 @@ function ReceiptTimeline({
               </button>
               {selected === receipt.id ? (
                 <div className="border-t border-line/60 px-5 py-4">
-                  <ReceiptDetail journalId={data.journal_id} id={receipt.id} />
+                  <ReceiptChanges key={receipt.id} changes={receipt.changes} />
                 </div>
               ) : null}
             </div>
@@ -212,36 +237,38 @@ function ReceiptTimeline({
 
 export default function AgentContextPage() {
   const query = useReceiptIndex();
-  const [tab, setTab] = useState<"receipts" | "context">("receipts");
+  const [tab, setTab] = useState<"receipts" | "context" | "compressed">(
+    "receipts",
+  );
   // A failed read must not present the last successful response as current receipt evidence.
   const data = query.isError ? undefined : query.data;
   return (
-    <section className="space-y-4">
-      <PageHeaderContent slot="details">
-        <span className="flex items-center gap-2 text-xs text-muted">
-          <span
-            className={`size-1.5 rounded-full ${data?.connection.status === "connected" ? "bg-sage" : "bg-muted"}`}
-          />
-          {data
+    <section className="space-y-4 [overflow-anchor:none]">
+      <ConnectionStatus
+        connected={data?.connection.status === "connected"}
+        label={
+          data
             ? `${connectionLabels[data.connection.status]}${data.connection.synchronized ? "" : " · 等待初始数据"}`
             : query.isError
               ? "Agent 不可用"
-              : "连接 Agent…"}
-        </span>
-      </PageHeaderContent>
+              : undefined
+        }
+      />
       <PageHeaderContent slot="actions">
-        <Button
-          variant="ghost"
-          icon={<RefreshCw size={14} />}
-          status={query.isFetching ? "pending" : "idle"}
-          onClick={() => {
-            query.refetch().catch(() => {
-              console.warn("Agent receipt refresh failed");
-            });
-          }}
-        >
-          刷新
-        </Button>
+        {tab === "receipts" ? (
+          <Button
+            variant="ghost"
+            icon={<RefreshCw size={14} />}
+            status={query.isFetching ? "pending" : "idle"}
+            onClick={() => {
+              query.refetch().catch(() => {
+                console.warn("Agent receipt refresh failed");
+              });
+            }}
+          >
+            刷新接收记录
+          </Button>
+        ) : null}
       </PageHeaderContent>
       <SegmentedControl
         label="Agent 数据观察"
@@ -251,7 +278,8 @@ export default function AgentContextPage() {
         onValueChange={setTab}
         options={[
           { value: "receipts", label: "接收记录" },
-          { value: "context", label: "当前上下文" },
+          { value: "context", label: "原始上下文" },
+          { value: "compressed", label: "压缩后上下文" },
         ]}
       />
 
@@ -277,6 +305,7 @@ export default function AgentContextPage() {
             <ReceivedContext
               key={data.journal_id}
               journalId={data.journal_id}
+              compressed={tab === "compressed"}
             />
           )}
           <details className="border-t border-line pt-3 text-xs text-muted">
@@ -286,12 +315,13 @@ export default function AgentContextPage() {
             <div className="mt-3 space-y-2 leading-6">
               <p>
                 每 2 秒读取 Agent 接收记录，心跳不计入记录。展开时暂停列表刷新，
-                Agent 继续接收；当前上下文通过“重新读取”更新。
+                Agent
+                继续接收；原始上下文和压缩后上下文通过“获取最新上下文”更新。
                 列表预览前三项变化，展开查看全部；搜索匹配全部变化中的空间、观测来源与目标、房间、设备、属性和变化值。
               </p>
               <p>
                 消息只包含本次提供的部分，省略部分沿用旧值；设备增量仅更新或删除指定条目，
-                其他部分整体替换。详情中的上下文固定为该条消息合并后的状态。
+                其他部分整体替换。展开详情只展示该次接收的完整变化。
               </p>
               <p>
                 消息大小按 SSE 正文计算，上下文按 scope 与 parts 的紧凑 JSON
