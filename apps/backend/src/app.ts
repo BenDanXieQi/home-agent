@@ -26,6 +26,7 @@ import { errorResponse, handleHttpError } from "@home-agent/api/errors/hono";
 import { createWebRoutes } from "./web/routes";
 import { secureHeaders } from "hono/secure-headers";
 import { createChatRoutes } from "./chat/routes";
+import { createWorkflowRoutes } from "./workflows/routes";
 import type { Environment } from "./environment";
 import { createConnectionRoutes } from "./connections/routes";
 import type { ConnectionStore } from "./connections/store";
@@ -210,6 +211,16 @@ export function createApp({
         port: environment.BACKEND_PORT,
         timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
         readAgentUrl,
+      }),
+    )
+    .route(
+      "/api/workflows",
+      createWorkflowRoutes({
+        port: environment.BACKEND_PORT,
+        timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+        readAgentUrl,
+        household,
+        shutdownSignal,
       }),
     )
     .route(

@@ -1,8 +1,8 @@
 # Observability
 
-当前实现采用标准 OpenTelemetry JS SDK、`@hono/otel` 和 OTLP/HTTP protobuf exporter。backend 创建 Provider，使用 AsyncLocalStorage 上下文管理和 W3C `traceparent` / `tracestate` 传播。默认不导出数据；开启后默认记录全部 trace。
+当前实现采用标准 OpenTelemetry JS SDK、`@hono/otel` 和 OTLP/HTTP protobuf exporter。backend 与 Agent 分别创建 Provider，使用 AsyncLocalStorage 上下文管理和 W3C `traceparent` / `tracestate` 传播。默认不导出数据；开启后默认记录全部 trace。
 
-`@home-agent/observability` 提供 SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、关闭与导出能力，由 backend 接入。
+`@home-agent/observability` 提供 SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、原生 Request 入口及关闭与导出能力，由 backend 与 Agent 接入。
 
 ## 配置
 
@@ -37,9 +37,11 @@ backend POST /api/chat                   SERVER
 └─ backend → Agent POST /api/chat        CLIENT（直到响应体读完或取消）
 ```
 
-backend 的语音模型解释器保留模型 span。Agent 最简进程未接入 OpenTelemetry。
+workflow 调用链为 Backend SERVER → `tracedFetch` CLIENT → Agent `/api/workflows` SERVER → `automation.generate` 模型 span。Agent 在本机访问校验通过后接收上游追踪上下文，响应包含同一 `x-trace-id`。模型 span 记录草稿校验结果、能力校验问题数、澄清数及供应商返回的 token 用量；无用量时不填充估算值。正文仅在 `OTEL_INCLUDE_CONTENT=true` 时采集。
 
-单次聊天在模型执行结束后返回 JSON，失败使用统一 HTTP 错误。backend 代理产生 CLIENT span；Agent HTTP 入口与 Deep Agents 内部步骤未接入自定义 OpenTelemetry span。
+backend 的语音模型解释器保留模型 span。
+
+单次聊天在模型执行结束后返回 JSON，失败使用统一 HTTP 错误。backend 代理产生 CLIENT span；Agent 聊天入口与 Deep Agents 内部步骤未接入自定义 OpenTelemetry span。
 
 超时或断开会触发 AbortSignal 并关闭 SSE，包括解除慢客户端导致的写入背压；这种情况下不保证收到最后一个事件。普通模型错误在连接仍可用时发送 `run_failed`。
 

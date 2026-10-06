@@ -57,6 +57,7 @@ const errorMessages = {
   request_cancelled: "请求已取消。",
   run_timeout: "Agent 执行超时。",
   agent_execution_failed: "Agent 执行失败，请查看运行记录。",
+  workflow_busy: "Agent 正在处理任务，请稍后重试。",
   identity_enrollment_unavailable: "登记已过期或已取消，请重新开始。",
   identity_reference_unavailable: "该人物或参考资料已变化，请刷新后重试。",
   identity_recording_invalid: "录像无法解析或超过限制，请重新录制。",

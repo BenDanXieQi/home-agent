@@ -103,6 +103,7 @@ export const errorDefinitions = {
   request_cancelled: { status: 408, message: "The request was cancelled." },
   run_timeout: { status: 504, message: "The Agent run timed out." },
   agent_execution_failed: { status: 500, message: "The Agent run failed." },
+  workflow_busy: { status: 429, message: "The Agent workflow is busy." },
   identity_enrollment_unavailable: {
     status: 410,
     message: "The enrollment expired or is no longer available.",

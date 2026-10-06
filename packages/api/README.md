@@ -4,6 +4,8 @@
 
 ## 模块边界
 
+`@home-agent/api/agent-workflows` 定义 Agent 公共任务入口的输入、结果及容量限制，当前支持 `automation-generation`。`householdWorkflowInputSchema` 用于 Backend 入口，包含家庭运行标识及用户要求；`agentWorkflowInputSchema` 用于 Backend 到 Agent 的调用，携带 Backend 准备的设备能力。`@home-agent/api/automations` 提供生成草稿使用的规则树、设备能力、输入输出 schema 与能力校验；它不表示 Backend 已接入规则存储或执行。任务调用方式与未接入范围见 [Agent 接口](../../apps/agent/README.md#接口)。
+
 Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agent/api/household` 等入口使用 `src/contracts/`。契约层包含定义数据格式并执行校验的 Zod schema、由它推导的类型，以及不涉及网络或数据库的协议数据转换，不依赖 Hono、追踪或服务端错误处理。backend 与 Agent 按需导入 `@home-agent/api/errors` 和 `@home-agent/api/errors/hono`，服务端错误处理层向契约层依赖。
 
 `@home-agent/api/devices` 提供设备清单条目与规格能力的领域 schema；米家协议和家庭规则复用这份定义，供应商原始数据的转换属于接入适配器。

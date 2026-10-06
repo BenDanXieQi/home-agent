@@ -17,7 +17,15 @@ import { createContextReceiver } from "./context/receiver";
 import { createMaterialClient } from "./context/material-client";
 import { createHistoryClient } from "./context/history-client";
 import { agentReceiptQuerySchema } from "@home-agent/api/agent-receipts";
+import { agentWorkflowLimits } from "@home-agent/api/agent-workflows";
+import { createWorkflows } from "./workflows";
+import {
+  initializeTelemetry,
+  withRequestSpan,
+  currentTraceId,
+} from "@home-agent/observability";
 
+const telemetry = initializeTelemetry("home-agent-agent");
 const config = loadConfig();
 const receiver = createContextReceiver({ backendUrl: config.BACKEND_URL });
 export const readHistory = createHistoryClient({
@@ -29,6 +37,7 @@ export const readMaterial = createMaterialClient({
   receiver,
 });
 const assistant = createAssistant(config);
+const runWorkflow = createWorkflows(config);
 const allowed = createLocalAccessCheck([config.AGENT_PORT]);
 const server = Bun.serve({
   hostname: config.AGENT_HOST,
@@ -79,7 +88,10 @@ const server = Bun.serve({
         if (!result) throw new AppError("not_found");
         return Response.json(result, { headers });
       }
-      if (request.method !== "POST" || path !== "/api/chat")
+      if (
+        request.method !== "POST" ||
+        (path !== "/api/chat" && path !== "/api/workflows")
+      )
         throw new AppError("not_found");
       if (
         request.headers
@@ -93,7 +105,7 @@ const server = Bun.serve({
       try {
         body = await readLimitedJson(
           new Response(request.body),
-          32768,
+          path === "/api/workflows" ? agentWorkflowLimits.requestBytes : 32768,
           request.signal,
         );
       } catch (cause) {
@@ -104,6 +116,25 @@ const server = Bun.serve({
             : "invalid_json",
           { cause },
         );
+      }
+      if (path === "/api/workflows") {
+        listener.timeout(request, 0);
+        return withRequestSpan(request, async () => {
+          try {
+            return Response.json(await runWorkflow(body, request.signal), {
+              headers,
+            });
+          } catch (cause) {
+            const error =
+              cause instanceof AppError
+                ? cause
+                : new AppError("internal_error", { cause });
+            return Response.json(errorPayload(error, currentTraceId()), {
+              status: errorDefinitions[error.code].status,
+              headers,
+            });
+          }
+        });
       }
       const input = chatInputSchema.safeParse(body);
       if (!input.success)
@@ -162,9 +193,11 @@ receiver.start();
 console.info(`Home Agent listening on ${server.url.toString()}`);
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    Promise.all([receiver.stop(), server.stop(true)]).catch(() => {
-      console.error("Failed to stop Home Agent");
-      process.exitCode = 1;
-    });
+    Promise.all([receiver.stop(), server.stop(true)])
+      .finally(() => telemetry.shutdown())
+      .catch(() => {
+        console.error("Failed to stop Home Agent");
+        process.exitCode = 1;
+      });
   });
 }

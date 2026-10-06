@@ -363,6 +363,19 @@ function parseSpec(instance: Instance, translations: Translations) {
               in_params: inputs.map((property) => ({
                 name: typeName(property.type),
                 format: property.format,
+                ...(property.unit ? { unit: property.unit } : {}),
+                ...(property["value-range"]
+                  ? { value_range: property["value-range"] }
+                  : {}),
+                ...(property["value-list"]?.length
+                  ? {
+                      value_list: property["value-list"].map((value) => ({
+                        value: value.value,
+                        name: value.description,
+                        description: value.description,
+                      })),
+                    }
+                  : {}),
               })),
             }
           : {}),

@@ -111,8 +111,11 @@ export class HouseholdRuntime {
           }
         }
       }
-      const commit = this.factCommit();
-      if (commit.history) this.publishHistory(commit.history);
+      if (
+        this.factListeners.size > 0 &&
+        (context.fact_result || context.changes.length > 0)
+      )
+        this.publishFacts(this.factCommit(context));
       this.collection?.scheduleSync();
       for (const effect of context.effects) {
         try {
@@ -139,18 +142,27 @@ export class HouseholdRuntime {
     if (this.collection) throw new HouseholdError("invalid_state");
     this.collection = collection;
   }
-  private factCommit() {
-    const observation = this.context.fact_result?.observation;
+  private factCommit(context: HouseholdRuntime["context"]) {
+    const commit = {
+      state_version: {
+        scope_epoch: context.scope_epoch,
+        sequence: context.sequence,
+      },
+      changes: context.changes,
+      result: context.fact_result,
+    };
+    const observation = context.fact_result?.observation;
     const event = observation?.event;
-    if (!observation || !event) return freeze({ history: null });
+    if (!observation || !event) return freeze({ ...commit, history: null });
     const envelope = {
       observation_id: observation.observation_id,
       received_at: event.received_at,
-      scope_epoch: this.epoch,
+      scope_epoch: context.scope_epoch,
       input_sequence: observation.input_sequence,
     };
     if (event.kind === "online")
       return freeze({
+        ...commit,
         history: [
           deviceHistoryReportSchema.parse({
             ...envelope,
@@ -182,13 +194,11 @@ export class HouseholdRuntime {
             }),
           ]
         : null;
-    return freeze({ history });
+    return freeze({ ...commit, history });
   }
-  private publishHistory(
-    history: NonNullable<ReturnType<HouseholdRuntime["factCommit"]>["history"]>,
-  ) {
-    if (!history.length) return;
-    const commit = freeze({ history });
+  private publishFacts(commit: ReturnType<HouseholdRuntime["factCommit"]>) {
+    if (!commit.result && !commit.changes.length && !commit.history?.length)
+      return;
     for (const listener of this.factListeners) {
       try {
         listener(commit);
@@ -524,23 +534,30 @@ export class HouseholdRuntime {
       });
       assert();
       if (!this.context.accepted) throw new HouseholdError("capacity_exceeded");
-      if (this.ready) {
+      if (this.ready && this.factListeners.size > 0) {
         // Record the received inventory, even when a newer live report wins the current value.
-        this.publishHistory(
-          Object.values(directory.device)
-            .filter((device) => !device.archived)
-            .map((device) =>
-              deviceHistoryReportSchema.parse({
-                kind: "online",
-                device_id: device.device_id,
-                value: device.online,
-                source: "directory",
-                received_at: now,
-                observation_id: crypto.randomUUID(),
-                scope_epoch: epoch,
-                input_sequence: reportSequence,
-              }),
-            ),
+        // The directory state commit was already published by the actor above.
+        // This delivery contains only historical reports, not another state change.
+        this.publishFacts(
+          freeze({
+            state_version: this.version(),
+            changes: [],
+            result: null,
+            history: Object.values(directory.device)
+              .filter((device) => !device.archived)
+              .map((device) =>
+                deviceHistoryReportSchema.parse({
+                  kind: "online",
+                  device_id: device.device_id,
+                  value: device.online,
+                  source: "directory",
+                  received_at: now,
+                  observation_id: crypto.randomUUID(),
+                  scope_epoch: epoch,
+                  input_sequence: reportSequence,
+                }),
+              ),
+          }),
         );
       }
       // Specification preparation cannot block an already accepted directory.

@@ -1,4 +1,17 @@
+import type {
+  automationDecisionInputSchema,
+  automationDecisionResultSchema,
+  automationEvaluationTimingSchema,
+  automationActionTimingSchema,
+  automationDecisionTimingSchema,
+} from "@home-agent/api/automations";
 import type { z } from "zod";
+import type {
+  AutomationDefinition,
+  AutomationEvaluation,
+  AutomationAction,
+} from "@home-agent/api/automations";
+import type { automationInputSchema } from "../household/automations/state";
 import type { referenceInputSchema } from "../household/identity/contracts";
 import { sql } from "drizzle-orm";
 import {
@@ -468,3 +481,120 @@ export const deviceObservations = pgTable(
     ),
   ],
 );
+
+export const automations = pgTable(
+  "automations",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    homeId: text("home_id").notNull(),
+    revision: integer("revision").notNull(),
+    enabled: boolean("enabled").notNull(),
+    definition: jsonb("definition").$type<AutomationDefinition>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automations_household_idx").on(table.accountId, table.homeId),
+  ],
+);
+
+export const automationRuns = pgTable(
+  "automation_runs",
+  {
+    id: uuid("id").primaryKey(),
+    automationId: uuid("automation_id")
+      .notNull()
+      .references(() => automations.id, { onDelete: "cascade" }),
+    revision: integer("revision").notNull(),
+    input: jsonb("input")
+      .$type<z.infer<typeof automationInputSchema>>()
+      .notNull(),
+    status: text("status").notNull(),
+    reason: text("reason"),
+    evaluation: jsonb("evaluation").$type<AutomationEvaluation>().notNull(),
+    timing: jsonb("timing")
+      .$type<z.infer<typeof automationEvaluationTimingSchema>>()
+      .notNull()
+      .default({}),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automation_runs_history_idx").on(
+      table.automationId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const automationActions = pgTable(
+  "automation_actions",
+  {
+    id: uuid("id").primaryKey(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => automationRuns.id, { onDelete: "cascade" }),
+    action: jsonb("action").$type<AutomationAction>().notNull(),
+    timing: jsonb("timing")
+      .$type<z.infer<typeof automationActionTimingSchema>>()
+      .notNull()
+      .default({}),
+    status: text("status").notNull(),
+    reason: text("reason"),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("automation_actions_run_idx").on(table.runId)],
+);
+
+export { householdEvents } from "../household/events/schema";
+
+export const automationDecisions = pgTable("automation_decisions", {
+  id: uuid("id")
+    .primaryKey()
+    .references(() => automationRuns.id, { onDelete: "cascade" }),
+  input: jsonb("input")
+    .$type<z.infer<typeof automationDecisionInputSchema>>()
+    .notNull(),
+  status: text("status").notNull(),
+  timing: jsonb("timing")
+    .$type<z.infer<typeof automationDecisionTimingSchema>>()
+    .notNull()
+    .default({}),
+  result:
+    jsonb("result").$type<z.infer<typeof automationDecisionResultSchema>>(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+export const automationModelAdmissions = pgTable(
+  "automation_model_admissions",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    homeId: text("home_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    index("automation_model_budget_idx").on(
+      table.accountId,
+      table.homeId,
+      table.createdAt,
+    ),
+  ],
+);
+
+export {
+  automationReviews,
+  automationReviewRuns,
+} from "../household/automations/reviews/schema";

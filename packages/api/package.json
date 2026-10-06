@@ -29,7 +29,11 @@
     "./agent-context/devices": "./src/domain/agent-device-metadata.ts",
     "./agent-context/merge": "./src/domain/agent-context.ts",
     "./agent-receipts": "./src/contracts/agent-receipts.ts",
-    "./agent-context": "./src/contracts/agent-context.ts"
+    "./agent-context": "./src/contracts/agent-context.ts",
+    "./automations": "./src/domain/automations.ts",
+    "./agent-workflows": "./src/contracts/agent-workflows.ts",
+    "./automation-reviews": "./src/contracts/automation-reviews.ts",
+    "./household-events": "./src/contracts/household-events.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",
