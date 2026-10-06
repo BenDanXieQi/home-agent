@@ -74,9 +74,8 @@
     "typescript": "catalog:"
   },
   "exports": {
-    "./client": {
-      "types": "./dist/rpc/client.d.ts",
-      "default": "./src/client.ts"
+    "./rpc": {
+      "types": "./dist/rpc/rpc.d.ts"
     }
   }
 }

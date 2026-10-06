@@ -10,7 +10,7 @@ import {
 } from "../../api/client";
 import type { InferRequestType } from "hono/client";
 type MijiaApi =
-  import("@home-agent/backend/client").BackendClient["api"]["mijia"];
+  import("@home-agent/backend-client").BackendClient["api"]["mijia"];
 export function reserveMijiaPlayback(
   target: InferRequestType<
     MijiaApi["playback"]["reservations"]["$post"]

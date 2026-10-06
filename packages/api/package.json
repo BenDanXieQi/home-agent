@@ -33,7 +33,8 @@
     "./automations": "./src/domain/automations.ts",
     "./agent-workflows": "./src/contracts/agent-workflows.ts",
     "./automation-reviews": "./src/contracts/automation-reviews.ts",
-    "./household-events": "./src/contracts/household-events.ts"
+    "./household-events": "./src/contracts/household-events.ts",
+    "./http/request-json": "./src/http/request-json.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

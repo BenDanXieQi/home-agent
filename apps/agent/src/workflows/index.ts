@@ -1,9 +1,10 @@
+import type { z } from "zod";
 import {
-  agentWorkflowInputSchema,
+  type agentWorkflowInputSchema,
   agentWorkflowResultSchema,
   agentWorkflowLimits,
 } from "@home-agent/api/agent-workflows";
-import { AppError, validationIssues } from "@home-agent/api/errors";
+import { AppError } from "@home-agent/api/errors";
 import type { Config } from "../config";
 import { createAutomationGeneration } from "./automation-generation";
 
@@ -11,12 +12,10 @@ export function createWorkflows(config: Config) {
   const generate = createAutomationGeneration(config);
   let active = 0;
 
-  return async (input: unknown, requestSignal: AbortSignal) => {
-    const parsed = agentWorkflowInputSchema.safeParse(input);
-    if (!parsed.success)
-      throw new AppError("invalid_request", {
-        issues: validationIssues(parsed.error),
-      });
+  return async (
+    input: z.output<typeof agentWorkflowInputSchema>,
+    requestSignal: AbortSignal,
+  ) => {
     if (requestSignal.aborted) throw new AppError("request_cancelled");
     if (!generate) throw new AppError("model_not_configured");
     if (active >= agentWorkflowLimits.concurrent)
@@ -28,8 +27,8 @@ export function createWorkflows(config: Config) {
     active++;
     try {
       const result = agentWorkflowResultSchema.parse({
-        workflow: parsed.data.workflow,
-        result: await generate(parsed.data.input, signal),
+        workflow: input.workflow,
+        result: await generate(input.input, signal),
       });
       signal.throwIfAborted();
       if (

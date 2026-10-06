@@ -1,3 +1,4 @@
+import { createAgentClient } from "./agent-client";
 import { createAutomationRoutes } from "./household/automations/routes";
 import type { AutomationService } from "./household/automations/service";
 import { createAgentReceiverRoutes } from "./agent-context/receiver-routes";
@@ -94,6 +95,10 @@ export function createApp({
   shutdownSignal,
   readAgentUrl,
 }: AppDependencies) {
+  const agent = createAgentClient({
+    readAgentUrl,
+    timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+  });
   const recordingService = createRecordingService({
     ...recordings,
     household,
@@ -209,16 +214,14 @@ export function createApp({
       "/api/agent/receipts",
       createAgentReceiverRoutes({
         port: environment.BACKEND_PORT,
-        timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
-        readAgentUrl,
+        agent,
       }),
     )
     .route(
       "/api/chat",
       createChatRoutes({
         port: environment.BACKEND_PORT,
-        timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
-        readAgentUrl,
+        agent,
       }),
     )
     .route(
@@ -226,7 +229,7 @@ export function createApp({
       createWorkflowRoutes({
         port: environment.BACKEND_PORT,
         timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
-        readAgentUrl,
+        agent,
         household,
         shutdownSignal,
       }),

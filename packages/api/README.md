@@ -29,7 +29,9 @@ Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agen
 
 这些函数用于公共数据；Promise、取消控制器、网络连接和任务仍由负责相应资源的模块管理。
 
-`@home-agent/api/local-access` 复用 TCP 对端及 Host／Origin 的本机访问校验；`@home-agent/api/http/read-body` 限制响应读取大小，并负责释放读取器。JSON 解码和供应商错误转换由各自的协议适配器负责，读取错误保留传输与取消原因。
+`@home-agent/api/local-access` 复用 TCP 对端及 Host／Origin 的本机访问校验；`@home-agent/api/http/read-body` 通过原生 Web Streams 管线限制响应读取大小，由原生 Response 汇集字节及处理流取消，不自行拼接分块或管理 reader 锁。JSON 解码和供应商错误转换由各自的协议适配器负责，读取错误保留传输与取消原因。
+
+`@home-agent/api/http/request-json` 执行一次服务间 JSON 请求：调用方提供发送函数、响应 schema、取消信号、期限、字节上限及不可用错误码。它复用 `readLimitedJson`，保留上游公共错误的 code、params 与 issues，区分调用取消与超时，不负责领域资格、地址发现、重连或重试。响应只要求标准 Web Response 中实际使用的字段，不要求 Bun 的扩展方法。SSE 继续使用独立的 `consumeEventStream`，不会经过 JSON 响应解析。
 
 ## 错误响应
 

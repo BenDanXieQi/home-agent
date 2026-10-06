@@ -102,6 +102,8 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 `POST /api/agent/context/history` 按 `kind` 返回 `device_reports`、`member_sightings` 或 `perception_windows`。成员分支从身份仓库读取数据库当前归因，音视频分支读取当前仍有访问资格的完整窗口，保留视觉、音频、转写与媒体状态。两者支持时间和来源筛选，成员另可按成员 ID 筛选；它们独立于推送中的有界最近集合查询。协议、区间边界、分页与保留限制见[Agent 数据交付](../../docs/household-runtime.md#agent-当前数据与材料历史)，字段定义见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 
+`agent-client.ts` 集中聊天、专项任务及接收记录的 Agent 调用，每次请求解析当前连接配置中的 Agent 地址，配置更新影响后续请求。请求使用原生 RequestInit、`tracedFetch` 及共享有界 JSON 读取，保留公共错误码和字段说明，不自动重试。发送参数使用入口已校验的值，不再次校验同一份输入；响应仍在接收边界校验。调用方保留各自容量与期限，workflow 的能力准备、运行失效取消和结果复核仍由 workflow 路由拥有。
+
 `GET /api/agent/receipts`、`/api/agent/receipts/:id` 与 `/api/agent/receipts/current` 将 Web 只读请求转发到配置的 Agent 服务，校验响应并限制大小与超时，沿用可信本机 Web 访问限制，不用 Backend 发布缓存替代接收结果。
 
 Agent 启动后独立接收，不要求模型配置或聊天请求；本机 `GET /api/received-context` 供只读验收，使用方式见[Agent README](../agent/README.md)。推送和历史仅交付已有来源材料与引用，凭据、参考照片、特征向量及媒体字节不进入该通路；没有接入模型工具、默认模型输入或语义回写。专用通路的真实来源比对与未覆盖的故障、家庭生命周期边界见[验证边界](../../docs/household-runtime.md#agent-通路验证边界)。
@@ -121,7 +123,9 @@ Agent 启动后独立接收，不要求模型配置或聊天请求；本机 `GET
 ```text
 src/
 ├── main.ts                 # 启动、资源初始化与关闭
-├── app.ts                  # 中间件、子路由与错误处理的组装
+├── app.ts                  # 中间件、子路由、Agent 客户端与错误处理的组装
+├── agent-client.ts         # 聊天、专项任务与接收记录的共用 Agent HTTP 调用
+├── rpc.ts                  # 从实际应用推导并预编译路由类型，无运行时代码
 ├── environment.ts          # 环境变量解析
 ├── media/
 │   ├── resources.ts         # 媒体任务、文件、读取、容量与回收的唯一所有者
@@ -134,7 +138,7 @@ src/
 │   ├── store.ts            # YAML 路径、校验与读写
 │   └── status.ts           # 服务探测与状态接口
 ├── chat/
-│   └── routes.ts           # 绑定家庭范围、聊天转发与流取消
+│   └── routes.ts           # 单次 JSON 聊天转发与请求取消
 ├── agent-context/
 │   ├── service.ts          # 常驻来源整理、分部刷新与资格隔离
 │   ├── history.ts          # 成员／音视频历史的请求资格、游标与完整记录分页
@@ -336,7 +340,7 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 
 ## Hono RPC 边界
 
-`createApp` 和各功能路由工厂返回链式注册得到的路由类型。`src/client.ts` 只通过 type import 引用应用类型，并用 `hc` 导出浏览器客户端工厂。`build:rpc` 预编译客户端声明，避免前端反复推导服务端实现。客户端仅依赖 Hono 的浏览器模块；启动、数据库与米家生命周期代码不属于客户端运行时。
+`createApp` 和各功能路由工厂返回链式注册得到的路由类型。`src/rpc.ts` 从实际应用推导 `BackendApp`，`build:rpc` 预编译路由声明并通过 `@home-agent/backend/rpc` 仅供类型导入。根目录 [共享 Backend 客户端](../../packages/backend-client/README.md) 使用 Hono `hc`，在自己的声明构建中展开客户端类型，供 Web 和 Agent 共用；运行时只加载 Hono 客户端，不加载 Backend 启动、数据库或米家代码。Backend 声明构建不依赖消费者；Turbo 先生成路由声明，再生成客户端声明，并在开发时同时维护两者。
 
 JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middleware，handler 通过 `c.req.valid("json")` 读取。该 middleware 复用公共 JSON 读取、Zod 校验和 `AppError`，并将输入类型暴露给 RPC。聊天输入协议由 backend 与 Agent 共同引用 `packages/api`，返回单次 JSON 回答。新增接口须接入路由链，复用公共 schema，并通过功能 API 模块调用类型化客户端。
 

@@ -7,5 +7,5 @@
     "rootDir": "src",
     "outDir": "dist/rpc"
   },
-  "include": ["src/client.ts"]
+  "include": ["src/rpc.ts"]
 }

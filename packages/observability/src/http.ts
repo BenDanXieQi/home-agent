@@ -41,9 +41,16 @@ export function httpTracing() {
 }
 
 /** CLIENT span covers headers AND body consumption, including SSE and cancellation. */
-export function tracedFetch(input: string | URL, init: RequestInit = {}) {
-  const url = new URL(input);
-  const method = init.method ?? "GET";
+export function tracedFetch(
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit = {},
+) {
+  const request =
+    input instanceof Request
+      ? new Request(input, init)
+      : new Request(input.toString(), init);
+  const url = new URL(request.url);
+  const method = request.method;
   return trace.getTracer("home-agent.http").startActiveSpan(
     `${method} ${url.pathname}`,
     {
@@ -60,7 +67,7 @@ export function tracedFetch(input: string | URL, init: RequestInit = {}) {
       const finish = () => {
         if (ended) return;
         ended = true;
-        init.signal?.removeEventListener("abort", onAbort);
+        request.signal.removeEventListener("abort", onAbort);
         span.end();
         finishOperation();
       };
@@ -71,18 +78,18 @@ export function tracedFetch(input: string | URL, init: RequestInit = {}) {
         else span.setAttribute("operation.cancelled", true);
       };
       const onAbort = () => {
-        recordCancellation(init.signal?.reason);
+        recordCancellation(request.signal.reason);
         finish();
       };
-      if (init.signal?.aborted) onAbort();
-      else init.signal?.addEventListener("abort", onAbort, { once: true });
+      if (request.signal.aborted) onAbort();
+      else request.signal.addEventListener("abort", onAbort, { once: true });
       try {
         const carrier: Record<string, string> = {};
         propagation.inject(context.active(), carrier);
-        const headers = new Headers(init.headers);
+        const headers = new Headers(request.headers);
         for (const [key, value] of Object.entries(carrier))
           headers.set(key, value);
-        const response = await fetch(url, { ...init, headers });
+        const response = await fetch(request, { headers });
         if (!ended) {
           span.setAttribute("http.response.status_code", response.status);
           if (response.status >= 400) {

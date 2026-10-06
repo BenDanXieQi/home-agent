@@ -35,21 +35,29 @@ LANGSMITH_PROJECT=home-agent
 ```text
 backend POST /api/chat                   SERVER
 └─ backend → Agent POST /api/chat        CLIENT（直到响应体读完或取消）
+   └─ Agent POST /api/chat               SERVER
 ```
 
-workflow 调用链为 Backend SERVER → `tracedFetch` CLIENT → Agent `/api/workflows` SERVER → `automation.generate` 模型 span。Agent 在本机访问校验通过后接收上游追踪上下文，响应包含同一 `x-trace-id`。模型 span 记录草稿校验结果、能力校验问题数、澄清数及供应商返回的 token 用量；无用量时不填充估算值。正文仅在 `OTEL_INCLUDE_CONTENT=true` 时采集。
+Backend 与 Agent 的 Hono HTTP 入口先执行 `httpTracing()`，接收上游 W3C 追踪上下文并创建 SERVER span，再执行路由的本机访问及输入校验。因此被访问校验拒绝的请求也经过追踪中间件；开启追踪时，响应包含同一 `x-trace-id`。HTTP 入口 span 的耗时截止于响应创建，不代表响应流的完整持续时间。
+
+workflow 调用链为 Backend SERVER → `tracedFetch` CLIENT → Agent `/api/workflows` SERVER → `automation.generate` 模型 span。模型 span 记录草稿校验结果、能力校验问题数、澄清数及供应商返回的 token 用量；无用量时不填充估算值。正文仅在 `OTEL_INCLUDE_CONTENT=true` 时采集。
 
 backend 的语音模型解释器保留模型 span。
 
-单次聊天在模型执行结束后返回 JSON，失败使用统一 HTTP 错误。backend 代理产生 CLIENT span；Agent 聊天入口与 Deep Agents 内部步骤未接入自定义 OpenTelemetry span。
+单次聊天在模型执行结束后返回 JSON，Backend 代理与 Agent HTTP 入口分别产生 CLIENT 与 SERVER span；Deep Agents 内部步骤未接入自定义 OpenTelemetry span。
 
-超时或断开会触发 AbortSignal 并关闭 SSE，包括解除慢客户端导致的写入背压；这种情况下不保证收到最后一个事件。普通模型错误在连接仍可用时发送 `run_failed`。
+聊天与 workflow 将请求取消及执行期限通过 AbortSignal 传给模型，并在执行结束后复核取消。失败使用统一 HTTP JSON 错误：模型执行超时为 `run_timeout`，Backend 调用 Agent 超时为 `agent_timeout`，请求取消为 `request_cancelled`，模型执行失败为 `agent_execution_failed`。客户端已断开时不保证收到错误响应。当前上下文 SSE 的同步与断线语义见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。
 
 退出时先停止接收请求并等待在途请求：backend 使用 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），超时强制关闭连接；Agent 停止时立即关闭连接并取消请求。追踪模块随后最多等待 10 秒让已登记操作结束，再关闭 exporter。这 10 秒不是整个进程的停机期限；数据库关闭和 exporter 导出另需时间。强制终止进程无法保证导出。
 
 ## 代码边界
 
-- `apps/backend/src/chat/routes.ts`：受限 JSON 请求与响应校验。
+- `apps/backend/src/app.ts`、`apps/agent/src/app.ts`：Hono HTTP 入口、追踪中间件及统一错误响应装配。
+- `apps/backend/src/chat/routes.ts`：受限 JSON 输入校验与聊天转发。
+- `apps/backend/src/workflows/routes.ts`：生成请求的设备能力准备、运行失效取消及结果复核。
+- `apps/backend/src/agent-client.ts`：聊天、workflow 与接收记录共用的 Agent 调用，使用 `tracedFetch` 传播追踪上下文并有界读取、校验响应。
+- `apps/agent/src/chat.ts`：单次聊天执行、取消及期限、完整回答校验。
+- `apps/agent/src/workflows/automation-generation/index.ts`：生成模型的 span、用量与草稿校验属性。
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
 - `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。
 - `apps/backend/src/mijia/media/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。

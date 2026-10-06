@@ -23,7 +23,9 @@
     "langchain": "1.5.15",
     "@home-agent/model": "workspace:*",
     "langsmith": "catalog:",
-    "@home-agent/observability": "workspace:*"
+    "@home-agent/observability": "workspace:*",
+    "@home-agent/backend-client": "workspace:*",
+    "hono": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
