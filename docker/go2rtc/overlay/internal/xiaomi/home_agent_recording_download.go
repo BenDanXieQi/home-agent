@@ -77,7 +77,7 @@ func homeAgentRecordingDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reader := camera.recordings
-	if !camera.singleLens || reader == nil || !camera.recordingsReady {
+	if reader == nil || !camera.recordingsReady {
 		homeAgentMu.Unlock()
 		homeAgentError(w, "recording_unavailable", http.StatusConflict)
 		return

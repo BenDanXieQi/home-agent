@@ -248,6 +248,11 @@ type dualProducer struct {
 
 func (p *dualProducer) finish() { p.once.Do(func() { close(p.done) }) }
 
+// The SD index and file commands use the same storage channel, not live flags.
+func (p *dualProducer) recordingChannel() uint32 {
+	return uint32(p.channel) * 10
+}
+
 func (p *dualProducer) Start() error {
 	var audioTS uint32
 	p.session.mu.Lock()

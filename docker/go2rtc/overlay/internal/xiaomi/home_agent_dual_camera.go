@@ -40,6 +40,10 @@ func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int,
 		if err != nil {
 			return nil, err
 		}
+		homeAgentMu.Lock()
+		camera.recordings, _ = producer.(homeAgentRecordingReader)
+		camera.recordingsReady = true
+		homeAgentMu.Unlock()
 		return homeAgentTimeProducer(camera, producer), nil
 	})
 	release := sync.OnceFunc(func() {

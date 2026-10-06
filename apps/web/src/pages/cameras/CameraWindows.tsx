@@ -226,7 +226,7 @@ export function CameraWindows({
                       ? `${activityUnavailableReason} 活动记录仍然保留。`
                       : windows.length
                         ? "选择列表中的片段查看内容。"
-                        : "检测到画面变化或识别出说话内容后，片段会自动出现在这里。"
+                        : "片段是短期缓存，最多保留 30 分钟，后台重启后会清理。检测到画面变化或识别出说话内容后，新片段会自动出现在这里。"
                 }
                 className="h-full min-h-0 rounded-none bg-surface shadow-none"
               />

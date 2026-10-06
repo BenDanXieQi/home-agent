@@ -22,33 +22,70 @@ export function useObservationPlayback(
   }[],
   scope: string,
 ) {
-  const groups = useMemo(() => {
+  const groupSignature = useMemo(
+    () =>
+      JSON.stringify([
+        ...new Map(
+          activities.map(({ source }) => [
+            JSON.stringify([source.deviceId, source.channel]),
+            [source.deviceId, source.channel],
+          ]),
+        ).values(),
+      ]),
+    [activities],
+  );
+  const groupSources = useMemo(() => {
+    const parsed: unknown = JSON.parse(groupSignature);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item) => {
+      if (
+        !Array.isArray(item) ||
+        typeof item[0] !== "string" ||
+        (item[1] !== 1 && item[1] !== 2)
+      )
+        return [];
+      return [
+        {
+          key: JSON.stringify(item),
+          deviceId: item[0],
+          channel: item[1],
+        },
+      ];
+    });
+  }, [groupSignature]);
+  const groupStates = useMemo(() => {
     const sources = new Map<
       string,
       {
+        key: string;
         state: ReturnType<typeof createPerceptionSourceState>;
-        activities: typeof activities;
       }
     >();
-    for (const activity of activities) {
-      const { deviceId, channel } = activity.source;
-      const key = JSON.stringify([deviceId, channel]);
-      let group = sources.get(key);
-      if (!group) {
-        group = {
-          state: createPerceptionSourceState({ deviceId, channel }),
-          activities: [],
-        };
-        sources.set(key, group);
-      }
-      group.activities.push(activity);
+    for (const { key, deviceId, channel } of groupSources) {
+      sources.set(key, {
+        key,
+        state: createPerceptionSourceState({ deviceId, channel }),
+      });
     }
     return [...sources.values()];
-  }, [activities]);
+  }, [groupSources]);
+  const groups = useMemo(
+    () =>
+      groupStates.map((group) => ({
+        ...group,
+        activities: activities.filter(
+          ({ source }) =>
+            JSON.stringify([source.deviceId, source.channel]) === group.key,
+        ),
+      })),
+    [activities, groupStates],
+  );
   const targetsAtom = useMemo(
     () =>
-      atom((get) => groups.map((group) => get(group.state.playbackTargetAtom))),
-    [groups],
+      atom((get) =>
+        groupStates.map((group) => get(group.state.playbackTargetAtom)),
+      ),
+    [groupStates],
   );
   const targets = useAtomValue(targetsAtom);
   const windows = useQueries({
@@ -152,8 +189,7 @@ export function useObservationPlayback(
               error: windowQuery.error,
               retry: windowQuery.refetch,
             };
-          if (!windowQuery?.isSuccess || windowQuery.fetchStatus !== "idle")
-            return { status: "checking" as const };
+          if (!windowQuery?.isSuccess) return { status: "checking" as const };
           if (recording?.isError && !recording.isFetching)
             return {
               status: "failed" as const,
@@ -165,19 +201,17 @@ export function useObservationPlayback(
               status: "recording" as const,
               clip,
               seekAt: activity.recordingAt ?? activity.source.lastObservedAt,
-              checking: recording?.fetchStatus !== "idle",
+              checking:
+                windowQuery.fetchStatus !== "idle" ||
+                recording?.fetchStatus !== "idle",
             };
-          if (
-            recording?.data?.status === "unavailable" &&
-            !recording.isFetching
-          )
+          if (recording?.data?.status === "unavailable")
             return {
               status: "unavailable" as const,
               reason: recording.data.reason,
               retry: recording.refetch,
             };
-          if (!recording?.isSuccess || recording.fetchStatus !== "idle")
-            return { status: "checking" as const };
+          if (!recording?.isSuccess) return { status: "checking" as const };
           return { status: "empty" as const };
         }
         return [activity.id, availability()] as const;

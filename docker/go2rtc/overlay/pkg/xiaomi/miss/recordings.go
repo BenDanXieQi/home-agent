@@ -14,7 +14,7 @@ import (
 
 // Wire evidence: xiaomi-camera-viewer, MIT, commit
 // 4dc3ae3a77245c5c9afed1981d9840816a439de7, recordings.go and miss/client.go.
-// This adapter reads recording metadata and files from storage channel 0. It does not send
+// This adapter reads recording metadata and files from the selected storage channel. It does not send
 // playback, recording-setting, deletion or format commands.
 const recordingIndexCommand = 6
 const recordingMaxEntries = 65536
@@ -59,13 +59,20 @@ type recordingRequest struct {
 }
 
 type recordingReader struct {
+	init    sync.Once
+	slots   chan struct{}
+	gate    chan struct{}
 	mu      sync.Mutex
 	request *recordingRequest
 	failed  bool
 }
 
 func (p *Producer) ListRecordings(ctx context.Context) (RecordingIndex, error) {
-	return p.client.listRecordings(ctx)
+	return p.client.listRecordings(ctx, 0)
+}
+
+func (p *dualProducer) ListRecordings(ctx context.Context) (RecordingIndex, error) {
+	return p.session.client.listRecordings(ctx, p.recordingChannel())
 }
 
 func (c *Client) beginRecordingRequest(ctx context.Context, command uint32) (*recordingRequest, error) {
@@ -76,13 +83,33 @@ func (c *Client) beginRecordingRequest(ctx context.Context, command uint32) (*re
 		return nil, ctx.Err()
 	}
 	r := &c.recordings
+	// Both lenses share this physical reader. Admit one request and one waiter;
+	// cancellation before acquiring the wire must not fence the active reader.
+	r.init.Do(func() {
+		r.slots = make(chan struct{}, 2)
+		r.gate = make(chan struct{}, 1)
+	})
+	select {
+	case r.slots <- struct{}{}:
+	default:
+		return nil, ErrRecordingsBusy
+	}
+	select {
+	case r.gate <- struct{}{}:
+	case <-ctx.Done():
+		<-r.slots
+		return nil, ctx.Err()
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.failed {
-		return nil, ErrRecordingsReset
+	err := ctx.Err()
+	if err == nil && r.failed {
+		err = ErrRecordingsReset
 	}
-	if r.request != nil {
-		return nil, ErrRecordingsBusy
+	if err != nil {
+		<-r.gate
+		<-r.slots
+		return nil, err
 	}
 	request := &recordingRequest{ctx: ctx, command: command, done: make(chan recordingReply, 1)}
 	if command == recordingFileCommand {
@@ -104,6 +131,8 @@ func (c *Client) releaseRecordingRequest(request *recordingRequest, completed bo
 	if !completed && !request.finished {
 		r.failed = true
 	}
+	<-r.gate
+	<-r.slots
 }
 
 func (c *Client) writeRecordingCommand(ctx context.Context, command uint32, payload []byte) error {
@@ -128,7 +157,7 @@ func (c *Client) writeRecordingCommand(ctx context.Context, command uint32, payl
 	return nil
 }
 
-func (c *Client) listRecordings(ctx context.Context) (RecordingIndex, error) {
+func (c *Client) listRecordings(ctx context.Context, storageChannel uint32) (RecordingIndex, error) {
 	ctx, cancel := context.WithTimeout(ctx, recordingQueryTimeout)
 	defer cancel()
 	request, err := c.beginRecordingRequest(ctx, recordingIndexCommand)
@@ -137,8 +166,10 @@ func (c *Client) listRecordings(ctx context.Context) (RecordingIndex, error) {
 	}
 	completed := false
 	defer func() { c.releaseRecordingRequest(request, completed) }()
-	// Storage channel 0 is the zero word at payload offset 8.
-	if err := c.writeRecordingCommand(ctx, recordingIndexCommand, make([]byte, 24)); err != nil {
+	// Storage channels are 0 and 10, distinct from the live lens flags 0 and 1.
+	payload := make([]byte, 24)
+	binary.LittleEndian.PutUint32(payload[8:], storageChannel)
+	if err := c.writeRecordingCommand(ctx, recordingIndexCommand, payload); err != nil {
 		completed = errors.Is(err, ErrRecordingsBusy)
 		return RecordingIndex{}, err
 	}

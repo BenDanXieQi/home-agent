@@ -30,10 +30,14 @@ type recordingFileChunk struct {
 // on the resident connection. A successful transport still needs container
 // validation before the caller can offer a playable recording.
 func (p *Producer) DownloadRecording(ctx context.Context, start uint32, output io.Writer, onStart func(int) error) error {
-	return p.client.downloadRecording(ctx, start, output, onStart)
+	return p.client.downloadRecording(ctx, start, 0, output, onStart)
 }
 
-func (c *Client) downloadRecording(ctx context.Context, start uint32, output io.Writer, onStart func(int) error) error {
+func (p *dualProducer) DownloadRecording(ctx context.Context, start uint32, output io.Writer, onStart func(int) error) error {
+	return p.session.client.downloadRecording(ctx, start, p.recordingChannel(), output, onStart)
+}
+
+func (c *Client) downloadRecording(ctx context.Context, start, storageChannel uint32, output io.Writer, onStart func(int) error) error {
 	if start < recordingMinStart || start > recordingMaxStart {
 		return ErrRecordingsInvalid
 	}
@@ -45,9 +49,10 @@ func (c *Client) downloadRecording(ctx context.Context, start uint32, output io.
 	}
 	completed := false
 	defer func() { c.releaseRecordingRequest(request, completed) }()
-	payload := make([]byte, 12)
+	payload := make([]byte, 24)
 	binary.LittleEndian.PutUint32(payload, start)
-	// The 12-byte request selects storage channel 0; offset 8 is also zero.
+	// The firmware reads offset 8 only when the payload exceeds 19 bytes.
+	binary.LittleEndian.PutUint32(payload[8:], storageChannel)
 	if err := c.writeRecordingCommand(ctx, recordingFileCommand, payload); err != nil {
 		completed = errors.Is(err, ErrRecordingsBusy)
 		return err
