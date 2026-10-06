@@ -15,6 +15,10 @@ import { createChatRoutes } from "./chat";
 import type { AgentDatabase } from "../db";
 import { createRoomAnalysisInterpreter } from "../room-analysis";
 import { createRoomAnalysisRoutes } from "./room-analysis";
+import { createAutomationDraftGenerator } from "../automation-generation";
+import { createAutomationGenerationRoutes } from "./automation-generation";
+import { createAutomationReasoning } from "../automation-reasoning";
+import { createAutomationReasoningRoutes } from "./automation-reasoning";
 
 export function createApp(config: Config, database?: AgentDatabase) {
   const agent = createHomeAgent(config, database?.checkpointer);
@@ -49,6 +53,22 @@ export function createApp(config: Config, database?: AgentDatabase) {
   app.route(
     "/api/speech-dialogue",
     createSpeechDialogueRoutes(createSpeechDialogueInterpreter(config), reset),
+  );
+  app.route(
+    "/api/automations",
+    createAutomationGenerationRoutes(
+      createAutomationDraftGenerator(config),
+      config.AGENT_RUN_TIMEOUT_MS,
+      reset,
+    ),
+  );
+  app.route(
+    "/api/automations",
+    createAutomationReasoningRoutes(
+      createAutomationReasoning(config, database),
+      config.AGENT_RUN_TIMEOUT_MS,
+      reset,
+    ),
   );
   app.post(
     "/api/household-reset",

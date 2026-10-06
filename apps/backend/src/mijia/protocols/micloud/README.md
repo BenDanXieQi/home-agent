@@ -1,10 +1,12 @@
 # MiCloud adapter
 
-本模块将 [homebridge-miot](https://github.com/merdok/homebridge-miot) 的独立 MiCloud 协议代码移植为 Bun TypeScript 模块，提供米家二维码登录、短信／邮件安全验证、授权会话导出与恢复、passToken 会话续期，以及设备清单和属性的加密读取请求。设备清单包含家庭、房间、设备及其归属。会话保存、凭据加密和续期调度由 backend 负责；本模块不包含 Homebridge、设备控制、密码登录或 OAuth。
+本模块将 [homebridge-miot](https://github.com/merdok/homebridge-miot) 的独立 MiCloud 协议代码移植为 Bun TypeScript 模块，提供米家二维码登录、短信／邮件安全验证、授权会话导出与恢复、passToken 会话续期，以及设备清单、属性读取、属性写入和动作调用的加密请求。设备清单包含家庭、房间、设备及其归属。会话保存、凭据加密和续期调度由 backend 负责；本模块不包含 Homebridge、密码登录或 OAuth。
 
 ## 固定来源与许可
 
 上游固定 commit：`8d27204423a569e11c468830e3df324d278954ee`。
+
+控制请求复用现有会话与传输，地址和载荷对应上游 `miotSetProps`、`miotAction`。`writeProperties` 发往 `/miotspec/prop/set`，`invokeAction` 发往 `/miotspec/action`；只发送一次，禁止 HTTP 重定向重放。`commands.ts` 按 [MIoT SDK 控制契约](https://github.com/MiEcosystem/miot-plugin-sdk/wiki/04-miot_spec) 单独校验返回地址及整数状态码，不复用缓存读取的状态码推断；逐项 `code=0` 表示供应商接纳，缺失、重复或地址不符的结果为未知。家庭资格、规格与参数校验、串行发送和结果不明的处理由 `mijia/control` 与 service 负责。设备动作尚未完成实机验收。
 
 | 移植来源                                                                                                                                     | 本地模块                    | 上游文件 SHA-256                                                   |
 | -------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------- | ------------------------------------------------------------------ |

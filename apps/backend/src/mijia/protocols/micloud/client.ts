@@ -18,6 +18,12 @@ import {
   miotPropertyAddressSchema,
   type MiotPropertyAddress,
 } from "./properties";
+import {
+  MIOT_WRITE_BATCH_SIZE,
+  MIOT_COMMAND_TIMEOUT_MS,
+  miotPropertyWriteSchema,
+  miotActionRequestSchema,
+} from "./commands";
 
 export type { MiCloudSavedSession } from "./session";
 
@@ -523,12 +529,51 @@ export class MiCloud {
     return parsed.data;
   }
 
+  async writeProperties(
+    properties: readonly z.infer<typeof miotPropertyWriteSchema>[],
+    signal: AbortSignal,
+    onRequestStarted: RequestStartObserver,
+  ) {
+    const input = miotPropertyWriteSchema
+      .array()
+      .min(1)
+      .max(MIOT_WRITE_BATCH_SIZE)
+      .safeParse(properties);
+    if (!input.success) throw new MiCloudError("invalid-input");
+    return this.#deviceRequest(
+      "/miotspec/prop/set",
+      { params: input.data },
+      signal,
+      MIOT_COMMAND_TIMEOUT_MS,
+      onRequestStarted,
+      true,
+    );
+  }
+
+  async invokeAction(
+    action: z.infer<typeof miotActionRequestSchema>,
+    signal: AbortSignal,
+    onRequestStarted: RequestStartObserver,
+  ) {
+    const input = miotActionRequestSchema.safeParse(action);
+    if (!input.success) throw new MiCloudError("invalid-input");
+    return this.#deviceRequest(
+      "/miotspec/action",
+      { params: input.data },
+      signal,
+      MIOT_COMMAND_TIMEOUT_MS,
+      onRequestStarted,
+      true,
+    );
+  }
+
   async #deviceRequest(
     path: string,
     data: Record<string, unknown>,
     signal?: AbortSignal,
     timeoutMs?: number,
     onRequestStarted?: RequestStartObserver,
+    rejectRedirects = false,
   ) {
     this.#transport.assertActive(signal);
     const session = this.#session;
@@ -577,6 +622,7 @@ export class MiCloud {
           "MIOT-ENCRYPT-ALGORITHM": "ENCRYPT-RC4",
         },
         body: new URLSearchParams(params),
+        rejectRedirects,
       },
       signal,
       timeoutMs,

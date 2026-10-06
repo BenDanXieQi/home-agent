@@ -123,3 +123,9 @@ export {
 export * from "./perception-window";
 
 export * from "./member-identity";
+
+export * from "./automations";
+
+export * from "./household-events";
+
+export * from "./automation-reviews";

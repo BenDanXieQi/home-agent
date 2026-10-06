@@ -10,6 +10,13 @@ const toolLabels = {
   query_devices: "查找设备",
   get_device_state: "读取设备状态",
   query_members: "查询成员资料",
+  get_automation_capabilities: "查询自动化能力",
+  list_automations: "查询自动化规则",
+  get_automation: "读取自动化定义",
+  get_automation_runs: "读取自动化执行记录",
+  generate_automation_draft: "生成自动化草稿",
+  save_automation: "保存自动化规则",
+  delete_automation: "删除自动化规则",
 };
 export const ChatTurn = memo(function ChatTurn({
   turn,

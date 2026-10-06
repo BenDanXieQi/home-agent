@@ -1,16 +1,12 @@
 import { z } from "zod";
+import { deviceValueSchema } from "../domain/devices";
 
 export const propertyAddressSchema = z.object({
   did: z.string().min(1).max(512),
   siid: z.number().int().positive(),
   piid: z.number().int().positive(),
 });
-export const propertyValueSchema = z.union([
-  z.string(),
-  z.number().finite(),
-  z.boolean(),
-  z.null(),
-]);
+export const propertyValueSchema = deviceValueSchema.nullable();
 export const factReasonSchema = z.enum([
   "missing",
   "unverified",

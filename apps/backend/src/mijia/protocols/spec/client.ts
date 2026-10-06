@@ -361,8 +361,27 @@ function parseSpec(instance: Instance, translations: Translations) {
         ...(inputs.length
           ? {
               in_params: inputs.map((property) => ({
+                piid: property.iid,
                 name: typeName(property.type),
                 format: property.format,
+                ...(property.unit ? { unit: property.unit } : {}),
+                ...(property["value-range"]
+                  ? { value_range: property["value-range"] }
+                  : {}),
+                ...(property["value-list"]?.length
+                  ? {
+                      value_list: property["value-list"].map(
+                        (value, index) => ({
+                          value: value.value,
+                          name: value.description,
+                          description: translate(
+                            `${prefix}:property:${pad(property.iid)}:valuelist:${pad(index)}`,
+                            value.description,
+                          ),
+                        }),
+                      ),
+                    }
+                  : {}),
               })),
             }
           : {}),

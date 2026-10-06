@@ -23,7 +23,10 @@
     "./household-queries": "./src/contracts/household-queries.ts",
     "./mijia-recordings": "./src/mijia/recordings.ts",
     "./speech-dialogue": "./src/contracts/speech-dialogue.ts",
-    "./devices": "./src/domain/devices.ts"
+    "./devices": "./src/domain/devices.ts",
+    "./automations": "./src/domain/automations.ts",
+    "./household-events": "./src/contracts/household-events.ts",
+    "./automation-reviews": "./src/contracts/automation-reviews.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

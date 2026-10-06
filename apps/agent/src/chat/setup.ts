@@ -21,6 +21,7 @@ export async function setupChatStorage(database: AgentDatabase) {
     LEFT JOIN agent_state.chat_threads threads
       ON checkpoints.thread_id = threads.thread_id::text
     WHERE checkpoints.checkpoint_ns = '' AND threads.thread_id IS NULL
+      AND checkpoints.thread_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
   `);
   const rows = z.array(z.object({ thread_id: z.uuid() })).parse(result.rows);
   for (const { thread_id: threadId } of rows) {
