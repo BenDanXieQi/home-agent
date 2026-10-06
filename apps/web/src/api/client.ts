@@ -21,6 +21,7 @@ export const retryOnceOnTransportFailure: RetryPolicy = {
   codes: ["network_error", "request_timeout"],
 };
 export type RequestOptions = {
+  acceptedStatuses?: readonly number[];
   signal?: AbortSignal | undefined;
   // Per-attempt limit. The caller's signal bounds the whole operation, including retries.
   timeoutMs?: number;
@@ -67,7 +68,10 @@ export function createApiClient(
         const response = await send(rpc, {
           init: { signal, ...(options.keepalive ? { keepalive: true } : {}) },
         });
-        if (!response.ok) {
+        if (
+          !response.ok &&
+          !options.acceptedStatuses?.includes(response.status)
+        ) {
           const details = apiErrorSchema.safeParse(
             await response.json().catch((cause: unknown) => {
               if (cause instanceof SyntaxError) return null;
@@ -104,6 +108,11 @@ export function createApiClient(
       send,
       async (response) => {
         const payload: unknown = await response.json();
+        if (!response.ok) {
+          const error = apiErrorSchema.safeParse(payload);
+          if (error.success)
+            throw new RequestError(error.data, response.status);
+        }
         let data: T;
         try {
           data = schema.parse(payload);

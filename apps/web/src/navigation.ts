@@ -6,6 +6,7 @@ import {
   ScrollText,
   Settings2,
   Video,
+  Waypoints,
 } from "lucide-react";
 
 export const navigation = [
@@ -22,6 +23,13 @@ export const navigation = [
     icon: LayoutGrid,
     cornerRadius: 14,
     mobilePrimary: true,
+  },
+  {
+    to: "/spaces",
+    label: "空间",
+    icon: Waypoints,
+    cornerRadius: 14,
+    mobilePrimary: false,
   },
   {
     to: "/members",

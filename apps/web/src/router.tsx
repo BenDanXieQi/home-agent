@@ -149,6 +149,11 @@ const dataRoute = createRoute({
   path: "/data",
   component: lazyRouteComponent(() => import("./pages/database/index")),
 });
+const spacesRoute = createRoute({
+  getParentRoute: () => publicWorkspaceRoute,
+  path: "/spaces",
+  component: lazyRouteComponent(() => import("./pages/spaces/index")),
+});
 export const router = createRouter({
   routeTree: rootRoute.addChildren([
     accountRoute.addChildren([
@@ -167,7 +172,7 @@ export const router = createRouter({
       dataRoute,
       settingsRoute,
     ]),
-    publicWorkspaceRoute.addChildren([imageAnalysisRoute]),
+    publicWorkspaceRoute.addChildren([imageAnalysisRoute, spacesRoute]),
   ]),
   scrollRestoration: true,
   getScrollRestorationKey: (location) => location.href,
