@@ -1,5 +1,6 @@
-import { petSoundLabels } from "./window-presentation";
-import { findPlayableMemberActivityWindow } from "../../modules/members/activity";
+import { formatTime } from "../../modules/presentation/time";
+import { petSoundLabels } from "../../modules/perception/window-presentation";
+import { findPlayableObservationWindow } from "../../modules/playback/observation";
 import { useSearch } from "@tanstack/react-router";
 import { CameraAnalysisLayout } from "./CameraAnalysisLayout";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -18,7 +19,11 @@ import {
   type WindowListEntry,
 } from "../../modules/perception/windows";
 import { useWindowMediaState } from "../../modules/perception/use-window-input-state";
-import { windowTime, mediaStates, candidateLabel } from "./window-presentation";
+import {
+  windowTime,
+  mediaStateLabel,
+  candidateLabel,
+} from "../../modules/perception/window-presentation";
 import { CameraHeader } from "./CameraHeader";
 import { cameraTileClassName } from "./camera-styles";
 import { useWindowDetail } from "../../modules/perception/use-window-detail";
@@ -34,7 +39,12 @@ export function CameraWindows({
   scope: string;
   visible: boolean;
 }) {
-  const { activityRun, activityFirstAt, activityAt } = useSearch({
+  const {
+    activityRun,
+    activityFirstAt,
+    activityAt,
+    window: windowId,
+  } = useSearch({
     from: "/account/cameras/$deviceId/$channel",
   });
   const fromActivity = activityRun !== undefined && activityAt !== undefined;
@@ -73,17 +83,19 @@ export function CameraWindows({
     if (playable?.length === 1) select(playable[0]);
   }
   const windows = query.data?.windows ?? [];
-  const activityWindow = fromActivity
-    ? findPlayableMemberActivityWindow(
-        windows,
-        {
-          sourceRunId: activityRun,
-          firstObservedAt: activityFirstAt ?? activityAt,
-          lastObservedAt: activityAt,
-        },
-        query.dataUpdatedAt,
-      )
-    : undefined;
+  const activityWindow =
+    activityRun !== undefined && activityAt !== undefined
+      ? findPlayableObservationWindow(
+          windows,
+          {
+            sourceRunId: activityRun,
+            firstObservedAt: activityFirstAt ?? activityAt,
+            lastObservedAt: activityAt,
+          },
+          query.dataUpdatedAt,
+          windowId,
+        )
+      : undefined;
   if (fromActivity && !selection && activityWindow) select(activityWindow);
   const activityUnavailable =
     fromActivity && query.isSuccess && !activityWindow;
@@ -121,7 +133,7 @@ export function CameraWindows({
             </div>
             {fromActivity ? (
               <StatusNotice>
-                活动观察时间：{new Date(activityAt).toLocaleString("zh-CN")}
+                活动观察时间：{formatTime(activityAt)}
                 {query.isSuccess
                   ? activityWindow
                     ? activityAt <= activityWindow.endedAt
@@ -259,11 +271,7 @@ const WindowRow = memo(function WindowRow({
           </span>
         </span>
         <span className="mt-1 block text-xs text-muted">
-          {entry.gate.candidate === "none"
-            ? "仅文字"
-            : state
-              ? mediaStates[state]
-              : "尚未生成"}
+          {entry.gate.candidate === "none" ? "仅文字" : mediaStateLabel(state)}
           {entry.incomplete ? " · 不完整窗口" : ""}
         </span>
         {entry.petSoundKinds?.length ? (

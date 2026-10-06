@@ -1,12 +1,12 @@
-import { and, desc, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lt, or, sql } from "drizzle-orm";
 import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import {
-  agentContextPolicy,
   memberSightingRecordSchema,
   memberSightingsHistoryQuerySchema,
 } from "@home-agent/api/agent-context";
+import { memberObservationSchema } from "@home-agent/api/agent-context/observations";
 import { AppError } from "@home-agent/api/errors";
 import type { Database } from "../../db";
 import {
@@ -15,8 +15,15 @@ import {
   mijiaHomeSelections,
 } from "../../db/schema";
 import type { Transaction } from "../../db/transaction-outcome";
-import { createHouseholdBindingAccess } from "../binding-repository";
-import { createMemberWriter, lockIdentityMembers } from "./repository";
+import {
+  createHouseholdBindingAccess,
+  createHouseholdBindingRead,
+} from "../binding-repository";
+import {
+  createMemberWriter,
+  lockIdentityMembers,
+  membersLock,
+} from "./repository";
 import type { memberActivity } from "./activity";
 
 const memberSightingTopic = sql`${contextRecords.topic} = 'member_sighting'`;
@@ -71,6 +78,7 @@ async function bindingUpdatedAt(tx: Transaction) {
 
 export function createMemberActivityRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
+  const read = createHouseholdBindingRead(db);
   const write = createMemberWriter(db);
   const listeners = new Set<() => void>();
   const notify = () => {
@@ -93,24 +101,54 @@ export function createMemberActivityRepository(db: Database) {
     binding(identity: Parameters<typeof access>[0], assertCurrent: () => void) {
       return access(identity, assertCurrent, bindingUpdatedAt);
     },
-    async recent(
+    async byId(
       identity: Parameters<typeof access>[0],
       assertCurrent: () => void,
+      id: string,
     ) {
       return access(identity, assertCurrent, async (tx) => {
         await lockIdentityMembers(tx, "shared");
-        const lastObservedAt = sql<number>`(${contextRecords.data}->>'lastObservedAt')::numeric`;
         const rows = await tx
           .select()
           .from(contextRecords)
-          .where(memberSightingTopic)
-          .orderBy(desc(lastObservedAt), desc(contextRecords.id))
-          .limit(agentContextPolicy.recentSightings + 1);
-        const records = await sightingRecords(
-          tx,
-          rows.slice(0, agentContextPolicy.recentSightings),
-        );
-        return { records, truncated: records.length < rows.length };
+          .where(and(memberSightingTopic, eq(contextRecords.id, id)))
+          .limit(1);
+        return (await sightingRecords(tx, rows))[0] ?? null;
+      });
+    },
+    async observationsSince(
+      identity: Parameters<typeof access>[0],
+      assertCurrent: () => void,
+      since: number,
+      consume: (record: z.infer<typeof memberObservationSchema>) => boolean,
+    ) {
+      return read(identity, assertCurrent, async (tx) => {
+        await tx`select pg_advisory_xact_lock_shared(hashtextextended(${membersLock}, 0))`;
+        assertCurrent();
+        const query = tx`
+          select id, jsonb_build_object(
+            'sourceRunId', data->'sourceRunId',
+            'run', data->'run',
+            'mediaGeneration', data->'mediaGeneration',
+            'trackId', data->'trackId',
+            'deviceId', data->'deviceId',
+            'channel', data->'channel',
+            'firstObservedAt', data->'firstObservedAt',
+            'lastObservedAt', data->'lastObservedAt'
+          ) as data,
+          data #>> '{attribution,current,kind}' = 'known' as known,
+          (data #>> '{attribution,revision}')::integer as revision
+          from context_records
+          where topic = 'member_sighting' and (data->>'lastObservedAt')::numeric >= ${since}
+          order by (data->>'lastObservedAt')::numeric desc, id desc
+        `;
+        for await (const rows of query.cursor(16)) {
+          for (const row of rows) {
+            assertCurrent();
+            if (!consume(memberObservationSchema.parse(row))) return false;
+          }
+        }
+        return true;
       });
     },
     async history(

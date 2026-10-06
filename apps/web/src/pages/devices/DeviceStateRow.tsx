@@ -1,4 +1,11 @@
 import {
+  reasonLabels,
+  subscriptionLabels,
+} from "../../modules/devices/presentation";
+import { formatTime } from "../../modules/presentation/time";
+import { JsonData } from "../../components/json/JsonData";
+import { formatDevicePropertyValue } from "../../modules/devices/presentation";
+import {
   memo,
   useCallback,
   useEffect,
@@ -24,13 +31,7 @@ import { Button } from "../../components/Button";
 import { requestJson } from "../../api/client";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import { expand } from "../../utils/motion";
-import {
-  summarizeProperties,
-  reasonLabels,
-  subscriptionLabels,
-  propertyValue,
-  time,
-} from "./fact-presentation";
+import { summarizeProperties, propertyValue } from "./fact-presentation";
 
 export const DeviceStateRow = memo(function DeviceStateRow({
   device,
@@ -252,22 +253,29 @@ function DeviceDetails({
                     {property.read_candidate ? (
                       <small className="mt-1 block text-muted">
                         缓存候选：
-                        {JSON.stringify(property.read_candidate.value)} ·{" "}
-                        {time(property.read_candidate.received_at)}
+                        {formatDevicePropertyValue(
+                          property.read_candidate.value,
+                          property,
+                        )}{" "}
+                        ·{" "}
+                        {formatTime(
+                          property.read_candidate.received_at,
+                          "clock",
+                        )}
                       </small>
                     ) : null}
                   </td>
                   <td>{reliable ? reasonLabels[property.reason] : "待同步"}</td>
                   <td title={property.last_report_at ?? ""}>
-                    {time(property.last_report_at)}
+                    {formatTime(property.last_report_at, "clock")}
                     {property.last_read_at ? (
                       <small className="mt-1 block text-muted">
-                        读取 {time(property.last_read_at)}
+                        读取 {formatTime(property.last_read_at, "clock")}
                       </small>
                     ) : null}
                   </td>
                   <td title={property.last_change_at ?? ""}>
-                    {time(property.last_change_at)}
+                    {formatTime(property.last_change_at, "clock")}
                   </td>
                 </tr>
               ))}
@@ -279,6 +287,13 @@ function DeviceDetails({
           尚未取得属性资料。设备仍保留在设备清单中，状态上报后自动更新。
         </p>
       )}
+      {properties.length ? (
+        <JsonData
+          value={properties}
+          label="设备属性 JSON"
+          name={`device-${device.id}-properties`}
+        />
+      ) : null}
     </div>
   );
 }

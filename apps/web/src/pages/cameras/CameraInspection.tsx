@@ -1,3 +1,4 @@
+import { JsonData } from "../../components/json/JsonData";
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import type { useFrameViewer } from "../../modules/perception/use-frame-viewer";
@@ -81,12 +82,14 @@ function VideoInspection({
         时表示沿用稍早的框，ageMs
         为两帧时间差（毫秒）。定格后保留当时数据，后台继续分析。
       </p>
-      <pre
-        className="max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs"
-        aria-label="视频分析 JSON 内容"
-      >
-        {JSON.stringify(video, null, 2)}
-      </pre>
+      {video ? (
+        <JsonData
+          value={video}
+          label="视频分析 JSON"
+          name="video-analysis"
+          defaultOpen
+        />
+      ) : null}
     </>
   );
 }
@@ -94,24 +97,8 @@ function VideoInspection({
 function AudioInspectionJson({
   audio,
 }: Parameters<typeof CameraAudioAnalysis>[0]) {
-  const [expanded, setExpanded] = useState(false);
   return (
-    <details
-      open={expanded}
-      onToggle={(event) => setExpanded(event.currentTarget.open)}
-    >
-      <summary className="cursor-pointer text-xs text-muted">
-        声音原始数据 JSON
-      </summary>
-      {expanded ? (
-        <pre
-          className="mt-2 max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs"
-          aria-label="声音分析 JSON 内容"
-        >
-          {JSON.stringify(audio, null, 2)}
-        </pre>
-      ) : null}
-    </details>
+    <JsonData value={audio} label="声音原始数据 JSON" name="audio-analysis" />
   );
 }
 

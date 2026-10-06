@@ -1,3 +1,4 @@
+import { createAgentReceiverRoutes } from "./agent-context/receiver-routes";
 import { createAgentContextRoutes } from "./agent-context/routes";
 import type { createAgentContextService } from "./agent-context/service";
 import type { createMemberActivityRepository } from "./household/identity/activity-repository";
@@ -194,6 +195,14 @@ export function createApp({
     .route(
       "/api/services",
       createConnectionStatusRoutes(environment.BACKEND_PORT, connectionStore),
+    )
+    .route(
+      "/api/agent/receipts",
+      createAgentReceiverRoutes({
+        port: environment.BACKEND_PORT,
+        timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+        readAgentUrl,
+      }),
     )
     .route(
       "/api/chat",

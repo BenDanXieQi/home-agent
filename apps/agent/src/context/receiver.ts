@@ -1,5 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { createReceiptJournal } from "./receipts";
 import { z } from "zod";
+import { mergeAgentContextSnapshot } from "@home-agent/api/agent-context/merge";
 import {
   agentContextEventSchema,
   agentContextPartsSchema,
@@ -9,9 +11,11 @@ import {
 } from "@home-agent/api/agent-context";
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
 
-/** The transport owns connection and household qualification; parts replace whole values. */
+/** The transport owns connection and household qualification; the shared reducer applies updates. */
 export function createContextReceiver(options: { backendUrl: string }) {
   const base = z.url({ protocol: /^https?$/ }).parse(options.backendUrl);
+  const receipts = createReceiptJournal();
+  let heartbeatAt: string | null = null;
   const partNames = Object.keys(agentContextPartsSchema.shape);
   let scope: z.infer<typeof agentContextScopeSchema> | null = null;
   let parts: z.infer<typeof agentContextSnapshotSchema>["parts"] = {};
@@ -37,6 +41,8 @@ export function createContextReceiver(options: { backendUrl: string }) {
     while (!signal.aborted) {
       const generation = ++connectionGeneration;
       qualificationGeneration++;
+      receipts.clear();
+      heartbeatAt = null;
       scope = null;
       parts = {};
       receivedAt = null;
@@ -75,8 +81,12 @@ export function createContextReceiver(options: { backendUrl: string }) {
             });
             status = "connected";
             lastError = null;
-            receivedAt = new Date().toISOString();
-            if (message.event === "heartbeat") return;
+            const now = new Date().toISOString();
+            if (message.event === "heartbeat") {
+              heartbeatAt = now;
+              return;
+            }
+            receivedAt = now;
             const next = message.data.scope;
             if (
               scope?.scope_epoch !== next?.scope_epoch ||
@@ -84,14 +94,29 @@ export function createContextReceiver(options: { backendUrl: string }) {
               scope?.home_id !== next?.home_id
             ) {
               qualificationGeneration++;
+              receipts.clear();
               parts = {};
               synchronized = false;
             }
+            const previous = { scope, parts };
+            parts = mergeAgentContextSnapshot(
+              { scope, parts },
+              message.data,
+            ).parts;
             scope = next;
-            parts = { ...parts, ...message.data.parts };
             synchronized =
               Object.keys(parts).length === partNames.length &&
               Object.values(parts).every((part) => part !== undefined);
+            receipts.append(
+              {
+                message,
+                context: { scope, parts },
+                received_at: now,
+                synchronized,
+              },
+              Buffer.byteLength(event.data),
+              previous,
+            );
             if (synchronized) retryMs = agentContextPolicy.reconnectInitialMs;
           },
         );
@@ -104,6 +129,11 @@ export function createContextReceiver(options: { backendUrl: string }) {
         else if (error instanceof SyntaxError) failureReason = "invalid_json";
       }
       if (signal.aborted || generation !== connectionGeneration) return;
+      receipts.clear();
+      scope = null;
+      parts = {};
+      receivedAt = null;
+      heartbeatAt = null;
       status = "disconnected";
       synchronized = false;
       qualificationGeneration++;
@@ -128,11 +158,27 @@ export function createContextReceiver(options: { backendUrl: string }) {
 
   return {
     qualification,
+    receiptIndex(query?: Parameters<typeof receipts.index>[0]) {
+      return {
+        ...receipts.index(query),
+        scope,
+        connection: { status, synchronized, last_error: lastError },
+        received_at: receivedAt,
+        heartbeat_at: heartbeatAt,
+      };
+    },
+    receipt(id: string) {
+      return receipts.detail(id);
+    },
+    journalId() {
+      return receipts.id();
+    },
     currentScope() {
       return qualification()?.scope ?? null;
     },
     snapshot() {
       return {
+        context_bytes: Buffer.byteLength(JSON.stringify({ scope, parts })),
         scope,
         connection: { status, synchronized, last_error: lastError },
         parts,
@@ -143,6 +189,11 @@ export function createContextReceiver(options: { backendUrl: string }) {
       if (running) return;
       controller = new AbortController();
       running = run(controller.signal).catch(() => {
+        receipts.clear();
+        scope = null;
+        parts = {};
+        receivedAt = null;
+        heartbeatAt = null;
         synchronized = false;
         status = "disconnected";
         qualificationGeneration++;
@@ -153,6 +204,11 @@ export function createContextReceiver(options: { backendUrl: string }) {
       connectionGeneration++;
       qualificationGeneration++;
       synchronized = false;
+      receipts.clear();
+      scope = null;
+      parts = {};
+      receivedAt = null;
+      heartbeatAt = null;
       status = "stopped";
       controller?.abort();
       await running;

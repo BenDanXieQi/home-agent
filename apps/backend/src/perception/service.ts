@@ -618,6 +618,18 @@ export function createPerceptionService(options: {
         : { ...entry, sampledMedia };
     },
     windowRevision: () => windowRevision,
+    windowObservation(id: string) {
+      const observation = windows.observation(id, Date.now());
+      return observation
+        ? {
+            ...observation,
+            material: {
+              ...observation.material,
+              sampledMedia: media.sampledMedia(id),
+            },
+          }
+        : undefined;
+    },
     *history(
       input: Pick<
         z.infer<typeof perceptionWindowsHistoryQuerySchema>,

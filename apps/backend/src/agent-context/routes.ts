@@ -1,3 +1,4 @@
+import { createAgentMaterialReader } from "./material";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -8,6 +9,7 @@ import {
 } from "@home-agent/api/errors/hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
 import {
+  agentMaterialQuerySchema,
   agentHistoryQuerySchema,
   agentHistoryResponseSchema,
 } from "@home-agent/api/agent-context";
@@ -35,6 +37,13 @@ export function createAgentContextRoutes(
   sightings: ReturnType<typeof createMemberActivityRepository> | undefined,
   perception: ReturnType<typeof createPerceptionService>,
 ) {
+  const material = createAgentMaterialReader(
+    household,
+    sightings,
+    perception,
+    shutdown,
+    timeoutMs,
+  );
   const read = createDeviceHistoryReader(household, query, shutdown, timeoutMs);
   const history = createAgentHistoryReader({
     household,
@@ -44,7 +53,9 @@ export function createAgentContextRoutes(
     timeoutMs,
   });
   const app = new Hono();
-  app.use(requireLocalAccess([port]));
+  app.use("/stream", requireLocalAccess([port, 5173], { webEntry: true }));
+  app.use("/material", requireLocalAccess([port, 5173], { webEntry: true }));
+  app.use("/history", requireLocalAccess([port]));
   app.use(
     bodyLimit({
       maxSize: deviceHistoryPolicy.requestBytes,
@@ -63,6 +74,10 @@ export function createAgentContextRoutes(
   );
   return app
     .get("/stream", createAgentContextStream(context, shutdown))
+    .post("/material", validateJson(agentMaterialQuerySchema), async (c) => {
+      c.header("Cache-Control", "no-store");
+      return c.json(await material(c.req.valid("json"), c.req.raw.signal));
+    })
     .post("/history", validateJson(agentHistoryQuerySchema), async (c) => {
       c.header("Cache-Control", "no-store");
       const input = c.req.valid("json");

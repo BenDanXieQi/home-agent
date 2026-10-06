@@ -1,3 +1,4 @@
+import { deviceRoomKey } from "@home-agent/api/devices";
 import { deviceCategoryLabel } from "../../modules/devices/presentation";
 import { atom } from "jotai";
 import { householdSnapshotAtom } from "../../modules/household/state";
@@ -30,16 +31,12 @@ const byName = ([, left]: [string, string], [, right]: [string, string]) =>
 export const deviceFilterOptionsAtom = atom((get) => {
   const rooms = new Map<string, string>();
   for (const room of Object.values(get(roomsAtom) ?? {})) {
-    if (!room.archived)
-      rooms.set(JSON.stringify([room.home_id, room.room_id]), room.name);
+    if (!room.archived) rooms.set(deviceRoomKey(room), room.name);
   }
   const categories = new Map<string, string>();
   const capabilities = new Set<string>();
   for (const device of get(devicesAtom)) {
-    rooms.set(
-      JSON.stringify([device.home_id, device.room_id]),
-      device.room_name ?? "未分配房间",
-    );
+    rooms.set(deviceRoomKey(device), device.room_name ?? "未分配房间");
     categories.set(
       JSON.stringify(device.category),
       device.category ? deviceCategoryLabel(device.category) : "未分类",
@@ -62,11 +59,11 @@ export const filteredDevicesAtom = atom((get) => {
     (device) =>
       (filter === "all" ||
         (filter === "online" ? device.online : !device.online)) &&
-      (!room || JSON.stringify([device.home_id, device.room_id]) === room) &&
+      (!room || deviceRoomKey(device) === room) &&
       (!category || JSON.stringify(device.category) === category) &&
       (!capability ||
         device.capability_tags.some((tag) => tag === capability)) &&
-      `${device.name} ${device.alias ?? ""} ${device.model}`
+      `${device.room_name ?? ""} ${device.name} ${device.id} ${device.alias ?? ""} ${device.model}`
         .toLocaleLowerCase()
         .includes(search),
   );

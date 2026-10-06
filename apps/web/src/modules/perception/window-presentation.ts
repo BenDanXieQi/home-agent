@@ -1,9 +1,6 @@
-import type { WindowListEntry } from "../../modules/perception/windows";
-
-const windowClock = new Intl.DateTimeFormat("zh-CN", {
-  timeStyle: "medium",
-  hour12: false,
-});
+import { formatTime } from "../presentation/time";
+import type { WindowListEntry } from "./windows";
+import type { projectWindowMaterial } from "@home-agent/api/perception/window-observations";
 
 export const visualReasons = {
   first: "首个有效画面窗口",
@@ -21,7 +18,7 @@ export const representations = {
   audio: "声音",
 };
 export function windowTime(time: number) {
-  return windowClock.format(time);
+  return formatTime(time, "clock");
 }
 export function candidateLabel(window: Pick<WindowListEntry, "gate">) {
   return { video: "画面变化", audio: "声音片段", none: "仅文字" }[
@@ -39,6 +36,33 @@ export const mediaStates = {
   evicted: "已清理",
   revoked: "访问已撤销",
 };
+
+export function mediaStateLabel(
+  state:
+    | NonNullable<WindowListEntry["sampledMedia"]>["state"]
+    | null
+    | undefined,
+) {
+  return state ? mediaStates[state] : "无媒体引用";
+}
+
+export function petSoundSummary(
+  material: Pick<
+    ReturnType<typeof projectWindowMaterial>,
+    "pet_sound_analysis" | "pet_sound_count"
+  >,
+) {
+  const analysis = material.pet_sound_analysis;
+  if (!analysis) return "未提供分析结果";
+  if (analysis.status !== "ready") return petSoundStatuses[analysis.status];
+  if (analysis.validity !== "valid")
+    return {
+      no_data: "未获得分析结果",
+      expired: "分析结果已过期",
+      unavailable: "分析结果不可用",
+    }[analysis.validity];
+  return `${petSoundStatuses.ready} · ${material.pet_sound_count} 条检测结果`;
+}
 
 export const historicalIdentityStatuses = {
   idle: "当时未采样",
@@ -71,4 +95,24 @@ export const petSoundStatuses = {
   insufficient_input: "等待完整声音窗口",
   ready: "分类可用",
   unavailable: "分类不可用",
+};
+
+export const windowInputStates = {
+  available: "可用",
+  expired: "已过期",
+  evicted: "已清理",
+  revoked: "访问已撤销",
+};
+export const windowAudioStates = {
+  available: "可用",
+  no_track: "无音轨",
+  missing: "缺失",
+  insufficient_input: "输入不足",
+  failed: "失败",
+};
+export const windowVadStates = {
+  speech: "检出人声",
+  no_speech: "未检出人声",
+  insufficient_input: "输入不足",
+  unavailable: "不可用",
 };

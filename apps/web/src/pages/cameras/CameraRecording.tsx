@@ -1,11 +1,12 @@
+import { formatTime } from "../../modules/presentation/time";
 import { Navigate, useParams, useSearch } from "@tanstack/react-router";
 import type { z } from "zod";
 import { Button } from "../../components/Button";
 import { BackLink } from "../../components/BackLink";
 import { Notice, StatusNotice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
-import type { memberActivitySourceSchema } from "../../modules/members/activity";
-import { useActivityRecording } from "../../modules/members/use-activity-recording";
+import type { observationPlaybackSourceSchema } from "../../modules/playback/observation";
+import { useObservationRecording } from "../../modules/playback/use-observation-recording";
 import { RecordingPlayer } from "../../modules/recordings/RecordingPlayer";
 import { useCameraReturn } from "./use-camera-return";
 
@@ -14,10 +15,17 @@ export default function CameraRecordingPage() {
   const { deviceId, channel } = useParams({
     from: "/account/cameras/$deviceId/$channel/recording",
   });
-  const { member, recordingAt, activityAt, activityRun, activityFirstAt } =
-    useSearch({
-      from: "/account/cameras/$deviceId/$channel/recording",
-    });
+  const {
+    member,
+    recordingAt,
+    seekAt,
+    activityAt,
+    activityRun,
+    activityFirstAt,
+    window: windowId,
+  } = useSearch({
+    from: "/account/cameras/$deviceId/$channel/recording",
+  });
   return (
     <section className="space-y-4">
       {member ? (
@@ -29,11 +37,12 @@ export default function CameraRecordingPage() {
       )}
       {(channel === "1" || channel === "2") &&
       recordingAt !== undefined &&
+      seekAt !== undefined &&
       activityRun !== undefined &&
       activityFirstAt !== undefined &&
       activityAt !== undefined ? (
-        <ActivityRecording
-          key={`${deviceId}:${channel}:${recordingAt}:${activityRun}:${activityFirstAt}:${activityAt}`}
+        <ObservationRecording
+          key={`${deviceId}:${channel}:${windowId ?? ""}:${recordingAt}:${seekAt}:${activityRun}:${activityFirstAt}:${activityAt}`}
           activity={{
             deviceId,
             channel: channel === "1" ? 1 : 2,
@@ -42,7 +51,9 @@ export default function CameraRecordingPage() {
             lastObservedAt: activityAt,
           }}
           member={member}
+          windowId={windowId}
           recordingAt={recordingAt}
+          seekAt={seekAt}
         />
       ) : (
         <Notice tone="error">录像定位信息不完整。</Notice>
@@ -51,16 +62,20 @@ export default function CameraRecordingPage() {
   );
 }
 
-function ActivityRecording({
+function ObservationRecording({
   activity,
   member,
   recordingAt,
+  seekAt,
+  windowId,
 }: {
-  activity: z.infer<typeof memberActivitySourceSchema>;
+  activity: z.infer<typeof observationPlaybackSourceSchema>;
   member: string | undefined;
   recordingAt: number;
+  seekAt: number;
+  windowId: string | undefined;
 }) {
-  const recording = useActivityRecording(activity, recordingAt);
+  const recording = useObservationRecording(activity, recordingAt, windowId);
   if (recording.cached)
     return (
       <Navigate
@@ -71,6 +86,7 @@ function ActivityRecording({
         }}
         search={{
           mode: "windows",
+          window: recording.cached.id,
           activityRun: activity.sourceRunId,
           activityFirstAt: activity.firstObservedAt,
           activityAt: activity.lastObservedAt,
@@ -81,9 +97,7 @@ function ActivityRecording({
     );
   return (
     <div className="space-y-3">
-      <h2 className="text-sm font-medium">
-        活动录像 · {new Date(activity.lastObservedAt).toLocaleString("zh-CN")}
-      </h2>
+      <h2 className="text-sm font-medium">观察录像 · {formatTime(seekAt)}</h2>
       {!recording.target ? (
         <StatusNotice>等待摄像头连接就绪…</StatusNotice>
       ) : recording.error ? (
@@ -102,7 +116,7 @@ function ActivityRecording({
       ) : recording.ready ? (
         <RecordingPlayer
           playback={recording.playback}
-          activityAt={activity.lastObservedAt}
+          activityAt={seekAt}
           autoPlay
         />
       ) : (

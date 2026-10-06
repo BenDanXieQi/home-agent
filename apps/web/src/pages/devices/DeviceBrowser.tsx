@@ -1,3 +1,4 @@
+import { SearchField } from "../../components/SearchField";
 import { householdScopeEpochAtom } from "../../modules/household/state";
 import { DeviceStateRow } from "./DeviceStateRow";
 import { CollectionDetails } from "./CollectionDetails";
@@ -173,16 +174,13 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           {devices.length} 台设备 · 最近状态
         </span>
         <div className="flex min-w-0 items-center gap-2 max-md:w-full">
-          <label className="relative m-0 flex w-60 items-center [&_svg]:absolute [&_svg]:left-2.5 [&_svg]:text-muted max-md:w-auto max-md:min-w-0 max-md:flex-1">
-            <Search size={14} />
-            <input
-              className="h-10 pl-9 text-[13px]"
-              aria-label="搜索设备"
-              placeholder="搜索名称、别名或型号"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-          </label>
+          <SearchField
+            label="搜索设备"
+            placeholder="搜索房间、设备、别名或型号"
+            value={search}
+            onChange={setSearch}
+            className="w-60 max-md:w-auto max-md:flex-1"
+          />
           <Button
             aria-expanded={refinementsOpen}
             aria-controls="device-refinements"

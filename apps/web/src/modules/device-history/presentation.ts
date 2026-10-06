@@ -1,14 +1,12 @@
+import { deviceRoomKey } from "@home-agent/api/devices";
+import { formatDevicePropertyValue } from "../devices/presentation";
 import { deviceHistoryRecordId } from "@home-agent/api/device-history";
 import type { devicesAtom } from "../devices/state";
 import type { HistoryResponse } from "./page";
 
 function displayValue(record: HistoryResponse["records"][number]) {
   if (record.kind === "online") return record.value ? "在线" : "离线";
-  const label = record.metadata.value_list?.find(
-    (item) => item.value === record.value,
-  )?.description;
-  const value = label ?? String(record.value);
-  return record.metadata.unit ? `${value} ${record.metadata.unit}` : value;
+  return formatDevicePropertyValue(record.value, record.metadata);
 }
 
 function describeLogEntry(
@@ -61,5 +59,6 @@ export function historyDevices(devices: ReturnType<typeof devicesAtom.read>) {
       id: device.id,
       name: device.name,
       room: device.room_name ?? "未分配房间",
+      room_key: deviceRoomKey(device),
     }));
 }

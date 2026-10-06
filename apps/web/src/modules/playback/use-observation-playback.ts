@@ -4,19 +4,21 @@ import { useQueries } from "@tanstack/react-query";
 import type { z } from "zod";
 import { createPerceptionSourceState } from "../perception/source-state";
 import {
-  activityCacheSettled,
-  activityWindowListOptions,
-} from "./activity-cache";
+  observationCacheSettled,
+  observationWindowListOptions,
+} from "./observation-cache";
 import { recordingAvailabilityOptions } from "../recordings/api";
 import {
-  findMemberActivityWindow,
-  type memberActivitySourceSchema,
-} from "./activity";
+  findObservationWindow,
+  type observationPlaybackSourceSchema,
+} from "./observation";
 
-export function useActivityPlayback(
+export function useObservationPlayback(
   activities: {
     id: string;
-    source: z.infer<typeof memberActivitySourceSchema>;
+    windowId?: string | undefined;
+    recordingAt?: number | undefined;
+    source: z.infer<typeof observationPlaybackSourceSchema>;
   }[],
   scope: string,
 ) {
@@ -51,7 +53,7 @@ export function useActivityPlayback(
   const targets = useAtomValue(targetsAtom);
   const windows = useQueries({
     queries: groups.map((group, index) => ({
-      ...activityWindowListOptions({
+      ...observationWindowListOptions({
         scopeEpoch: scope,
         ...group.state.target,
       }),
@@ -86,10 +88,11 @@ export function useActivityPlayback(
         group.activities.map((activity) => [
           activity.id,
           targets[index]?.scope_epoch === scope && windows[index]?.isSuccess
-            ? findMemberActivityWindow(
+            ? findObservationWindow(
                 indexes[index]?.get(activity.source.sourceRunId) ?? [],
                 activity.source,
                 now,
+                activity.windowId,
               )
             : undefined,
         ]),
@@ -103,7 +106,10 @@ export function useActivityPlayback(
         ...new Set(
           group.activities
             .filter((activity) => !matched[index]?.get(activity.id))
-            .map((activity) => activity.source.lastObservedAt),
+            .map(
+              (activity) =>
+                activity.recordingAt ?? activity.source.lastObservedAt,
+            ),
         ),
       ];
       const options = recordingAvailabilityOptions(
@@ -117,7 +123,7 @@ export function useActivityPlayback(
         enabled:
           target?.scope_epoch === scope &&
           at.length > 0 &&
-          activityCacheSettled(windows[index]),
+          observationCacheSettled(windows[index]),
       };
     }),
   });
@@ -129,23 +135,53 @@ export function useActivityPlayback(
           ? recording.data.matches.map((match) => [match.at, match.clip])
           : [],
       );
-      return group.activities.map(
-        (activity) =>
-          [
-            activity.id,
-            {
-              window: matched[index]?.get(activity.id),
-              clip:
-                targets[index]?.scope_epoch === scope &&
-                windows[index]?.isSuccess
-                  ? clips.get(activity.source.lastObservedAt)
-                  : undefined,
-              checking:
-                windows[index]?.fetchStatus !== "idle" ||
-                !!recording?.isFetching,
-            },
-          ] as const,
-      );
+      const windowQuery = windows[index];
+      const qualified = targets[index]?.scope_epoch === scope;
+      return group.activities.map((activity) => {
+        const window = matched[index]?.get(activity.id);
+        const clip =
+          qualified && windowQuery?.isSuccess
+            ? clips.get(activity.recordingAt ?? activity.source.lastObservedAt)
+            : undefined;
+        function availability() {
+          if (!qualified) return { status: "waiting" as const };
+          if (window) return { status: "window" as const, window };
+          if (windowQuery?.isError && !windowQuery.isFetching)
+            return {
+              status: "failed" as const,
+              error: windowQuery.error,
+              retry: windowQuery.refetch,
+            };
+          if (!windowQuery?.isSuccess || windowQuery.fetchStatus !== "idle")
+            return { status: "checking" as const };
+          if (recording?.isError && !recording.isFetching)
+            return {
+              status: "failed" as const,
+              error: recording.error,
+              retry: recording.refetch,
+            };
+          if (clip)
+            return {
+              status: "recording" as const,
+              clip,
+              seekAt: activity.recordingAt ?? activity.source.lastObservedAt,
+              checking: recording?.fetchStatus !== "idle",
+            };
+          if (
+            recording?.data?.status === "unavailable" &&
+            !recording.isFetching
+          )
+            return {
+              status: "unavailable" as const,
+              reason: recording.data.reason,
+              retry: recording.refetch,
+            };
+          if (!recording?.isSuccess || recording.fetchStatus !== "idle")
+            return { status: "checking" as const };
+          return { status: "empty" as const };
+        }
+        return [activity.id, availability()] as const;
+      });
     }),
   );
 }

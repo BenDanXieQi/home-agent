@@ -5,6 +5,10 @@ import {
   windowRequestUnavailable,
   type WindowListEntry,
 } from "./windows";
+import {
+  useWindowInputState,
+  useWindowMediaState,
+} from "./use-window-input-state";
 export function useWindowDetail(
   entry: WindowListEntry | undefined,
   scope: string,
@@ -21,18 +25,23 @@ export function useWindowDetail(
         ? 500
         : false,
   });
+  const inputState = useWindowInputState(entry);
+  const mediaState = useWindowMediaState(entry?.sampledMedia);
   // Frame judgments are frozen. Only completed speech can add historical evidence.
   const window = useMemo(
     () =>
-      query.data && entry
+      query.data && entry && inputState !== undefined
         ? {
             ...query.data,
-            inputState: entry.inputState,
-            sampledMedia: entry.sampledMedia,
+            inputState,
+            sampledMedia:
+              entry.sampledMedia && mediaState
+                ? { ...entry.sampledMedia, state: mediaState }
+                : null,
             summaryUntil: entry.summaryUntil,
           }
         : undefined,
-    [query.data, entry],
+    [query.data, entry, inputState, mediaState],
   );
   return { query, window };
 }

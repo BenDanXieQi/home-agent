@@ -1,3 +1,4 @@
+import { formatTime } from "../../modules/presentation/time";
 import { useId, useState } from "react";
 import { Check, ChevronDown, Clock3 } from "lucide-react";
 import { Popover } from "radix-ui";
@@ -16,7 +17,7 @@ function localInputTime(value: string) {
 function rangeTime(value: string) {
   const date = new Date(value);
   const today = new Date().toDateString() === date.toDateString();
-  return `${today ? "" : date.toLocaleDateString("zh-CN", { month: "numeric", day: "numeric" }) + " "}${date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
+  return `${today ? "" : formatTime(date, "monthDay") + " "}${formatTime(date, "minute")}`;
 }
 
 export function HistoryRange({

@@ -15,7 +15,7 @@ import {
 import { householdLimits } from "../config";
 import { HouseholdError } from "../errors";
 
-const membersLock = "household_members";
+export const membersLock = "household_members";
 
 // Shared with member writes; caller already holds the household binding lock.
 export function lockIdentityMembers(

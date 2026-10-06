@@ -1,4 +1,7 @@
-import { petSoundLabels, petSoundStatuses } from "./window-presentation";
+import {
+  petSoundLabels,
+  petSoundStatuses,
+} from "../../modules/perception/window-presentation";
 import type { ExtractAtomValue } from "jotai";
 import type { createPerceptionSourceState } from "../../modules/perception/source-state";
 

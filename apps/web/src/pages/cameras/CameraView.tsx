@@ -40,6 +40,7 @@ export default function CameraViewPage() {
           to="/cameras/$deviceId/$channel"
           search={{
             mode: undefined,
+            window: undefined,
             activityRun: undefined,
             activityAt: undefined,
             activityFirstAt: undefined,
