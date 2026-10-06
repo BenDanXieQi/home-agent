@@ -12,25 +12,34 @@ import {
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, m, useScroll, useReducedMotion } from "motion/react";
 import { Collapsible } from "radix-ui";
-import { ArrowRight, ChevronDown } from "lucide-react";
-import type { DeviceLogSnapshot } from "@home-agent/api/device-logs";
+import { ChevronDown } from "lucide-react";
+import type { LogEntry } from "../../modules/device-history/presentation";
 import { ReturnLatest } from "./ReturnLatest";
-import { changeLabels, presentLogEntry } from "./presentation";
+import { sourceLabels, presentLogEntry } from "./presentation";
 
 /** Hold the visible batch while reading history; reaching the top resumes live rows. */
 export function LogEvents({
   rows,
   showDevice,
   empty,
+  reading,
+  onReadingChange,
+  onLoadOlder,
+  loadingOlder,
+  paused,
 }: {
-  rows: DeviceLogSnapshot["entries"];
+  rows: LogEntry[];
   showDevice: boolean;
   empty: ReactNode;
+  reading: LogEntry[] | null;
+  onReadingChange: (reading: boolean) => void;
+  onLoadOlder: () => void;
+  loadingOlder: boolean;
+  paused: boolean;
 }) {
-  const [baseline, setBaseline] = useState(() =>
-    rows.reduce((latest, row) => Math.max(latest, row.sequence), -1),
+  const [baseline, setBaseline] = useState(
+    () => new Set(rows.map((row) => row.id)),
   );
-  const [reading, setReading] = useState<typeof rows | null>(null);
   const [returnCount, setReturnCount] = useState<number | null>(null);
   const returning = returnCount !== null;
   const scroller = useRef<HTMLElement>(null);
@@ -38,40 +47,36 @@ export function LogEvents({
   const { scrollY } = useScroll({ container: scroller });
   // React schedules fresh rows separately from the urgent return-button exit.
   const visible = useDeferredValue(reading ?? rows);
-  const visibleSequences = useMemo(
-    () => new Set(visible.map((row) => row.sequence)),
+  const visibleIds = useMemo(
+    () => new Set(visible.map((row) => row.id)),
     [visible],
   );
-  const [expanded, setExpanded] = useState(() => new Set<number>());
-  const [focused, setFocused] = useState<number | null>(null);
-  const changeExpanded = useCallback((sequence: number, open: boolean) => {
+  const [expanded, setExpanded] = useState(() => new Set<string>());
+  const [focused, setFocused] = useState<string | null>(null);
+  const previousVisibleIds = useRef(visibleIds);
+  const changeExpanded = useCallback((id: string, open: boolean) => {
     setExpanded((previous) => {
       const next = new Set(previous);
-      if (open) next.add(sequence);
-      else next.delete(sequence);
+      if (open) next.add(id);
+      else next.delete(id);
       return next;
     });
   }, []);
   const retainedIndexes = useMemo(
     () =>
       visible.flatMap((row, index) =>
-        expanded.has(row.sequence) || focused === row.sequence ? [index] : [],
+        expanded.has(row.id) || focused === row.id ? [index] : [],
       ),
     [visible, expanded, focused],
   );
-  // oxlint-disable-next-line react/incompatible-library -- Read the virtualizer's live measurements on every render; do not compiler-memoize this component.
+  // oxlint-disable-next-line react/incompatible-library -- Read current measurements on each render.
   const virtualizer = useVirtualizer({
-    // Panel resizing can notify during a React commit; let React batch that update.
     useFlushSync: false,
     count: visible.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => 100,
-    getItemKey: useCallback(
-      (index: number) => visible[index]!.sequence,
-      [visible],
-    ),
+    getItemKey: useCallback((index: number) => visible[index]!.id, [visible]),
     overscan: 4,
-    // Keep expanded details and keyboard focus mounted when scrolled offscreen.
     rangeExtractor: useCallback(
       (range: Parameters<typeof defaultRangeExtractor>[0]) =>
         [
@@ -81,24 +86,24 @@ export function LogEvents({
     ),
   });
   useLayoutEffect(() => {
-    // TanStack retains measured sizes by key after rows leave the list. Delete
-    // only retired keys so current row heights and the reading position survive.
-    for (const key of virtualizer.itemSizeCache.keys()) {
-      if (typeof key !== "number" || !visibleSequences.has(key))
-        virtualizer.itemSizeCache.delete(key);
+    // Frozen reading keeps its measurements. At turnover, use public APIs to
+    // release retired measurements and immediately remeasure mounted rows.
+    if ([...previousVisibleIds.current].some((id) => !visibleIds.has(id))) {
+      virtualizer.measure();
+      for (const element of scroller.current?.querySelectorAll<HTMLElement>(
+        "[data-index]",
+      ) ?? [])
+        virtualizer.measureElement(element);
     }
+    previousVisibleIds.current = visibleIds;
     setExpanded((previous) => {
-      if ([...previous].every((sequence) => visibleSequences.has(sequence)))
-        return previous;
-      return new Set(
-        [...previous].filter((sequence) => visibleSequences.has(sequence)),
-      );
+      if ([...previous].every((id) => visibleIds.has(id))) return previous;
+      return new Set([...previous].filter((id) => visibleIds.has(id)));
     });
     setFocused((previous) =>
-      previous !== null && !visibleSequences.has(previous) ? null : previous,
+      previous !== null && !visibleIds.has(previous) ? null : previous,
     );
-  }, [visibleSequences, virtualizer]);
-  // Growing rows must not move a reader who is following the newest reports.
+  }, [visibleIds, virtualizer]);
   virtualizer.shouldAdjustScrollPositionOnItemSizeChange =
     reading && !returning ? undefined : () => false;
   useLayoutEffect(() => {
@@ -107,10 +112,8 @@ export function LogEvents({
   }, [visible, reading, virtualizer]);
   function resumeLatest() {
     setReturnCount(null);
-    setBaseline(
-      rows.reduce((latest, row) => Math.max(latest, row.sequence), -1),
-    );
-    setReading(null);
+    setBaseline(new Set(rows.map((row) => row.id)));
+    onReadingChange(false);
   }
   function interruptReturn() {
     if (!returning) return;
@@ -118,19 +121,20 @@ export function LogEvents({
     if (element) virtualizer.scrollToOffset(element.scrollTop);
     setReturnCount(null);
   }
-  const newestVisible = useMemo(
-    () => visible.reduce((latest, row) => Math.max(latest, row.sequence), -1),
-    [visible],
+  const newestVisible = visible[0]?.id;
+  const readingIds = useMemo(
+    () => new Set(reading?.map((row) => row.id)),
+    [reading],
   );
   const pending = useMemo(
     () =>
       reading
         ? rows.reduce(
-            (count, row) => count + Number(row.sequence > newestVisible),
+            (count, row) => count + Number(!readingIds.has(row.id)),
             0,
           )
         : 0,
-    [reading, rows, newestVisible],
+    [reading, rows, readingIds],
   );
   const shownCount = returnCount ?? pending;
   return (
@@ -141,6 +145,7 @@ export function LogEvents({
             key="return-latest"
             returning={returning}
             count={shownCount}
+            label={paused ? "回到顶部" : "回到最新"}
             scrollY={scrollY}
             onReturn={() => {
               scroller.current?.focus({ preventScroll: true });
@@ -202,10 +207,15 @@ export function LogEvents({
             interruptReturn();
         }}
         onScroll={(event) => {
-          const { scrollTop } = event.currentTarget;
+          const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
           // Start the flight as soon as smooth scrolling reaches the exact top.
           if (reading && scrollTop <= (returning ? 0 : 1)) resumeLatest();
-          else if (scrollTop > 1 && !reading) setReading(visible);
+          else if (scrollTop > 1 && !reading) onReadingChange(true);
+          if (
+            scrollTop > 1 &&
+            scrollHeight - scrollTop - clientHeight <= clientHeight
+          )
+            onLoadOlder();
         }}
       >
         <div
@@ -221,7 +231,7 @@ export function LogEvents({
                 ref={virtualizer.measureElement}
                 className="absolute top-0 left-0 flow-root w-full"
                 style={{ transform: `translateY(${item.start}px)` }}
-                onFocusCapture={() => setFocused(row.sequence)}
+                onFocusCapture={() => setFocused(row.id)}
                 onBlurCapture={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget))
                     setFocused(null);
@@ -230,13 +240,13 @@ export function LogEvents({
                 <LogEvent
                   row={row}
                   showDevice={showDevice}
-                  open={expanded.has(row.sequence)}
+                  open={expanded.has(row.id)}
                   onOpenChange={changeExpanded}
-                  entering={!reading && row.sequence > baseline}
+                  entering={!reading && !baseline.has(row.id)}
                   highlighted={
                     !reading &&
-                    row.sequence === newestVisible &&
-                    row.sequence > baseline
+                    row.id === newestVisible &&
+                    !baseline.has(row.id)
                   }
                 />
               </div>
@@ -244,6 +254,11 @@ export function LogEvents({
           })}
         </div>
 
+        {loadingOlder ? (
+          <output className="block py-3 text-center text-xs text-muted">
+            正在读取更早记录…
+          </output>
+        ) : null}
         {!visible.length && empty}
       </section>
     </div>
@@ -258,18 +273,18 @@ const LogEvent = memo(function LogEvent({
   open,
   onOpenChange,
 }: {
-  row: DeviceLogSnapshot["entries"][number];
+  row: LogEntry;
   showDevice: boolean;
   highlighted: boolean;
   entering: boolean;
   open: boolean;
-  onOpenChange: (sequence: number, open: boolean) => void;
+  onOpenChange: (id: string, open: boolean) => void;
 }) {
   const reducedMotion = useReducedMotion();
   return (
     <Collapsible.Root
       open={open}
-      onOpenChange={(value) => onOpenChange(row.sequence, value)}
+      onOpenChange={(value) => onOpenChange(row.id, value)}
       asChild
     >
       <m.article
@@ -278,16 +293,10 @@ const LogEvent = memo(function LogEvent({
         )}
         initial={
           entering && !reducedMotion
-            ? { height: 0, opacity: 0, marginBottom: 0 }
+            ? { opacity: 0, transform: "translateY(8px)" }
             : false
         }
-        animate={{ height: "auto", opacity: 1, marginBottom: 12 }}
-        exit={{
-          height: 0,
-          opacity: 0,
-          marginBottom: 0,
-          transition: { duration: reducedMotion ? 0 : 0.18 },
-        }}
+        animate={{ opacity: 1, transform: "translateY(0px)" }}
         transition={{
           duration: reducedMotion ? 0 : 0.24,
           ease: [0.22, 1, 0.36, 1],
@@ -299,7 +308,7 @@ const LogEvent = memo(function LogEvent({
           </time>
           <span className="flex min-w-0 flex-col gap-1 max-[1001px]:col-start-1 max-[1001px]:row-start-2">
             <strong className="text-[15px] font-medium leading-6">
-              {row.description || row.property || "连接记录"}
+              {row.description || row.property}
             </strong>
             {showDevice ? (
               <span className="text-xs leading-5 text-muted">
@@ -308,16 +317,8 @@ const LogEvent = memo(function LogEvent({
             ) : null}
           </span>
           <span className="flex gap-2.5 items-center text-[14px] [&_svg]:shrink-0 [&_svg]:text-muted m-0 max-w-72 flex-wrap justify-end max-[1001px]:col-start-1 max-[1001px]:row-start-3 max-[1001px]:max-w-full max-[1001px]:justify-start">
-            {row.change === "changed" && (
-              <>
-                <code className="text-sm leading-7 wrap-anywhere min-w-0 text-muted">
-                  {row.previous_value}
-                </code>
-                <ArrowRight size={13} aria-label="变为" />
-              </>
-            )}
             <code className="text-sm leading-7 wrap-anywhere min-w-0">
-              {row.value}
+              {row.displayValue}
             </code>
           </span>
           <ChevronDown
@@ -353,7 +354,7 @@ export const LogEventDetail = memo(function LogEventDetail({
   row,
   comparison = false,
 }: {
-  row: DeviceLogSnapshot["entries"][number];
+  row: LogEntry;
   comparison?: boolean;
 }) {
   return (
@@ -376,18 +377,24 @@ export const LogEventDetail = memo(function LogEventDetail({
           <dd className="mt-1 text-ink">{presentLogEntry(row).dateTime}</dd>
         </div>
         <div>
-          <dt className="text-muted">上报类型</dt>
-          <dd className="mt-1 text-ink">{changeLabels[row.change]}</dd>
+          <dt className="text-muted">记录类型</dt>
+          <dd className="mt-1 text-ink">
+            {row.kind === "property" ? "属性报告" : "在线状态"}
+          </dd>
         </div>
         <div>
-          <dt className="text-muted">属性标识</dt>
+          <dt className="text-muted">来源</dt>
+          <dd className="mt-1 text-ink">{sourceLabels[row.source]}</dd>
+        </div>
+        <div>
+          <dt className="text-muted">项</dt>
           <dd className="mt-1 break-all font-mono text-ink">
             {row.property || row.kind}
           </dd>
         </div>
         <div>
           <dt className="text-muted">记录编号</dt>
-          <dd className="mt-1 text-ink">#{row.sequence}</dd>
+          <dd className="mt-1 break-all font-mono text-ink">{row.id}</dd>
         </div>
       </dl>
       <details className="group/raw mt-6">
@@ -398,9 +405,9 @@ export const LogEventDetail = memo(function LogEventDetail({
         <pre
           className="my-3 max-h-96 overflow-auto whitespace-pre-wrap break-all bg-transparent p-0 font-mono text-[13px] leading-7 text-ink [scrollbar-gutter:stable]"
           tabIndex={0}
-          aria-label={`第 ${row.sequence} 条原始数据`}
+          aria-label={`记录 ${row.id} 的原始数据`}
         >
-          {JSON.stringify(row.observation, null, 2)}
+          {JSON.stringify(row.record, null, 2)}
         </pre>
         {/* oxlint-enable jsx-a11y/no-noninteractive-tabindex */}
       </details>

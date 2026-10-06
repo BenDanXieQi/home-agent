@@ -20,7 +20,7 @@
 | 感知调试、图片与视频框   | [后台分析与结果校验](perception.md#后台分析与结果校验)、[窗口展示](../apps/web/README.md#窗口筛选与媒体)、[Web README](../apps/web/README.md)                                  | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                                                        |
 | 设备事实与房间查询       | [设备事实](contracts/device-facts.md)                                                                                                                                          | [事实模块](../apps/backend/src/household)                                                                                                         |
 | Agent 接入、查询与执行   | [Agent 最简架子](../apps/agent/README.md)、[实施计划](plans/household-automation.md)                                                                                           | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                                                 |
-| 设备采集与历史查询       | [设备事实](contracts/device-facts.md)、[设备历史](household-runtime.md#设备属性历史)、[Web README](../apps/web/README.md)                                                      | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules)                              |
+| 设备采集与历史查询       | [设备事实](contracts/device-facts.md)、[设备历史](household-runtime.md#设备状态历史)、[历史事件流](household-runtime.md#web-历史事件流)、[Web README](../apps/web/README.md)   | [历史保存与读取](../apps/backend/src/household/history)、[数据库](../apps/backend/src/db)、[Web 历史模块](../apps/web/src/modules/device-history) |
 
 源码用于核实实际行为，领域规则和来源契约用于判断应满足的约束，计划用于界定未交付工作。发生不一致时，先查清是实现缺陷、文档过时还是尚未交付，不能只改文档掩盖代码问题，也不能把计划接口当作现有能力调用。
 
@@ -32,7 +32,7 @@
 | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [本地运行](running.md)                          | 如何启动、配置服务连接、切换 go2rtc 运行方式及停止服务                                                                                                               |
 | [米家接入与摄像头](mijia.md)                    | 如何授权、预览、管理媒体资源；米家设备能力与使用限制                                                                                                                 |
-| [家庭运行时](household-runtime.md)              | 当前家庭绑定、设备清单、规格、公共状态订阅、设备上报日志及属性历史保存与查询                                                                                         |
+| [家庭运行时](household-runtime.md)              | 当前家庭绑定、设备清单、规格、公共状态订阅，以及属性与在线报告的历史保存与查询                                                                                       |
 | [设备事实与房间快照](contracts/device-facts.md) | 持续采集、当前值质量、本机策略、房间查询与读取                                                                                                                       |
 | [本地目标检测](perception.md)                   | 已实现图片／摄像头检测、人宠跟踪、人物身份分析与窗口历史快照、音频分析、猫狗声音捕获与语音转写、窗口筛选与短期媒体、后台分析与结果校验、计算资源、模型契约及验证范围 |
 
@@ -43,10 +43,10 @@
 | 文档                                                        | 唯一维护的设计                                             |
 | ----------------------------------------------------------- | ---------------------------------------------------------- |
 | [计划入口](plans/README.md)                                 | 计划导航和共同交付要求，不另维护一份实施路线               |
-| [Backend 当前数据与历史读取](plans/household-automation.md) | 专用推送、时间查询与数据验收；不含 AI 关联推理             |
+| [Backend 当前数据与历史读取](plans/household-automation.md) | 专用推送、Agent 接收及成员／音视频历史；不含 AI 关联推理   |
 | [媒体能力扩展](plans/media-perception.md)                   | 非人声候选、有限观察、Agent 媒体输入与恢复、身份生产者扩展 |
 
-数据交付计划维护尚未实现的专用推送、Agent 接收及成员／音视频历史读取。设备属性历史的现有保存、查询与验证限制由家庭运行时文档统一维护，供设备时间序列补查复用；成员和音视频按实际保留范围读取。AI 关联推理与回写不属于当前已实现能力。
+数据交付计划维护尚未实现的专用推送、Agent 接收及成员／音视频历史读取。设备状态历史的现有保存、查询与验证限制由家庭运行时文档统一维护，供设备时间序列补查复用；成员和音视频按实际保留范围读取。AI 关联推理与回写不属于当前已实现能力。
 
 ## 外部实现参考
 

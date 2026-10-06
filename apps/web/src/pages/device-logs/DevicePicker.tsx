@@ -5,18 +5,16 @@ import {
   useCallback,
   useLayoutEffect,
   useMemo,
-  useId,
   useRef,
   useState,
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
-import { AnimatePresence, m } from "motion/react";
+import { AnimatePresence, m, useReducedMotion } from "motion/react";
 import { Check, ChevronDown, Search, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Select } from "../../components/Select";
 import { SearchSelect } from "../../components/SearchSelect";
 import { Skeleton } from "../../components/Skeleton";
-import { SelectionIndicator } from "../../components/SelectionIndicator";
 import { VirtualRow } from "../../components/VirtualRow";
 import { usePreviousKeys } from "../../utils/use-previous-keys";
 import { contentSwap, iconSwap } from "../../utils/motion";
@@ -30,14 +28,14 @@ export const DevicePicker = memo(function DevicePicker({
   selection: deviceSelection,
   comparison,
   loaded,
-  hasRun,
+  available,
   open: devicesOpen,
   onOpenChange,
 }: {
   selection: ReturnType<typeof useDeviceSelection>;
   comparison: ReturnType<typeof useLogComparison>;
   loaded: boolean;
-  hasRun: boolean;
+  available: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -53,14 +51,14 @@ export const DevicePicker = memo(function DevicePicker({
     roomOptions,
     categoryOptions,
   } = deviceSelection;
-  const { query: deviceQuery, room, category, reportFilter } = filters;
+  const { query: deviceQuery, room, category } = filters;
   const { comparing, compareIds, toggleComparison } = comparison;
   // List items animate only when the listed set changes, never when content above moves.
   const membership = useMemo(
     () => `${comparing}:${devices.map((device) => device.id).join()}`,
     [comparing, devices],
   );
-  const selectionId = useId();
+  const reducedMotion = useReducedMotion();
   const deviceList = useRef<HTMLDivElement>(null);
   const deviceRows = useRef<HTMLDivElement>(null);
   const [deviceRowsOffset, setDeviceRowsOffset] = useState(0);
@@ -154,18 +152,36 @@ export const DevicePicker = memo(function DevicePicker({
         className={`flex min-h-0 flex-1 flex-col ${devicesOpen ? "max-[901px]:pt-3" : "max-[901px]:hidden"}`}
       >
         <div className="min-h-0 shrink overflow-auto overscroll-contain">
-          <label className="m-0 flex min-w-0 items-center gap-2 rounded-lg bg-linen/60 px-2.5 text-muted focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-accent/50">
-            <Search size={15} className="shrink-0" aria-hidden="true" />
-            <input
-              className="w-full min-w-0 border-0 bg-transparent px-0 py-[9px] text-[13px] focus-visible:outline-none focus-visible:shadow-none"
-              aria-label="搜索设备"
-              placeholder="设备、房间或 ID"
-              value={deviceQuery}
-              onChange={(event) => {
-                updateFilters({ query: event.target.value });
+          <div className="flex min-w-0 items-center gap-1.5">
+            <label className="m-0 flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-linen/60 px-2.5 text-muted focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-accent/50">
+              <Search size={15} className="shrink-0" aria-hidden="true" />
+              <input
+                className="w-full min-w-0 border-0 bg-transparent px-0 py-[9px] text-[13px] focus-visible:outline-none focus-visible:shadow-none"
+                aria-label="搜索设备"
+                placeholder="设备、房间或 ID"
+                value={deviceQuery}
+                onChange={(event) => {
+                  updateFilters({ query: event.target.value });
+                }}
+              />
+            </label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="small"
+              className="shrink-0 size-9 min-h-9 p-0 text-muted enabled:hover:bg-surface enabled:hover:text-ink disabled:opacity-40 disabled:cursor-default pointer-coarse:size-11 pointer-coarse:min-h-11"
+              icon={<RotateCcw size={14} aria-hidden="true" />}
+              aria-label="重置设备选择和筛选"
+              title="重置设备选择和筛选"
+              onClick={() => {
+                clearFilters();
+                comparison.clearComparison();
               }}
+              disabled={
+                !filtering && !(comparing ? compareIds.length : deviceId)
+              }
             />
-          </label>
+          </div>
           <fieldset
             className="shrink-0 min-w-0 mt-2 mx-0 mb-0 grid grid-cols-2 gap-y-1 gap-x-2 p-0 border-0"
             aria-label="筛选设备"
@@ -192,35 +208,6 @@ export const DevicePicker = memo(function DevicePicker({
               }}
               options={categoryOptions}
             />
-            <div className="col-span-full grid grid-cols-2 items-center gap-2 min-w-0">
-              <Select
-                label="上报情况"
-                className={twMerge(
-                  `h-8 px-2.5 py-0 bg-transparent text-[12px] font-normal text-muted enabled:hover:bg-surface data-[state=open]:bg-surface pointer-coarse:min-h-11 ${reportFilter ? "border-ink/24 text-ink font-medium" : ""}`,
-                )}
-                value={reportFilter}
-                onValueChange={(value) => {
-                  updateFilters({ reportFilter: value });
-                }}
-                options={[
-                  { value: "", label: "上报不限" },
-                  { value: "reported", label: "有上报" },
-                  { value: "silent", label: "暂未上报" },
-                ]}
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                className="justify-self-end w-auto h-8 min-h-8 py-0 px-2 bg-transparent text-ink text-[12px] enabled:hover:bg-surface enabled:hover:text-ink disabled:text-muted disabled:opacity-40 disabled:cursor-default pointer-coarse:min-h-11"
-                icon={<RotateCcw size={14} aria-hidden="true" />}
-                aria-label="重置筛选"
-                title="重置筛选"
-                onClick={clearFilters}
-                disabled={!filtering}
-              >
-                重置
-              </Button>
-            </div>
           </fieldset>
         </div>
         <m.div
@@ -292,7 +279,7 @@ export const DevicePicker = memo(function DevicePicker({
                           ? `最多对比 ${maximumComparedDevices} 台设备，请先取消一台`
                           : !comparing && deviceId === device.id
                             ? "再次点击取消选择，查看当前列表的全部上报"
-                            : `${device.id} · ${device.properties + device.online} 条上报`
+                            : device.id
                       }
                       onClick={() => {
                         if (comparing) toggleComparison(device.id);
@@ -304,11 +291,19 @@ export const DevicePicker = memo(function DevicePicker({
                         }
                       }}
                     >
-                      {!comparing && deviceId === device.id ? (
-                        <SelectionIndicator
-                          layoutId={selectionId}
-                          className="inset-0 rounded-lg bg-sidebar"
-                        />
+                      {!comparing ? (
+                        <m.span
+                          className="pointer-events-none absolute inset-0 -z-10 flex items-center justify-end rounded-lg bg-sidebar px-2.5"
+                          aria-hidden="true"
+                          initial={false}
+                          animate={{ opacity: deviceId === device.id ? 1 : 0 }}
+                          transition={{
+                            duration: reducedMotion ? 0 : 0.22,
+                            ease: "easeOut",
+                          }}
+                        >
+                          <Check size={14} />
+                        </m.span>
                       ) : null}
                       <AnimatePresence mode="popLayout" initial={false}>
                         {comparing ? (
@@ -326,7 +321,9 @@ export const DevicePicker = memo(function DevicePicker({
                           </m.span>
                         ) : null}
                       </AnimatePresence>
-                      <span className="min-w-0">
+                      <span
+                        className={`min-w-0 flex-1 ${comparing ? "" : "pr-6"}`}
+                      >
                         <strong className="block text-[13px] leading-5 font-medium wrap-anywhere">
                           {device.name}
                         </strong>
@@ -334,13 +331,6 @@ export const DevicePicker = memo(function DevicePicker({
                           {device.room}
                         </small>
                       </span>
-                      {!comparing && deviceId === device.id ? (
-                        <Check
-                          size={14}
-                          className="ml-auto"
-                          aria-hidden="true"
-                        />
-                      ) : null}
                     </button>
                   </VirtualRow>
                 );
@@ -354,17 +344,17 @@ export const DevicePicker = memo(function DevicePicker({
                 className="text-muted text-[11px] leading-[1.8] py-2 px-1.5"
                 {...contentSwap}
               >
-                {hasRun
+                {available
                   ? "没有匹配的设备"
-                  : "开始采集后，在这里选择要调试的设备。"}
+                  : "家庭设备清单准备就绪后，即可选择设备。"}
               </m.p>
             )}
           </AnimatePresence>
         </m.div>
         <p className="shrink-0 text-muted text-[11px] leading-[1.8] py-2 px-1.5">
           {comparing
-            ? "左侧筛选用于找设备，不会移除已选设备。"
-            : "筛选只影响显示，不影响采集。"}
+            ? "筛选用于找设备；重置会同时清空已选设备。"
+            : "筛选限定历史查询，不影响后台持续保存。"}
         </p>
       </div>
     </aside>

@@ -1,4 +1,3 @@
-import { addAbortListener } from "node:events";
 import { z } from "zod";
 import { sql, type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
@@ -50,53 +49,132 @@ const bindingSchema = z.object({
   updated_at: deviceHistoryTimeSchema,
 });
 const parametersSchema = z.array(z.union([z.string(), z.number(), z.null()]));
-const sessionSchema = z.object({
-  pid: z.int32().positive(),
-  backend_start: deviceHistoryTimeSchema,
-  transaction_start: deviceHistoryTimeSchema,
-});
 
 export function createDeviceHistoryRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
   const dialect = new PgDialect();
   return {
     async save(
-      context: HistoryAccess,
-      report: z.infer<typeof deviceHistoryReportSchema>,
+      context: HistoryAccess & { currentDeviceIds: () => ReadonlySet<string> },
+      reports: readonly z.infer<typeof deviceHistoryReportSchema>[],
     ) {
       return access(context.identity, context.assertCurrent, async (tx) => {
-        const valid = await tx.execute(
-          sql`select ${report.received_at}::timestamptz >= now() - make_interval(days => ${deviceHistoryPolicy.retentionDays}) as valid`,
+        const deviceIds = context.currentDeviceIds();
+        const candidates = reports.filter((report) =>
+          deviceIds.has(report.device_id),
         );
-        if (!valid[0]?.valid) return false;
+        if (!candidates.length) return { saved: [], suppressed: 0 };
+        const deviceId = candidates[0]!.device_id;
+        if (candidates.some((report) => report.device_id !== deviceId))
+          throw new HouseholdError("invalid_state");
+        // One device's ordered batch cannot block writes for another device.
         await lockTransaction(
           tx,
-          JSON.stringify([
-            "device_property_definition",
-            report.device_id,
-            report.siid,
-            report.piid,
-          ]),
+          JSON.stringify(["device_history_changes", deviceId]),
           "exclusive",
         );
-        const metadata = JSON.stringify(report.metadata);
-        const rows =
-          await tx.execute(sql`select id from device_property_definitions
-          where device_id = ${report.device_id} and siid = ${report.siid} and piid = ${report.piid}
-          and metadata = ${metadata}::jsonb limit 1 for key share`);
-        const id = rows[0]?.id ?? crypto.randomUUID();
-        if (!rows.length)
-          await tx.execute(sql`insert into device_property_definitions (id, device_id, siid, piid, metadata)
-          values (${id}, ${report.device_id}, ${report.siid}, ${report.piid}, ${metadata}::jsonb)`);
-        context.assertCurrent();
-        await tx.execute(sql`insert into device_property_observations
-          (received_at, observation_id, definition_id, scope_epoch, input_sequence, value, source)
-          values (${report.received_at}::timestamptz, ${report.observation_id}, ${id}, ${report.scope_epoch}, ${String(report.input_sequence)}::bigint, ${JSON.stringify(report.value)}::jsonb, ${report.source})`);
-        return true;
+        const valid = await tx.execute(
+          sql`select observation_id from jsonb_to_recordset(${JSON.stringify(
+            candidates.map(({ received_at, observation_id }) => ({
+              received_at,
+              observation_id,
+            })),
+          )}::jsonb) as reports (received_at timestamptz, observation_id uuid)
+            where received_at >= now() - make_interval(days => ${deviceHistoryPolicy.retentionDays})`,
+        );
+        const validIds = new Set(
+          valid.map((row) => z.uuid().parse(row.observation_id)),
+        );
+        const observations: {
+          report: (typeof reports)[number];
+          values: SQL;
+        }[] = [];
+        for (const report of candidates) {
+          if (!validIds.has(report.observation_id)) continue;
+          let definitionId: string | null = null;
+          if (report.kind === "property") {
+            const metadata = JSON.stringify(report.metadata);
+            const rows =
+              await tx.execute(sql`select id from device_property_definitions
+              where device_id = ${report.device_id} and siid = ${report.siid} and piid = ${report.piid}
+              and metadata = ${metadata}::jsonb limit 1 for key share`);
+            definitionId = z.uuid().parse(rows[0]?.id ?? crypto.randomUUID());
+            if (!rows.length)
+              await tx.execute(sql`insert into device_property_definitions (id, device_id, siid, piid, metadata)
+                values (${definitionId}, ${report.device_id}, ${report.siid}, ${report.piid}, ${metadata}::jsonb)`);
+          }
+          observations.push({
+            report,
+            values: sql`(${report.received_at}::timestamptz, ${report.observation_id}::uuid, ${report.kind}::text, ${report.device_id}::text, ${definitionId}::uuid, ${report.scope_epoch}::uuid, ${String(report.input_sequence)}::bigint, ${JSON.stringify(report.value)}::jsonb, ${report.source}::text)`,
+          });
+        }
+        const currentDeviceIds = context.currentDeviceIds();
+        const accepted = observations.filter((observation) =>
+          currentDeviceIds.has(observation.report.device_id),
+        );
+        if (!accepted.length) return { saved: [], suppressed: 0 };
+        const inserted = await tx.execute(sql`
+          WITH incoming (received_at, observation_id, kind, device_id, definition_id,
+            scope_epoch, input_sequence, value, source) AS (
+            VALUES ${sql.join(
+              accepted.map((observation) => observation.values),
+              sql`, `,
+            )}
+          ), addressed AS (
+            SELECT i.*, d.metadata,
+              CASE WHEN i.kind = 'online' THEN 'online'
+                ELSE d.siid::text || '.' || d.piid::text END AS item
+            FROM incoming i
+            LEFT JOIN device_property_definitions d ON d.id = i.definition_id
+          ), compared AS (
+            SELECT i.*,
+              row_number() OVER item_order AS item_number,
+              lag(value) OVER item_order AS previous_value,
+              lag(metadata) OVER item_order AS previous_metadata
+            FROM addressed i
+            WINDOW item_order AS (
+              PARTITION BY device_id, item
+              ORDER BY input_sequence, received_at, observation_id
+            )
+          ), changes AS (
+            SELECT i.* FROM compared i
+            LEFT JOIN device_history_state previous
+              ON previous.device_id = i.device_id AND previous.item = i.item
+            WHERE CASE WHEN i.item_number = 1
+              THEN previous.device_id IS NULL OR
+                (i.value, i.metadata) IS DISTINCT FROM (previous.value, previous.metadata)
+              ELSE (i.value, i.metadata) IS DISTINCT FROM (i.previous_value, i.previous_metadata)
+            END
+          ), state_updates AS (
+            INSERT INTO device_history_state (device_id, item, value, metadata)
+            SELECT DISTINCT ON (device_id, item) device_id, item, value, metadata
+            FROM addressed
+            ORDER BY device_id, item, input_sequence DESC, received_at DESC, observation_id DESC
+            ON CONFLICT (device_id, item) DO UPDATE SET
+              value = excluded.value, metadata = excluded.metadata
+            WHERE (device_history_state.value, device_history_state.metadata)
+              IS DISTINCT FROM (excluded.value, excluded.metadata)
+          )
+          insert into device_observations
+          (received_at, observation_id, kind, device_id, definition_id, scope_epoch, input_sequence, value, source)
+          SELECT received_at, observation_id, kind, device_id, definition_id,
+            scope_epoch, input_sequence, value, source FROM changes
+          RETURNING observation_id`);
+        const insertedIds = new Set(
+          inserted.map((row) => z.uuid().parse(row.observation_id)),
+        );
+        const suppressed = accepted.length - insertedIds.size;
+        const saved = accepted
+          .map((observation) => observation.report)
+          .filter((report) => insertedIds.has(report.observation_id));
+        // Roll back both the comparison state and history if this device was revoked during I/O.
+        if (!context.currentDeviceIds().has(deviceId))
+          throw new HouseholdError("stale_session");
+        return { saved, suppressed };
       });
     },
     async read(
-      context: HistoryAccess & { signal: AbortSignal },
+      context: HistoryAccess & { signal: AbortSignal; timeoutMs: number },
       input: z.infer<typeof deviceHistoryQuerySchema>,
       after:
         | { binding: string; position: z.infer<typeof historyPositionSchema> }
@@ -104,7 +182,8 @@ export function createDeviceHistoryRepository(db: Database) {
       receive: (
         candidate: z.infer<typeof rowSchema>,
         bindingTime: string,
-      ) => boolean,
+      ) => boolean | Promise<boolean>,
+      delivery: "page" | "export" = "page",
     ) {
       try {
         context.signal.throwIfAborted();
@@ -118,63 +197,39 @@ export function createDeviceHistoryRepository(db: Database) {
               parametersSchema.parse(compiled.params),
             );
           };
-          const session = sessionSchema.parse(
-            (
-              await prepare(sql`${transactionTimeouts(householdLimits.transactionMs)},
-                pg_backend_pid() as pid,
-                to_char(backend_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as backend_start,
-                to_char(xact_start AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as transaction_start
-                from pg_stat_activity where pid = pg_backend_pid()`)
-            )[0],
+          await prepare(
+            sql`${transactionTimeouts(delivery === "export" ? context.timeoutMs : householdLimits.transactionMs)}`,
           );
-          const cancel = () =>
-            db.$client`
-              select pg_cancel_backend(pid) from pg_stat_activity
-              where pid = ${session.pid}
-                and backend_start = ${session.backend_start}::timestamptz
-                and xact_start = ${session.transaction_start}::timestamptz
-            `.catch((error: unknown) => {
-              console.warn(
-                "Device history cancellation failed",
-                error instanceof Error ? error.name : "unknown",
-              );
-            });
           const execute = async (
             statement: SQL,
-            consume?: (candidate: z.infer<typeof rowSchema>) => boolean,
+            consume?: (
+              candidate: z.infer<typeof rowSchema>,
+            ) => boolean | Promise<boolean>,
           ) => {
             context.signal.throwIfAborted();
             context.assertCurrent();
             const pending = prepare(statement);
-            let cancellation: ReturnType<typeof cancel> | undefined;
-            const listener = addAbortListener(context.signal, () => {
-              cancellation = cancel();
-            });
-            let callbackError: unknown;
-            try {
-              const result = consume
-                ? await pending.cursor(1, (rows) => {
-                    try {
-                      context.signal.throwIfAborted();
-                      context.assertCurrent();
-                      if (!consume(rowSchema.parse(rows[0])))
-                        return db.$client.CLOSE;
-                      return undefined;
-                    } catch (error) {
-                      callbackError = error;
-                      return db.$client.CLOSE;
-                    }
-                  })
-                : await pending;
-              if (callbackError) throw callbackError;
+            if (!consume) {
+              const result = await pending;
               context.signal.throwIfAborted();
               context.assertCurrent();
               return result;
-            } finally {
-              listener[Symbol.dispose]();
-              // Keep this transaction reserved until cancellation has settled.
-              await cancellation;
             }
+            let accepting = true;
+            for await (const rows of pending.cursor(16)) {
+              for (const row of rows) {
+                context.signal.throwIfAborted();
+                context.assertCurrent();
+                if (!(await consume(rowSchema.parse(row)))) {
+                  accepting = false;
+                  break;
+                }
+              }
+              if (!accepting) break;
+            }
+            context.signal.throwIfAborted();
+            context.assertCurrent();
+            return undefined;
           };
           await execute(transactionLock(householdBindingLock, "shared"));
           const bindings = z.array(bindingSchema).parse(
@@ -188,99 +243,50 @@ export function createDeviceHistoryRepository(db: Database) {
           if (after && after.binding !== bindingTime)
             throw new AppError("invalid_request");
           const position = after?.position;
+          const direction = input.order === "desc" ? sql`DESC` : sql`ASC`;
+          const comparison = input.order === "desc" ? sql`<` : sql`>`;
+          const limit =
+            delivery === "export" ? sql`` : sql`LIMIT ${input.limit + 1}`;
+          const observationOrder = sql`o.received_at ${direction}, o.scope_epoch ${direction}, o.input_sequence ${direction}, o.observation_id ${direction}`;
           const properties = input.properties
             ? JSON.stringify(input.properties)
             : null;
-          await execute(
-            input.representation === "observations"
-              ? sql`
-WITH page AS (
-            select o.* from device_property_observations o join device_property_definitions d on d.id = o.definition_id
-            where (${properties}::jsonb is null or exists (
-              select 1 from jsonb_to_recordset(${properties}::jsonb) as p(device_id text, siid integer, piid integer)
-              where (p.device_id,p.siid,p.piid) = (d.device_id,d.siid,d.piid)))
-            and o.received_at >= greatest(${input.start}::timestamptz, now() - make_interval(days => ${deviceHistoryPolicy.retentionDays}))
-            and o.received_at < ${input.end}::timestamptz
-            and (${position?.at ?? null}::timestamptz is null or
-              (o.received_at,o.scope_epoch,o.input_sequence,o.observation_id) >
-              (${position?.at ?? null}::timestamptz,${position?.epoch ?? null}::uuid,${position?.sequence ?? null}::bigint,${position?.id ?? null}::uuid))
-            order by o.received_at,o.scope_epoch,o.input_sequence,o.observation_id limit ${input.limit + 1}
-
-)
-            select jsonb_build_object('device_id', d.device_id, 'siid', d.siid, 'piid', d.piid,
-              'definition_id', d.id, 'observation_id', o.observation_id,
-              'received_at', to_char(o.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-              'value', o.value, 'source', o.source, 'metadata', d.metadata) as record,
-              jsonb_build_object('at', to_char(o.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
-                'epoch', o.scope_epoch, 'sequence', o.input_sequence::text, 'id', o.observation_id) as position
-FROM page o JOIN device_property_definitions d ON d.id = o.definition_id
-ORDER BY o.received_at,o.scope_epoch,o.input_sequence,o.observation_id
-          `
-              : sql`
-WITH selected AS (
-    SELECT o.*, d.device_id, d.siid, d.piid
-    FROM device_property_observations o
-    JOIN device_property_definitions d ON d.id = o.definition_id
-    WHERE (${properties}::jsonb IS NULL OR EXISTS (
+          const selected = sql`
+    SELECT o.*, d.siid, d.piid
+    FROM device_observations o
+    LEFT JOIN device_property_definitions d ON d.id = o.definition_id
+    WHERE o.kind IN (SELECT jsonb_array_elements_text(${JSON.stringify(input.kinds)}::jsonb))
+      AND (${input.device_ids ? JSON.stringify(input.device_ids) : null}::jsonb IS NULL
+        OR o.device_id IN (SELECT jsonb_array_elements_text(${input.device_ids ? JSON.stringify(input.device_ids) : null}::jsonb)))
+      AND (${properties}::jsonb IS NULL OR EXISTS (
         SELECT 1 FROM jsonb_to_recordset(${properties}::jsonb)
           AS p(device_id text, siid integer, piid integer)
-        WHERE (p.device_id, p.siid, p.piid) = (d.device_id, d.siid, d.piid)
+        WHERE (p.device_id, p.siid, p.piid) = (o.device_id, d.siid, d.piid)
       ))
       AND o.received_at >= GREATEST(${input.start}::timestamptz, now() - make_interval(days => ${deviceHistoryPolicy.retentionDays}))
-      AND o.received_at < ${input.end}::timestamptz
-), compared AS (
-    SELECT *,
-      (value, definition_id, source) IS DISTINCT FROM
-        lag(row(value, definition_id, source)) OVER property_order AS starts_run,
-      (value, definition_id, source) IS DISTINCT FROM
-        lead(row(value, definition_id, source)) OVER property_order AS ends_run
-    FROM selected
-    WINDOW property_order AS (
-      PARTITION BY device_id, siid, piid
-      ORDER BY received_at, scope_epoch, input_sequence, observation_id
-    )
-), numbered AS (
-    SELECT device_id, siid, piid, definition_id, received_at, scope_epoch, input_sequence, observation_id,
-      starts_run, ends_run,
-      sum(starts_run::integer)
-      OVER (PARTITION BY device_id, siid, piid
-            ORDER BY received_at, scope_epoch, input_sequence, observation_id
-            ROWS UNBOUNDED PRECEDING) AS segment
-    FROM compared
-), segments AS (
-    SELECT device_id, siid, piid, segment, definition_id,
-      min(received_at) AS first_received_at,
-      max(received_at) AS last_received_at,
-      -- Each filter selects the segment's unique boundary row, even when timestamps tie.
-      any_value(observation_id) FILTER (WHERE starts_run) AS first_observation_id,
-      any_value(observation_id) FILTER (WHERE ends_run) AS last_observation_id,
-      any_value(scope_epoch) FILTER (WHERE starts_run) AS first_scope_epoch,
-      any_value(input_sequence) FILTER (WHERE starts_run) AS first_input_sequence,
-      count(*) AS report_count
-    FROM numbered
-    GROUP BY device_id, siid, piid, segment, definition_id
-), page AS (
- SELECT * FROM segments
-WHERE ${position?.at ?? null}::timestamptz IS NULL OR
-    (first_received_at, first_scope_epoch, first_input_sequence, first_observation_id)
-      > (${position?.at ?? null}::timestamptz, ${position?.epoch ?? null}::uuid, ${position?.sequence ?? null}::bigint, ${position?.id ?? null}::uuid)
-ORDER BY first_received_at, first_scope_epoch, first_input_sequence, first_observation_id
-LIMIT ${input.limit + 1}
+      AND o.received_at < ${input.end}::timestamptz`;
+          const record = sql`jsonb_build_object('kind', o.kind, 'device_id', o.device_id,
+            'value', o.value, 'source', o.source)
+            || CASE WHEN o.kind = 'property' THEN jsonb_build_object(
+              'siid', d.siid, 'piid', d.piid, 'definition_id', d.id, 'metadata', d.metadata)
+              ELSE '{}'::jsonb END`;
+          await execute(
+            sql`
+WITH selected AS (${selected}), page AS (
+    SELECT * FROM selected o
+    WHERE ${position?.at ?? null}::timestamptz IS NULL OR
+      (o.received_at,o.scope_epoch,o.input_sequence,o.observation_id) ${comparison}
+      (${position?.at ?? null}::timestamptz,${position?.epoch ?? null}::uuid,${position?.sequence ?? null}::bigint,${position?.id ?? null}::uuid)
+    ORDER BY ${observationOrder}
+    ${limit}
 )
-SELECT jsonb_build_object(
- 'device_id', d.device_id, 'siid', d.siid, 'piid', d.piid,
- 'definition_id', d.id, 'value', o.value, 'source', o.source, 'metadata', d.metadata,
- 'first_received_at', to_char(first_received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
- 'last_received_at', to_char(last_received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
- 'first_observation_id', first_observation_id, 'last_observation_id', last_observation_id,
- 'report_count', report_count) AS record,
- jsonb_build_object('at', to_char(first_received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
- 'epoch', first_scope_epoch, 'sequence', first_input_sequence::text, 'id', first_observation_id) AS position
- FROM page s
- JOIN device_property_observations o ON o.received_at = s.first_received_at AND o.observation_id = s.first_observation_id
- JOIN device_property_definitions d ON d.id = s.definition_id
-ORDER BY first_received_at, first_scope_epoch, first_input_sequence, first_observation_id
-          `,
+SELECT ${record} || jsonb_build_object(
+    'observation_id', o.observation_id,
+    'received_at', to_char(o.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')) AS record,
+    jsonb_build_object('at', to_char(o.received_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+      'epoch', o.scope_epoch, 'sequence', o.input_sequence::text, 'id', o.observation_id) AS position
+FROM page o LEFT JOIN device_property_definitions d ON d.id = o.definition_id
+ORDER BY ${observationOrder}`,
             (candidate) => receive(candidate, bindingTime),
           );
         });

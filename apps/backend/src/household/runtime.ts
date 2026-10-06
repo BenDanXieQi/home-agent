@@ -112,15 +112,7 @@ export class HouseholdRuntime {
         }
       }
       const commit = this.factCommit();
-      if (commit.history) {
-        for (const listener of this.factListeners) {
-          try {
-            listener(commit);
-          } catch {
-            console.warn("Household fact subscriber failed");
-          }
-        }
-      }
+      if (commit.history) this.publishHistory(commit.history);
       this.collection?.scheduleSync();
       for (const effect of context.effects) {
         try {
@@ -150,32 +142,60 @@ export class HouseholdRuntime {
   private factCommit() {
     const observation = this.context.fact_result?.observation;
     const event = observation?.event;
-    const history =
-      observation &&
-      observation.metadata &&
-      event &&
-      (event.kind === "property" || event.kind === "read")
-        ? deviceHistoryReportSchema.parse({
+    if (!observation || !event) return freeze({ history: null });
+    const envelope = {
+      observation_id: observation.observation_id,
+      received_at: event.received_at,
+      scope_epoch: this.epoch,
+      input_sequence: observation.input_sequence,
+    };
+    if (event.kind === "online")
+      return freeze({
+        history: [
+          deviceHistoryReportSchema.parse({
+            ...envelope,
+            kind: "online",
             device_id: event.did,
-            siid: event.siid,
-            piid: event.piid,
-            observation_id: observation.observation_id,
-            received_at: event.received_at,
-            scope_epoch: this.epoch,
-            input_sequence: observation.input_sequence,
-            value: event.value,
-            source:
-              event.kind === "read"
-                ? "read"
-                : event.delivery_kind === "baseline"
-                  ? "retained"
-                  : "push",
-            metadata: observation.metadata,
-          })
+            value: event.online,
+            source: event.delivery_kind === "baseline" ? "retained" : "push",
+          }),
+        ],
+      });
+    const history =
+      observation.metadata &&
+      (event.kind === "property" || event.kind === "read")
+        ? [
+            deviceHistoryReportSchema.parse({
+              ...envelope,
+              kind: "property",
+              device_id: event.did,
+              siid: event.siid,
+              piid: event.piid,
+              value: event.value,
+              source:
+                event.kind === "read"
+                  ? "read"
+                  : event.delivery_kind === "baseline"
+                    ? "retained"
+                    : "push",
+              metadata: observation.metadata,
+            }),
+          ]
         : null;
-    return freeze({
-      history,
-    });
+    return freeze({ history });
+  }
+  private publishHistory(
+    history: NonNullable<ReturnType<HouseholdRuntime["factCommit"]>["history"]>,
+  ) {
+    if (!history.length) return;
+    const commit = freeze({ history });
+    for (const listener of this.factListeners) {
+      try {
+        listener(commit);
+      } catch {
+        console.warn("Household fact subscriber failed");
+      }
+    }
   }
   subscribeFacts(
     listener: (commit: ReturnType<HouseholdRuntime["factCommit"]>) => void,
@@ -491,6 +511,7 @@ export class HouseholdRuntime {
     return () => {
       assert();
       const projection = candidateProjection();
+      const reportSequence = this.context.input_sequence + 1;
       this.actor.send({
         type: "directory",
         scope_epoch: epoch,
@@ -503,6 +524,25 @@ export class HouseholdRuntime {
       });
       assert();
       if (!this.context.accepted) throw new HouseholdError("capacity_exceeded");
+      if (this.ready) {
+        // Record the received inventory, even when a newer live report wins the current value.
+        this.publishHistory(
+          Object.values(directory.device)
+            .filter((device) => !device.archived)
+            .map((device) =>
+              deviceHistoryReportSchema.parse({
+                kind: "online",
+                device_id: device.device_id,
+                value: device.online,
+                source: "directory",
+                received_at: now,
+                observation_id: crypto.randomUUID(),
+                scope_epoch: epoch,
+                input_sequence: reportSequence,
+              }),
+            ),
+        );
+      }
       // Specification preparation cannot block an already accepted directory.
       this.specs.update(candidate.devices);
       this.publishSpecifications(changedDevices);

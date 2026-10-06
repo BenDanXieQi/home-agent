@@ -1,5 +1,7 @@
 import { createAgentContextRoutes } from "./agent-context/routes";
 import type { createDeviceHistoryQuery } from "./household/history/query";
+import { createDeviceHistoryRoutes } from "./household/history/routes";
+import type { createDeviceHistoryService } from "./household/history/service";
 import { createIdentityRoutes } from "./household/identity/routes";
 import type { createReferenceEnrollment } from "./household/identity/enrollment";
 import type { createIdentityReferences } from "./household/identity/references";
@@ -28,11 +30,16 @@ import { createConnectionStatusRoutes } from "./connections/status";
 import { createMijiaRoutes } from "./mijia/routes";
 import type { HouseholdRuntime } from "./household/runtime";
 import type { MijiaService } from "./mijia/service";
-import type { DevicePushLogs } from "./mijia/device-logs/service";
 import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  deviceHistory?:
+    | Pick<
+        ReturnType<typeof createDeviceHistoryService>,
+        "subscribe" | "revision"
+      >
+    | undefined;
   deviceHistoryQuery?: ReturnType<typeof createDeviceHistoryQuery> | undefined;
   spatialService?: ReturnType<typeof createSpatialService>;
   identityEnrollment?: ReturnType<typeof createReferenceEnrollment> | undefined;
@@ -48,7 +55,6 @@ type AppDependencies = {
   connectionStore: ConnectionStore;
   household: HouseholdRuntime;
   mijiaService: MijiaService;
-  deviceLogs: DevicePushLogs;
   memberRepository: ReturnType<typeof createMemberRepository> | undefined;
   contextRepository: ReturnType<typeof createContextRepository> | undefined;
   shutdownSignal: AbortSignal;
@@ -56,6 +62,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  deviceHistory,
   deviceHistoryQuery,
   spatialService = createSpatialService(undefined, () => []),
   identityEnrollment,
@@ -68,7 +75,6 @@ export function createApp({
   connectionStore,
   household,
   mijiaService,
-  deviceLogs,
   contextRepository,
   memberRepository,
   shutdownSignal,
@@ -115,6 +121,17 @@ export function createApp({
         environment.BACKEND_PORT,
         household,
         deviceHistoryQuery,
+        shutdownSignal,
+        environment.BACKEND_REQUEST_TIMEOUT_MS,
+      ),
+    )
+    .route(
+      "/api/device-history",
+      createDeviceHistoryRoutes(
+        environment.BACKEND_PORT,
+        household,
+        deviceHistoryQuery,
+        deviceHistory,
         shutdownSignal,
         environment.BACKEND_REQUEST_TIMEOUT_MS,
       ),
@@ -181,13 +198,7 @@ export function createApp({
     )
     .route(
       "/api/mijia",
-      createMijiaRoutes(
-        environment.BACKEND_PORT,
-        household,
-        deviceLogs,
-        mijiaService,
-        shutdownSignal,
-      ),
+      createMijiaRoutes(environment.BACKEND_PORT, household, mijiaService),
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));

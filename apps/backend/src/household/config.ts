@@ -1,4 +1,7 @@
-import { householdStreamPolicy } from "@home-agent/api/household";
+import {
+  householdInventoryPolicy,
+  householdStreamPolicy,
+} from "@home-agent/api/household";
 
 export const householdLimits = {
   memorySampleMs: 60_000,
@@ -8,7 +11,7 @@ export const householdLimits = {
   snapshotBytes: householdStreamPolicy.snapshotBytes,
   specificationBytes: 4 * 1024 * 1024,
   specificationResponseBytes: 4 * 1024 * 1024,
-  devices: 1024,
+  devices: householdInventoryPolicy.devices,
   changesBytes: 2 * 1024 * 1024,
   queuedChanges: 256,
   connections: 16,

@@ -26,6 +26,7 @@ const variants = {
 export function SegmentedControl<Value extends string>({
   value,
   onValueChange,
+  onReselect,
   options,
   label,
   variant = "pill",
@@ -44,6 +45,7 @@ export function SegmentedControl<Value extends string>({
 > & {
   value: Value;
   onValueChange: (value: Value) => void;
+  onReselect?: () => void;
   options: readonly { value: Value; label: string }[];
   label: string;
   variant?: keyof typeof variants;
@@ -73,8 +75,12 @@ export function SegmentedControl<Value extends string>({
             key={option.value}
             value={option.value}
             className={twMerge(
-              `relative isolate shrink-0 whitespace-nowrap text-xs text-muted transition-colors enabled:hover:text-ink data-[state=on]:pointer-events-none ${styles.item}`,
+              `relative isolate shrink-0 whitespace-nowrap text-xs text-muted transition-colors enabled:hover:text-ink ${styles.item}`,
+              !onReselect && "data-[state=on]:pointer-events-none",
             )}
+            onClick={() => {
+              if (option.value === value) onReselect?.();
+            }}
             onFocus={() => select(option.value)}
           >
             {option.value === value ? (

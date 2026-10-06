@@ -1,15 +1,14 @@
 import { deviceCategoryLabel } from "../../modules/devices/presentation";
 import { useCallback, useMemo, useState } from "react";
 import { useAtomValue } from "jotai";
-import type { DeviceLogSnapshot } from "@home-agent/api/device-logs";
+import type { historyDevices } from "../../modules/device-history/presentation";
 import { devicesAtom } from "../../modules/devices/state";
 
-const emptyFilters = { query: "", room: "", category: "", reportFilter: "" };
+const emptyFilters = { query: "", room: "", category: "" };
 
 /** Owns device selection and refinements shared by the picker and log reader. */
 export function useDeviceSelection(
-  allDevices: NonNullable<DeviceLogSnapshot["run"]>["devices"],
-  liveDevices: NonNullable<DeviceLogSnapshot["run"]>["devices"],
+  allDevices: ReturnType<typeof historyDevices>,
 ) {
   const records = useAtomValue(devicesAtom);
   const inventory = useMemo(
@@ -26,14 +25,13 @@ export function useDeviceSelection(
     setFilters(emptyFilters);
     setDeviceId(null);
   }, []);
-  const { query, room, category, reportFilter } = filters;
+  const { query, room, category } = filters;
   const search = query.trim().toLowerCase();
-  const filtering = Boolean(search || room || category || reportFilter);
+  const filtering = Boolean(search || room || category);
   const devices = useMemo(
     () =>
       allDevices.filter((device) => {
         const metadata = inventory.get(device.id);
-        const reports = device.properties + device.online;
         return (
           `${device.name} ${device.room} ${device.id} ${metadata?.model ?? ""}`
             .toLowerCase()
@@ -42,20 +40,18 @@ export function useDeviceSelection(
           (!category ||
             (category === "camera"
               ? metadata?.camera
-              : JSON.stringify(metadata?.category ?? "未分类") === category)) &&
-          (!reportFilter ||
-            (reportFilter === "reported" ? reports > 0 : reports === 0))
+              : JSON.stringify(metadata?.category ?? "未分类") === category))
         );
       }),
-    [allDevices, inventory, search, room, category, reportFilter],
+    [allDevices, inventory, search, room, category],
   );
   const visibleIds = useMemo(
     () => new Set(devices.map((device) => device.id)),
     [devices],
   );
   const selectedDevice = useMemo(
-    () => liveDevices.find((device) => device.id === deviceId),
-    [liveDevices, deviceId],
+    () => allDevices.find((device) => device.id === deviceId),
+    [allDevices, deviceId],
   );
   const roomOptions = useMemo(
     () => [

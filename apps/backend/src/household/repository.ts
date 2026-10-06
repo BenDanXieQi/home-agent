@@ -13,8 +13,12 @@ import { householdLimits, jsonBytes } from "./config";
 import {
   createConfirmedWriter,
   createLockedTransactions,
+  lockTransaction,
   StorageOutcomeUnknownError,
+  type Transaction,
 } from "../db/transaction-outcome";
+
+import { householdBindingLock } from "./binding-repository";
 
 const storedDirectorySchema = directorySchema.extend({
   device: z.record(
@@ -30,7 +34,7 @@ const storedDirectorySchema = directorySchema.extend({
     }),
   ),
 });
-const directoryLockKey = "household_binding";
+const directoryLockKey = "household_directory";
 function directoryIdentity(accountId: string, homeId: string) {
   return and(
     eq(householdDirectories.accountId, accountId),
@@ -39,10 +43,17 @@ function directoryIdentity(accountId: string, homeId: string) {
 }
 /** Stores the current complete directory; removed entries are not a history store. */
 export function createHouseholdRepository(db: Database) {
-  const transaction = createLockedTransactions(
+  const bindingTransaction = createLockedTransactions(
     db,
     householdLimits.transactionMs,
+    "shared",
   );
+  // Serializing the inventory must not block independent household history reads.
+  const transaction = <T>(key: string, run: (tx: Transaction) => Promise<T>) =>
+    bindingTransaction(householdBindingLock, async (tx) => {
+      await lockTransaction(tx, key, "exclusive");
+      return run(tx);
+    });
   async function readStored(
     tx: Parameters<Parameters<typeof transaction>[1]>[0],
     accountId: string,

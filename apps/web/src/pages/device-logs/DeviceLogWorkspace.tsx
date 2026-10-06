@@ -1,17 +1,27 @@
 import {
-  memo,
   useCallback,
-  useDeferredValue,
+  useMemo,
   useState,
   useSyncExternalStore,
+  type ComponentProps,
 } from "react";
+import { useAtomValue } from "jotai";
 import { Group, Panel } from "react-resizable-panels";
-import type { useDeviceLogs } from "../../modules/device-logs/use-device-logs";
-import type { DeviceLogSnapshot } from "@home-agent/api/device-logs";
+import {
+  deviceHistoryPolicy,
+  deviceHistoryQuerySchema,
+} from "@home-agent/api/device-history";
+import { devicesAtom } from "../../modules/devices/state";
+import {
+  historyDevices,
+  historyLogEntries,
+} from "../../modules/device-history/presentation";
+import { useDeviceHistory } from "../../modules/device-history/use-device-history";
 import { ResizeHandle } from "../../components/ResizeHandle";
-import { CaptureControls } from "./CaptureControls";
+import { HistoryControls } from "./HistoryControls";
 import { DevicePicker } from "./DevicePicker";
 import { LogReader } from "./LogReader";
+import { historyRangePresets, logViews } from "./log-data";
 import { useDeviceSelection } from "./use-device-selection";
 import { useLogComparison } from "./use-log-comparison";
 
@@ -23,91 +33,100 @@ const subscribeNarrow = (notify: () => void) => {
 };
 const readNarrow = () => matchMedia(narrowQuery).matches;
 
-const emptyDevices: NonNullable<DeviceLogSnapshot["run"]>["devices"] = [];
-
-export const DeviceLogWorkspace = memo(function DeviceLogWorkspace({
-  data,
-  connected,
-  loaded,
+export function DeviceLogWorkspace({
+  scope,
+  accountId,
+  homeId,
   ready,
-}: Pick<ReturnType<typeof useDeviceLogs>, "data" | "connected" | "loaded"> & {
+}: {
+  scope: string;
+  accountId: string;
+  homeId: string;
   ready: boolean;
 }) {
-  const { run } = data;
-  const capturing = run?.status === "capturing";
-  const [frozen, setFrozen] = useState<DeviceLogSnapshot | null>(null);
-  const paused = capturing && frozen !== null && frozen.run?.id === run?.id;
-  const displayed = paused ? frozen : data;
-  const deferred = useDeferredValue(displayed);
-  const entries =
-    capturing && deferred.run?.id === run?.id
-      ? deferred.entries
-      : displayed.entries;
-  const unseen = paused
-    ? Math.max(0, (run?.total_rows ?? 0) - (frozen.run?.total_rows ?? 0))
-    : 0;
-  const resume = useCallback(() => setFrozen(null), []);
-  const setLive = useCallback(
-    (live: boolean) => setFrozen(live ? null : data),
-    [data],
-  );
+  const devices = useAtomValue(devicesAtom);
+  const allDevices = useMemo(() => historyDevices(devices), [devices]);
+  const selection = useDeviceSelection(allDevices);
+  const [range, setRange] = useState(() => {
+    const end = Date.now();
+    return {
+      start: new Date(end - historyRangePresets[1]!.duration).toISOString(),
+      end: new Date(end).toISOString(),
+    };
+  });
+  const [selectedRange, setSelectedRange] = useState<
+    ComponentProps<typeof HistoryControls>["selectedRange"]
+  >(historyRangePresets[1]!.duration);
+  const [live, setLive] = useState(true);
+  const [view, setView] = useState<(typeof logViews)[number]["value"]>("all");
   const [devicesOpen, setDevicesOpen] = useState(false);
-  const selection = useDeviceSelection(
-    displayed.run?.devices ?? emptyDevices,
-    run?.devices ?? emptyDevices,
-  );
   const comparison = useLogComparison(
-    displayed.run?.devices ?? emptyDevices,
-    run?.id,
+    allDevices,
+    JSON.stringify([range, view]),
   );
-  const { comparing, enterComparison, leaveComparison } = comparison;
-  const { deviceId } = selection;
+  const ids = comparison.comparing
+    ? comparison.compareIds
+    : selection.deviceId
+      ? [selection.deviceId]
+      : selection.filtering
+        ? [...selection.visibleIds]
+        : undefined;
+  const input = deviceHistoryQuerySchema.parse({
+    account_id: accountId,
+    home_id: homeId,
+    ...range,
+    kinds: view === "all" ? ["property", "online"] : [view],
+    ...(ids?.length ? { device_ids: ids } : {}),
+    order: "desc",
+    limit: deviceHistoryPolicy.maxLimit,
+  });
+  const noDevices = ids !== undefined && ids.length === 0;
+  const history = useDeviceHistory(scope, input, ready && !noDevices, live);
+  const entries = useMemo(
+    () =>
+      historyLogEntries(
+        noDevices ? [] : (history.displayData?.records ?? []),
+        devices,
+      ),
+    [history.displayData?.records, devices, noDevices],
+  );
   const toggleComparison = useCallback(() => {
-    if (comparing) leaveComparison();
+    if (comparison.comparing) comparison.leaveComparison();
     else {
-      enterComparison(deviceId);
+      comparison.enterComparison(selection.deviceId);
       setDevicesOpen(true);
     }
-  }, [comparing, enterComparison, leaveComparison, deviceId]);
+  }, [comparison, selection.deviceId]);
+  const resumeLatest = () => {
+    const end = Date.now();
+    const duration = selectedRange ?? historyRangePresets[1]!.duration;
+    setRange({
+      start: new Date(end - duration).toISOString(),
+      end: new Date(end).toISOString(),
+    });
+    setSelectedRange(duration);
+    setLive(true);
+    comparison.clearAnchor();
+    history.latest();
+  };
   const narrow = useSyncExternalStore(subscribeNarrow, readNarrow);
-  const picker = (
-    <DevicePicker
-      selection={selection}
-      comparison={comparison}
-      loaded={loaded}
-      hasRun={!!run}
-      open={devicesOpen}
-      onOpenChange={setDevicesOpen}
-    />
-  );
-  const reader = (
-    <LogReader
-      entries={entries}
-      selection={selection}
-      comparison={comparison}
-      runId={run?.id}
-      hasRun={!!run}
-      loaded={loaded}
-      capturing={capturing}
-      paused={paused}
-      onResume={resume}
-      onToggleComparison={toggleComparison}
-    />
-  );
   return (
-    <section className="flex h-full min-h-0 flex-col gap-4 [--switch-on:var(--color-ink)] [--segmented-accent:var(--color-ink)] [&_button:focus-visible]:outline-1 [&_button:focus-visible]:outline-ink/50 [&_button:focus-visible]:-outline-offset-2">
-      <div className="shrink-0 empty:hidden">
-        <CaptureControls
-          run={run}
-          connected={connected}
-          loaded={loaded}
-          ready={ready}
-          paused={paused}
-          unseen={unseen}
-          onLiveChange={setLive}
-          onCaptured={resume}
-        />
-      </div>
+    <section className="flex h-full min-h-0 flex-col gap-4 [--segmented-accent:var(--color-ink)] [&_button:focus-visible]:outline-1 [&_button:focus-visible]:outline-ink/50">
+      <HistoryControls
+        queryKey={JSON.stringify([input, history.displayPageKey])}
+        history={history}
+        range={history.range}
+        selectedRange={selectedRange}
+        ready={ready}
+        hasMatches={!noDevices}
+        live={live}
+        onResume={resumeLatest}
+        onRangeChange={(next, nextLive, selected) => {
+          setLive(nextLive);
+          setSelectedRange(selected);
+          setRange(next);
+        }}
+      />
       <Group
         className="relative min-h-0 flex-1 bg-white"
         id="device-log-panels"
@@ -120,13 +139,59 @@ export const DeviceLogWorkspace = memo(function DeviceLogWorkspace({
           minSize={narrow ? (devicesOpen ? "50%" : "64px") : "200px"}
           maxSize={narrow ? (devicesOpen ? "50%" : "64px") : "380px"}
         >
-          {picker}
+          <DevicePicker
+            selection={selection}
+            comparison={comparison}
+            loaded={ready || Boolean(history.data)}
+            available={allDevices.length > 0}
+            open={devicesOpen}
+            onOpenChange={setDevicesOpen}
+          />
         </Panel>
         {narrow ? null : <ResizeHandle label="调整设备列表宽度" />}
         <Panel id="log-reader" minSize="0px">
-          {reader}
+          <LogReader
+            entries={entries}
+            selection={selection}
+            comparison={comparison}
+            queryKey={history.displayPageKey}
+            updating={
+              !noDevices &&
+              !history.error &&
+              history.isPending &&
+              Boolean(history.displayData)
+            }
+            loaded={
+              noDevices ||
+              Boolean(history.displayData) ||
+              Boolean(history.error)
+            }
+            paused={!live}
+            view={
+              history.displayInput
+                ? history.displayInput.kinds.length === 1
+                  ? history.displayInput.kinds[0]!
+                  : "all"
+                : view
+            }
+            onViewChange={setView}
+            onResume={resumeLatest}
+            onToggleComparison={toggleComparison}
+            loadingOlder={history.loadingOlder}
+            onLoadOlder={() => {
+              if (
+                !history.hasNext ||
+                history.isFetching ||
+                history.error ||
+                noDevices
+              )
+                return;
+              setLive(false);
+              history.loadOlder();
+            }}
+          />
         </Panel>
       </Group>
     </section>
   );
-});
+}

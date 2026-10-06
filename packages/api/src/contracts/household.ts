@@ -22,6 +22,10 @@ import {
 import { operationSchema } from "./operations";
 import { apiErrorSchema } from "./errors";
 
+export const householdInventoryPolicy = {
+  devices: 1024,
+} as const;
+
 export const householdStreamPolicy = {
   snapshotBytes: 8 * 1024 * 1024,
   heartbeatMs: 15_000,

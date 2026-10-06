@@ -1,4 +1,4 @@
-import type { DeviceLogSnapshot } from "@home-agent/api/device-logs";
+import type { LogEntry } from "../../modules/device-history/presentation";
 
 const timeFormatter = new Intl.DateTimeFormat("zh-CN", {
   hour: "2-digit",
@@ -26,14 +26,14 @@ const dateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
 export const time = (value: string | number) =>
   timeFormatter.format(typeof value === "string" ? Date.parse(value) : value);
 
-export const changeLabels = {
-  first: "首次上报",
-  changed: "值变化",
-  same: "重复上报",
-  control: "连接记录",
+export const sourceLabels = {
+  push: "实时推送",
+  retained: "保留消息",
+  read: "属性读取",
+  directory: "设备清单读取",
 };
 
-function describeEntry(row: DeviceLogSnapshot["entries"][number]) {
+function describeEntry(row: LogEntry) {
   const timestamp = Date.parse(row.received_at);
   return {
     timestamp,
@@ -43,13 +43,10 @@ function describeEntry(row: DeviceLogSnapshot["entries"][number]) {
   };
 }
 
-// SSE appends immutable rows. Reuse their presentation across scrolling and
-// comparison changes without retaining rows after the capture window drops them.
-const presentations = new WeakMap<
-  DeviceLogSnapshot["entries"][number],
-  ReturnType<typeof describeEntry>
->();
-export function presentLogEntry(row: DeviceLogSnapshot["entries"][number]) {
+// Reuse immutable history records across scrolling and comparison changes
+// without retaining rows after the query releases them.
+const presentations = new WeakMap<LogEntry, ReturnType<typeof describeEntry>>();
+export function presentLogEntry(row: LogEntry) {
   const previous = presentations.get(row);
   if (previous) return previous;
   const presentation = describeEntry(row);

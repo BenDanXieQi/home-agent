@@ -1,20 +1,32 @@
-import { deviceLogScopeAtom } from "../../modules/device-logs/state";
+import { Activity } from "lucide-react";
 import { useAtomValue } from "jotai";
-import { householdAtom } from "../../modules/household/state";
-import { useDeviceLogs } from "../../modules/device-logs/use-device-logs";
+import {
+  householdAtom,
+  householdScopeEpochAtom,
+  householdSyncedAtom,
+} from "../../modules/household/state";
+import { EmptyState } from "../../components/EmptyState";
 import { DeviceLogWorkspace } from "./DeviceLogWorkspace";
 
 export default function DeviceLogsPage() {
   const household = useAtomValue(householdAtom);
-  const scope = useAtomValue(deviceLogScopeAtom);
-  const { data, connected, loaded } = useDeviceLogs(scope);
+  const scope = useAtomValue(householdScopeEpochAtom);
+  const synced = useAtomValue(householdSyncedAtom);
+  if (!household?.account_id || !household.home_id || !scope)
+    return (
+      <EmptyState
+        icon={<Activity size={24} />}
+        title="等待家庭连接"
+        description="绑定家庭后即可查询设备历史。"
+      />
+    );
   return (
     <DeviceLogWorkspace
       key={scope}
-      data={data}
-      connected={connected}
-      loaded={loaded}
-      ready={household?.status === "running"}
+      scope={scope}
+      accountId={household.account_id}
+      homeId={household.home_id}
+      ready={synced && household.status === "running"}
     />
   );
 }

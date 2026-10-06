@@ -2,7 +2,7 @@
 
 基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、语音请求判断和聊天转发。语音模块直接调用模型；单次聊天由独立 [Agent](../agent/README.md) 执行。基础检测不依赖 Agent 在线。
 
-当前支持原生属性持续采集、带有效性的当前值与房间事实查询、设备属性历史保存与只读查询，以及成员资料、参考身份关联与可修订的成员出现记录；当前位置、通用活动识别与可执行要求管理尚未实现。Agent 数据通路规划见[实施范围](../../docs/plans/household-automation.md#本次范围)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+当前支持原生属性持续采集、带有效性的当前值与房间事实查询、设备状态历史保存与只读查询，以及成员资料、参考身份关联与可修订的成员出现记录；当前位置、通用活动识别与可执行要求管理尚未实现。Agent 数据通路规划见[实施范围](../../docs/plans/household-automation.md#本次范围)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
 本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和语音请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。
 
@@ -70,7 +70,7 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 `MijiaService.readProperties(properties, signal)` 直接使用当前中国大陆区 MiCloud 会话，由 service 核验账号、所选家庭归属及读取运行标识；该标识用于排除会话更新前的旧读取结果。`properties/read-request.ts` 按设备分组检查 readable 规格；所有调用共用 `PropertyReader` 的串行批次。返回逐项 `baseline`／`cloud_cache` 观测，保留部分成功和原始返回码语义；缓存读取不保证最新值，`Retry-After` 约束后续批次与新读取。应用层通过 `POST /api/mijia/properties/read` 提供一次性读取，不做周期属性轮询。
 
-`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。家庭采集模块和[限时上报日志](../../docs/household-runtime.md#设备上报日志)分别消费该入口；只有家庭运行时提交 `latest` 与有效在线状态。采集范围、必要补读与房间查询见[设备事实与房间快照](../../docs/contracts/device-facts.md)。独立设备事件尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/contracts/mijia.md)。
+`MijiaService.observeDevices(deviceIds, onObservation, signal)` 使用同一账号保存的 OAuth 凭据，按所选家庭内显式指定的设备提供 MQTT 属性与在线观察。`AccountObservations` 管理活动观察和重连，`MiotMqtt` 管理单次连接、共享 topic 与逐 topic 订阅确认；断线后恢复活动订阅，设备清单变化通知与属性观察共享连接，取消全部观察（含设备清单变化通知）后停止连接与计时器。家庭采集模块消费该入口，家庭运行时提交 `latest` 与有效在线状态，历史服务保存已接纳报告。采集范围、必要补读与房间查询见[设备事实与房间快照](../../docs/contracts/device-facts.md)。独立设备事件尚未接入。读取、推送的协议契约及已验证范围见[米家来源契约](../../docs/contracts/mijia.md)。
 
 `CameraSourceManager` 管理摄像头共享流的规格、注册、重试、离线保留与释放；实际连接摄像头、接收视频和维持常驻消费者由 go2rtc 执行。`PlaybackManager` 管理播放预留、协商结果和观看资源释放，实际 WebRTC 连接位于 go2rtc 与浏览器之间。浏览器预览视频不经过 backend；本地感知另从 go2rtc 私有分析出口读取视频，在 backend 的计算子进程内解码。官方能力列表声明为双摄的设备，其两个镜头的共享流在 go2rtc 内复用一个物理 MISS 连接，backend 根据小米官方通道能力列表生成通道列表，并通过 `channelCount` 将能力传给 Go；Go 不按具体型号选择双摄分支。backend 仍分别管理各镜头的源与播放资源；关闭一路观看不会关闭另一镜头的连接。
 
@@ -84,7 +84,9 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
 
-`POST /api/agent/context/history` 提供 `kind=device_reports` 的只读设备属性历史。`household/history/service.ts` 拥有接纳报告订阅与有界异步提交；`repository.ts` 负责两表事务保存、SQL 同值段／原始报告查询及原生游标读取；`query.ts` 负责查询准入、游标和完整记录分页。`agent-context/routes.ts` 负责本机访问、输入、取消截止时间及传输响应容量。接口语义见[设备属性历史](../../docs/household-runtime.md#设备属性历史)，维护任务与部署限制见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。专用 Agent SSE 与其他历史 kind 尚未实现。
+`POST /api/device-history/events` 为 Web 提供独立设备历史 SSE，支持实时首屏、固定区间分页与连续导出；`POST /api/agent/context/history` 继续以一次性 JSON 响应提供 `kind=device_reports`。两者共用 `household/history/read.ts` 的家庭资格、取消与读取期限，以及 `query.ts` 的游标和完整记录分页。数据库读取由已有 Postgres.js 共享连接池分配连接和调度等待；连接等待、取消与容量边界见[只读历史接口](../../docs/household-runtime.md#只读历史接口)。记录覆盖原生属性和设备在线值，支持时间、设备、类型与属性地址筛选，以及升序／降序分页。
+
+`household/history/service.ts` 拥有接纳报告订阅与按设备有界顺序提交，事务保存成功后才通知历史流；`repository.ts` 负责按主键比较最近保存状态，在同一事务内更新状态并保存变化记录，以及按时间与游标读取历史；导出在一个查询快照内连续交付，不逐页重开事务。`live.ts` 在活动连接之间共享相同查询与已提交版本的读取，最后一个连接退出时释放资源；`stream.ts` 合并 250 毫秒内的匹配保存通知，重新读取当前首屏并交付变化记录、移出项与完整顺序；不定时轮询数据库，也不推送尚未保存的报告。`routes.ts` 负责本机访问、输入、流连接容量与关闭，家庭公共错误转换由 `household/http-errors.ts` 拥有。接口语义见[设备状态历史](../../docs/household-runtime.md#设备状态历史)，维护任务与部署限制见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。专用 Agent SSE 与其他历史 kind 尚未实现。
 
 ## 连接配置与探测
 
@@ -133,7 +135,6 @@ src/
 │   │   ├── discovery.ts   # 设备快照、发现任务、刷新合并与定时器
 │   │   ├── directory-notifications.ts # 账号级设备清单变化通知与刷新防抖
 │   │   └── mapping.ts     # 设备业务映射与摄像头识别
-│   ├── device-logs/        # 米家推送诊断采集、文件与读取接口
 │   ├── properties/
 │   │   ├── read-request.ts # 请求复制、按设备分组与 readable 规格预检
 │   │   ├── reader.ts      # 指定属性读取、共用串行批次与取消
@@ -158,7 +159,7 @@ src/
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、属性采集、成员与状态 SSE
 │   ├── data-lifecycle.ts   # 家庭表归属与事务内统一清理
-│   ├── history/            # 属性报告保存、查询准入与分页、数据库读取
+│   ├── history/            # 属性与在线报告保存、查询准入与分页、数据库读取及历史 SSE
 │   └── spatial/            # 空间资料服务、三张表的事务与引用查询、本机 HTTP 接口
 ├── perception/            # 本地检测、来源协调、人宠跟踪、轨迹身份证据、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
@@ -173,7 +174,8 @@ src/
 │   └── speech/             # 单一 VAD 结果切段、语音证据、ASR 子进程与空闲释放
 ├── conversation/          # 短时语音片段交付、判断状态、Agent 客户端和读取接口
 ├── http/                  # backend 内跨业务复用的 HTTP 传输适配
-│   └── snapshot-stream.ts  # 当前快照 SSE、通知合并、连接容量与关闭
+│   ├── sse-transport.ts   # 共用 SSE 有界写入、心跳、超时与取消
+│   └── snapshot-stream.ts  # 当前快照 SSE、通知合并与连接容量
 ├── credentials/
 │   ├── store.ts            # 数据库授权的认证加密与读写
 │   └── key.ts              # 独立密钥文件的权限与内容校验
@@ -194,7 +196,7 @@ src/
 
 语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 `src/conversation/interpret.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
 
-`src/http/snapshot-stream.ts` 负责感知与语音接口共用的当前快照 SSE 传输，只接收变更订阅、快照读取和应用关闭信号；快照内容及有效性仍由各业务模块维护。
+`src/http/sse-transport.ts` 通过原生 `WritableStream`、Hono `writeSSE` 与 `p-timeout` 提供家庭状态、设备历史和当前快照共用的串行写入、事件／队列容量、心跳、超时与取消。每条连接持有独立资源，领域适配器维护各自的协议、资格、通知和连接数。`snapshot-stream.ts` 合并感知与语音的快照通知；家庭状态流维护版本及实体变化，历史流读取已保存页并计算页增量，三者不合并数据语义。
 
 聊天路由只接收 Agent 地址读取函数、端口与超时；米家服务接收 go2rtc 地址读取函数、凭据仓库和家庭选择存储模块。地址函数由启动入口连接到配置仓库，调用时读取当前配置，业务模块不依赖 YAML 存储结构。数据库连接由存储模块使用，不放入 HTTP 请求上下文。`environment.ts` 负责读取和校验进程环境变量。
 

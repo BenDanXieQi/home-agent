@@ -97,7 +97,14 @@
       "idx": 13,
       "version": "7",
       "when": 1791257937308,
-      "tag": "0013_device_property_history",
+      "tag": "0013_device_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791268231074,
+      "tag": "0014_device_history_state",
       "breakpoints": true
     }
   ]

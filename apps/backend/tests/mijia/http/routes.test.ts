@@ -1,8 +1,4 @@
 import { afterEach, describe, expect, jest, mock, spyOn, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Hono } from "hono";
 import {
   applyChanges,
@@ -15,7 +11,6 @@ import {
 } from "../../../src/mijia/household";
 import type { HouseholdRuntime } from "../../../src/household/runtime";
 import { householdLimits } from "../../../src/household/config";
-import { DevicePushLogs } from "../../../src/mijia/device-logs/service";
 import { MijiaService } from "../../../src/mijia/service";
 import { createMijiaRoutes } from "../../../src/mijia/routes";
 import { MijiaError } from "../../../src/mijia/errors";
@@ -28,18 +23,8 @@ import {
 import { deferred, nextTurn } from "../../support/async";
 
 const runtimes: HouseholdRuntime[] = [];
-const logStores: DevicePushLogs[] = [];
-const logDirectories: string[] = [];
-const shutdownControllers: AbortController[] = [];
 afterEach(async () => {
-  for (const controller of shutdownControllers.splice(0)) controller.abort();
-  for (const logs of logStores.splice(0)) {
-    await logs.ready;
-    await logs.stop();
-  }
   for (const runtime of runtimes.splice(0)) await runtime.close();
-  for (const directory of logDirectories.splice(0))
-    await rm(directory, { recursive: true, force: true });
   mock.restore();
   jest.useRealTimers();
 });
@@ -61,15 +46,9 @@ function harness() {
   );
   runtimes.push(runtime);
   runtime.start();
-  const directory = mkdtempSync(join(tmpdir(), "home-agent-routes-"));
-  logDirectories.push(directory);
-  const logs = new DevicePushLogs(runtime, directory, service);
-  logStores.push(logs);
-  const shutdown = new AbortController();
-  shutdownControllers.push(shutdown);
   const app = new Hono().route(
     "/api/mijia",
-    createMijiaRoutes(4000, runtime, logs, service, shutdown.signal),
+    createMijiaRoutes(4000, runtime, service),
   );
   async function request(
     path: string,
@@ -88,7 +67,7 @@ function harness() {
       { requestIP: () => ({ address, port: 50000, family: "IPv4" }) },
     );
   }
-  return { app, service, runtime, logs, shutdown, request };
+  return { app, service, runtime, request };
 }
 
 function json(method: string, body: unknown) {
@@ -110,14 +89,13 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
     expect(catalog).not.toHaveBeenCalled();
   });
 
-  test.each(["/events", "/logs/events"])(
+  test.each(["/events"])(
     "HEAD %s leaves the stream capacity available for GET",
     async (path) => {
       const h = harness();
-      await h.logs.ready;
+      await nextTurn();
       const snapshot = spyOn(h.runtime, "snapshot");
       const subscribe = spyOn(h.runtime, "subscribe");
-      const logs = spyOn(h.logs, "snapshot");
       const heads = await Promise.all(
         Array.from({ length: 32 }, () => h.request(path, { method: "HEAD" })),
       );
@@ -130,7 +108,6 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
       }
       expect(snapshot).not.toHaveBeenCalled();
       expect(subscribe).not.toHaveBeenCalled();
-      expect(logs).not.toHaveBeenCalled();
 
       const response = await h.request(path);
       const reader = response.body?.getReader();
@@ -221,53 +198,6 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
         pollIntervalMs: 2_000,
       });
       await nextTurn();
-    }
-  });
-
-  test("service shutdown drains an open log stream without waiting for client cancellation", async () => {
-    const h = harness();
-    const server = Bun.serve({
-      hostname: "127.0.0.1",
-      port: 0,
-      idleTimeout: 0,
-      fetch: h.app.fetch,
-    });
-    let deadline: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const response = await fetch(
-        new URL("/api/mijia/logs/events", server.url),
-        {
-          headers: { host: "localhost:4000" },
-        },
-      );
-      expect(response.status).toBe(200);
-      const reader = response.body!.getReader();
-      try {
-        expect(
-          new TextDecoder().decode((await reader.read()).value),
-        ).toStartWith("event: snapshot\n");
-        const draining = server.stop();
-        h.shutdown.abort();
-        await Promise.all([
-          h.runtime.close(),
-          h.logs.stop("后端停止", "interrupted"),
-        ]);
-        const drained = await Promise.race([
-          draining.then(() => true),
-          new Promise<false>((resolve) => {
-            deadline = setTimeout(() => resolve(false), 2_000);
-          }),
-        ]);
-        expect(drained).toBe(true);
-        expect((await reader.read()).done).toBe(true);
-        expect((await h.request("/logs/events")).status).toBe(503);
-      } finally {
-        await reader.cancel();
-        reader.releaseLock();
-      }
-    } finally {
-      clearTimeout(deadline);
-      await server.stop(true);
     }
   });
 

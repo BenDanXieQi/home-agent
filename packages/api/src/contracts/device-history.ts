@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { deviceCapabilitySchema } from "../domain/devices";
 import { propertyAddressSchema, propertyValueSchema } from "./observations";
+import { apiErrorSchema } from "./errors";
+import { householdInventoryPolicy } from "./household";
 
 export const deviceHistoryPolicy = {
   retentionDays: 365,
@@ -8,7 +10,9 @@ export const deviceHistoryPolicy = {
   maxLimit: 1000,
   responseBytes: 1024 * 1024,
   requestBytes: 128 * 1024,
+  exportBytes: 64 * 1024 * 1024,
 } as const;
+export const deviceHistoryKindSchema = z.enum(["property", "online"]);
 export const deviceHistoryPropertySchema = z.strictObject({
   device_id: propertyAddressSchema.shape.did,
   siid: propertyAddressSchema.shape.siid,
@@ -19,15 +23,28 @@ export const deviceHistoryMetadataSchema = z.object({
   unit: deviceCapabilitySchema.shape.unit.unwrap().nullable(),
   value_list: deviceCapabilitySchema.shape.value_list.unwrap().nullable(),
 });
-export const deviceHistoryReportSchema = deviceHistoryPropertySchema.extend({
-  observation_id: z.uuid(),
-  received_at: z.iso.datetime(),
-  scope_epoch: z.uuid(),
-  input_sequence: z.number().int().nonnegative(),
+const property = deviceHistoryPropertySchema.extend({
+  kind: z.literal("property"),
   value: propertyValueSchema,
   source: z.enum(["push", "retained", "read"]),
   metadata: deviceHistoryMetadataSchema,
 });
+const online = z.object({
+  kind: z.literal("online"),
+  device_id: propertyAddressSchema.shape.did,
+  value: z.boolean(),
+  source: z.enum(["push", "retained", "directory"]),
+});
+const report = z.object({
+  observation_id: z.uuid(),
+  received_at: z.iso.datetime(),
+  scope_epoch: z.uuid(),
+  input_sequence: z.number().int().nonnegative(),
+});
+export const deviceHistoryReportSchema = z.discriminatedUnion("kind", [
+  property.extend(report.shape),
+  online.extend(report.shape),
+]);
 export const deviceHistoryTimeSchema = z.iso
   .datetime()
   .refine((value) => !value.startsWith("0000-"), {
@@ -49,9 +66,19 @@ export const deviceHistoryQuerySchema = z
       .min(1)
       .max(1000)
       .optional(),
+    device_ids: z
+      .array(propertyAddressSchema.shape.did)
+      .min(1)
+      .max(householdInventoryPolicy.devices)
+      .optional(),
+    kinds: z
+      .array(deviceHistoryKindSchema)
+      .min(1)
+      .max(2)
+      .default(["property", "online"]),
     start: deviceHistoryTimeSchema,
     end: deviceHistoryTimeSchema,
-    representation: z.enum(["runs", "observations"]).default("runs"),
+    order: z.enum(["asc", "desc"]).default("asc"),
     limit: z
       .number()
       .int()
@@ -67,23 +94,15 @@ export const deviceHistoryQuerySchema = z
   .refine((input) => input.start < input.end, {
     message: "start must precede end",
   });
-const common = deviceHistoryPropertySchema.extend({
-  definition_id: z.uuid(),
-  value: propertyValueSchema,
-  source: deviceHistoryReportSchema.shape.source,
-  metadata: deviceHistoryMetadataSchema,
-});
-export const deviceHistoryObservationSchema = common.extend({
+const storedProperty = property.extend({ definition_id: z.uuid() });
+const observation = z.object({
   observation_id: z.uuid(),
   received_at: z.iso.datetime(),
 });
-export const deviceHistoryRunSchema = common.extend({
-  first_received_at: z.iso.datetime(),
-  last_received_at: z.iso.datetime(),
-  first_observation_id: z.uuid(),
-  last_observation_id: z.uuid(),
-  report_count: z.number().int().positive(),
-});
+export const deviceHistoryObservationSchema = z.discriminatedUnion("kind", [
+  storedProperty.extend(observation.shape),
+  online.extend(observation.shape),
+]);
 const response = z.object({
   account_id: deviceHistoryQuerySchema.shape.account_id,
   home_id: deviceHistoryQuerySchema.shape.home_id,
@@ -92,16 +111,65 @@ const response = z.object({
   retention_days: z.literal(deviceHistoryPolicy.retentionDays),
   next_cursor: z.string().nullable(),
 });
-export const deviceHistoryResponseSchema = z.discriminatedUnion(
-  "representation",
-  [
-    response.extend({
-      representation: z.literal("observations"),
-      records: z.array(deviceHistoryObservationSchema),
-    }),
-    response.extend({
-      representation: z.literal("runs"),
-      records: z.array(deviceHistoryRunSchema),
-    }),
-  ],
-);
+export const deviceHistoryResponseSchema = response.extend({
+  records: z.array(deviceHistoryObservationSchema),
+});
+
+export function deviceHistoryRecordId(
+  record: z.infer<typeof deviceHistoryResponseSchema>["records"][number],
+) {
+  return record.observation_id;
+}
+
+export const deviceHistoryStreamPolicy = {
+  connections: 16,
+  heartbeatMs: 15_000,
+  writeTimeoutMs: 15_000,
+  coalesceMs: 250,
+  eventBytes: deviceHistoryPolicy.responseBytes + 128 * 1024,
+  queuedBytes: 2 * (deviceHistoryPolicy.responseBytes + 128 * 1024),
+  queuedEvents: 256,
+} as const;
+
+export const deviceHistoryStreamRequestSchema = deviceHistoryQuerySchema
+  .safeExtend({ delivery: z.enum(["live", "page", "export"]).default("page") })
+  .refine(
+    (input) =>
+      input.delivery !== "live" || (!input.cursor && input.order === "desc"),
+    {
+      message: "Live delivery requires descending order and no page cursor",
+    },
+  );
+
+const changedPage = {
+  record_ids: z.array(z.uuid()).max(deviceHistoryPolicy.maxLimit),
+  removed_ids: z.array(z.uuid()).max(deviceHistoryPolicy.maxLimit),
+};
+export const deviceHistoryChangeSchema = deviceHistoryResponseSchema
+  .extend(changedPage)
+  .refine(
+    (page) => {
+      const ids = new Set(page.record_ids);
+      const upserts = new Set(page.records.map(deviceHistoryRecordId));
+      const removed = new Set(page.removed_ids);
+      return (
+        ids.size === page.record_ids.length &&
+        upserts.size === page.records.length &&
+        removed.size === page.removed_ids.length &&
+        [...upserts].every((id) => ids.has(id)) &&
+        [...removed].every((id) => !ids.has(id))
+      );
+    },
+    {
+      message:
+        "History changes require unique page identities and consistent upserts/removals",
+    },
+  );
+
+export const deviceHistoryStreamEventSchema = z.discriminatedUnion("event", [
+  z.object({ event: z.literal("page"), data: deviceHistoryResponseSchema }),
+  z.object({ event: z.literal("change"), data: deviceHistoryChangeSchema }),
+  z.object({ event: z.literal("heartbeat"), data: z.strictObject({}) }),
+  z.object({ event: z.literal("complete"), data: z.strictObject({}) }),
+  z.object({ event: z.literal("error"), data: apiErrorSchema }),
+]);

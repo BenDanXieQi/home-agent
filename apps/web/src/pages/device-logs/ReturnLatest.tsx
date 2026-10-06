@@ -16,11 +16,13 @@ export function ReturnLatest({
   count,
   scrollY,
   onReturn,
+  label,
 }: {
   returning: boolean;
   count: number;
   scrollY: ReturnType<typeof useScroll>["scrollY"];
   onReturn: () => void;
+  label: string;
 }) {
   const present = useIsPresent();
   const reducedMotion = useReducedMotion();
@@ -53,7 +55,7 @@ export function ReturnLatest({
         className="[&_.agent-avatar]:w-8 [&_.agent-avatar]:h-8 pointer-events-auto shrink-0 whitespace-nowrap tabular-nums shadow-panel"
         variant="primary"
         style={{ opacity: reducedMotion ? 1 : opacity }}
-        aria-label={count ? `返回最新，${count} 条新上报` : "返回最新"}
+        aria-label={count ? `${label}，${count} 条新记录` : label}
         icon={
           <span
             className="relative inline-flex w-8 h-7 items-center motion-safe:[&[data-returning='true']_.agent-avatar-gaze]:[transform:translateY(-2px)]"
@@ -119,7 +121,7 @@ export function ReturnLatest({
         onClick={onReturn}
       >
         <span className="relative inline-flex items-center">
-          返回最新
+          {label}
           <AnimatePresence initial={false} mode="popLayout">
             {count > 0 && (
               <m.span
