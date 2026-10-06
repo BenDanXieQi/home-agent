@@ -58,6 +58,18 @@ export const mijiaErrorDefinitions = {
     status: 400,
     message: "所选属性不属于当前设备的可读取规格。",
   },
+  mijia_property_not_writeable: {
+    status: 400,
+    message: "所选属性不属于当前设备的可写入规格。",
+  },
+  mijia_action_not_supported: {
+    status: 400,
+    message: "所选动作不属于当前设备的可用规格。",
+  },
+  mijia_device_offline: {
+    status: 409,
+    message: "设备当前离线，未发送控制请求。",
+  },
   mijia_network: {
     status: 502,
     message: "无法连接米家服务，请检查网络后重试。",

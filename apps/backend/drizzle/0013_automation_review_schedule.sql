@@ -1,0 +1,1 @@
+ALTER TABLE "automation_reviews" DROP COLUMN "pending";

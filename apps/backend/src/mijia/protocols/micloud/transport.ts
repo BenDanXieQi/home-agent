@@ -13,6 +13,7 @@ import type { MiCloudSavedSession } from "./session";
 export type RequestOptions = Omit<RequestInit, "body"> & {
   body?: URLSearchParams;
   sameOriginRedirects?: boolean;
+  rejectRedirects?: boolean;
 };
 /** Reports the first fetch dispatch, after local request preparation has succeeded. */
 export type RequestStartObserver = (startedAt: string) => void;
@@ -142,7 +143,8 @@ export class MiCloudTransport {
     let pendingResponse: Response | undefined;
     try {
       for (let hop = 0; hop < 10; hop++) {
-        const { sameOriginRedirects, ...requestOptions } = options;
+        const { sameOriginRedirects, rejectRedirects, ...requestOptions } =
+          options;
         const headers = new Headers(options.headers);
         headers.set("User-Agent", this.identity.userAgent);
         headers.set("Cookie", this.#cookieHeader(next));
@@ -162,6 +164,8 @@ export class MiCloudTransport {
         const location = response.headers.get("location");
         if ([301, 302, 303, 307, 308].includes(response.status) && location) {
           await response.body?.cancel();
+          // A command must never be replayed by an HTTP redirect.
+          if (rejectRedirects) throw new MiCloudError("invalid-response");
           const destination = trustedUrl(location, next.toString());
           if (sameOriginRedirects && destination.origin !== url.origin)
             throw new MiCloudError("invalid-response");

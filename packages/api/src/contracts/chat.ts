@@ -21,6 +21,13 @@ export const chatToolNameSchema = z.enum([
   "query_devices",
   "get_device_state",
   "query_members",
+  "get_automation_capabilities",
+  "list_automations",
+  "get_automation",
+  "get_automation_runs",
+  "generate_automation_draft",
+  "save_automation",
+  "delete_automation",
 ]);
 export const chatToolPreviewLimit = 16_000;
 const execution = { runId: z.uuid(), threadId: z.uuid() };

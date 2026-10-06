@@ -1,3 +1,7 @@
+import { createAutomationReviewRoutes } from "./household/automations/reviews/routes";
+import type { createAutomationReviewService } from "./household/automations/reviews/service";
+import { createAutomationRoutes } from "./household/automations/routes";
+import type { AutomationService } from "./household/automations/service";
 import { createHouseholdQueries } from "./household/queries/service";
 import { createHouseholdQueryRoutes } from "./household/queries/routes";
 import { createIdentityRoutes } from "./household/identity/routes";
@@ -33,6 +37,10 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  automationReviews?:
+    | ReturnType<typeof createAutomationReviewService>
+    | undefined;
+  automations?: AutomationService | undefined;
   identityEnrollment?: ReturnType<typeof createReferenceEnrollment> | undefined;
   identityReferences?: ReturnType<typeof createIdentityReferences> | undefined;
   speechInbox: ReturnType<typeof createSpeechInbox>;
@@ -55,6 +63,8 @@ type AppDependencies = {
 };
 
 export function createApp({
+  automationReviews,
+  automations,
   identityEnrollment,
   identityReferences,
   speechInbox,
@@ -105,6 +115,18 @@ export function createApp({
           runtime: "bun",
           timestamp: new Date().toISOString(),
         }),
+      ),
+    )
+    .route(
+      "/api/household/automations/reviews",
+      createAutomationReviewRoutes(environment.BACKEND_PORT, automationReviews),
+    )
+    .route(
+      "/api/household/automations",
+      createAutomationRoutes(
+        environment.BACKEND_PORT,
+        automations,
+        shutdownSignal,
       ),
     )
     .route(

@@ -1,3 +1,9 @@
+import {
+  automations,
+  householdEvents,
+  automationReviews,
+  automationModelAdmissions,
+} from "../../db/schema";
 import { eq } from "drizzle-orm";
 import type { Database } from "../../db";
 import {
@@ -68,6 +74,10 @@ export function createHomeSelectionStore(
             beforeWrite();
             if (previousHomeId !== null) {
               // Context links are deleted by the context_records foreign key.
+              await tx.delete(automations);
+              await tx.delete(automationReviews);
+              await tx.delete(householdEvents);
+              await tx.delete(automationModelAdmissions);
               await tx.delete(contextRecords);
               await revokeMemberReferences(tx, invalidateReferences);
               await tx.delete(householdSubjects);

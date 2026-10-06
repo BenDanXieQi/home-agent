@@ -23,6 +23,7 @@ import { MijiaError, safeMijiaError } from "./errors";
 import { DeviceDiscovery } from "./devices/discovery";
 import type { MijiaDeviceSpec } from "@home-agent/api/mijia";
 import { mijiaOperation } from "./operation";
+import { MijiaCommands } from "./control/commands";
 
 import { accountSessionSchema } from "./account/session";
 import { deviceDirectory } from "./devices/directory";
@@ -139,6 +140,7 @@ export class MijiaService {
   private readonly deviceReadScopes = new Map<string, AbortController>();
   private readGeneration = crypto.randomUUID();
   private readonly propertyReader = new PropertyReader();
+  private readonly commands = new MijiaCommands();
   private readonly credentialStore: CredentialStore | undefined;
   private readonly resetHomeData: MijiaDependencies["resetHomeData"];
   private readonly homeSelectionStore: HomeSelectionStore | undefined;
@@ -612,6 +614,106 @@ export class MijiaService {
         console.error("service: maintenance.renew failed", backgroundError);
       });
     return observations;
+  }
+
+  writeProperties(
+    properties: Parameters<MiCloud["writeProperties"]>[0],
+    signal: AbortSignal,
+    assertCurrent: () => void,
+  ) {
+    const context = this.commandContext(
+      properties.map(({ did }) => did),
+      signal,
+      assertCurrent,
+    );
+    return this.commands.writeProperties(properties, context);
+  }
+
+  invokeAction(
+    action: Parameters<MiCloud["invokeAction"]>[0],
+    signal: AbortSignal,
+    assertCurrent: () => void,
+  ) {
+    return this.commands.invokeAction(
+      action,
+      this.commandContext([action.did], signal, assertCurrent),
+    );
+  }
+
+  private commandContext(
+    deviceIds: readonly string[],
+    signal: AbortSignal,
+    assertCallerCurrent: () => void,
+  ) {
+    signal.throwIfAborted();
+    assertCallerCurrent();
+    const client = this.accountClient;
+    if (!client) throw new MijiaError("not_bound");
+    if (!this.household?.ready() || !this.discovery.catalogConfirmed)
+      throw new MijiaError("devices_failed");
+    if (!this.activeAccount(client) || this.committingCredentials)
+      throw new MijiaError("stale_session");
+    this.discovery.requireHome();
+    const generation = this.readGeneration;
+    const definitions = new Map(
+      [...new Set(deviceIds)].map((did) => {
+        const device = this.discovery.find(did);
+        if (!device) throw new MijiaError("device_not_found");
+        return [
+          did,
+          {
+            device,
+            specification: this.getDeviceSpec(did, signal).spec,
+          },
+        ];
+      }),
+    );
+    const combined = AbortSignal.any([
+      signal,
+      this.readScope.signal,
+      ...[...definitions.keys()].map((did) => this.deviceReadSignal(did)),
+    ]);
+    const assertCurrent = () => {
+      combined.throwIfAborted();
+      assertCallerCurrent();
+      if (
+        !this.activeAccount(client) ||
+        this.committingCredentials ||
+        this.readGeneration !== generation
+      )
+        throw new MijiaError("stale_session");
+      this.discovery.requireHome();
+      if (!this.household?.ready() || !this.discovery.catalogConfirmed)
+        throw new MijiaError("devices_failed");
+      for (const [did, initial] of definitions) {
+        const current = this.discovery.find(did);
+        if (!current) throw new MijiaError("device_not_found");
+        if (
+          initial.device.home_id !== current.home_id ||
+          initial.device.model !== current.model ||
+          initial.device.spec_type !== current.spec_type ||
+          this.getDeviceSpec(did, combined).spec !== initial.specification
+        )
+          throw new MijiaError("stale_session");
+      }
+    };
+    assertCurrent();
+    return {
+      client,
+      accountKey: this.accountKey(client),
+      signal: combined,
+      assertCurrent,
+      specification: (did: string) => this.getDeviceSpec(did, combined),
+      authenticationRejected: () => {
+        if (!this.activeAccount(client)) return;
+        this.maintenance.renew(client).catch((backgroundError: unknown) => {
+          console.error(
+            "service: command session renewal failed",
+            backgroundError,
+          );
+        });
+      },
+    };
   }
 
   private requireStore() {

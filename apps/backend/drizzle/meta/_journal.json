@@ -71,6 +71,41 @@
       "when": 1791107428180,
       "tag": "0009_member_activity_matches",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791219744994,
+      "tag": "0010_automations",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791265255054,
+      "tag": "0011_automation_run_timing",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791269903181,
+      "tag": "0012_automation_memory_evaluation",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791289227505,
+      "tag": "0013_automation_review_schedule",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791301415845,
+      "tag": "0014_automation_ai_conditions",
+      "breakpoints": true
     }
   ]
 }

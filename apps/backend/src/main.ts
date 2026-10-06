@@ -1,3 +1,5 @@
+import { createAutomationReviewService } from "./household/automations/reviews/service";
+import { createAutomationService } from "./household/automations/service";
 import { createAppearanceIdentity } from "./household/identity/appearance";
 import { createReferenceEnrollment } from "./household/identity/enrollment";
 import { createMemberActivityRepository } from "./household/identity/activity-repository";
@@ -159,7 +161,41 @@ identityEnrollment = identityReferences
       },
     )
   : undefined;
+let automationReviews:
+  | ReturnType<typeof createAutomationReviewService>
+  | undefined;
+const automations =
+  database && environment.DATABASE_URL
+    ? createAutomationService({
+        db: database.db,
+        databaseUrl: environment.DATABASE_URL,
+        household,
+        mijia: mijiaService,
+        readAgentUrl,
+        signal: shutdown.signal,
+        readEventTypes: () => [],
+        reviews: () => automationReviews,
+        extraTasks: () => automationReviews?.taskList ?? {},
+      })
+    : undefined;
+automationReviews =
+  database && automations
+    ? createAutomationReviewService({
+        db: database.db,
+        household,
+        readAgentUrl,
+        signal: shutdown.signal,
+        isCurrent: (id, revision) => automations.isCurrent(id, revision),
+        onChange: (id, revision) => {
+          automations.acceptJudgment(id, revision);
+        },
+      })
+    : undefined;
+await automationReviews?.start();
+await automations?.start();
 const app = createApp({
+  automations,
+  automationReviews,
   identityEnrollment,
   identityReferences,
   speechInbox,
@@ -210,6 +246,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
         const results = await Promise.race([
           Promise.allSettled([
             server.stop(),
+            automationReviews?.close(),
+            automations?.close(),
             perception.close(),
             app.closeRecordings(),
             speechInbox.close(),

@@ -1,6 +1,6 @@
 # Backend
 
-基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测、音频能量、人声分析、本地语音转写和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
+基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测、音频能量、人声分析、本地语音转写、聊天转发和家庭自动化。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
 
 当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，尚未实现人物／宠物状态、空间覆盖、活动判断或生效要求管理。相关领域边界见[家庭语义目标与领域模型](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
@@ -104,6 +104,12 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 设备状态返回原始值及有效性，枚举值附 `value_label`；缺少可用规格时标签为空，不猜数字含义。属性分页保留缺值项，不能用空列表判断设备关闭。接口沿用本机访问校验，禁用缓存，请求最多 4 KiB、响应最多 128 KiB；超过响应限额返回容量错误，调用方可缩小分页大小。共享契约位于 `packages/api/src/contracts/household-queries.ts`。
 
+## 自动化与 AI 判断条件
+
+`/api/household/automations/` 提供规则能力、定义、求值、运行记录与自然语言草稿接口，`/reviews/runs` 按所属规则读取 AI 条件判断历史。当前支持规则树中的触发／状态角色、米家属性写入与动作调用、网页通知记录，以及 Agent 在已配置动作中选择。使用方式、来源资格、内存动作调度、决策登记、预算和未验证范围统一见[自动化当前能力](../../docs/automations.md)。
+
+`household/automations/` 拥有定义、条件求值、Agent 决策与调度。`service.ts` 拥有依赖索引、内存条件状态和定时器，同步求值后把固定动作交给内存执行器，Agent 决策则登记数据库任务；`facts.ts` 读取条件所需事实，`capabilities.ts` 转换设备规格，`generation.ts` 选择草稿生成范围，`queries.ts` 提供分页读取，Agent HTTP 调用集中在 client 模块；`automations/reviews/` 拥有规则内 AI 条件的周期调度、证据校验和判断历史；`household/events/` 拥有稳定事件身份和接纳；`household/automations/actions.ts` 拥有内存动作队列、设备发送和异步日志，`execution.ts` 组织执行快照与结果汇总；`mijia/control/` 负责当前家庭内的控制校验和串行供应商请求。`main.ts` 组装这些服务，HTTP 仅做边界转换。Agent 调查、问题和等待状态不归这些模块。
+
 ## 连接配置与探测
 
 `GET /api/config` 返回 `{ config, writable, path }`；`PUT /api/config` 接收完整配置 JSON（最多 16 KiB），保存后返回同一结构。字段、默认值、运行时校验与编辑器 schema 来自 `packages/api/src/contracts/` 的同一套 Zod 定义。配置仓库复用内容未变的解析结果，但不跳过文件访问、大小和权限检查；写入通过 `yaml` Document API 保留注释，并由 `write-file-atomic` 原子替换。
@@ -172,7 +178,7 @@ src/
 │       │   └── properties.ts # 属性地址类型、每批数量上限及请求超时
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
-├── household/             # 家庭状态机、设备清单存储、规格、属性采集、成员与状态 SSE
+├── household/             # 家庭状态机、设备清单、规格、属性采集、成员、自动化、事件、动作与状态 SSE
 ├── perception/            # 本地检测、来源协调、人宠跟踪、轨迹身份证据、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
 │   ├── source-lease.ts     # 音视频共用的来源资格撤销与取消联动
@@ -217,7 +223,7 @@ src/
 
 ## 数据库
 
-使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，由启动入口创建连接并注入凭据存储；未配置时，米家授权操作返回存储错误。backend 进程启动不自动执行迁移；根目录 `dev` 在启动应用前自动准备数据库并执行迁移。
+使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，由启动入口创建连接并注入凭据存储；未配置时，米家授权操作返回存储错误。backend 进程启动不自动执行迁移；根目录 `dev` 在启动应用前自动准备数据库并执行迁移。backend 的 `db:migrate` 先执行 Drizzle 业务迁移，再运行 `scripts/migrate-automation-worker.ts` 初始化 Graphile Worker；不能仅迁移业务表后直接启动自动化。
 
 ```sh
 bun run db:migrate                       # 自动启动本机数据库、迁移并初始化 Agent，再检查
@@ -234,7 +240,7 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 
 `mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表、选择 API 与切换语义见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 
-`credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。凭据写入与删除使用事务和提交结果确认：确认已提交后采用结果，确认回滚才报告普通存储失败；数据库暂时无法确认时暂停账号访问，待显式重试读取数据库中的保存状态后恢复，不沿用旧内存会话。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
+`credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。凭据写入与删除使用事务和提交结果确认：确认已提交后采用结果，确认回滚才报告普通存储失败；数据库暂时无法确认时暂停账号访问，待显式重试读取数据库中的保存状态后恢复，不沿用旧内存会话。业务表定义由 `src/db/schema.ts` 导出，自动化、事件和维护表按所属子域定义；TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
 
 ### 家庭上下文表
 
