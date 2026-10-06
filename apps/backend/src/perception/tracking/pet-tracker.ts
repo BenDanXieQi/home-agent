@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { detectionSchema } from "../observations";
 import { assign, iou } from "./assignment";
-import { initiate, predict, correct, distance, predictedBox } from "./kalman";
+import { initiate, predict, correct, predictedBox } from "./kalman";
 import { createTrackIds } from "./track-ids";
 
 export const petTrackingPolicySchema = z.object({
@@ -70,8 +70,10 @@ export function createPetTracker(
           eligible.map((track) =>
             indices.map((index) => {
               const box = pets[index]!;
-              return track.className === box.className &&
-                distance(track.motion, box) <= 9.4877
+              // Pet poses change aspect ratio sharply even while boxes overlap.
+              // Keep motion prediction for assignment, without the human
+              // shape-distance gate splitting a continuous pet trajectory.
+              return track.className === box.className
                 ? 1 - iou(predictedBox(track.motion), box)
                 : Infinity;
             }),
