@@ -1,6 +1,6 @@
 # 米家来源契约
 
-本文描述同一米家账号下的指定属性读取、MQTT 属性／在线推送及其恢复边界。类型化配置位于 [`source-profiles.ts`](../../apps/backend/src/mijia/properties/source-profiles.ts)，读取契约为 `miot-cloud-cache-read`，版本 `1`；`miot` 表示属性模型，不表示 OAuth 鉴权。传输使用 `micloud_rc4`，凭据类型为 `mijia_qr_session`，设备与读取绑定同一 MiCloud 账号实例。
+本文描述同一米家账号下的指定属性读取、设备控制、MQTT 属性／在线推送及其恢复边界。类型化配置位于 [`source-profiles.ts`](../../apps/backend/src/mijia/properties/source-profiles.ts)，读取契约为 `miot-cloud-cache-read`，版本 `1`；`miot` 表示属性模型，不表示 OAuth 鉴权。传输使用 `micloud_rc4`，凭据类型为 `mijia_qr_session`，设备、读取与控制绑定同一 MiCloud 账号实例。
 
 本文的“设备清单”指家庭、房间、设备及其归属信息；“公共状态（projection）”指供页面读取的状态。“作用域（scope）”是当前账号和家庭这一轮运行的范围，旧作用域的请求结果不能写入新一轮状态。“状态提交”表示同步更新家庭状态机；“数据库事务提交”表示确认数据库写入成功，两者不是同一步操作。
 
@@ -76,6 +76,16 @@ OAuth 与 MQTT 使用同一个实例 UUID：OAuth 的 `device_id=mico.<uuid>`，
 [`preparePropertyRead`](../../apps/backend/src/mijia/properties/read-request.ts) 复制属性请求，按设备分组，同步读取家庭模块已准备的规格并逐设备验证其属性；保留原输入顺序，通过 service 提供的断言核验当前账号、采集实例和设备清单归属，再交给 [`PropertyReader`](../../apps/backend/src/mijia/properties/reader.ts) 按全服务共用的串行队列执行 HTTP 批次。
 
 应用层通过 `POST /api/mijia/properties/read` 提供一次性读取及接纳结果，内部协议入口不变；没有周期属性读取。现有 `/devices/refresh` 按 target 刷新设备清单、规格或两者；扫码授权和连接状态继续使用[现有米家业务接口](../mijia.md#http-与追踪)。
+
+## 设备控制入口
+
+`MijiaService.writeProperties(properties, signal, assertCurrent)` 与 `invokeAction(action, signal, assertCurrent)` 供 backend 动作执行调用。调用方必须提供本次动作仍属于有效家庭和规则版本的检查函数。service 在接纳、串行排队后和实际发送前检查该函数及当前账号、已确认的家庭范围、设备归属、规格引用和取消信号；发送前另行检查当前在线状态、可写属性／可调用动作，以及参数格式、枚举、范围、步长和动作输入顺序。动作输入保留规格的 `piid` 与完整值约束。设备移除、家庭切换、认证会话替换或规格变更不能让旧排队动作取得新资格。
+
+控制复用现有 RC4 请求：POST `/app/miotspec/prop/set` 的 `data` 为 `{"params":[{"did":"…","siid":2,"piid":1,"value":true}]}`；POST `/app/miotspec/action` 的 `data` 为 `{"params":{"did":"…","siid":2,"aiid":1,"in":[]}}`。来源为 [homebridge-miot 的 MiCloud 实现](https://github.com/merdok/homebridge-miot/blob/main/lib/protocol/MiCloud.js)及 [MIoT Plugin SDK](https://github.com/MiEcosystem/miot-plugin-sdk/wiki/04-miot_spec)，未另建鉴权、签名或设备协议。
+
+控制按账号和设备分别排队，同一设备的命令按接纳顺序串行，不同设备可以并发。跨设备属性批次在让出执行权前登记全部目标设备的排队位置，取得所有目标的执行资格后仍作为一次 HTTP 请求发送；与它重叠的后续命令保持顺序，不拆分批次或自动重发。属性写入每批最多 50 项，单次 HTTP 最长 30 秒；这些是本应用预算，不是供应商上限。每个 service 的等待与在途控制请求合计最多 100 项，超限拒绝；设备队列空闲后释放。控制不自动重试，拒绝 HTTP 重定向；供应商 `Retry-After` 在同一账号内生效，会话续期不绕过期限。动作记录、重启恢复及何时再次尝试由 backend 动作领域维护，此适配层不保存动作历史。
+
+只有返回地址精确匹配且逐项整数 `code=0` 才返回 `accepted`，表示供应商接纳；非零整数码返回 `rejected`，不能据此声明设备已经达到目标状态。缺失、重复、地址不符或非法结果返回 `unknown`。发送前失败抛出错误，表示本次未发送；发送后网络错误、超时、取消、作用域失效或响应不明返回 `unknown` 并保留脱敏原因，不能盲目重放。写入结果不会直接成为设备事实；属性结果须由后续观测核对。协议资料和类型检查不代替实机验证，当前未验证真实属性写入、动作调用及供应商幂等保证。
 
 ## 编码、请求限制与逐项结果
 

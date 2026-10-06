@@ -43,7 +43,13 @@ export const deviceCapabilitySchema = z.object({
   service_type_name: z.string().optional(),
   service_description: z.string().optional(),
   in_params: z
-    .array(z.object({ name: z.string(), ...capabilityValueShape }))
+    .array(
+      z.object({
+        piid: z.number().int().positive(),
+        name: z.string(),
+        ...capabilityValueShape,
+      }),
+    )
     .optional(),
   prop_description: z.string().optional(),
 });

@@ -1,0 +1,143 @@
+@layer components {
+  .automation-input {
+    min-height: 2.5rem;
+    min-width: 0;
+    max-width: 100%;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    background: var(--color-surface);
+    color: var(--color-ink);
+    font-size: 0.875rem;
+    line-height: 1.5;
+  }
+
+  .automation-input:focus-visible {
+    outline: 1px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+    outline-offset: 0;
+  }
+
+  .automation-input:disabled {
+    background: var(--color-sidebar);
+    color: var(--color-muted);
+  }
+
+  .automation-editor .ruleGroup {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.75rem;
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    background: var(--color-surface);
+  }
+
+  .automation-editor .ruleGroup .ruleGroup {
+    margin-left: 0.5rem;
+    border-left: 2px solid var(--color-line);
+  }
+
+  .automation-editor .ruleGroup-header,
+  .automation-editor .rule,
+  .automation-editor .ruleGroup-body {
+    display: flex;
+    min-width: 0;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .automation-editor .ruleGroup-body {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+  }
+
+  .automation-editor .rule {
+    flex: 1;
+  }
+
+  .automation-editor select,
+  .automation-editor input:not([type="checkbox"]) {
+    min-height: 2.25rem;
+    min-width: 0;
+    max-width: 100%;
+    font-size: 0.8125rem;
+  }
+
+  .automation-editor select {
+    width: auto;
+    max-width: min(24rem, 100%);
+  }
+
+  .automation-editor input[type="time"] {
+    width: 9rem;
+  }
+
+  .automation-editor input:not([type]) {
+    width: 13rem;
+  }
+
+  .automation-form input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    accent-color: var(--color-ink);
+  }
+
+  .automation-editor label {
+    margin-bottom: 0;
+  }
+
+  .automation-editor input[type="number"] {
+    width: 7rem;
+  }
+
+  /* Only style the query builder's native actions; shared controls own theirs. */
+  .automation-editor
+    button:not([aria-haspopup]):not(.button):not([role="switch"]),
+  .automation-editor .ruleGroup-notToggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    min-height: 2rem;
+    border: 1px solid transparent;
+    border-radius: 0.75rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+  }
+
+  .automation-editor
+    button:not([aria-haspopup]):not(.button):not([role="switch"]) {
+    background: var(--color-surface);
+    transition: background-color 180ms ease;
+  }
+
+  .automation-editor
+    button:not([aria-haspopup]):not(.button):not(
+      [role="switch"]
+    ):enabled:hover {
+    background: var(--color-sidebar);
+  }
+
+  .automation-editor .rule-remove,
+  .automation-editor .ruleGroup-remove {
+    color: var(--color-muted);
+  }
+
+  .automation-editor .rule-remove:enabled:hover,
+  .automation-editor .ruleGroup-remove:enabled:hover {
+    color: var(--color-danger);
+  }
+
+  @media (max-width: 640px) {
+    .automation-editor .ruleGroup {
+      padding: 0.5rem;
+    }
+
+    .automation-editor .ruleGroup .ruleGroup {
+      margin-left: 0;
+    }
+  }
+}
