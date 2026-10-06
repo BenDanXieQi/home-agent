@@ -1,14 +1,5 @@
 // Shared wire codes, HTTP statuses and safe messages. Never include upstream data.
 export const mijiaErrorDefinitions = {
-  mijia_home_reset_failed: {
-    status: 503,
-    message:
-      "家庭数据清理未确认，请检查 Agent 服务及数据库后重试；部分数据可能已清除。",
-  },
-  mijia_home_reset_busy: {
-    status: 409,
-    message: "Agent 仍有任务或数据清理正在进行，请稍后重试切换家庭。",
-  },
   mijia_binding_conflict: {
     status: 409,
     message: "家庭绑定冲突，请使用原账号，在设置中刷新后选择其他家庭重新绑定。",
