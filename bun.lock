@@ -22,10 +22,12 @@
       "version": "0.0.0",
       "dependencies": {
         "@home-agent/api": "workspace:*",
+        "@home-agent/backend-client": "workspace:*",
         "@home-agent/model": "workspace:*",
         "@home-agent/observability": "workspace:*",
         "@langchain/core": "catalog:",
         "deepagents": "1.14.2",
+        "hono": "catalog:",
         "langchain": "1.5.15",
         "langsmith": "catalog:",
         "zod": "catalog:",
@@ -95,7 +97,7 @@
         "@fontsource-variable/geist": "^5.3.0",
         "@fontsource-variable/geist-mono": "^5.3.0",
         "@home-agent/api": "workspace:*",
-        "@home-agent/backend": "workspace:*",
+        "@home-agent/backend-client": "workspace:*",
         "@react-querybuilder/dnd": "^8.24.3",
         "@tailwindcss/vite": "^4.3.3",
         "@tanstack/query-core": "^5.103.2",
@@ -148,6 +150,22 @@
         "zod": "catalog:",
       },
       "devDependencies": {
+        "@home-agent/oxlint-config": "workspace:*",
+        "@home-agent/typescript-config": "workspace:*",
+        "@types/bun": "catalog:",
+        "oxlint": "catalog:",
+        "oxlint-tsgolint": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/backend-client": {
+      "name": "@home-agent/backend-client",
+      "version": "0.0.0",
+      "dependencies": {
+        "hono": "catalog:",
+      },
+      "devDependencies": {
+        "@home-agent/backend": "workspace:*",
         "@home-agent/oxlint-config": "workspace:*",
         "@home-agent/typescript-config": "workspace:*",
         "@types/bun": "catalog:",
@@ -364,6 +382,8 @@
     "@home-agent/api": ["@home-agent/api@workspace:packages/api"],
 
     "@home-agent/backend": ["@home-agent/backend@workspace:apps/backend"],
+
+    "@home-agent/backend-client": ["@home-agent/backend-client@workspace:packages/backend-client"],
 
     "@home-agent/model": ["@home-agent/model@workspace:packages/model"],
 

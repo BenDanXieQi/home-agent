@@ -39,7 +39,7 @@
       ]
     },
     "@home-agent/web#build": {
-      "dependsOn": ["^build:rpc", "check-types"],
+      "dependsOn": ["check-types"],
       "outputs": ["dist/**"],
       "env": ["VITE_*"]
     },
@@ -70,19 +70,22 @@
       "persistent": true
     },
     "@home-agent/web#check-types": {
-      "dependsOn": ["^check-types", "^build:rpc"]
+      "dependsOn": ["^check-types", "@home-agent/backend-client#build"]
     },
     "@home-agent/web#lint": {
-      "dependsOn": ["^lint", "^build:rpc"]
+      "dependsOn": ["^lint", "@home-agent/backend-client#build"]
     },
     "@home-agent/web#dev": {
-      "dependsOn": ["^build:rpc"],
-      "with": ["@home-agent/backend#dev:rpc"],
+      "dependsOn": ["@home-agent/backend-client#build"],
+      "with": [
+        "@home-agent/backend#dev:rpc",
+        "@home-agent/backend-client#dev:types"
+      ],
       "cache": false,
       "persistent": true
     },
     "@home-agent/web#lint:fix": {
-      "dependsOn": ["^build:rpc"],
+      "dependsOn": ["@home-agent/backend-client#build"],
       "cache": false
     },
     "@home-agent/backend#test": {
@@ -93,6 +96,48 @@
         "PERCEPTION_TUD_LABELS_PATH",
         "ORT_DISABLE_TELEMETRY"
       ]
+    },
+    "@home-agent/backend-client#check-types": {
+      "dependsOn": ["@home-agent/backend#build:rpc"]
+    },
+    "@home-agent/backend-client#lint": {
+      "dependsOn": ["@home-agent/backend#build:rpc"]
+    },
+    "@home-agent/backend-client#lint:fix": {
+      "dependsOn": ["@home-agent/backend#build:rpc"],
+      "cache": false
+    },
+    "@home-agent/agent#build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "@home-agent/agent#check-types": {
+      "dependsOn": ["^check-types", "@home-agent/backend-client#build"]
+    },
+    "@home-agent/agent#lint": {
+      "dependsOn": ["^lint", "@home-agent/backend-client#build"]
+    },
+    "@home-agent/agent#lint:fix": {
+      "cache": false,
+      "dependsOn": ["@home-agent/backend-client#build"]
+    },
+    "@home-agent/agent#dev": {
+      "cache": false,
+      "persistent": true,
+      "dependsOn": ["@home-agent/backend-client#build"],
+      "with": [
+        "@home-agent/backend#dev:rpc",
+        "@home-agent/backend-client#dev:types"
+      ]
+    },
+    "@home-agent/backend-client#build": {
+      "dependsOn": ["@home-agent/backend#build:rpc"],
+      "outputs": ["dist/**"]
+    },
+    "@home-agent/backend-client#dev:types": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
     }
   },
   "globalPassThroughEnv": [

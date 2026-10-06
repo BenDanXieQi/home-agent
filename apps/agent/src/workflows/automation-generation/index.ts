@@ -5,7 +5,7 @@ import {
 } from "@langchain/core/messages";
 import {
   automationDraftSchema,
-  automationGenerationInputSchema,
+  type automationGenerationInputSchema,
   automationGenerationLimits,
   validateAutomationCapabilities,
   type AutomationCapabilities,
@@ -103,10 +103,9 @@ export function createAutomationGeneration(config: Config) {
     signal: AbortSignal,
   ) => {
     signal.throwIfAborted();
-    const parsedInput = automationGenerationInputSchema.parse(input);
     const context = JSON.stringify({
-      ...parsedInput,
-      capabilities: modelCapabilities(parsedInput.capabilities),
+      ...input,
+      capabilities: modelCapabilities(input.capabilities),
     });
     if (Buffer.byteLength(context) > automationGenerationLimits.requestBytes)
       throw new AppError("request_too_large");
@@ -176,10 +175,7 @@ export function createAutomationGeneration(config: Config) {
         if (!parsed.success) return invalidDraft;
         const draft = parsed.data;
         const problems = draft.definition
-          ? validateAutomationCapabilities(
-              draft.definition,
-              parsedInput.capabilities,
-            )
+          ? validateAutomationCapabilities(draft.definition, input.capabilities)
           : [];
         const result = automationDraftSchema.parse(
           problems.length

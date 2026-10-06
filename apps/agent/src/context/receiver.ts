@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { createReceiptJournal } from "./receipts";
 import { z } from "zod";
+import type { BackendClient } from "@home-agent/backend-client";
 import { mergeAgentContextSnapshot } from "@home-agent/api/agent-context/merge";
 import {
   agentContextEventSchema,
@@ -12,8 +13,7 @@ import {
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
 
 /** The transport owns connection and household qualification; the shared reducer applies updates. */
-export function createContextReceiver(options: { backendUrl: string }) {
-  const base = z.url({ protocol: /^https?$/ }).parse(options.backendUrl);
+export function createContextReceiver(options: { client: BackendClient }) {
   const receipts = createReceiptJournal();
   let heartbeatAt: string | null = null;
   const partNames = Object.keys(agentContextPartsSchema.shape);
@@ -53,10 +53,15 @@ export function createContextReceiver(options: { backendUrl: string }) {
         await consumeEventStream(
           {
             request: (requestSignal) =>
-              fetch(new URL("/api/agent/context/stream", base), {
-                headers: { Accept: "text/event-stream" },
-                signal: requestSignal,
-              }),
+              options.client.api.agent.context.stream.$get(
+                {},
+                {
+                  init: {
+                    headers: { Accept: "text/event-stream" },
+                    signal: requestSignal,
+                  },
+                },
+              ),
             signal,
             maxBufferSize: agentContextPolicy.eventBytes,
             maxEventBytes: agentContextPolicy.maxSnapshotBytes,

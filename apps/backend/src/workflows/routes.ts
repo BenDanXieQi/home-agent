@@ -1,18 +1,15 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { requireLocalAccess } from "@home-agent/api/local-access";
-import { apiErrorSchema } from "@home-agent/api/contracts";
 import { AppError } from "@home-agent/api/errors";
 import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
-import { readLimitedJson } from "@home-agent/api/http/read-body";
 import {
   householdWorkflowInputSchema,
   agentWorkflowInputSchema,
-  agentWorkflowResultSchema,
   agentWorkflowLimits,
 } from "@home-agent/api/agent-workflows";
 import { validateAutomationCapabilities } from "@home-agent/api/automations";
-import { tracedFetch } from "@home-agent/observability";
+import type { createAgentClient } from "../agent-client";
 import type { HouseholdRuntime } from "../household/runtime";
 import { accessHousehold } from "../household/access";
 import { HouseholdError } from "../household/errors";
@@ -22,13 +19,13 @@ import { readAutomationCapabilities } from "../household/automations/capabilitie
 export function createWorkflowRoutes({
   port,
   timeoutMs,
-  readAgentUrl,
+  agent,
   household,
   shutdownSignal,
 }: {
   port: number;
   timeoutMs: number;
-  readAgentUrl: () => Promise<string>;
+  agent: Pick<ReturnType<typeof createAgentClient>, "workflow">;
   household: HouseholdRuntime;
   shutdownSignal: AbortSignal;
 }) {
@@ -67,33 +64,11 @@ export function createWorkflowRoutes({
               capabilities: readAutomationCapabilities(household),
             },
           });
-          const body = JSON.stringify(request);
-          if (Buffer.byteLength(body) > agentWorkflowLimits.requestBytes)
-            throw new AppError("request_too_large");
-          const url = await readAgentUrl();
           signal.throwIfAborted();
           current.assertCurrent();
-          const response = await tracedFetch(new URL("/api/workflows", url), {
-            method: "POST",
-            redirect: "error",
-            headers: { "Content-Type": "application/json" },
-            body,
-            signal,
-          });
-          const data = await readLimitedJson(
-            response,
-            agentWorkflowLimits.responseBytes,
-            signal,
-          );
+          const result = await agent.workflow(request, signal);
           signal.throwIfAborted();
           current.assertCurrent();
-          if (!response.ok) {
-            const error = apiErrorSchema.safeParse(data);
-            throw new AppError(
-              error.success ? error.data.code : "agent_unavailable",
-            );
-          }
-          const result = agentWorkflowResultSchema.parse(data);
           if (result.workflow !== input.workflow)
             throw new AppError("agent_execution_failed");
           if (result.result.definition) {

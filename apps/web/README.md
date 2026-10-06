@@ -252,7 +252,7 @@ bunx turbo run build --filter=@home-agent/web
 
 ## 类型化 HTTP 客户端
 
-所有浏览器到 backend 的请求使用 `@home-agent/backend/client` 导出的 `createBackendClient`，由 Hono `hc` 从链式路由推导路径、方法、路径参数、JSON 输入和响应。功能模块不拼接 API 路径，不手写 JSON 序列化，也不直接调用 fetch。`packages/api` 继续定义运行时 Zod 协议、错误和 HTTP 语义；客户端请求辅助函数同时检查 RPC 响应类型与校验器输出类型。
+所有浏览器到 backend 的请求使用 `@home-agent/backend-client` 导出的 `createBackendClient`，由 Hono `hc` 从链式路由推导路径、方法、路径参数、JSON 输入和响应。功能模块不拼接 API 路径，不手写 JSON 序列化，也不直接调用 fetch。`packages/api` 继续定义运行时 Zod 协议、错误和 HTTP 语义；客户端请求辅助函数同时检查 RPC 响应类型与校验器输出类型。
 
 `createApiClient(baseUrl, fetchImpl)` 注入传输，默认使用同源路径和浏览器 fetch。功能调用通过回调取得该客户端及请求选项，统一执行超时、取消和错误处理。例如：
 
@@ -266,7 +266,7 @@ requestJson(
 
 `requestJsonResponse` 额外返回解析后的 `Retry-After`，`requestEmpty` 验证 204 响应。播放释放沿用 keepalive。重试默认关闭；播放 offer 显式选择 `retryOnceOnTransportFailure`，最多重发一次相同参数。每次请求沿用调用方的 `timeoutMs`，播放器的取消信号统一约束首次请求和重试，总协商期限为 85 秒，不因重试重新计时。HTTP 业务错误和响应校验失败不自动重试，后台生命周期恢复继续由 backend 管理。
 
-RPC 声明由 backend 的 `build:rpc` 生成到 `dist/rpc`，不提交 Git。Turborepo 在 Web 检查和构建前生成声明；根目录 `bun run dev` 或 `bunx turbo run dev --filter=@home-agent/web` 同时运行声明 watcher。单独调用 Web 包脚本前需先执行 `bun run --cwd apps/backend build:rpc`。声明和客户端运行时代码都不引入服务端实现到浏览器包；SSE 接口通过类型化客户端返回原始流，不使用 JSON 响应辅助函数。
+Backend 的 `build:rpc` 生成路由声明，共享客户端的 `build` 随后生成已展开的客户端声明；Web 从共享包读取客户端类型，不在消费端重新生成整份客户端结构。声明不提交 Git。Turborepo 在 Web 检查和构建前完成这两步；根目录 `bun run dev` 或 `bunx turbo run dev --filter=@home-agent/web` 同时维护服务端和客户端声明。单独运行 Web 的类型检查或 lint 前需先执行 `bunx turbo run build --filter=@home-agent/backend-client`，生成细节见[共享 Backend 客户端](../../packages/backend-client/README.md)。声明和客户端运行时代码都不引入服务端实现到浏览器包；SSE 接口通过类型化客户端返回原始流，不使用 JSON 响应辅助函数。
 
 家庭设置在首次未绑定或展开“重新绑定家庭”时通过 `GET /api/mijia/setup/homes` 读取候选。设置页显示已绑定家庭；重新绑定需选择其他家庭并确认对设备任务和视频连接的影响，保存期间禁用重复提交。保存后的初始化失败可刷新设备清单重试。设备、看家页标题仅显示对应数量；设置页标题不显示摄像头接入状态，连接问题在具体设置项提示。完整规格与候选家庭不进入公共快照。
 

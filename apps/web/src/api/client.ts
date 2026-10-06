@@ -1,7 +1,7 @@
 import {
   createBackendClient,
   type BackendClient,
-} from "@home-agent/backend/client";
+} from "@home-agent/backend-client";
 import { parseRetryAfter } from "@home-agent/api/http/retry-after";
 import { apiErrorSchema } from "@home-agent/api/contracts";
 import { RequestError, type ClientErrorCode } from "./errors";

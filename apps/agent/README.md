@@ -1,6 +1,6 @@
 # Agent
 
-基于 Deep Agents 的最简家庭助手服务，入口为 `src/assistant.ts` 的 `createDeepAgent`。原生 `Bun.serve()` 承载内部 HTTP，不使用 Hono，backend 转发请求，Web `/agent` 提供单次问答。
+基于 Deep Agents 的最简家庭助手服务，入口为 `src/assistant.ts` 的 `createDeepAgent`。Hono 定义内部 HTTP 路由，由 `Bun.serve()` 承载；backend 转发请求，Web `/agent` 提供单次问答。
 
 ## 运行
 
@@ -11,7 +11,7 @@ bun install
 bun run --cwd apps/agent dev
 ```
 
-`AGENT_HOST` 默认 `127.0.0.1`，`AGENT_PORT` 默认 `1811`。`BACKEND_URL` 使用 HTTP(S) 地址，默认 `http://127.0.0.1:3000`；Backend 使用自定义监听地址时显式配置。无需数据库、迁移或 Agent Server。根目录开发命令仍会启动本项目其他服务。后台上下文接收不要求模型配置。
+`AGENT_HOST` 默认 `127.0.0.1`，`AGENT_PORT` 默认 `1811`。`BACKEND_URL` 使用 HTTP(S) 地址，默认 `http://127.0.0.1:3000`；Backend 使用自定义监听地址时显式配置。无需数据库、迁移或 Agent Server。根目录开发命令仍会启动本项目其他服务。后台上下文接收不要求模型配置。独立运行类型检查或 lint 前先执行 `bunx turbo run build --filter=@home-agent/backend-client`，生成服务端及客户端声明；Turbo 的 Agent 构建、检查和开发命令已声明该依赖，开发时同时维护两份声明。生成职责见[共享 Backend 客户端](../../packages/backend-client/README.md)。
 
 ## 接口
 
@@ -19,9 +19,9 @@ bun run --cwd apps/agent dev
 
 生成能力位于 `src/workflows/automation-generation/`，复用共享模型工厂，使用一次结构化模型调用；规则结构、设备引用、读写权限、枚举及动作参数按 `@home-agent/api/automations` 校验。输入中的能力用于约束草稿，不构成设备操作授权；保存或执行前仍需 Backend 核验当前家庭及设备能力。它不保存或启用规则、不操作设备、不使用聊天历史或 Agent 数据库。
 
-入口请求上限 256 KiB，响应上限 128 KiB，同时执行一项 workflow，繁忙返回 `workflow_busy`；运行期限取 `AGENT_RUN_TIMEOUT_MS` 与 90 秒的较小值，取消和超时传递到模型调用，结束后释放执行名额。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，专项模块不另建 HTTP 或客户端层。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实模型生成效果尚未验证。
+入口请求上限 256 KiB，响应上限 128 KiB，同时执行一项 workflow，繁忙返回 `workflow_busy`；运行期限取 `AGENT_RUN_TIMEOUT_MS` 与 90 秒的较小值，取消和超时传递到模型调用，结束后释放执行名额。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，接收 Hono 入口已校验的输入，负责并发名额、执行期限和结果边界；专项模块不另建 HTTP 或客户端层。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实模型生成效果尚未验证。
 
-进程复用 `@home-agent/observability` 初始化 OpenTelemetry。workflow 入口接续 Backend 的 W3C 追踪上下文，生成调用记录 `automation.generate` span、耗时、草稿校验结果及供应商返回的输入／输出 token 用量。默认不采集正文；`OTEL_INCLUDE_CONTENT=true` 时才记录输入资料和生成结果，导出方式沿用[共享追踪配置](../../packages/observability/README.md)。供应商没有返回用量时不估算 token 数。聊天与 Deep Agents 内部步骤没有新增 span。关闭时停止请求并关闭 exporter。
+进程复用 `@home-agent/observability` 初始化 OpenTelemetry。HTTP 入口通过共用的 Hono 追踪中间件接续 Backend 的 W3C 追踪上下文，生成调用记录 `automation.generate` span、耗时、草稿校验结果及供应商返回的输入／输出 token 用量。默认不采集正文；`OTEL_INCLUDE_CONTENT=true` 时才记录输入资料和生成结果，导出方式沿用[共享追踪配置](../../packages/observability/README.md)。供应商没有返回用量时不估算 token 数。聊天入口具有 HTTP span；Deep Agents 内部步骤没有新增 span。关闭时停止请求并关闭 exporter。
 
 `GET /health` 返回服务状态和 `modelConfigured`；配置存在不表示供应商调用成功。
 
@@ -39,11 +39,12 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 - `assistant.ts`：模型与 Deep Agents 配置。
 - `config.ts`：服务配置。
-- `main.ts`：独立进程、HTTP 入口、请求校验、模型执行，以及接收器启动／停止与历史客户端装配。
+- `main.ts`：配置、共享 Backend RPC 客户端与应用装配，以及服务器、接收器和追踪的启动／关闭。
+- `app.ts`：无启动副作用的 Hono 应用工厂，复用本机访问、JSON 校验、请求大小限制、错误处理及 HTTP 追踪中间件。
+- `chat.ts`：单次模型执行、取消与期限、完整回答校验。
 - `context/receiver.ts`：Backend 专用 SSE 接收、五部分内存状态、连接和家庭资格。
 - `context/receipts.ts`：受接收器管理的有限内存接收记录与当时上下文；`context/receipt-changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
-- `context/material-client.ts`：按成员记录或窗口 ID 读取引用材料，核对当前接收资格，不修改接收状态。
-- `context/history-client.ts`：Backend 三类历史的只读客户端，校验响应与接收资格。
+- `context/reader.ts`：历史与引用材料读取；使用共享 Backend RPC 客户端，负责当前接收资格及响应与请求的匹配校验。
 - `context/model-view/`：Agent 家庭视图筛选、语义查询键、JSON 编码与解码；`cli.ts` 提供保存快照的离线转换和查询。
 - `workflows/spatial-planning/index.ts`：空间规划专项 Agent 工厂，使用同一模型配置，由调用方注入共用的 backend 能力。
 - `workflows/spatial-planning/instructions.ts`：空间证据使用、记录匹配、配置写入与结果核对指令。
@@ -58,13 +59,13 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 语音请求判断由 backend 的 `conversation/interpret.ts` 负责，不调用此服务。数据库中已有的 `agent_state` 数据不被本服务读取、迁移或删除；若不再需要，可由数据库维护者另行清理。
 
-Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代理调用追踪。
+Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；共享 RPC 客户端使用 `hono/client`，服务调用通过 `tracedFetch` 传播追踪上下文。Agent 在读取请求体前保存 Bun 原始 Request；校验成功后仅对本次模型请求关闭连接空闲计时，模型执行期限仍由聊天或 workflow 管理。
 
 ## 当前数据接收与只读历史客户端
 
 回执摘要在接纳消息时校验并冻结，索引读取复用同一份摘要；详情与摘要共享变化记录，淘汰或清空时一起释放。
 
-`src/context/receiver.ts` 导出 `createContextReceiver({ backendUrl })`。`start()` 自动订阅，`stop()` 取消连接与重连等待；`snapshot()` 提供收到的内存数据，`currentScope()` 仅在当前连接已收到全部五部分初始状态时返回可用家庭身份。SSE 解码使用共享 `@home-agent/api/http/event-stream`，复用成熟的 eventsource-parser。
+`src/context/receiver.ts` 导出 `createContextReceiver({ client })`，使用 `@home-agent/backend-client` 创建的 RPC 客户端。`start()` 自动订阅，`stop()` 取消连接与重连等待；`snapshot()` 提供收到的内存数据，`currentScope()` 仅在当前连接已收到全部五部分初始状态时返回可用家庭身份。SSE 解码使用共享 `@home-agent/api/http/event-stream`，复用成熟的 eventsource-parser。
 
 `GET /api/received-context` 复用 Agent 本机访问限制，返回 `{ scope, connection, parts, received_at, context_bytes }`。connection 包含连接 status、synchronized 与 last_error；全部部分收到初始状态后才标记已同步，部分为 loading、failed 或 unavailable 时仍保留各自状态。last_error 为 null 或 `{ reason, at }`，保留最近失败的安全分类和 UTC 时间，直到收到合法事件后清空。分类区分请求失败、HTTP 状态、无效事件流、超时、JSON／契约错误、流读取失败和正常结束；订阅失败日志最多每 30 秒记录一次，不包含接收正文或原始异常。后续省略部分保留旧值；设备状态增量只更新或删除指定条目，其他提供部分整体替换；ready 的空集合清空对应集合，heartbeat 不改变同步。首次连接、重连及家庭资格变化先清空接收数据；断线标记未同步。该入口用于诊断，不保存持久日志，也不代表模型输入。received_at 只记录数据消息，心跳单独计时。断线、停止及意外失败时清空当前数据。
 
@@ -72,11 +73,11 @@ Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代
 
 `context/receipts.ts` 由接收器独占，消息在通过校验并合并后记录。设备增量正文只保留本次条目变化，context 保存增量合并后的完整状态；合并使用共享 Mutative 封装，不修改旧接收记录。记录保留接收序号、UTC 时间、初始接收／状态更新、涉及部分、原始正文 `payload_bytes`、合并上下文 `context_bytes` 字节数、校验后的消息和当时上下文；不是原始 SSE 字节归档。`context_bytes` 为完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，接收记录固定为当时大小，当前快照接口按本次读取状态计算；不含连接诊断字段，不代表进程内存占用。接收记录按不可变对象引用缓存字节数，设备增量复用未变化条目的统计；统计过程不重复序列化完整上下文或完整接收记录。最多 1000 条，同时按每条完整序列化体积计入 64 MiB 预算（共享对象仍重复计数），超限淘汰最早记录并累计数量。连接或家庭资格改变时清空记录并更换会话标识，重启丢失，不重放或保存消费进度。心跳不生成接收记录。读取已淘汰记录返回 404。响应上限覆盖整个接收记录保留预算及响应信封，计入变化摘要，保证保留的单条详情和完整索引均可读取。
 
-统一观察保存观察索引、`member_sighting_ids/window_id` 引用、成员出现归因修订号及轻量窗口材料摘要，不保存成员记录正文或完整音视频窗口详情。`createMaterialClient({ backendUrl, receiver })` 由入口装配为 `readMaterial`，接受 `{ kind: "member_sighting" | "perception_window", id }` 和取消信号，自动携带当前 scope 调用 Backend 的 `/api/agent/context/material`。读取前后核对接收资格、响应类型与引用 ID；源材料过期、移除或资格变化时失败，不用旧缓存替代，不写回上下文。返回的是来源当前保留版本，不是当时接收内容。
+统一观察保存观察索引、`member_sighting_ids/window_id` 引用、成员出现归因修订号及轻量窗口材料摘要，不保存成员记录正文或完整音视频窗口详情。`createContextReader({ client, receiver })` 提供 `readMaterial` 方法，接受 `{ kind: "member_sighting" | "perception_window", id }` 和取消信号，自动携带当前 scope 调用 Backend 的 `/api/agent/context/material`。读取前后核对接收资格、响应类型与引用 ID；源材料过期、移除或资格变化时失败，不用旧缓存替代，不写回上下文。返回的是来源当前保留版本，不是当时接收内容。
 
-`src/context/history-client.ts` 导出 `createHistoryClient({ backendUrl, receiver })`，启动入口将客户端装配为 `readHistory`。receiver 提供当前接收资格；调用者传入 `kind=device_reports|member_sightings|perception_windows`、UTC 区间、相应对象条件、分页参数及取消信号。设备分支沿用原读取条件；成员使用可选 member_ids/sources，音视频使用可选 sources，返回完整窗口与匹配引用。用法与字段见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
+同一读取模块的 `readHistory` 方法读取三类历史。receiver 提供当前接收资格；调用者传入 `kind=device_reports|member_sightings|perception_windows`、UTC 区间、相应对象条件、分页参数及取消信号。设备分支沿用原读取条件；成员使用可选 member_ids/sources，音视频使用可选 sources，返回完整窗口与匹配引用。用法与字段见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 
-客户端组合调用方取消与共享请求截止时间，通过共用的有界 HTTP 工具读取并校验响应。返回前重新核对连接代次、绑定身份、家庭运行资格及请求区间；失败、超时或资格改变拒绝结果，不用当前值或旧缓存代替历史。接收数据仅存在于内存，重启重新读取，不保存 SSE 消费进度。客户端未注册为模型工具。实机与专项边界统一见[Agent 通路验证边界](../../docs/household-runtime.md#agent-通路验证边界)。
+网络请求使用共享 RPC 和 `@home-agent/api/http/request-json`，组合调用方取消与请求截止时间，有界读取并校验响应，不自动重试。Backend 返回的公共错误码及字段说明保留，传输或非法响应报告不可用；超时与取消分别报告。上下文读取模块在返回前重新核对连接代次、绑定身份、家庭运行资格及请求区间；失败、超时或资格改变拒绝结果，不用当前值或旧缓存代替历史。接收数据仅存在于内存，重启重新读取，不保存 SSE 消费进度。读取工厂供调用方显式装配，当前聊天未使用它，也未注册模型工具；启动模块不导出业务调用实例。实机与专项边界统一见[Agent 通路验证边界](../../docs/household-runtime.md#agent-通路验证边界)。
 
 ## 家庭模型视图
 

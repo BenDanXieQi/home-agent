@@ -3,16 +3,21 @@ import {
   type EventSourceMessage,
 } from "eventsource-parser/stream";
 
+type StreamResponse = Pick<
+  Response,
+  "body" | "bodyUsed" | "ok" | "headers" | "status"
+>;
+
 /** One HTTP stream; callers own reconnection and domain state. */
 export async function consumeEventStream(
   options: {
-    request: (signal: AbortSignal) => Promise<Response>;
+    request: (signal: AbortSignal) => Promise<StreamResponse>;
     signal: AbortSignal;
     maxBufferSize: number;
     maxEventBytes?: number;
     firstEventTimeoutMs?: number;
     silenceMs: number;
-    onResponse?: (response: Response) => void;
+    onResponse?: (response: StreamResponse) => void;
   },
   receive: (event: EventSourceMessage) => void,
 ) {
@@ -30,7 +35,7 @@ export async function consumeEventStream(
     );
   }
   arm(10_000);
-  let response: Response | undefined;
+  let response: StreamResponse | undefined;
   try {
     response = await options.request(signal);
     signal.throwIfAborted();
