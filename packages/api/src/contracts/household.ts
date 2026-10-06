@@ -176,9 +176,7 @@ export const deviceSchema = inventoryDeviceSchema.extend({
   capability_tags: z.array(
     z.enum(["readable", "writeable", "notify", "action", "event"]),
   ),
-  read_enabled_properties: z.array(
-    z.object({ siid: z.number().int(), piid: z.number().int() }),
-  ),
+  read_enabled_properties: z.array(propertyAddressSchema.omit({ did: true })),
 });
 export const initialSpecification = Object.freeze({
   spec_id: null,

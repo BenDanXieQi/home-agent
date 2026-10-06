@@ -85,3 +85,9 @@ bun run --cwd packages/api test -- tests/contracts/household.test.ts
 ```
 
 消费方只测试自己如何使用契约和处理校验失败，不重复枚举这些共享规则。
+
+## 设备历史契约
+
+`@home-agent/api/device-history` 从设备能力、属性地址和值 schema 派生固定说明、接纳报告、查询和两种响应。共享 `deviceHistoryPolicy` 定义 365 天保留、页大小与请求／响应容量。`@home-agent/api/agent-context` 复用设备历史契约并增加 `kind=device_reports`；专用 SSE、成员出现与音视频历史分支尚未实现。
+
+时间区间校验 UTC、至多微秒精度及 `start < end`；属性编号 `siid/piid` 复用共享地址 schema，只接受 `1..2147483647` 的整数。默认 `runs` 返回同值报告段，`observations` 返回原始报告。Backend 对属性筛选去重并固定排序，校验游标及当前家庭资格；调用方不解释游标内部内容。来源、分页、保留与容量语义见[设备属性历史](../../docs/household-runtime.md#设备属性历史)，支持基线与验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。

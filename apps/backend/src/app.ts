@@ -1,3 +1,5 @@
+import { createAgentContextRoutes } from "./agent-context/routes";
+import type { createDeviceHistoryQuery } from "./household/history/query";
 import { createIdentityRoutes } from "./household/identity/routes";
 import type { createReferenceEnrollment } from "./household/identity/enrollment";
 import type { createIdentityReferences } from "./household/identity/references";
@@ -33,6 +35,7 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  deviceHistoryQuery?: ReturnType<typeof createDeviceHistoryQuery> | undefined;
   spatialService?: ReturnType<typeof createSpatialService>;
   identityEnrollment?: ReturnType<typeof createReferenceEnrollment> | undefined;
   identityReferences?: ReturnType<typeof createIdentityReferences> | undefined;
@@ -56,6 +59,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  deviceHistoryQuery,
   spatialService = createSpatialService(undefined, () => []),
   identityEnrollment,
   identityReferences,
@@ -107,6 +111,16 @@ export function createApp({
           runtime: "bun",
           timestamp: new Date().toISOString(),
         }),
+      ),
+    )
+    .route(
+      "/api/agent/context",
+      createAgentContextRoutes(
+        environment.BACKEND_PORT,
+        household,
+        deviceHistoryQuery,
+        shutdownSignal,
+        environment.BACKEND_REQUEST_TIMEOUT_MS,
       ),
     )
     .route(

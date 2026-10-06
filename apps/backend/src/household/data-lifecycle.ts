@@ -13,6 +13,8 @@ const tableLifetime = {
   contextEntities: "household",
   identityMembers: "household",
   identitySamples: "household",
+  devicePropertyDefinitions: "household",
+  devicePropertyObservations: "household",
   spaces: "household",
   passages: "household",
   observationBindings: "household",

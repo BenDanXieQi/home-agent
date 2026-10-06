@@ -2,7 +2,7 @@
 
 基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、房间观测解释、语音请求判断和聊天转发。房间与语音模块直接调用模型；单次聊天由独立 [Agent](../agent/README.md) 执行。基础检测不依赖 Agent 在线。
 
-当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，已接入成员资料、参考身份关联与可修订的成员出现记录；当前位置、通用活动识别与可执行要求管理尚未实现。本次数据交付边界见[实施范围](../../docs/plans/household-automation.md#本次范围)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+当前支持原生属性持续采集、带有效性的当前值与房间事实查询、设备属性历史保存与只读查询，以及成员资料、参考身份关联与可修订的成员出现记录；当前位置、通用活动识别与可执行要求管理尚未实现。Agent 数据通路规划见[实施范围](../../docs/plans/household-automation.md#本次范围)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
 本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和语音请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析由 backend 直接调用模型，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
@@ -84,6 +84,8 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
 
+`POST /api/agent/context/history` 提供 `kind=device_reports` 的只读设备属性历史。`household/history/service.ts` 拥有接纳报告订阅与有界异步提交；`repository.ts` 负责两表事务保存、SQL 同值段／原始报告查询及原生游标读取；`query.ts` 负责查询准入、游标和完整记录分页。`agent-context/routes.ts` 负责本机访问、输入、取消截止时间及传输响应容量。接口语义见[设备属性历史](../../docs/household-runtime.md#设备属性历史)，维护任务与部署限制见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。专用 Agent SSE 与其他历史 kind 尚未实现。
+
 ## 连接配置与探测
 
 `GET /api/config` 返回 `{ config, writable, path }`；`PUT /api/config` 接收完整配置 JSON（最多 16 KiB），保存后返回同一结构。字段、默认值、运行时校验与编辑器 schema 来自 `packages/api/src/contracts/` 的同一套 Zod 定义。配置仓库复用内容未变的解析结果，但不跳过文件访问、大小和权限检查；写入通过 `yaml` Document API 保留注释，并由 `write-file-atomic` 原子替换。
@@ -113,6 +115,8 @@ src/
 │   └── status.ts           # 服务探测与状态接口
 ├── chat/
 │   └── routes.ts           # 绑定家庭范围、聊天转发与流取消
+├── agent-context/
+│   └── routes.ts           # Agent 只读历史请求、家庭资格与传输边界
 ├── mijia/
 │   ├── routes.ts           # 米家 HTTP 输入、响应与取消信号
 │   ├── service.ts          # 账号生命周期、凭据串行提交与跨模块协调
@@ -154,6 +158,7 @@ src/
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、属性采集、成员与状态 SSE
 │   ├── data-lifecycle.ts   # 家庭表归属与事务内统一清理
+│   ├── history/            # 属性报告保存、查询准入与分页、数据库读取
 │   └── spatial/            # 空间资料服务、三张表的事务与引用查询、本机 HTTP 接口
 ├── perception/            # 本地检测、来源协调、人宠跟踪、轨迹身份证据、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约

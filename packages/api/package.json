@@ -23,7 +23,9 @@
     "./mijia-recordings": "./src/mijia/recordings.ts",
     "./speech-dialogue": "./src/contracts/speech-dialogue.ts",
     "./devices": "./src/domain/devices.ts",
-    "./http/local-access-policy": "./src/http/local-access-policy.ts"
+    "./http/local-access-policy": "./src/http/local-access-policy.ts",
+    "./device-history": "./src/contracts/device-history.ts",
+    "./agent-context": "./src/contracts/agent-context.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

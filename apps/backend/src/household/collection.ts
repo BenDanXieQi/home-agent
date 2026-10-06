@@ -154,10 +154,16 @@ export class HouseholdCollection {
               this.runtime.specification(device.id).spec,
             )) {
               const match = /^prop\.(\d+)\.(\d+)$/.exec(key);
-              if (match)
-                definitions.push(
-                  this.definition(device, Number(match[1]), Number(match[2])),
-                );
+              if (!match) continue;
+              const address = propertyAddressSchema.safeParse({
+                did: device.id,
+                siid: Number(match[1]),
+                piid: Number(match[2]),
+              });
+              if (!address.success) continue;
+              definitions.push(
+                this.definition(device, address.data.siid, address.data.piid),
+              );
             }
           } catch {
             /* Unavailable specifications do not stop observations. */

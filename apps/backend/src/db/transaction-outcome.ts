@@ -3,16 +3,22 @@ import type { Database } from ".";
 
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
+export function transactionTimeouts(timeoutMs: number) {
+  return sql`select set_config('statement_timeout', ${String(timeoutMs)}, true), set_config('lock_timeout', ${String(timeoutMs)}, true), set_config('transaction_timeout', ${String(timeoutMs)}, true)`;
+}
+
+export function transactionLock(key: string, mode: "exclusive" | "shared") {
+  return mode === "shared"
+    ? sql`select pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`
+    : sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+}
+
 export function lockTransaction(
   tx: Transaction,
   key: string,
   mode: "exclusive" | "shared",
 ) {
-  return tx.execute(
-    mode === "shared"
-      ? sql`select pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`
-      : sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
-  );
+  return tx.execute(transactionLock(key, mode));
 }
 
 /** The database has not yet established whether a previous write committed. */
@@ -31,9 +37,7 @@ export function createLockedTransactions(
 ) {
   return <T>(key: string, run: (tx: Transaction) => Promise<T>) =>
     db.transaction(async (tx) => {
-      await tx.execute(
-        sql`select set_config('statement_timeout', ${String(timeoutMs)}, true), set_config('lock_timeout', ${String(timeoutMs)}, true), set_config('transaction_timeout', ${String(timeoutMs)}, true)`,
-      );
+      await tx.execute(transactionTimeouts(timeoutMs));
       await lockTransaction(tx, key, mode);
       return run(tx);
     });

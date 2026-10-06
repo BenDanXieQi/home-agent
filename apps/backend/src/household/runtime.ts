@@ -1,3 +1,4 @@
+import { deviceHistoryReportSchema } from "@home-agent/api/device-history";
 import type { HouseholdCollection } from "./collection";
 import type { FactInput } from "./observations";
 import { createActor, type EventFromLogic } from "xstate";
@@ -155,7 +156,33 @@ export class HouseholdRuntime {
     this.collection = collection;
   }
   private factCommit(before: Projection) {
+    const observation = this.context.fact_result?.observation;
+    const event = observation?.event;
+    const history =
+      observation &&
+      observation.metadata &&
+      event &&
+      (event.kind === "property" || event.kind === "read")
+        ? deviceHistoryReportSchema.parse({
+            device_id: event.did,
+            siid: event.siid,
+            piid: event.piid,
+            observation_id: observation.observation_id,
+            received_at: event.received_at,
+            scope_epoch: this.epoch,
+            input_sequence: observation.input_sequence,
+            value: event.value,
+            source:
+              event.kind === "read"
+                ? "read"
+                : event.delivery_kind === "baseline"
+                  ? "retained"
+                  : "push",
+            metadata: observation.metadata,
+          })
+        : null;
     return freeze({
+      history,
       state_version: this.version(),
       changes: this.context.changes,
       result: this.context.fact_result,

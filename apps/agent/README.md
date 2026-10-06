@@ -21,7 +21,7 @@ bun run --cwd apps/agent dev
 
 每次请求独立调用 Deep Agents，不传 checkpointer 或持久 Store。显式使用 `new StateBackend()`，虚拟文件工具只操作本次运行的内存状态，没有配置宿主文件系统或 shell。框架内置工具及通用委派由 Deep Agents 提供，没有注册家庭业务工具、专用子 agent、技能或跨请求记忆。
 
-目前不能读取家庭资料、设备或感知证据，不能安排提醒、控制设备或接收后台事件。本次待接入能力为接收 Backend 整理的数据及按时间只读访问历史，见[数据交付计划](../../docs/plans/household-automation.md)。模型如何关联材料、持续工作和回写另行设计。
+家庭助手尚未接入家庭资料、设备或感知证据，不能安排提醒、控制设备或接收后台事件。只读设备历史客户端由独立模块提供，尚未注册为模型工具；专用上下文接收与其他数据通路见[数据交付计划](../../docs/plans/household-automation.md)。
 
 `AGENT_RUN_TIMEOUT_MS` 默认 120,000；模型不自动重试，单次模型输出由 `AGENT_MAX_OUTPUT_TOKENS` 限制，默认 4096，图步数上限 30。请求取消或超时向执行传播取消信号。Bun 保留默认连接空闲超时，仅在请求体完成校验后对本次模型请求关闭空闲计时，由执行期限控制等待。模型明确返回长度截断、内容过滤、未完成或失败状态时，不作为完整回答返回；结果未知时不自动重发。
 
@@ -32,6 +32,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 - `assistant.ts`：模型与 Deep Agents 配置。
 - `config.ts`：服务配置。
 - `main.ts`：独立进程、两个 HTTP 入口、请求校验、执行与停止。
+- `context/history-client.ts`：Backend 设备历史的只读客户端，校验响应与调用方家庭资格。
 - `workflows/spatial-planning/index.ts`：空间规划专项 Agent 工厂，使用同一模型配置，由调用方注入共用的 backend 能力。
 - `workflows/spatial-planning/instructions.ts`：空间证据使用、记录匹配、配置写入与结果核对指令。
 
@@ -46,3 +47,9 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 房间观测解释和语音请求判断分别由 backend 的 `room-analysis/interpret.ts`、`conversation/interpret.ts` 负责，不调用此服务。数据库中已有的 `agent_state` 数据不被本服务读取、迁移或删除；若不再需要，可由数据库维护者另行清理。
 
 Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代理调用追踪。
+
+## 只读设备历史客户端
+
+`src/context/history-client.ts` 导出 `createHistoryClient({ backendUrl, timeoutMs, currentScope })`。`backendUrl` 要求 HTTP(S)；`currentScope` 返回当前已接收且可用的 `{ account_id, home_id, scope_epoch }`，无可用资格时返回 null。调用者传入 `kind=device_reports`、UTC 区间、可选属性／表达方式／分页参数及取消信号。专用上下文接收模块尚未实现，客户端未在启动或模型工具中注册。
+
+客户端组合调用方取消与截止时间，以共用的有界 HTTP 工具读取并校验响应，在返回前再次核对绑定和运行资格。失败、超时或资格变化拒绝结果。接口、来源及分页语义见[设备属性历史](../../docs/household-runtime.md#设备属性历史)，实机和容量验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。
