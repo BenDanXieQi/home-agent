@@ -109,9 +109,7 @@ async function runBun(commandArgs: string[]) {
 async function prepareDatabase() {
   await runDocker([...up, "db"]);
   await runBun(["run", "--cwd", "apps/backend", "db:migrate"]);
-  await runBun(["run", "--cwd", "apps/agent", "db:setup"]);
   await runBun(["run", "--cwd", "apps/backend", "db:check"]);
-  await runBun(["run", "--cwd", "apps/agent", "db:check"]);
 }
 if (action === "status") {
   console.info(`已选 go2rtc 模式：${modeLabel(await selectedMode())}`);
