@@ -88,7 +88,6 @@
     "@home-agent/backend#test": {
       "cache": false,
       "passThroughEnv": [
-        "TEST_DATABASE_URL",
         "PERCEPTION_INDOOR_DATA_DIR",
         "PERCEPTION_TUD_VIDEO_PATH",
         "PERCEPTION_TUD_LABELS_PATH",

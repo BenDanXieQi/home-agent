@@ -6,21 +6,21 @@
 
 先读仓库 [AGENTS.md](../AGENTS.md) 及存在时的 `AGENTS.local.md`，再按任务选取下表入口，不要求每次通读全部文档。定位代码遵守 CodeGraph 优先规则；下表链接到现有实现目录，计划中列出的未来文件不代表已经存在。
 
-| 要做的工作               | 先读的文档                                                                                                                                                                     | 现有代码入口                                                                                                            |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| 启动、配置、部署排障     | [运行说明](running.md)、[Backend README](../apps/backend/README.md)                                                                                                            | [启动脚本](../scripts)、[服务连接](../apps/backend/src/connections)                                                     |
-| 米家授权、属性读取与推送 | [来源契约](contracts/mijia.md)、[Backend 模块职责](../apps/backend/README.md#目录与约定)                                                                                       | [米家接入](../apps/backend/src/mijia)                                                                                   |
-| 家庭绑定、设备清单与订阅 | [家庭运行时](household-runtime.md)、[业务规则](contracts/household-runtime.md)                                                                                                 | [家庭运行时](../apps/backend/src/household)、[共享契约](../packages/api/src/contracts)                                  |
-| 人物与宠物资料维护       | [Web 家庭成员](../apps/web/README.md#家庭成员)、[Backend 家庭上下文表](../apps/backend/README.md#家庭上下文表)、[人物识别参考存储](../apps/backend/README.md#人物识别参考存储) | [成员接口与存储](../apps/backend/src/household/members)、[成员页面](../apps/web/src/pages/members)                      |
-| 家庭上下文数据库浏览     | [Backend 表结构与接口](../apps/backend/README.md#家庭上下文表)、[Web 浏览页面](../apps/web/README.md#家庭数据库浏览)                                                           | [只读接口](../apps/backend/src/household-context)、[浏览页面](../apps/web/src/pages/database)                           |
-| 本地检测、音视频证据     | [当前检测](perception.md)，新增能力再读[媒体扩展计划](plans/media-perception.md)                                                                                               | [感知模块](../apps/backend/src/perception)、[go2rtc 扩展](../docker/go2rtc)                                             |
-| 本地成员身份分析         | [持续身份分析](perception.md#持续成员身份分析)                                                                                                                                 | [身份分析](../apps/backend/src/perception/identity)、[窗口接纳](../apps/backend/src/perception/window)                  |
-| 离线身份校准与属性对照   | [评估协议与结果](../apps/backend/scripts/perception-evaluation/README.md#人体外观离线校准)、[属性模型参考](references/person-attributes.md)                                    | [评估适配](../apps/backend/scripts/perception-evaluation)、[ReID 校准](../apps/backend/scripts/calibrate-appearance.ts) |
-| 感知调试、图片与视频框   | [后台分析与结果校验](perception.md#后台分析与结果校验)、[窗口展示](../apps/web/README.md#窗口筛选与媒体)、[Web README](../apps/web/README.md)                                  | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                              |
-| 房间事实与观测描述       | [设备事实](contracts/device-facts.md)、[房间分析](contracts/room-analysis.md)                                                                                                  | [事实模块](../apps/backend/src/household)、[分析模块](../apps/backend/src/room-analysis)                                |
-| Agent 查询、调查与执行   | [Agent 当前能力](../apps/agent/README.md)、[领域模型](plans/household-model.md)、[主实施顺序](plans/household-automation.md#实施顺序与改动位置)                                | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                       |
-| 家庭记录与工作存储设计   | [数据设计](plans/household-storage.md)、[主系统设计](plans/household-automation.md)                                                                                            | [数据库](../apps/backend/src/db)；规划表及迁移不代表已经存在                                                            |
-| 设备采集与历史页面       | [设备事实](contracts/device-facts.md)、[设备历史计划](plans/device-history.md)、[Web README](../apps/web/README.md)                                                            | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules)    |
+| 要做的工作               | 先读的文档                                                                                                                                                                     | 现有代码入口                                                                                                                                      |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 启动、配置、部署排障     | [运行说明](running.md)、[Backend README](../apps/backend/README.md)                                                                                                            | [启动脚本](../scripts)、[服务连接](../apps/backend/src/connections)                                                                               |
+| 米家授权、属性读取与推送 | [来源契约](contracts/mijia.md)、[Backend 模块职责](../apps/backend/README.md#目录与约定)                                                                                       | [米家接入](../apps/backend/src/mijia)                                                                                                             |
+| 家庭绑定、设备清单与订阅 | [家庭运行时](household-runtime.md)、[业务规则](contracts/household-runtime.md)                                                                                                 | [家庭运行时](../apps/backend/src/household)、[共享契约](../packages/api/src/contracts)                                                            |
+| 人物与宠物资料维护       | [Web 家庭成员](../apps/web/README.md#家庭成员)、[Backend 家庭上下文表](../apps/backend/README.md#家庭上下文表)、[人物识别参考存储](../apps/backend/README.md#人物识别参考存储) | [成员接口与存储](../apps/backend/src/household/members)、[成员页面](../apps/web/src/pages/members)                                                |
+| 家庭上下文数据库浏览     | [Backend 表结构与接口](../apps/backend/README.md#家庭上下文表)、[Web 浏览页面](../apps/web/README.md#家庭数据库浏览)                                                           | [只读接口](../apps/backend/src/household-context)、[浏览页面](../apps/web/src/pages/database)                                                     |
+| 空间、通道与观测绑定维护 | [Web 空间维护](../apps/web/README.md#空间关系资料)、[Backend 空间资料](../apps/backend/README.md#空间关系资料)、[共享契约](../packages/api/README.md#空间资料契约)             | [空间模块](../apps/backend/src/household/spatial)、[维护页面](../apps/web/src/pages/spaces)、[共享契约](../packages/api/src/contracts/spatial.ts) |
+| 本地检测、音视频证据     | [当前检测](perception.md)，新增能力再读[媒体扩展计划](plans/media-perception.md)                                                                                               | [感知模块](../apps/backend/src/perception)、[go2rtc 扩展](../docker/go2rtc)                                                                       |
+| 本地成员身份分析         | [持续身份分析](perception.md#持续成员身份分析)                                                                                                                                 | [身份分析](../apps/backend/src/perception/identity)、[窗口接纳](../apps/backend/src/perception/window)                                            |
+| 离线身份校准与属性对照   | [评估协议与结果](../apps/backend/scripts/perception-evaluation/README.md#人体外观离线校准)、[属性模型参考](references/person-attributes.md)                                    | [评估适配](../apps/backend/scripts/perception-evaluation)、[ReID 校准](../apps/backend/scripts/calibrate-appearance.ts)                           |
+| 感知调试、图片与视频框   | [后台分析与结果校验](perception.md#后台分析与结果校验)、[窗口展示](../apps/web/README.md#窗口筛选与媒体)、[Web README](../apps/web/README.md)                                  | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                                                        |
+| 房间事实与观测描述       | [设备事实](contracts/device-facts.md)、[房间分析](contracts/room-analysis.md)                                                                                                  | [事实模块](../apps/backend/src/household)、[分析模块](../apps/backend/src/room-analysis)                                                          |
+| Agent 接入、查询与执行   | [Agent 最简架子](../apps/agent/README.md)、[实施计划](plans/household-automation.md)                                                                                           | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                                                 |
+| 设备采集与历史页面       | [设备事实](contracts/device-facts.md)、[设备历史计划](plans/device-history.md)、[Web README](../apps/web/README.md)                                                            | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules)                              |
 
 源码用于核实实际行为，领域规则和来源契约用于判断应满足的约束，计划用于界定未交付工作。发生不一致时，先查清是实现缺陷、文档过时还是尚未交付，不能只改文档掩盖代码问题，也不能把计划接口当作现有能力调用。
 
@@ -41,16 +41,14 @@
 
 ## 实施计划
 
-| 文档                                                       | 唯一维护的设计                                                               |
-| ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| [计划入口](plans/README.md)                                | 计划导航和共同交付要求，不另维护一份实施路线                                 |
-| [信息边界与状态归属](plans/household-model.md)             | 来源记录、任务判断、明确要求与状态所有权；定义语义与不变量                   |
-| [家庭观察与 Agent 工作协作](plans/household-automation.md) | 记录查询、变化与定时唤醒、调查、材料交接、动作及唯一交付顺序                 |
-| [家庭记录与 Agent 工作存储](plans/household-storage.md)    | 记录、工作与动作新增表、字段、约束、索引、事务、生命周期及迁移的唯一设计来源 |
-| [媒体能力扩展](plans/media-perception.md)                  | 非人声候选、有限观察、Agent 媒体输入与恢复、身份生产者扩展                   |
-| [设备观测历史](plans/device-history.md)                    | 选定原始观测的写入、缺口、查询、清理及历史页面                               |
+| 文档                                                        | 唯一维护的设计                                             |
+| ----------------------------------------------------------- | ---------------------------------------------------------- |
+| [计划入口](plans/README.md)                                 | 计划导航和共同交付要求，不另维护一份实施路线               |
+| [Backend 当前数据与历史读取](plans/household-automation.md) | 专用推送、时间查询与数据验收；不含 AI 关联推理             |
+| [媒体能力扩展](plans/media-perception.md)                   | 非人声候选、有限观察、Agent 媒体输入与恢复、身份生产者扩展 |
+| [设备观测历史](plans/device-history.md)                     | 全部已接纳属性报告的表结构、写入、缺口、查询与清理         |
 
-信息边界文档说明“信息是什么、归谁负责”，协作设计说明“如何查询、调查和执行”，数据设计唯一维护新增表结构与事务约束，媒体与设备计划各自定义来源契约。主交付顺序只在协作设计维护；能力按实际依赖交付，不按文件排列串行施工。其他文档引用数据设计，不复制同一张表的字段、索引或清理规则。第一方 Agent 是项目归属，不要求语义理解、条件求值和动作执行全部交给模型。
+本次数据交付计划维护当前推送与按时间补查。设备历史计划唯一维护属性历史保存、查询和缺口，是设备时间序列补查的依赖；成员和音视频按实际保留范围读取。AI 关联推理、回写和进一步结构优化另行讨论。
 
 ## 外部实现参考
 
