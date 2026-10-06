@@ -49,6 +49,93 @@ export const householdDirectories = pgTable(
   (table) => [primaryKey({ columns: [table.accountId, table.homeId] })],
 );
 
+export const spaces = pgTable(
+  "spaces",
+  {
+    id: uuid("id").primaryKey(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check("spaces_name_nonempty", sql`length(btrim(${table.name})) > 0`),
+  ],
+);
+
+export const passages = pgTable(
+  "passages",
+  {
+    id: uuid("id").primaryKey(),
+    name: text("name").notNull(),
+    spaceAId: uuid("space_a_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "restrict" }),
+    spaceBId: uuid("space_b_id")
+      .notNull()
+      .references(() => spaces.id, { onDelete: "restrict" }),
+    description: text("description").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check("passages_name_nonempty", sql`length(btrim(${table.name})) > 0`),
+    check(
+      "passages_endpoints_differ",
+      sql`${table.spaceAId} <> ${table.spaceBId}`,
+    ),
+    index("passages_space_a_idx").on(table.spaceAId),
+    index("passages_space_b_idx").on(table.spaceBId),
+  ],
+);
+
+export const observationBindings = pgTable(
+  "observation_bindings",
+  {
+    id: uuid("id").primaryKey(),
+    deviceId: text("device_id").notNull(),
+    channel: integer("channel"),
+    spaceId: uuid("space_id").references(() => spaces.id, {
+      onDelete: "restrict",
+    }),
+    passageId: uuid("passage_id").references(() => passages.id, {
+      onDelete: "restrict",
+    }),
+    description: text("description").notNull().default(""),
+    enabled: boolean("enabled").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    check(
+      "observation_bindings_one_target",
+      sql`(${table.spaceId} is null) <> (${table.passageId} is null)`,
+    ),
+    check(
+      "observation_bindings_device_nonempty",
+      sql`length(btrim(${table.deviceId})) > 0`,
+    ),
+    check(
+      "observation_bindings_channel",
+      sql`${table.channel} is null or ${table.channel} in (1, 2)`,
+    ),
+    index("observation_bindings_space_idx").on(table.spaceId),
+    index("observation_bindings_passage_idx").on(table.passageId),
+  ],
+);
+
 export const householdSubjectKind = pgEnum("household_subject_kind", [
   "person",
   "pet",

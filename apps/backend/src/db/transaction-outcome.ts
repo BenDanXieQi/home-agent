@@ -3,6 +3,18 @@ import type { Database } from ".";
 
 export type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
+export function lockTransaction(
+  tx: Transaction,
+  key: string,
+  mode: "exclusive" | "shared",
+) {
+  return tx.execute(
+    mode === "shared"
+      ? sql`select pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`
+      : sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+  );
+}
+
 /** The database has not yet established whether a previous write committed. */
 export class StorageOutcomeUnknownError extends Error {
   constructor() {
@@ -22,11 +34,7 @@ export function createLockedTransactions(
       await tx.execute(
         sql`select set_config('statement_timeout', ${String(timeoutMs)}, true), set_config('lock_timeout', ${String(timeoutMs)}, true), set_config('transaction_timeout', ${String(timeoutMs)}, true)`,
       );
-      await tx.execute(
-        mode === "shared"
-          ? sql`select pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`
-          : sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
-      );
+      await lockTransaction(tx, key, mode);
       return run(tx);
     });
 }

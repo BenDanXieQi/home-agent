@@ -11,10 +11,8 @@ afterEach(async () => {
 // MiLoCo test_prop_subscriptions allows account-wide property subscriptions.
 // Home Agent shares account-wide directory notifications with explicitly scoped observations.
 test("property observations follow the selected home while directory notifications still cover both homes", async () => {
-  const resetError = new Error("Household data cleanup unavailable");
   const h = await runningHousehold(undefined, {
     homeId: "home-a",
-    resetHomeData: () => Promise.reject(resetError),
   });
   households.push(h);
   await eventually(() => h.mqtt.transports.length === 1);
@@ -90,16 +88,6 @@ test("property observations follow the selected home while directory notificatio
   });
   expect(h.service.directoryPushStatus().received).toBe(received + 1);
 
-  const beforeSwitch = h.runtime.epoch;
-  await expect(h.runtime.bindHome(h.runtime.epoch, "home-b")).rejects.toBe(
-    resetError,
-  );
-  expect(h.runtime.epoch).toBe(beforeSwitch);
-  expect(h.runtime.ready).toBe(true);
-  expect(h.runtime.snapshot().projection.household.household.home_id).toBe(
-    "home-a",
-  );
-  expect(h.mqtt.transports).toHaveLength(1);
   await h.runtime.logout();
   for (let index = 0; index < old.subscriptions.length; index++)
     if (propertyTopics.includes(old.subscriptions[index]!.topic))

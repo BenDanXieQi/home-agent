@@ -155,22 +155,12 @@ test("home access loss keeps the saved binding without choosing another home", a
   ).rejects.toMatchObject({ reason: "devices_failed" });
 });
 
-test("switching homes waits for cleanup and durable binding before replacing device access", async () => {
-  const cleanupEntered = deferred();
-  const cleanupFinished = deferred();
+test("switching homes waits for durable binding before replacing device access", async () => {
   const saveEntered = deferred();
   const saveAllowed = deferred();
-  restore.push(
-    () => cleanupFinished.resolve(),
-    () => saveAllowed.resolve(),
-  );
+  restore.push(() => saveAllowed.resolve());
   const fixture = await runningHousehold(householdCatalog(), {
     homeId: "home-a",
-    resetHomeData: async (commit) => {
-      cleanupEntered.resolve();
-      await cleanupFinished.promise;
-      await commit(() => {});
-    },
   });
   fixtures.push(fixture);
   const before = fixture.runtime.snapshot();
@@ -184,23 +174,6 @@ test("switching homes waits for cleanup and durable binding before replacing dev
     fixture.runtime.bindHome(before.scope_epoch, "home-a"),
   ).rejects.toMatchObject({ reason: "binding_conflict" });
   const switching = fixture.runtime.bindHome(before.scope_epoch, "home-b");
-  await cleanupEntered.promise;
-  expect(fixture.homes.write).not.toHaveBeenCalled();
-  expect(fixture.runtime.epoch).toBe(before.scope_epoch);
-  expect(
-    Object.values(fixture.runtime.snapshot().projection.device)
-      .map((device) => device.id)
-      .toSorted(),
-  ).toEqual(
-    Object.values(before.projection.device)
-      .map((device) => device.id)
-      .toSorted(),
-  );
-  await expect(
-    fixture.runtime.bindHome(before.scope_epoch, "home-b"),
-  ).rejects.toMatchObject({ reason: "invalid_state" });
-
-  cleanupFinished.resolve();
   await saveEntered.promise;
   expect(fixture.runtime.epoch).toBe(before.scope_epoch);
   expect(fixture.runtime.ready).toBe(true);

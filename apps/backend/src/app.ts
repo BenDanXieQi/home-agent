@@ -1,5 +1,3 @@
-import { createHouseholdQueries } from "./household/queries/service";
-import { createHouseholdQueryRoutes } from "./household/queries/routes";
 import { createIdentityRoutes } from "./household/identity/routes";
 import type { createReferenceEnrollment } from "./household/identity/enrollment";
 import type { createIdentityReferences } from "./household/identity/references";
@@ -9,6 +7,8 @@ import { createSpeechRoutes } from "./conversation/routes";
 import type { createSpeechInbox } from "./conversation/speech-inbox";
 import type { createMemberRepository } from "./household/members/repository";
 import { createMemberRoutes } from "./household/members/routes";
+import { createSpatialRoutes } from "./household/spatial/routes";
+import { createSpatialService } from "./household/spatial/service";
 import { createPerceptionRoutes } from "./perception/routes";
 import type { createPerceptionService } from "./perception/service";
 import { healthSchema } from "@home-agent/api/contracts";
@@ -33,6 +33,7 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  spatialService?: ReturnType<typeof createSpatialService>;
   identityEnrollment?: ReturnType<typeof createReferenceEnrollment> | undefined;
   identityReferences?: ReturnType<typeof createIdentityReferences> | undefined;
   speechInbox: ReturnType<typeof createSpeechInbox>;
@@ -55,6 +56,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  spatialService = createSpatialService(undefined, () => []),
   identityEnrollment,
   identityReferences,
   speechInbox,
@@ -108,11 +110,8 @@ export function createApp({
       ),
     )
     .route(
-      "/api/household/queries",
-      createHouseholdQueryRoutes(
-        environment.BACKEND_PORT,
-        createHouseholdQueries(household, memberRepository),
-      ),
+      "/api/spatial",
+      createSpatialRoutes(environment.BACKEND_PORT, spatialService),
     )
     .route(
       "/api/household-members/references",
@@ -164,7 +163,6 @@ export function createApp({
         port: environment.BACKEND_PORT,
         timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
         readAgentUrl,
-        readHouseholdScope: () => household.epoch,
       }),
     )
     .route(
