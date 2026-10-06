@@ -7,6 +7,7 @@ import {
   agentContextSnapshotSchema,
   agentDevicePropertySchema,
   agentObservationSchema,
+  agentSightingSummarySchema,
   agentObservationSourceSchema,
   agentContextDataSchemas,
 } from "./agent-context";
@@ -110,6 +111,7 @@ export const agentReceiptChangeSchema = z.discriminatedUnion("kind", [
     ),
   ),
   change("observation", agentObservationSchema),
+  change("member_sighting", agentSightingSummarySchema),
   change(
     "observation_source",
     agentObservationSourceSchema.omit({ read_at: true }),

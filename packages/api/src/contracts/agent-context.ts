@@ -20,7 +20,10 @@ import {
   contextEntityTypeSchema,
   contextEntityRoleSchema,
 } from "./household-context";
-import { memberActivityDataSchema } from "./perception";
+import {
+  memberActivityDataSchema,
+  memberAttributionSnapshotSchema,
+} from "./perception";
 import { windowDetailSchema } from "./perception-window";
 
 /** The shared time schema normalizes UTC to six fractional digits. */
@@ -110,8 +113,32 @@ export const agentObservationSourceSchema = z.object({
   reason: z.string().nullable(),
   truncated: z.boolean(),
 });
+const knownAttribution = memberAttributionSnapshotSchema.options[0];
+export const agentSightingAttributionSchema = z.discriminatedUnion("kind", [
+  knownAttribution.pick({ kind: true }).extend({
+    association: knownAttribution.shape.association.options[1].pick({
+      memberId: true,
+      state: true,
+    }),
+  }),
+  memberAttributionSnapshotSchema.options[1].pick({ kind: true }),
+]);
+export const agentSightingSummarySchema = memberActivityDataSchema
+  .pick({
+    deviceId: true,
+    channel: true,
+    firstObservedAt: true,
+    lastObservedAt: true,
+    timeBasis: true,
+  })
+  .extend({
+    id: memberSightingRecordSchema.shape.id,
+    revision: memberActivityDataSchema.shape.attribution.shape.revision,
+    attribution: agentSightingAttributionSchema,
+  });
 export const agentObservationSchema = z.object({
   id: z.uuid(),
+  source: memberActivityDataSchema.pick({ deviceId: true, channel: true }),
   startedAt: z.number(),
   endedAt: z.number(),
   reasons: z.array(agentObservationReasonSchema).min(1),
@@ -165,8 +192,9 @@ export const agentContextDataSchemas = {
     }),
   members: memberListSchema,
   observations: z.object({
-    range: z.object({ start: z.number(), end: z.number() }),
+    as_of: z.iso.datetime(),
     records: z.array(agentObservationSchema),
+    member_sightings: z.array(agentSightingSummarySchema),
     sources: z.object({
       member_sightings: agentObservationSourceSchema,
       perception: agentObservationSourceSchema,

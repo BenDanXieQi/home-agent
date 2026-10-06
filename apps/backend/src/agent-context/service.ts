@@ -20,6 +20,8 @@ import { HouseholdError } from "../household/errors";
 import {
   assembleAgentObservations,
   memberObservationSchema,
+  latestMemberObservations,
+  sightingStateKey,
 } from "@home-agent/api/agent-context/observations";
 import { jsonBytes } from "../household/config";
 import { createAgentDeviceStateProjection } from "./device-state";
@@ -245,6 +247,10 @@ export function createAgentContextService(options: {
           if (
             old.status === "ready" &&
             isDeepStrictEqual(old.data.records, next.records) &&
+            isDeepStrictEqual(
+              old.data.member_sightings,
+              next.member_sightings,
+            ) &&
             (["member_sightings", "perception"] as const).every((name) =>
               isDeepStrictEqual(
                 observationSourceState(old.data.sources[name]),
@@ -328,14 +334,22 @@ export function createAgentContextService(options: {
     observationExpiry = undefined;
     const end = Date.now();
     const start = end - agentContextPolicy.recentObservationMs;
+    const latestIds = new Set(
+      latestMemberObservations(sightingSource.records).map(
+        (record) => record.id,
+      ),
+    );
     sightingSource.records = sightingSource.records.filter(
-      (record) => record.data.lastObservedAt >= start,
+      (record) =>
+        latestIds.has(record.id) || record.data.lastObservedAt >= start,
     );
     windowSource.records = windowSource.records.filter(
       (record) => record.endedAt >= start,
     );
     const oldest = [
-      ...sightingSource.records.map((record) => record.data.lastObservedAt),
+      ...sightingSource.records
+        .filter((record) => !latestIds.has(record.id))
+        .map((record) => record.data.lastObservedAt),
       ...windowSource.records.map((record) => record.endedAt),
     ].reduce((minimum, at) => Math.min(minimum, at), Infinity);
     if (Number.isFinite(oldest)) {
@@ -355,7 +369,7 @@ export function createAgentContextService(options: {
         sightingSource.records,
         windowSource.records,
       ),
-      range: { start, end },
+      as_of: new Date(end).toISOString(),
       sources: {
         member_sightings: sightingSource.state,
         perception: windowSource.state,
@@ -372,13 +386,18 @@ export function createAgentContextService(options: {
         };
       const records: typeof sightingSource.records = [];
       let referenceBytes = 2;
-      const complete = await sightings.observationsSince(
+      const latestTimes = new Map<string, number>();
+      const complete = await sightings.currentObservations(
         access.identity,
         access.assertCurrent,
         Date.now() - agentContextPolicy.recentObservationMs,
         (record) => {
-          // Every sighting appears in at least one output reference, even when windows merge it.
-          referenceBytes += jsonBytes(record.id) + (records.length ? 1 : 0);
+          const key = sightingStateKey(record);
+          if (!latestTimes.has(key))
+            latestTimes.set(key, record.data.lastObservedAt);
+          // Recent association rows are internal; only latest sightings must be published.
+          if (latestTimes.get(key) === record.data.lastObservedAt)
+            referenceBytes += jsonBytes(record.id) + 1;
           if (referenceBytes > agentContextPolicy.partBytes.observations)
             return false;
           records.push(record);
