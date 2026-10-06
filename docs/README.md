@@ -18,7 +18,7 @@
 | 本地成员身份分析         | [持续身份分析](perception.md#持续成员身份分析)                                                                                                                                 | [身份分析](../apps/backend/src/perception/identity)、[窗口接纳](../apps/backend/src/perception/window)                                            |
 | 离线身份校准与属性对照   | [评估协议与结果](../apps/backend/scripts/perception-evaluation/README.md#人体外观离线校准)、[属性模型参考](references/person-attributes.md)                                    | [评估适配](../apps/backend/scripts/perception-evaluation)、[ReID 校准](../apps/backend/scripts/calibrate-appearance.ts)                           |
 | 感知调试、图片与视频框   | [后台分析与结果校验](perception.md#后台分析与结果校验)、[窗口展示](../apps/web/README.md#窗口筛选与媒体)、[Web README](../apps/web/README.md)                                  | [现有播放器](../apps/web/src/modules/playback)、[感知模块](../apps/backend/src/perception)                                                        |
-| 房间事实与观测描述       | [设备事实](contracts/device-facts.md)、[房间分析](contracts/room-analysis.md)                                                                                                  | [事实模块](../apps/backend/src/household)、[分析模块](../apps/backend/src/room-analysis)                                                          |
+| 设备事实与房间查询       | [设备事实](contracts/device-facts.md)                                                                                                                                          | [事实模块](../apps/backend/src/household)                                                                                                         |
 | Agent 接入、查询与执行   | [Agent 最简架子](../apps/agent/README.md)、[实施计划](plans/household-automation.md)                                                                                           | [Agent](../apps/agent/src)、[backend 家庭领域](../apps/backend/src/household)；规划模块按批次新增                                                 |
 | 设备采集与历史查询       | [设备事实](contracts/device-facts.md)、[设备历史](household-runtime.md#设备属性历史)、[Web README](../apps/web/README.md)                                                      | [家庭模块](../apps/backend/src/household)、[数据库](../apps/backend/src/db)、[Web 业务模块](../apps/web/src/modules)                              |
 
@@ -34,7 +34,6 @@
 | [米家接入与摄像头](mijia.md)                    | 如何授权、预览、管理媒体资源；米家设备能力与使用限制                                                                                                                 |
 | [家庭运行时](household-runtime.md)              | 当前家庭绑定、设备清单、规格、公共状态订阅、设备上报日志及属性历史保存与查询                                                                                         |
 | [设备事实与房间快照](contracts/device-facts.md) | 持续采集、当前值质量、本机策略、房间查询与读取                                                                                                                       |
-| [房间 AI 上下文](contracts/room-analysis.md)    | 观测描述、触发策略、证据接纳、有效性及模型限制                                                                                                                       |
 | [本地目标检测](perception.md)                   | 已实现图片／摄像头检测、人宠跟踪、人物身份分析与窗口历史快照、音频分析、猫狗声音捕获与语音转写、窗口筛选与短期媒体、后台分析与结果校验、计算资源、模型契约及验证范围 |
 
 当前家庭运行时不等于完整家庭情景；目标检测不等于身份与活动识别。未来能力交付后，把实际用法和限制更新到所属功能文档，不把规划全文复制过来。

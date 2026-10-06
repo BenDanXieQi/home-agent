@@ -282,7 +282,7 @@ function DataBrowser({ scope }: { scope: string }) {
                   ? "试试其他关键词，或清除筛选条件。"
                   : displayedInput.table === "household_subjects"
                     ? "在成员页添加家人或宠物后，可以在这里查看已保存的资料。"
-                    : "上下文自动写入尚未接入，现有房间分析不会自动出现在这里。"
+                    : "尚无上下文或关联记录。"
               }
             >
               {displayedInput.search ? (

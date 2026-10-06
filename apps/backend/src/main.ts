@@ -11,7 +11,6 @@ import { createReferenceFiles } from "./household/identity/files";
 import { createSpeechInbox } from "./conversation/speech-inbox";
 import { createSpeechDialogueInterpreter } from "./conversation/interpret";
 import { loadModelConfig } from "@home-agent/model";
-import { AppError } from "@home-agent/api/errors";
 import { createMemberRepository } from "./household/members/repository";
 import { createSpatialRepository } from "./household/spatial/repository";
 import { createSpatialService } from "./household/spatial/service";
@@ -154,21 +153,6 @@ perception.start().catch((error: unknown) => {
   console.error("Perception startup failed", error);
 });
 const shutdown = new AbortController();
-const { RoomAnalysisService } = await import("./room-analysis/service");
-const { createRoomAnalysisInterpreter } =
-  await import("./room-analysis/interpret");
-const interpretRoom = createRoomAnalysisInterpreter(modelConfig);
-const roomAnalysis = new RoomAnalysisService(
-  household,
-  async (input, signal) => {
-    if (!interpretRoom) throw new AppError("model_not_configured");
-    try {
-      return await interpretRoom(input, signal);
-    } catch (cause) {
-      throw new AppError("agent_execution_failed", { cause });
-    }
-  },
-);
 identityEnrollment = identityReferences
   ? createReferenceEnrollment(
       identityReferences,
@@ -222,7 +206,6 @@ const app = createApp({
   household,
   mijiaService,
   deviceLogs,
-  roomAnalysis,
   shutdownSignal: shutdown.signal,
   readAgentUrl,
 });
@@ -237,7 +220,6 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
-    roomAnalysis.close();
     identityEnrollment?.close();
     (async () => {
       const drain = new AbortController();
