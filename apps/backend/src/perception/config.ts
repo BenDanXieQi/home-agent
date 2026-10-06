@@ -1,5 +1,6 @@
 import {
   windowPolicySchema,
+  petSoundConfigSchema,
   cameraVideoQualitySchema,
 } from "@home-agent/api/contracts";
 import { identityConfigSchema } from "./identity/config";
@@ -21,6 +22,7 @@ export const perceptionConfigSchema = z
     dialogue: speechDialogueConfigSchema.prefault({}),
     modelMemoryMiB: z.int().min(512).max(131072).default(4096),
     speech: speechConfigSchema.prefault({}),
+    petSounds: petSoundConfigSchema.prefault({}),
     sources: z
       .union([z.literal("household"), z.array(sourceSelectionSchema).max(8)])
       .default([]),

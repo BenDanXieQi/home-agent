@@ -1,9 +1,8 @@
 import type { identityClassSchema } from "@home-agent/api/contracts";
 import models from "./models.json";
-import { fork } from "node:child_process";
+import { createInferenceProcess } from "../compute/inference-process";
 import { faceEngine } from "./processing-version";
-import pTimeout from "p-timeout";
-import type { z } from "zod";
+import { z } from "zod";
 import { identityLimits, type identityConfigSchema } from "./config";
 import {
   identityRequestSchema,
@@ -18,160 +17,70 @@ export async function createIdentityProcess(
   config: z.infer<typeof identityConfigSchema>,
   signal: AbortSignal,
 ) {
-  signal.throwIfAborted();
-  const child = fork(
-    new URL(
+  const worker = createInferenceProcess<
+    | z.infer<typeof identityRequestSchema>
+    | z.infer<typeof identityPrepareSchema>,
+    Extract<z.infer<typeof identityResponseSchema>, { kind: "ready" }>,
+    Exclude<
+      z.infer<typeof identityResponseSchema>,
+      { kind: "ready" | "failed" }
+    >
+  >({
+    entry: new URL(
       import.meta.url.endsWith(".ts")
         ? "./process-entry.ts"
         : "../identity/process-entry.js",
       import.meta.url,
     ),
-    [config.modelDirectory],
-    {
-      execPath: process.execPath,
-      execArgv: [],
-      serialization: "advanced",
-      stdio: ["ignore", "ignore", "pipe", "ipc"],
-      signal,
-      killSignal: "SIGKILL",
-      env: { ...process.env, ORT_DISABLE_TELEMETRY: "1" },
+    args: [config.modelDirectory],
+    signal,
+    input: z.union([identityRequestSchema, identityPrepareSchema]),
+    initializeTimeoutMs: identityLimits.startupTimeoutMs,
+    closeTimeoutMs: 3000,
+    decode(message) {
+      const result = identityResponseSchema.parse(message);
+      if (result.kind === "failed") return result;
+      if (result.kind === "ready")
+        return { kind: "ready" as const, value: result };
+      return { kind: "result" as const, value: result };
     },
-  );
-  const ready = Promise.withResolvers<void>();
-  const exited = Promise.withResolvers<void>();
-  let loaded = false;
-  let version = "";
+  });
   const preparations = new Map<
     z.infer<typeof identityClassSchema>,
     { available: boolean; error: string | undefined; retryAt: number }
   >();
-  let error: Error | undefined;
-  let pending:
-    | ReturnType<
-        typeof Promise.withResolvers<
-          Exclude<
-            z.infer<typeof identityResponseSchema>,
-            { kind: "ready" | "failed" }
-          >
-        >
-      >
-    | undefined;
-  let stderr = "";
-  child.stderr!.on("data", (bytes: Buffer) => {
-    stderr = (stderr + bytes.toString("utf8")).slice(-4096);
-  });
-  function fail(cause: unknown) {
-    error ??= cause instanceof Error ? cause : new Error(String(cause));
-    ready.reject(error);
-    pending?.reject(error);
-    pending = undefined;
-    if (child.exitCode === null && child.signalCode === null)
-      child.kill("SIGKILL");
-  }
-  child.stderr!.on("error", fail);
-  child.on("error", (cause) => {
-    fail(cause);
-    if (child.pid === undefined) exited.resolve();
-  });
-  child.on("exit", () => {
-    fail(new Error(stderr || "Identity inference process exited"));
-    exited.resolve();
-  });
-  child.on("disconnect", () => {
-    fail(new Error("Identity inference IPC disconnected"));
-  });
-  child.on("message", (message: unknown) => {
-    if (error) return;
-    try {
-      const response = identityResponseSchema.parse(message);
-      if (response.kind === "failed") throw new Error(response.error);
-      if (response.kind === "ready") {
-        if (loaded) throw new Error("Duplicate identity initialization");
-        loaded = true;
-        version = response.version;
-        ready.resolve();
-      } else {
-        if (!pending || !loaded) throw new Error("Unexpected identity result");
-        pending.resolve(response);
-        pending = undefined;
-      }
-    } catch (cause) {
-      fail(cause);
-    }
-  });
   async function close() {
-    fail(new Error("Identity process closed"));
     try {
-      await pTimeout(exited.promise, {
-        milliseconds: 3000,
-        message: "Identity process exit unconfirmed",
-      });
+      await worker.close();
     } catch (cause) {
       throw new IdentityProcessExitError("Identity process exit unconfirmed", {
         cause,
       });
     }
   }
+  let initialized: Awaited<ReturnType<typeof worker.initialize>>;
   try {
-    await pTimeout(ready.promise, {
-      milliseconds: identityLimits.startupTimeoutMs,
-      signal,
-    });
+    initialized = await worker.initialize();
     signal.throwIfAborted();
   } catch (cause) {
-    fail(cause);
     await close();
     throw cause;
   }
-  async function request(
-    input:
-      | z.infer<typeof identityRequestSchema>
-      | z.infer<typeof identityPrepareSchema>,
-    timeoutMs: number,
-  ) {
-    if (error) throw error;
-    if (pending) throw new Error("Identity inference is busy");
-    const message =
-      input.kind === "prepare"
-        ? identityPrepareSchema.parse(input)
-        : identityRequestSchema.parse(input);
-    const result =
-      Promise.withResolvers<
-        Exclude<
-          z.infer<typeof identityResponseSchema>,
-          { kind: "ready" | "failed" }
-        >
-      >();
-    pending = result;
-    try {
-      child.send(message, (cause) => {
-        if (cause) fail(cause);
-      });
-    } catch (cause) {
-      fail(cause);
-    }
-    try {
-      return await pTimeout(result.promise, { milliseconds: timeoutMs });
-    } catch (cause) {
-      fail(cause);
-      throw cause;
-    }
-  }
   return {
     metadata: {
-      processId: child.pid,
+      processId: worker.status.processId,
       engine: faceEngine.engine,
       provider: "cpu" as const,
-      version,
+      version: initialized.version,
       yunetSha256: models.models.yunet.sha256,
       sfaceSha256: models.models.sface.sha256,
       petSha256: models.models.pet.sha256,
     },
     get error() {
-      return error?.message;
+      return worker.status.error?.message;
     },
     async prepare(classes: z.infer<typeof identityPrepareSchema>["classes"]) {
-      const result = await request(
+      const result = await worker.request(
         { kind: "prepare", classes },
         identityLimits.startupTimeoutMs,
       );
@@ -207,7 +116,7 @@ export async function createIdentityProcess(
       input: z.infer<typeof identityRequestSchema>,
       timeoutMs: number,
     ) {
-      const result = await request(input, timeoutMs);
+      const result = await worker.request(input, timeoutMs);
       if (result.kind === "unavailable") {
         if (input.kind !== "tracking")
           preparations.set(input.className, {

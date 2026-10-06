@@ -1,3 +1,4 @@
+import { petSoundLabels } from "./window-presentation";
 import { findPlayableMemberActivityWindow } from "../../modules/members/activity";
 import { useSearch } from "@tanstack/react-router";
 import { CameraAnalysisLayout } from "./CameraAnalysisLayout";
@@ -265,6 +266,11 @@ const WindowRow = memo(function WindowRow({
               : "尚未生成"}
           {entry.incomplete ? " · 不完整窗口" : ""}
         </span>
+        {entry.petSoundKinds?.length ? (
+          <span className="mt-1 block text-xs">
+            {entry.petSoundKinds.map((kind) => petSoundLabels[kind]).join("、")}
+          </span>
+        ) : null}
         {entry.speechCount > 0 ? (
           <span className="mt-1 block text-xs">
             语音文字 {entry.speechCount} 段

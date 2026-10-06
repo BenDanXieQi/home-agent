@@ -5,6 +5,7 @@ import {
   audioRunSchema,
   identityFrameSnapshotSchema,
   speechObservationSchema,
+  petSoundAnalysisSchema,
 } from "./perception";
 import { mediaFrameTimeSchema, frameFingerprintSchema } from "./media";
 
@@ -98,6 +99,7 @@ export const windowSummarySchema = z.object({
     peakRms: z.number().nonnegative(),
     speechBlocks: z.int().nonnegative(),
     vad: z.enum(["speech", "no_speech", "insufficient_input", "unavailable"]),
+    petSounds: petSoundAnalysisSchema.optional(),
   }),
   gate: z.object({
     candidate: z.enum(["video", "audio", "none"]),
@@ -150,6 +152,10 @@ export const windowListEntrySchema = windowDetailSchema
   })
   .extend({
     speechCount: z.int().nonnegative(),
+    petSoundKinds: z
+      .array(z.enum(["dog", "cat"]))
+      .max(2)
+      .optional(),
     identityCount: z.int().nonnegative(),
     identityLabels: z
       .array(

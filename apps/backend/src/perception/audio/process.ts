@@ -7,6 +7,7 @@ import type {
   audioTrackSchema,
   speechRuntimeSchema,
   speechObservationSchema,
+  petSoundObservationSchema,
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
 
@@ -17,7 +18,8 @@ export function createAudioProcess(options: {
     pcm?: z.infer<typeof pcmSchema>,
   ) => void;
   failure: (error: string) => void;
-  // The return value acknowledges inbox delivery, independently of window history.
+  petSound?: (observation: z.infer<typeof petSoundObservationSchema>) => void;
+  // The return value acknowledges conversational inbox delivery, independently of history.
   speech?: (observation: z.infer<typeof speechObservationSchema>) => boolean;
 }) {
   if (process.platform === "win32")
@@ -119,7 +121,15 @@ export function createAudioProcess(options: {
       speech = response.speech;
     } else if (response.kind === "track")
       options.track(response.track, response.pcm);
-    else if (response.kind === "speech") {
+    else if (response.kind === "pet_sound") {
+      if (!closingRequested) {
+        try {
+          options.petSound?.(response.observation);
+        } catch (cause) {
+          fail(cause);
+        }
+      }
+    } else if (response.kind === "speech") {
       if (!closingRequested) {
         try {
           send({
@@ -169,8 +179,9 @@ export function createAudioProcess(options: {
       signal.throwIfAborted();
       send({ kind: "start", input });
     },
-    retrySpeech() {
-      if (ready && !error && !closingRequested) send({ kind: "retry_speech" });
+    retryAnalysis() {
+      if (ready && !error && !closingRequested)
+        send({ kind: "retry_analysis" });
     },
     async stop(trackRunId: string) {
       if (error || stopped || closingRequested) return;

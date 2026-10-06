@@ -87,9 +87,10 @@ bun run --cwd apps/backend evaluate:models \
 bun run --cwd apps/backend benchmark:audio --variant=ffmpeg --sources=8 --seconds=30
 bun run --cwd apps/backend benchmark:audio --variant=libav --sources=8 --seconds=30
 bun run --cwd apps/backend benchmark:audio --variant=service --sources=8 --subscribers=16 --seconds=600
+bun run --cwd apps/backend benchmark:audio --variant=service --sources=8 --pet-sounds --seconds=30
 ```
 
-`ffmpeg` 使用正式独立解码器，`libav` 是仅供对照的进程内 `Demuxer → Decoder → FilterAPI` 链路，二者都执行同一个模型。`service` 使用正式音频服务、监督进程及 IPC；SSE 订阅中最后一路故意缓慢读取，用于核对隔离。命令同时报告外部 FFmpeg 与 node-av 内置 FFmpeg 版本；通过 `PERCEPTION_FFMPEG_PATH` 指定匹配版本可排除版本差异。不同版本的结果只代表具体部署组合，不能当作纯架构对照。对照按顺序运行，记录主机与其他负载；持续验证可与真实摄像头联合运行，但该结果属于竞争负载场景，不能与空闲主机数据混作同条件比较。RSS 包含基准进程及其子进程，不包括无关应用；合成输入不能证明真实摄像头的全部时钟与网络行为。
+`ffmpeg` 使用正式独立解码器，`libav` 是仅供对照的进程内 `Demuxer → Decoder → FilterAPI` 链路，二者都执行同一个模型。`service` 使用正式音频服务、监督进程及 IPC；`--pet-sounds` 同时启用固定猫狗分类模型，需准备模型资产。在 `firstFrameTimeoutMs` 期限内等待所有音轨完成首次分类后，才开始统计稳定运行；分类不可用或预热超时会失败退出。报告逐路完成分类数与分类结束到交付的年龄，按每两秒一次的分析步长核对持续推进，运行中失效或推进不足时失败退出。合成声音只验证联合容量，不验证物种准确率；SSE 订阅中最后一路故意缓慢读取，用于核对隔离。命令同时报告外部 FFmpeg 与 node-av 内置 FFmpeg 版本；通过 `PERCEPTION_FFMPEG_PATH` 指定匹配版本可排除版本差异。不同版本的结果只代表具体部署组合，不能当作纯架构对照。对照按顺序运行，记录主机与其他负载；持续验证可与真实摄像头联合运行，但该结果属于竞争负载场景，不能与空闲主机数据混作同条件比较。RSS 包含基准进程及其子进程，不包括无关应用；合成输入不能证明真实摄像头的全部时钟与网络行为。
 
 保留独立 FFmpeg 解码器的依据是单轨故障可独立回收，以及实际时效与 CPU 成本；进程内 libav 的内存优势不足以单独证明整体更优。对照实现不进入生产选择分支。
 

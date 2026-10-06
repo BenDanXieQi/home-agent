@@ -24,7 +24,7 @@ export function createSpeechRuntime(options: {
     z.infer<typeof speechObservationSchema>,
     "text" | "completedAt" | "modelSha256" | "processingVersion" | "inferenceMs"
   > &
-    Parameters<ReturnType<typeof createSpeechProcess>["recognize"]>[0] & {
+    Parameters<ReturnType<typeof createSpeechProcess>["evaluate"]>[0] & {
       queuedAt: number;
     })[] = [];
   let worker: ReturnType<typeof createSpeechProcess> | undefined;
@@ -272,7 +272,7 @@ export function createSpeechRuntime(options: {
         inFlight = job;
         status = "recognizing";
         publish(job.run.trackRunId);
-        const result = await worker.recognize(job);
+        const result = await worker.evaluate(job);
         // Delivery no longer owns a native inference that source revocation must interrupt.
         inFlight = undefined;
         status = "ready";

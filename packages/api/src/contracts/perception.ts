@@ -394,22 +394,22 @@ export const speechConfigSchema = z.strictObject({
   enabled: z.boolean().default(false),
   idleUnloadMs: z.int().min(5000).max(3600000).default(60000),
 });
-export const speechObservationSchema = z
-  .object({
-    id: z.string().min(1).max(128),
-    run: audioRunSchema,
-    generation: z.uuid(),
-    startSample: z.int().nonnegative(),
-    endSample: z.int().positive(),
+export const audioObservationSchema = sampleInterval.extend({
+  id: z.string().min(1).max(128),
+  run: audioRunSchema,
+  generation: z.uuid(),
+  observedStartAt: z.number(),
+  observedEndAt: z.number(),
+  completedAt: z.number(),
+  modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  inferenceMs: z.number().nonnegative(),
+});
+export const speechObservationSchema = audioObservationSchema
+  .extend({
     speechEndSample: z.int().positive(),
     boundary: z.enum(["pause", "length_limit"]),
-    observedStartAt: z.number(),
-    observedEndAt: z.number(),
-    completedAt: z.number(),
     text: z.string().max(4096),
-    modelSha256: z.string().regex(/^[a-f0-9]{64}$/),
     processingVersion: z.literal("sensevoice-silero-frame-processor"),
-    inferenceMs: z.number().nonnegative(),
   })
   .refine(
     (speech) =>
@@ -460,6 +460,47 @@ export const speechRuntimeSchema = z.object({
   inboxUnconfirmed: z.int().nonnegative(),
   error: z.string().max(4096).optional(),
 });
+export const petSoundConfigSchema = z.strictObject({
+  enabled: z.boolean().default(false),
+  threshold: z.number().min(0.1).max(1).default(0.4),
+});
+export const petSoundObservationSchema = audioObservationSchema
+  .extend({
+    processingVersion: z.literal("zipformer-pet-overlap"),
+    detections: z
+      .array(
+        z.object({
+          kind: z.enum(["dog", "cat"]),
+          score: z.number().min(0).max(1),
+          label: z.string().max(64),
+        }),
+      )
+      .max(2),
+  })
+  .refine(
+    (value) =>
+      value.startSample < value.endSample &&
+      value.observedStartAt < value.observedEndAt,
+    "Invalid pet sound interval",
+  );
+export const audioObservationEventSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("speech"), observation: speechObservationSchema }),
+  z.object({
+    kind: z.literal("pet_sound"),
+    observation: petSoundObservationSchema,
+  }),
+]);
+export const petSoundAnalysisSchema = z.object({
+  status: z.enum(["insufficient_input", "ready", "unavailable"]),
+  modelSha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable(),
+  error: z.string().max(4096).optional(),
+  chunks: z.array(petSoundObservationSchema).max(8),
+  dropped: z.int().nonnegative(),
+  validity: speechTrackSchema.shape.validity,
+});
 export const audioTrackSchema = z.object({
   run: audioRunSchema,
   channels: z
@@ -497,6 +538,7 @@ export const audioTrackSchema = z.object({
   vadStatus: z.enum(["insufficient_input", "ready", "unavailable"]),
   vadError: z.string().max(4096).optional(),
   speech: speechTrackSchema.optional(),
+  petSounds: petSoundAnalysisSchema.optional(),
   energyRemainder: z.int().min(0).max(479),
   vadRemainder: z.int().min(0).max(511),
   validity: z.enum(["no_data", "valid", "expired", "unavailable"]),
@@ -506,6 +548,7 @@ export const perceptionResourceSchema = z.object({
   videoWorkers: z.int().positive(),
   audioThreads: z.int().nonnegative(),
   speechThreads: z.int().nonnegative(),
+  petSoundThreads: z.int().nonnegative(),
   identityThreads: z.int().nonnegative(),
   modelMemoryMiB: z.int().positive(),
   reservedModelMiB: z.int().positive(),
@@ -522,6 +565,7 @@ export const perceptionSnapshotSchema = z.object({
     cpuRatio: z.number().positive().max(1),
     modelMemoryMiB: z.int().positive(),
     speech: speechConfigSchema,
+    petSounds: petSoundConfigSchema,
     sampleFps: z.number(),
     maxFrameAgeMs: z.number(),
     firstFrameTimeoutMs: z.number(),

@@ -1,4 +1,7 @@
-import { mkdtemp, writeFile, rename, rm, stat } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { mkdtemp, rename, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { WindowEncodingInput } from "./encoding-input";
 import { windowLimits } from "../window/limits";
@@ -34,9 +37,9 @@ export async function encodeWindow(
         )
       )
         throw new Error("Window frame dimensions changed");
-      await writeFile(
-        join(directory, "frames.rgb"),
-        frames.map((frame) => frame.rgb),
+      await pipeline(
+        Readable.from(frames.map((frame) => frame.rgb)),
+        createWriteStream(join(directory, "frames.rgb")),
         { signal },
       );
       args.push(
@@ -53,11 +56,13 @@ export async function encodeWindow(
       );
     }
     if (parameters.audioIncluded) {
-      await writeFile(
-        join(directory, "audio.pcm"),
-        audio.map(({ pcm }) =>
-          Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
+      await pipeline(
+        Readable.from(
+          audio.map(({ pcm }) =>
+            Buffer.from(pcm.buffer, pcm.byteOffset, pcm.byteLength),
+          ),
         ),
+        createWriteStream(join(directory, "audio.pcm")),
         { signal },
       );
 
@@ -145,7 +150,16 @@ export async function encodeWindow(
       );
     else args.push("-an");
     const output = join(directory, image ? "media.jpg" : "media.mp4");
-    args.push("-t", "5", "-fs", String(windowLimits.productBytes));
+    const durationSeconds = Math.max(
+      5,
+      (parameters.endedAt - parameters.startedAt) / 1000,
+    );
+    args.push(
+      "-t",
+      String(durationSeconds),
+      "-fs",
+      String(windowLimits.productBytes),
+    );
     if (image) args.push("-f", "image2", "-update", "1");
     else
       args.push(

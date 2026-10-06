@@ -1,12 +1,12 @@
 import { inferenceRequest } from "../compute/inference-protocol";
 import { sendProcessMessage } from "../compute/ipc";
-import { createSpeechModel } from "./model";
-import { speechJobSchema, speechResponseSchema } from "./protocol";
-import { senseVoiceModel } from "./limits";
+import { createPetSoundModel } from "./model";
+import { petSoundJobSchema, petSoundResponseSchema } from "./protocol";
+import { petSoundModelSha256 } from "./model";
 import type { z } from "zod";
 
 function send(
-  message: z.infer<typeof speechResponseSchema>,
+  message: z.infer<typeof petSoundResponseSchema>,
   requestId: string | null = null,
 ) {
   return sendProcessMessage(message, requestId);
@@ -17,7 +17,7 @@ function fatal(error: unknown) {
   failed = true;
   send({ kind: "fatal", error: String(error).slice(0, 4096) })
     .catch((cause: unknown) => {
-      console.error("Speech fatal publication failed", cause);
+      console.error("Pet sound fatal publication failed", cause);
     })
     .finally(() => process.exit(1));
 }
@@ -25,17 +25,19 @@ process.on("disconnect", () => {
   process.exit(0);
 });
 try {
-  const model = await createSpeechModel();
+  const model = await createPetSoundModel();
   process.on("message", (input: unknown) => {
     try {
       const { input: job, requestId } =
-        inferenceRequest(speechJobSchema).parse(input);
-      const result = model.recognize(job.samples);
+        inferenceRequest(petSoundJobSchema).parse(input);
+      const started = performance.now();
+      const events = model.classify(job.samples);
       send(
         {
           kind: "result",
           id: job.id,
-          ...result,
+          events,
+          elapsedMs: performance.now() - started,
           rssBytes: process.memoryUsage().rss,
         },
         requestId,
@@ -49,7 +51,7 @@ try {
   }, 1000);
   await send({
     kind: "ready",
-    modelSha256: senseVoiceModel.sha256,
+    modelSha256: petSoundModelSha256,
     rssBytes: process.memoryUsage().rss,
   });
 } catch (error) {
