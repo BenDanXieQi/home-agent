@@ -2,7 +2,7 @@
 
 当前为本项目自有、独立运行的第一方模型服务，提供流式对话、会话持久化、房间上下文分析、语音请求判断和执行追踪，通过 backend 转发请求。房间分析只解释 backend 本次提交的有界设备证据；普通聊天通过四个只读工具查询家庭概览、设备清单、设备状态和成员资料；人宠位置、长期记忆和设备控制未接入。
 
-当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。后续家庭能力见[家庭语义目标与领域模型](../../docs/plans/household-model.md)与 [第一方 Agent 协作计划](../../docs/plans/household-automation.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；房间分析和语音判断各使用单次结构化模型调用，不写对话检查点；它们与聊天共用模型配置。
+当前房间分析的启用、结构化结果和限制见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。后续家庭能力见[家庭助手的信息边界与状态归属](../../docs/plans/household-model.md)与 [家庭观察与 Agent 工作协作设计](../../docs/plans/household-automation.md)。下述 checkpoint 保存对话与执行状态，不承担后台当前房间总结或跨任务长期记忆的职责；房间分析和语音判断各使用单次结构化模型调用，不写对话检查点；它们与聊天共用模型配置。
 
 Agent 使用官方 `@langchain/langgraph-checkpoint-postgres`，通过 `pg` 连接 PostgreSQL。默认复用根目录 `DATABASE_URL`；可用 `AGENT_DATABASE_URL` 指定独立账号或数据库。状态表位于固定的 `agent_state` schema，使用普通 PostgreSQL 表，由 checkpointer 管理，不属于 backend 的 Drizzle schema，也不转换为 TimescaleDB hypertable。
 
