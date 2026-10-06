@@ -35,9 +35,13 @@ class WindowProduct {
   constructor(
     public view: z.infer<typeof mediaViewSchema>,
     resources: ReturnType<typeof createMediaResources>,
+    changed: () => void,
   ) {
     this.media = resources.create(view.readableUntil, (reason) => {
-      this.view.state = reason === "cancelled" ? "revoked" : reason;
+      const state = reason === "cancelled" ? "revoked" : reason;
+      if (this.view.state === state) return;
+      this.view.state = state;
+      changed();
     });
   }
   get state() {
@@ -85,6 +89,16 @@ export function createWindowMedia(
   directory: string,
 ) {
   const products = new Map<string, WindowProduct>();
+  const listeners = new Set<() => void>();
+  function changed() {
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (cause) {
+        console.error("Window media notification failed", cause);
+      }
+    }
+  }
   const resources = createMediaResources({
     bytes: windowLimits.productsBytes,
     concurrency: windowLimits.encodingConcurrency,
@@ -197,8 +211,10 @@ export function createWindowMedia(
         error: null,
       },
       resources,
+      changed,
     );
     products.set(idKey, item);
+    changed();
     inputBytes += lease.bytes;
     const signal = AbortSignal.any([
       lease.authorizationSignal,
@@ -213,6 +229,7 @@ export function createWindowMedia(
         signal.throwIfAborted();
         if (storageError) throw new Error(storageError);
         item.view.state = "generating";
+        changed();
         const mediaId = crypto.randomUUID();
         const path = join(
           directory,
@@ -243,6 +260,7 @@ export function createWindowMedia(
           mediaId,
           contentType: result.contentType,
         };
+        changed();
       },
       failed: (cause) => {
         if (item.media.retired) return;
@@ -250,6 +268,7 @@ export function createWindowMedia(
         item.view.state =
           !access || access.inputState === "revoked" ? "revoked" : "failed";
         item.view.error = String(cause).slice(0, 1024);
+        changed();
       },
     });
     const releaseInput = () => {
@@ -271,13 +290,21 @@ export function createWindowMedia(
           error: String(cause).slice(0, 1024),
         },
         resources,
+        changed,
       );
       products.set(key(entry, selection), item);
+      changed();
     }
   }
   return {
     capture,
     prune,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     view(id: string, selection: z.infer<typeof mediaSelectionSchema>) {
       return view(window(id), selection);
     },
@@ -356,6 +383,7 @@ export function createWindowMedia(
       await resources.close();
       await ready;
       products.clear();
+      listeners.clear();
     },
   };
 }

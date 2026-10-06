@@ -53,6 +53,8 @@ bun --env-file=.env scripts/web-entry.ts stop         # 只停止本项目入口
 
 Docker 数据库通过 `.env` 的 `POSTGRES_PORT` 映射到本机，容器内端口固定为 5432；`DATABASE_URL` 的端口须与 `POSTGRES_PORT` 一致。backend 和 Agent 运行在本机，监听地址分别由 `.env` 的 `BACKEND_HOST` / `BACKEND_PORT`、`AGENT_HOST` / `AGENT_PORT` 设置，无需 Docker 端口映射。Caddy 入口监听 `127.0.0.1:8443` 与 `[::1]:8443`，浏览器使用 `https://localhost:8443`；前端开发服务器监听内部 `127.0.0.1:5173`，API 转发使用 backend 的环境变量配置。go2rtc 使用 host 网络，不配置 `ports` 映射；启动命令统一使用本机 1984（API）、8554（RTSP）和 8555（WebRTC）端口。
 
+Agent 的 `BACKEND_URL` 默认 `http://127.0.0.1:3000`，用于后台上下文订阅和只读历史查询；Backend 监听地址或端口自定义时须显式设置该地址。接收不要求模型配置，诊断入口见[Agent README](../apps/agent/README.md#当前数据接收与只读历史客户端)。
+
 backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
 
 统一启动是开发便利，不表示 backend 依赖 Agent 在线。当前摄像头预览与本地检测不调用 Agent，也不要求 `AGENT_MODEL` 或 `OPENAI_API_KEY`；Agent 不在线时聊天不可用、服务检查显示该项不可达，不阻止已配置的本地检测。

@@ -43,7 +43,7 @@ export function createLockedTransactions(
     });
 }
 
-/** Called through the account's serial write entry; retains only an unconfirmed commit. */
+/** Called through an owner's serial write entry; retains only an unconfirmed commit. */
 export function createConfirmedWriter<TTransaction>(
   transaction: <T>(
     key: string,
@@ -57,6 +57,9 @@ export function createConfirmedWriter<TTransaction>(
     confirm: (
       tx: TTransaction,
     ) => Promise<{ committed: true; value: T } | { committed: false }>,
+    onSettled?: (
+      result: Awaited<ReturnType<typeof confirm>>,
+    ) => void | Promise<void>,
   ) => {
     await pending?.();
     let attempted = false;
@@ -70,8 +73,9 @@ export function createConfirmedWriter<TTransaction>(
         throw new StorageOutcomeUnknownError();
       }
     };
+    let value: T;
     try {
-      return await transaction(key, async (tx) => {
+      value = await transaction(key, async (tx) => {
         const result = await run(tx, () => {
           attempted = true;
         });
@@ -82,12 +86,15 @@ export function createConfirmedWriter<TTransaction>(
       // A rejected callback never reaches COMMIT; the transaction rolls it back.
       if (!attempted || !callbackCompleted) throw error;
       pending = async () => {
-        await recover();
+        const result = await recover();
+        await onSettled?.(result);
       };
       const result = await recover();
-      if (result.committed) return result.value;
-      throw error;
+      if (!result.committed) throw error;
+      value = result.value;
     }
+    await onSettled?.({ committed: true, value });
+    return value;
   };
   return Object.assign(write, {
     async settle() {

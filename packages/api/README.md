@@ -14,9 +14,9 @@ Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agen
 
 网络接收入口负责完整校验输入。家庭 SSE（服务端持续推送事件的 HTTP 连接）入口使用 `stateChangeSchema.parse` 一次性校验整批变化及每条数据的标识，再把已校验批次交给 `applyChanges`；后者生成新的状态，不修改原状态，并复用未变化的数据对象。快照通过 `snapshotSchema` 校验结构并复用相同的条目标识规则，不对已校验条目重复运行 schema 校验。
 
-完整规格由后端按 URN 共享，不进入公共状态。设备记录仅包含 `spec_id/spec_status/spec_error`、分类和能力标签；初始准备值由 `initialSpecification` 提供。候选家庭只由设置专用接口返回，当前协议不包含 `latest/source_health/rule_status` 空占位字段。
+完整规格由后端按 URN 共享，不进入 Web 家庭公共状态；Agent 专用通路在 `household` 部分另行交付完整规格。Web 设备记录仅包含 `spec_id/spec_status/spec_error`、分类和能力标签；初始准备值由 `initialSpecification` 提供。候选家庭只由设置专用接口返回，当前协议不包含 `latest/source_health/rule_status` 空占位字段。
 
-`src/contracts/perception.ts` 定义本地检测的健康、音轨、可选猫狗声音分类和语音转写快照，通过 `@home-agent/api/contracts` 导出。`@home-agent/api/speech-dialogue` 定义短时语音收件箱及 backend 内部语音判断输入和结果；采样区间、时间关系及判断字段的一致性由共享 schema 约束，接收边界完整校验，内部使用已校验数据。用法与期限见[语音交付](../../docs/perception.md#语音片段交付与对话判断)。这些契约不提供媒体读取或设备执行；聊天接口仍只承载文本对话。Backend 向 Agent 交付已有数据的专用协议见[数据交付计划](../../docs/plans/household-automation.md#专用推送与接收)，目前待实施。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
+`src/contracts/perception.ts` 定义本地检测的健康、音轨、可选猫狗声音分类和语音转写快照，通过 `@home-agent/api/contracts` 导出。`@home-agent/api/speech-dialogue` 定义短时语音收件箱及 backend 内部语音判断输入和结果；采样区间、时间关系及判断字段的一致性由共享 schema 约束，接收边界完整校验，内部使用已校验数据。用法与期限见[语音交付](../../docs/perception.md#语音片段交付与对话判断)。这些契约不提供媒体读取或设备执行；聊天接口仍只承载文本对话。Backend 向 Agent 交付已有数据的专用协议见[Agent 数据交付契约](#agent-数据交付契约)。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
 
 `@home-agent/api/immutable` 集中配置 Mutative，更新时只复制变化部分、复用未变化对象，称为“结构共享”：
 
@@ -88,10 +88,36 @@ bun run --cwd packages/api test -- tests/contracts/household.test.ts
 
 ## 设备历史契约
 
-`@home-agent/api/device-history` 从设备能力、属性地址和值 schema 派生固定说明、接纳报告、查询、两种页响应与 Web 历史 SSE。记录按 `kind=property|online` 区分，在线 `value` 为布尔值，不附带 MIoT 地址或属性说明；在线来源 `directory` 表示设备清单读取。共享 `deviceHistoryPolicy` 定义 365 天保留、页大小、请求／响应容量，`deviceHistoryStreamPolicy` 定义历史流的连接、事件与等待预算。`@home-agent/api/agent-context` 复用设备历史契约并增加 `kind=device_reports`；专用 Agent SSE、成员出现与音视频历史分支尚未实现。
+`@home-agent/api/device-history` 从设备能力、属性地址和值 schema 派生固定说明、接纳报告、查询、两种页响应与 Web 历史 SSE。记录按 `kind=property|online` 区分，在线 `value` 为布尔值，不附带 MIoT 地址或属性说明；在线来源 `directory` 表示设备清单读取。共享 `deviceHistoryPolicy` 定义 365 天保留、页大小、请求／响应容量，`deviceHistoryStreamPolicy` 定义历史流的连接、事件与等待预算。`@home-agent/api/agent-context` 的 `kind=device_reports` 分支复用设备历史契约，其他分支见[Agent 数据交付契约](#agent-数据交付契约)。
 
 时间区间校验 UTC、至多微秒精度及 `start < end`；属性编号 `siid/piid` 复用共享地址 schema，只接受 `1..2147483647` 的整数。查询统一返回已保存变化记录，不含表达方式参数或同值段字段；历史写入跳过连续同值，不保留每次重复报告。查询支持 device_ids、kinds 和 properties；kinds 默认两类，properties 仅匹配原生属性，筛选条件取交集。`order` 默认 `asc`，Web 使用 `desc` 按最新优先读取。Backend 对筛选去重并固定排序，校验游标、查询方向及当前家庭资格；调用方不解释游标内部内容。
 
 Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=live|page|export`。live 要求降序且不带游标，首批为 `page`，后续 `change` 携带变化记录、完整有序 `record_ids` 与 `removed_ids`；记录 ID 使用 observation_id。`page` 固定区间返回一页后发送 `complete`；`export` 按固定区间在单个 SQL 查询快照内生成最多 64 MiB 的临时页文件，事务结束后连续交付有界数据批次（next_cursor 为 null），期限沿用 Backend 读取配置，完成后发送 `complete`，两者随后关闭。空心跳使用 `heartbeat`，流内失败使用公共 `error` 契约。Agent 历史入口继续使用一次性 JSON 响应。来源、分页、保留与容量语义见[设备状态历史](../../docs/household-runtime.md#设备状态历史)，支持基线与验证边界见[数据库维护与验证限制](../../docs/household-runtime.md#数据库维护与验证限制)。
 
 家庭历史 HTTP 边界使用公共 `household_scope_changed`、`household_unavailable`、`household_capacity_exceeded` 与 `household_storage_unavailable` 错误码，复用统一错误响应结构和展示映射；家庭领域异常不引入供应商协议。
+
+## Agent 数据交付契约
+
+[`src/contracts/agent-context.ts`](src/contracts/agent-context.ts) 从已有家庭、成员、感知与窗口 schema 派生专用推送和历史分支，统一通过 `@home-agent/api/agent-context` 导入。`agentContextPolicy` 定义整理缓存、各部分、待发送内容、单次传输及历史响应的预算；来源语义与验证限制由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。
+
+`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部五部分，后续只提供变化部分；省略表示保留，提供表示整体替换，ready 的空集合清空旧集合。heartbeat 数据为空对象，不改变业务部分或同步状态。
+
+| 部分               | data 来源                                                        |
+| ------------------ | ---------------------------------------------------------------- |
+| `household`        | 家庭、房间、设备及完整规格                                       |
+| `device_state`     | 最新属性报告、设备在线值、采集与来源状态                         |
+| `members`          | 人物／宠物登记资料                                               |
+| `member_sightings` | 最近出现记录及其实体关联                                         |
+| `perception`       | 当前综合观察及完整窗口详情，包含视觉、音频、转写、身份和媒体状态 |
+
+每部分包含 `status/read_at/data/reason/truncated`。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。truncated 只说明该部分快照按条数或字节预算省略了完整记录，不证明历史完整。最近出现按 `lastObservedAt/id` 降序，窗口按 `endedAt/id` 降序；设备清单、成员资料与设备当前值超限时整部分失败，单个窗口超限也失败。
+
+历史 `POST /api/agent/context/history` 的输入和响应均按 kind 定义判别联合，各分支只接受自己的字段。公共输入为预期绑定 `account_id/home_id`、UTC 半开区间 `start/end`、`limit/cursor`，默认每页 100 条、上限 1,000 条。`member_sightings` 可选 `member_ids` 和 `sources`，`perception_windows` 可选 `sources`；sources 为 `{ device_id, channel? }` 数组，镜头值复用已有窗口 schema，省略 channel 匹配该设备全部镜头。筛选数组省略表示不筛选，显式空数组拒绝；对象去重并固定排序。
+
+成员响应的 records 由 `memberSightingRecordSchema` 定义，保留记录 ID、原时间、原 data/evidence、当前归因及 context_entities 关联。区间条件为 `firstObservedAt < end && lastObservedAt >= start`，按 `firstObservedAt/id` 升序分页。member_ids 匹配当前已知归因，sources 匹配记录来源，两类筛选取交集。retention 明确数据库存储、当前修订、观察跨度不证明持续在场、分页不保持快照。
+
+音视频响应的每条记录包含完整 `window` 与 `matches`。后者分别引用命中的视觉窗口 ID、音轨 run/代次和转写片段 ID；视觉、非空音频及每条转写的原观察区间任一满足相同重叠规则即返回整体窗口。按 `startedAt/id` 升序分页，媒体仅返回现有状态与引用。retention 明确内存存储、最长约 30 分钟、可能提前淘汰、重启丢失及区间完整性不保证；已不存在或已撤销的窗口不返回。
+
+新增响应保留 `kind/account_id/home_id/start/end/records/next_cursor`。游标绑定 kind、家庭身份、绑定记录 updated_at、规范化对象条件和区间；音视频还绑定感知 instanceId，Backend 重启后拒绝旧音视频游标。同一绑定的成员历史可跨进程续页，每页仍重新核验当前资格。分页按完整记录及字节预算交付，游标指向最后实际返回记录，首条单独超预算返回容量错误，无下一页时 next_cursor 为 null。归因修订、晚到内容和淘汰可改变后续页，分页结果不作为完整消费记录。成功无匹配记录返回空数组，来源不可用或读取失败返回错误。
+
+该契约交付已有来源材料，不包含凭据、参考照片、特征向量或媒体字节，不定义模型调查、默认模型输入、生活事件推断或语义回写。

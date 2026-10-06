@@ -5,7 +5,7 @@ import {
 } from "@home-agent/api/device-history";
 import { apiErrorSchema } from "@home-agent/api/contracts";
 import { rpc } from "../../api/client";
-import { consumeEventStream } from "../../api/event-stream";
+import { consumeEventStream } from "@home-agent/api/http/event-stream";
 import { RequestError } from "../../api/errors";
 import type { HistoryQuery } from "./page";
 

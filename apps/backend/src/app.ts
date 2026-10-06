@@ -1,4 +1,6 @@
 import { createAgentContextRoutes } from "./agent-context/routes";
+import type { createAgentContextService } from "./agent-context/service";
+import type { createMemberActivityRepository } from "./household/identity/activity-repository";
 import type { createDeviceHistoryQuery } from "./household/history/query";
 import { createDeviceHistoryRoutes } from "./household/history/routes";
 import type { createDeviceHistoryService } from "./household/history/service";
@@ -34,6 +36,10 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  agentContext: ReturnType<typeof createAgentContextService>;
+  memberActivityRepository:
+    | ReturnType<typeof createMemberActivityRepository>
+    | undefined;
   deviceHistory?:
     | Pick<
         ReturnType<typeof createDeviceHistoryService>,
@@ -62,6 +68,8 @@ type AppDependencies = {
 };
 
 export function createApp({
+  agentContext,
+  memberActivityRepository,
   deviceHistory,
   deviceHistoryQuery,
   spatialService = createSpatialService(undefined, () => []),
@@ -123,6 +131,9 @@ export function createApp({
         deviceHistoryQuery,
         shutdownSignal,
         environment.BACKEND_REQUEST_TIMEOUT_MS,
+        agentContext,
+        memberActivityRepository,
+        perception,
       ),
     )
     .route(

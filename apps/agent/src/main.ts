@@ -13,8 +13,15 @@ import {
 } from "@home-agent/api/http/read-body";
 import { createAssistant } from "./assistant";
 import { loadConfig } from "./config";
+import { createContextReceiver } from "./context/receiver";
+import { createHistoryClient } from "./context/history-client";
 
 const config = loadConfig();
+const receiver = createContextReceiver({ backendUrl: config.BACKEND_URL });
+export const readHistory = createHistoryClient({
+  backendUrl: config.BACKEND_URL,
+  receiver,
+});
 const assistant = createAssistant(config);
 const allowed = createLocalAccessCheck([config.AGENT_PORT]);
 const server = Bun.serve({
@@ -39,6 +46,8 @@ const server = Bun.serve({
         );
       if (!allowed(request, listener.requestIP(request)?.address))
         throw new AppError("local_access_required");
+      if (request.method === "GET" && path === "/api/received-context")
+        return Response.json(receiver.snapshot(), { headers });
       if (request.method !== "POST" || path !== "/api/chat")
         throw new AppError("not_found");
       if (
@@ -118,10 +127,11 @@ const server = Bun.serve({
     }
   },
 });
+receiver.start();
 console.info(`Home Agent listening on ${server.url.toString()}`);
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    server.stop(true).catch(() => {
+    Promise.all([receiver.stop(), server.stop(true)]).catch(() => {
       console.error("Failed to stop Home Agent");
       process.exitCode = 1;
     });

@@ -146,8 +146,18 @@ export function createWindowStore(options: {
     petSoundAssociations: 0,
   };
   const listeners = new Set<(id: string) => void>();
+  const contentListeners = new Set<() => void>();
   let bytes = 0;
   let descriptionBytes = 0;
+  function contentChanged() {
+    for (const listener of contentListeners) {
+      try {
+        listener();
+      } catch (cause) {
+        console.error("Window content notification failed", cause);
+      }
+    }
+  }
   function clearContext(entry: ReturnType<typeof source>) {
     if (!entry.context) return;
     bytes -=
@@ -185,12 +195,14 @@ export function createWindowStore(options: {
     entry.descriptionBytes += addedBytes;
     descriptionBytes += addedBytes;
     entry.summary.inputState = next;
-    if (previous !== "available") return;
-    if (count) counters[reason]++;
-    bytes -= entry.bytes;
-    entry.bytes = 0;
-    entry.input.frames = [];
-    entry.input.audio = [];
+    if (previous === "available") {
+      if (count) counters[reason]++;
+      bytes -= entry.bytes;
+      entry.bytes = 0;
+      entry.input.frames = [];
+      entry.input.audio = [];
+    }
+    if (next !== previous) contentChanged();
   }
   function forget(id: string, entry: RetainedWindow) {
     stopAcceptingAnalysis(entry);
@@ -198,6 +210,7 @@ export function createWindowStore(options: {
     entry.authorization.abort(new Error("Window description removed"));
     descriptionBytes -= entry.descriptionBytes;
     windows.delete(id);
+    contentChanged();
   }
   function limitDescriptions() {
     while (
@@ -364,6 +377,7 @@ export function createWindowStore(options: {
     while (ready.length > windowLimits.readyPerSource)
       release(ready.shift()!, "evicted");
     limitDescriptions();
+    if (windows.has(summary.id) && admitted) contentChanged();
     if (
       windows.has(summary.id) &&
       admitted &&
@@ -548,6 +562,7 @@ export function createWindowStore(options: {
       entry.analysisBytes = analysisBytes;
       descriptionBytes += addedBytes;
       entry.descriptionBytes += addedBytes;
+      if (admitted) contentChanged();
       if (!wasAdmitted && admitted && entry.summary.inputState === "available")
         for (const listener of listeners) listener(id);
     }
@@ -567,6 +582,12 @@ export function createWindowStore(options: {
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
+      };
+    },
+    subscribeContent(listener: () => void) {
+      contentListeners.add(listener);
+      return () => {
+        contentListeners.delete(listener);
       };
     },
     tick,
@@ -797,6 +818,41 @@ export function createWindowStore(options: {
       const entry = lookup(id, now);
       return entry ? structuredClone(entry.summary) : undefined;
     },
+    *selectDetails(
+      now: number,
+      selection: {
+        matches: (
+          summary: Readonly<z.infer<typeof windowSummarySchema>>,
+        ) => boolean;
+        after?: Pick<z.infer<typeof windowSummarySchema>, "startedAt" | "id">;
+        limit: number;
+      },
+    ) {
+      for (const [id, entry] of windows) maintain(id, entry, now);
+      const selected = [...windows.values()]
+        .filter(
+          ({ summary }) =>
+            windowAdmitted(summary) &&
+            summary.inputState !== "revoked" &&
+            (!selection.after ||
+              summary.startedAt > selection.after.startedAt ||
+              (summary.startedAt === selection.after.startedAt &&
+                summary.id > selection.after.id)) &&
+            selection.matches(summary),
+        )
+        .toSorted(
+          ({ summary: left }, { summary: right }) =>
+            left.startedAt - right.startedAt ||
+            (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+        )
+        .slice(0, selection.limit)
+        .map(({ summary }) => summary.id);
+      for (const id of selected) {
+        const entry = lookup(id, now);
+        if (entry && entry.summary.inputState !== "revoked")
+          yield structuredClone(entry.summary);
+      }
+    },
     access(id: string, now: number) {
       const entry = lookup(id, now);
       return entry
@@ -885,6 +941,7 @@ export function createWindowStore(options: {
       windows.clear();
       analysisWindows.clear();
       listeners.clear();
+      contentListeners.clear();
       descriptionBytes = 0;
     },
   };

@@ -2,7 +2,7 @@
 
 本文记录 MiLoCo 如何筛选媒体、调用多模态模型、核验人宠身份、保存参考样本，以及感知事件进入 Agent 后的会话与上下文管理，供本项目核对参考行为与设计差异。MiLoCo 的登记成员身份判断主要由多模态 LLM（大语言模型）完成，本地检测、跟踪和状态机负责定位目标、组织候选及接纳结果；主模型请求频率与单个人物的身份重审频率是两个独立问题。
 
-源码范围固定为 [XiaoMi/xiaomi-miloco 提交 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`][mi-commit]。下文参数来自该提交的默认配置与实际分支，不代表某台机器的覆盖配置、实测请求率或识别准确率。引用路径相对于 MiLoCo 仓库；本机 checkout 位置由根目录 `AGENTS.local.md` 指定，不写入共享文档。本项目已实现能力见[本地感知](../perception.md)，待实施契约见[媒体计划](../plans/media-perception.md)和[Agent 协作计划](../plans/household-automation.md)。
+源码范围固定为 [XiaoMi/xiaomi-miloco 提交 `cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8`][mi-commit]。下文参数来自该提交的默认配置与实际分支，不代表某台机器的覆盖配置、实测请求率或识别准确率。引用路径相对于 MiLoCo 仓库；本机 checkout 位置由根目录 `AGENTS.local.md` 指定，不写入共享文档。本项目已实现能力见[本地感知](../perception.md)，待实施契约见[媒体计划](../plans/media-perception.md)，现有 Agent 数据交付的未验证范围见[Agent 通路验证边界](../household-runtime.md#agent-通路验证边界)。
 
 ## 实时媒体处理
 
@@ -108,7 +108,7 @@ OpenClaw 插件预设每 15 分钟运行感知摘要，读取增量日志，由�
 
 巡检通过外部感知记忆和已处理台账接续，技能要求每轮先读取台账，处理后写回，以避免隔离会话重复提醒或操作。这是技能要求与模型行为，不能当作数据库级去重保证。固定会话仍可能增长；OpenClaw 插件检测到 `context overflow`（上下文溢出）后，尝试删除后台会话及 transcript（消息历史）并重建重试一次，主人实际 IM 会话不走该删除路径。宿主自身的压缩、裁剪和历史加载策略及实机效果需另行核对，插件代码不能证明固定会话永不溢出。依据：[巡检技能][mi-agent-patrol]、[溢出处理][mi-agent-webhook]。
 
-这些机制说明 MiLoCo 采用“来源筛选与分流、部分固定会话、部分独立执行、外部摘要与按需读取”的混合方案，不证明存在一份长期装入全部家庭经历的主上下文。本项目当前仅实施[Backend 数据送达 Agent](../plans/household-automation.md)，模型上下文、证据保留和任务恢复另行设计，不由该参考推定为已采用机制。
+这些机制说明 MiLoCo 采用“来源筛选与分流、部分固定会话、部分独立执行、外部摘要与按需读取”的混合方案，不证明存在一份长期装入全部家庭经历的主上下文。本项目已提供[Backend 数据送达 Agent](../household-runtime.md#agent-当前数据与材料历史)，模型上下文、证据保留和任务恢复另行设计，不由该参考推定为已采用机制。
 
 ## 与本项目的职责对齐
 
@@ -121,7 +121,7 @@ OpenClaw 插件预设每 15 分钟运行感知摘要，读取增量日志，由�
 | 宠物身份             | 实验功能中的模型判断，本地默认不跟踪猫狗 | 已实现猫狗位置跟踪，个体身份尚未接入；人体 ReID 不确认某只宠物                     |
 | 自动样本保存         | 连续确认、额外模型核验及定期清理         | 首期 P6 使用用户登记资料，自动样本积累另行定义资格与纠错                           |
 
-本项目媒体来源扩展见[媒体计划](../plans/media-perception.md)，当前数据通路见[数据交付计划](../plans/household-automation.md)；后续调用预算和采用参数另行确定。MiLoCo 采用 LLM 身份核验是它的实现选择，不构成本地身份识别在算法上必须依赖 LLM 的证明；本参考也不把讨论中的其他识别路线写成已采用能力。
+本项目媒体来源扩展见[媒体计划](../plans/media-perception.md)，当前数据通路见[家庭运行时](../household-runtime.md#agent-当前数据与材料历史)；后续调用预算和采用参数另行确定。MiLoCo 采用 LLM 身份核验是它的实现选择，不构成本地身份识别在算法上必须依赖 LLM 的证明；本参考也不把讨论中的其他识别路线写成已采用能力。
 
 [mi-commit]: https://github.com/XiaoMi/xiaomi-miloco/tree/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8
 [mi-settings]: https://github.com/XiaoMi/xiaomi-miloco/blob/cad239dca9b7a2dd3bf0e6565a26cf9eef6581b8/backend/miloco/src/miloco/config/settings.yaml

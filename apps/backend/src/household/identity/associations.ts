@@ -2,6 +2,7 @@ import {
   memberAssociationSchema,
   type perceptionSnapshotSchema,
 } from "@home-agent/api/contracts";
+import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
 import type { createIdentityMatching } from "./matching";
 import type { createAppearanceIdentity } from "./appearance";
@@ -125,9 +126,14 @@ export function createMemberAssociations(
             ];
           return [];
         });
-        next.set(run.runId, associations);
+        next.set(
+          run.runId,
+          associations.filter((association) => association.expiresAt > now),
+        );
       }
+      const changed = !isDeepStrictEqual(selected, next);
       selected = next;
+      return changed;
     },
     source(runId: string | undefined, now: number) {
       return structuredClone(

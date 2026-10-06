@@ -655,6 +655,15 @@ export class HouseholdRuntime {
       error: this.source.failure(error, stage),
     });
   }
+  specifications() {
+    return this.specs.snapshot(
+      new Set(
+        Object.values(this.projection.device)
+          .filter((device) => !device.archived)
+          .map((device) => device.device_id),
+      ),
+    ).specs;
+  }
   specification(id: string) {
     const device =
       this.projection.device[

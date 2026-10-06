@@ -13,6 +13,7 @@
     "./errors/hono": "./src/errors/hono.ts",
     "./http/retry-after": "./src/http/retry-after.ts",
     "./http/read-body": "./src/http/read-body.ts",
+    "./http/event-stream": "./src/http/event-stream.ts",
     "./household": "./src/contracts/household.ts",
     "./observations": "./src/contracts/observations.ts",
     "./household-context": "./src/contracts/household-context.ts",
@@ -34,6 +35,7 @@
   "dependencies": {
     "@home-agent/observability": "workspace:*",
     "hono": "catalog:",
+    "eventsource-parser": "4.1.1",
     "mutative": "1.3.0",
     "zod": "catalog:"
   },

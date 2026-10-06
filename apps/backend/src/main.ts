@@ -5,6 +5,7 @@ import { createAppearanceIdentity } from "./household/identity/appearance";
 import { createReferenceEnrollment } from "./household/identity/enrollment";
 import { createMemberActivityRepository } from "./household/identity/activity-repository";
 import { createMemberActivityService } from "./household/identity/activity-service";
+import { createAgentContextService } from "./agent-context/service";
 import { createMemberAccess } from "./household/members/access";
 import { createIdentityReferences } from "./household/identity/references";
 import { createReferenceFiles } from "./household/identity/files";
@@ -136,17 +137,27 @@ const perception = createPerceptionService({
   executable: environment.PERCEPTION_FFMPEG_PATH,
   sources: perceptionSources,
 });
-const memberActivity = database
-  ? createMemberActivityService(
-      household,
-      perception,
-      createMemberActivityRepository(database.db),
-    )
+const memberActivityRepository = database
+  ? createMemberActivityRepository(database.db)
+  : undefined;
+const memberRepository = database
+  ? createMemberRepository(database.db, cleanupIdentity, () => {
+      identityReferences?.matching.invalidate();
+    })
+  : undefined;
+const memberActivity = memberActivityRepository
+  ? createMemberActivityService(household, perception, memberActivityRepository)
   : undefined;
 perception.start().catch((error: unknown) => {
   console.error("Perception startup failed", error);
 });
 const shutdown = new AbortController();
+const agentContext = createAgentContextService({
+  household,
+  members: memberRepository,
+  sightings: memberActivityRepository,
+  perception,
+});
 identityEnrollment = identityReferences
   ? createReferenceEnrollment(
       identityReferences,
@@ -159,6 +170,8 @@ identityEnrollment = identityReferences
     )
   : undefined;
 const app = createApp({
+  agentContext,
+  memberActivityRepository,
   deviceHistory,
   deviceHistoryQuery: deviceHistoryRepository
     ? createDeviceHistoryQuery(deviceHistoryRepository)
@@ -178,11 +191,7 @@ const app = createApp({
   identityEnrollment,
   identityReferences,
   speechInbox,
-  memberRepository: database
-    ? createMemberRepository(database.db, cleanupIdentity, () => {
-        identityReferences?.matching.invalidate();
-      })
-    : undefined,
+  memberRepository,
   contextRepository: database
     ? createContextRepository(database.db)
     : undefined,
@@ -214,6 +223,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
+    const contextClosing = agentContext.close();
     identityEnrollment?.close();
     (async () => {
       const drain = new AbortController();
@@ -221,6 +231,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
       try {
         const results = await Promise.race([
           Promise.allSettled([
+            contextClosing,
             server.stop(),
             perception.close(),
             app.closeRecordings(),
@@ -232,7 +243,14 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
                   deviceHistory?.close(drain.signal),
                 ]);
               } finally {
-                await household.close();
+                try {
+                  await Promise.all([
+                    memberRepository?.close(),
+                    memberActivityRepository?.close(),
+                  ]);
+                } finally {
+                  await household.close();
+                }
               }
             })(),
           ]),
