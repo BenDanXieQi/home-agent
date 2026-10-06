@@ -23,6 +23,7 @@
       "dependencies": {
         "@home-agent/api": "workspace:*",
         "@home-agent/model": "workspace:*",
+        "@home-agent/observability": "workspace:*",
         "@langchain/core": "catalog:",
         "deepagents": "1.14.2",
         "langchain": "1.5.15",

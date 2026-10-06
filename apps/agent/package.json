@@ -22,7 +22,8 @@
     "deepagents": "1.14.2",
     "langchain": "1.5.15",
     "@home-agent/model": "workspace:*",
-    "langsmith": "catalog:"
+    "langsmith": "catalog:",
+    "@home-agent/observability": "workspace:*"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",

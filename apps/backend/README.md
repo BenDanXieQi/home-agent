@@ -341,3 +341,9 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middleware，handler 通过 `c.req.valid("json")` 读取。该 middleware 复用公共 JSON 读取、Zod 校验和 `AppError`，并将输入类型暴露给 RPC。聊天输入协议由 backend 与 Agent 共同引用 `packages/api`，返回单次 JSON 回答。新增接口须接入路由链，复用公共 schema，并通过功能 API 模块调用类型化客户端。
 
 服务探测、go2rtc 响应和 MiCloud 响应共同使用 `@home-agent/api/http/read-body` 的有界读取与 reader 清理。JSON 解码和供应商错误转换分别在对应边界处理；读取错误不吞掉传输或取消原因。
+
+## Agent 专项任务调用
+
+`POST /api/workflows` 复用本机访问限制，接受 `{ scope_epoch, workflow: "automation-generation", input: { text, definition? } }`，返回 `{ workflow, result: { definition, behavior, clarifications } }`。Backend 从当前家庭的已加载规格生成设备能力，不接受调用方提供的 capabilities，通过已配置的 Agent 地址调用公共任务入口。家庭切换、请求取消和服务关闭会取消在途调用；返回前再次校验家庭资格及草稿引用的当前设备能力，失效结果不作为可用草稿交付。
+
+当前只生成草稿，不保存、启用或执行规则。主干尚未接入自动化事件生产者与通知执行通路，所以交付的事件类型为空、通知能力为 false；不能把生成契约中的动作类型当成已实现的执行能力。自动化页面、动作选择和 AI 复核尚未接入。容量沿用共享 workflow 契约，调用期限不超过 Backend 请求期限与 workflow 期限。调用链通过现有 `tracedFetch` 传播追踪上下文；配置见[可观测性](../../packages/observability/README.md)。真实家庭与模型的完整生成链路尚未验收。

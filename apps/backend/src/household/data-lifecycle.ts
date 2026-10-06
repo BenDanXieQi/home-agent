@@ -19,6 +19,14 @@ const tableLifetime = {
   spaces: "household",
   passages: "household",
   observationBindings: "household",
+  automations: "household",
+  automationRuns: "household",
+  automationActions: "household",
+  automationDecisions: "household",
+  automationModelAdmissions: "household",
+  automationReviews: "household",
+  automationReviewRuns: "household",
+  householdEvents: "household",
 } satisfies {
   [K in keyof typeof schema as (typeof schema)[K] extends PgTable ? K : never]:
     | "installation"

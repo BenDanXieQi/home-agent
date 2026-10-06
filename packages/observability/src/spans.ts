@@ -1,5 +1,8 @@
 import {
   trace,
+  context,
+  propagation,
+  ROOT_CONTEXT,
   SpanKind,
   SpanStatusCode,
   type Span,
@@ -19,6 +22,34 @@ export {
 export function currentTraceId() {
   const id = trace.getActiveSpan()?.spanContext().traceId;
   return id && id !== "00000000000000000000000000000000" ? id : undefined;
+}
+
+/** Call only after access to the internal endpoint has been checked. */
+export function withRequestSpan(
+  request: Request,
+  run: () => Promise<Response>,
+) {
+  const parent = propagation.extract(ROOT_CONTEXT, {
+    traceparent: request.headers.get("traceparent") ?? undefined,
+    tracestate: request.headers.get("tracestate") ?? undefined,
+  });
+  const path = new URL(request.url).pathname;
+  return context.with(parent, () =>
+    withSpan(
+      `${request.method} ${path}`,
+      { "http.request.method": request.method, "http.route": path },
+      async (span) => {
+        const response = await run();
+        span.setAttribute("http.response.status_code", response.status);
+        if (response.status >= 400)
+          span.setStatus({ code: SpanStatusCode.ERROR });
+        const id = currentTraceId();
+        if (id) response.headers.set("x-trace-id", id);
+        return response;
+      },
+      { kind: SpanKind.SERVER },
+    ),
+  );
 }
 
 export function recordFailure(span: Span, error: unknown, errorType?: string) {

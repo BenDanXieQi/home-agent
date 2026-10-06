@@ -113,6 +113,13 @@
       "when": 1791293424998,
       "tag": "0015_member_sighting_query_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791312950568,
+      "tag": "0016_automations",
+      "breakpoints": true
     }
   ]
 }

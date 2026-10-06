@@ -35,6 +35,7 @@ export const errorCodeSchema = z.enum([
   "request_cancelled",
   "run_timeout",
   "agent_execution_failed",
+  "workflow_busy",
   "identity_enrollment_unavailable",
   "identity_reference_unavailable",
   "identity_source_unavailable",

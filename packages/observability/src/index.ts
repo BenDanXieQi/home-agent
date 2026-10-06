@@ -2,6 +2,7 @@ export { initializeTelemetry, telemetryStatus } from "./telemetry";
 export {
   currentTraceId,
   withSpan,
+  withRequestSpan,
   recordFailure,
   context,
   ROOT_CONTEXT,
