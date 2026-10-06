@@ -1,3 +1,4 @@
+import { SearchField } from "../../components/SearchField";
 import { maximumComparedDevices } from "./log-data";
 import { twMerge } from "tailwind-merge";
 import {
@@ -10,7 +11,7 @@ import {
 } from "react";
 import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, m, useReducedMotion } from "motion/react";
-import { Check, ChevronDown, Search, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
 import { Select } from "../../components/Select";
 import { SearchSelect } from "../../components/SearchSelect";
@@ -153,18 +154,13 @@ export const DevicePicker = memo(function DevicePicker({
       >
         <div className="min-h-0 shrink overflow-auto overscroll-contain">
           <div className="flex min-w-0 items-center gap-1.5">
-            <label className="m-0 flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-linen/60 px-2.5 text-muted focus-within:outline-1 focus-within:outline-offset-0 focus-within:outline-accent/50">
-              <Search size={15} className="shrink-0" aria-hidden="true" />
-              <input
-                className="w-full min-w-0 border-0 bg-transparent px-0 py-[9px] text-[13px] focus-visible:outline-none focus-visible:shadow-none"
-                aria-label="搜索设备"
-                placeholder="设备、房间或 ID"
-                value={deviceQuery}
-                onChange={(event) => {
-                  updateFilters({ query: event.target.value });
-                }}
-              />
-            </label>
+            <SearchField
+              label="搜索设备"
+              placeholder="设备、房间或 ID"
+              value={deviceQuery}
+              onChange={(query) => updateFilters({ query })}
+              className="flex-1"
+            />
             <Button
               type="button"
               variant="ghost"

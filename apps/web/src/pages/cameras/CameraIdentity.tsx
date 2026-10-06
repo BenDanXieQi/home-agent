@@ -1,3 +1,4 @@
+import { formatTime } from "../../modules/presentation/time";
 import { useMemo, useSyncExternalStore } from "react";
 import { associationLabel } from "../../modules/members/attribution";
 import { MemberAssociationEvidence } from "../../components/MemberAssociationEvidence";
@@ -52,9 +53,7 @@ function IdentityRow({
       ) : null}
       <p className="text-muted">
         观察时间：
-        {observedAt === null
-          ? "暂无识别证据"
-          : new Date(observedAt).toLocaleString("zh-CN", { hour12: false })}
+        {observedAt === null ? "暂无识别证据" : formatTime(observedAt)}
       </p>
     </li>
   );

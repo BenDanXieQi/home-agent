@@ -98,19 +98,23 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 ## Agent 数据交付契约
 
-[`src/contracts/agent-context.ts`](src/contracts/agent-context.ts) 从已有家庭、成员、感知与窗口 schema 派生专用推送和历史分支，统一通过 `@home-agent/api/agent-context` 导入。`agentContextPolicy` 定义整理缓存、各部分、待发送内容、单次传输及历史响应的预算；来源语义与验证限制由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。
+[`src/contracts/agent-context.ts`](src/contracts/agent-context.ts) 从已有家庭、空间、成员、感知与窗口 schema 派生专用推送和历史分支，统一通过 `@home-agent/api/agent-context` 导入。`agentContextPolicy` 定义整理缓存、各部分、待发送内容、单次传输及历史响应的预算；来源语义与验证限制由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。
 
-`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部五部分，后续只提供变化部分；省略表示保留，提供表示整体替换，ready 的空集合清空旧集合。heartbeat 数据为空对象，不改变业务部分或同步状态。
+`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部五部分，后续只提供变化部分；省略表示保留。设备状态在同一连接已有 ready 基线时可发送 `status=delta`：`data.changes` 复用家庭变化契约，包含 `latest/source_health/device_coverage/collection` 的 upsert 或 remove，`data.online` 仅在线列表变化时提供。增量只替换或删除指定条目；其他部分及非增量设备状态整体替换，ready 的空集合清空旧集合。每个连接以最后成功发送的完整状态为基线计算差异；增量比全量大时发送全量。heartbeat 数据为空对象，不改变业务部分或同步状态。Agent 接收器使用 `@home-agent/api/agent-context/merge` 的不可变增量合并、整部分替换与家庭资格隔离规则，连接重试由接收适配器维护。Web 数据页通过只读代理查看 Agent 接收记录。
 
-| 部分               | data 来源                                                        |
-| ------------------ | ---------------------------------------------------------------- |
-| `household`        | 家庭、房间、设备及完整规格                                       |
-| `device_state`     | 最新属性报告、设备在线值、采集与来源状态                         |
-| `members`          | 人物／宠物登记资料                                               |
-| `member_sightings` | 最近出现记录及其实体关联                                         |
-| `perception`       | 当前综合观察及完整窗口详情，包含视觉、音频、转写、身份和媒体状态 |
+| 部分           | data 来源                                        |
+| -------------- | ------------------------------------------------ |
+| `household`    | 家庭、房间、设备及完整规格                       |
+| `spatial`      | 空间、通道和观测绑定（包含停用记录）             |
+| `device_state` | 最新属性报告、设备在线值、采集与来源状态         |
+| `members`      | 人物／宠物登记资料                               |
+| `observations` | 统一观察索引、成员记录和音视频窗口引用、来源状态 |
 
-每部分包含 `status/read_at/data/reason/truncated`。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。truncated 只说明该部分快照按条数或字节预算省略了完整记录，不证明历史完整。最近出现按 `lastObservedAt/id` 降序，窗口按 `endedAt/id` 降序；设备清单、成员资料与设备当前值超限时整部分失败，单个窗口超限也失败。
+`device_state.data.latest` 只包含属性身份、值、来源证据、质量及时间，不重复家庭／房间、规格 ID、描述、类型、可读性和单位。静态信息由 `household.data.device/specs` 提供，规格中的属性键为 `prop.<siid>.<piid>`；设备的房间归属由设备清单提供。动态属性 schema 从已有属性 schema 派生。
+
+`observations.data` 包含 `range/records/sources`，`range.start/end` 是本次整理的最近 30 分钟范围；按观察结束时间选取，跨越范围起点的观察保留原始时间。近期索引按时间范围选取，正文大小不参与观察选取。每条窗口观察使用 `window_id` 引用唯一窗口，使用 `member_sighting_ids` 引用关联成员记录；统一快照不嵌入成员记录正文、检测帧、转写或完整窗口详情。`POST /api/agent/context/material` 使用 `agentMaterialQuerySchema` 的 `{ scope, kind, id }` 按需解析单个引用；`agentMaterialResponseSchema` 返回当前成员记录或窗口详情，过期／移除返回 404，读取结果不合并进统一快照。没有可关联窗口的成员记录形成 `window_id=null` 的独立出现观察。`reasons` 表示窗口选取依据，不是事件结论或说话人归因；窗口级声音和变化线索不复制到各成员的出现观察上。关联规则由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。`sources.member_sightings/perception` 分别包含 `status/read_at/reason/truncated`，表示独立读取与重试状态；统一部分 ready 不表示来源全部成功。交付不调用模型或生成媒体。
+
+合并后的每部分包含 `status/read_at/data/reason/truncated`。设备增量消息包含 `status=delta/read_at/data/truncated=false`，不作为独立上下文部分保存；缺少当前家庭的 ready 基线时拒绝增量并重新连接。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。当前交付不裁剪记录，truncated 为 false；时间范围和材料保留不证明历史完整。近期成员投影按 `lastObservedAt/id` 降序读取，统一观察按 `endedAt/id` 降序交付。任一部分超出发布容量时报告失败，不交付静默裁剪的集合。
 
 历史 `POST /api/agent/context/history` 的输入和响应均按 kind 定义判别联合，各分支只接受自己的字段。公共输入为预期绑定 `account_id/home_id`、UTC 半开区间 `start/end`、`limit/cursor`，默认每页 100 条、上限 1,000 条。`member_sightings` 可选 `member_ids` 和 `sources`，`perception_windows` 可选 `sources`；sources 为 `{ device_id, channel? }` 数组，镜头值复用已有窗口 schema，省略 channel 匹配该设备全部镜头。筛选数组省略表示不筛选，显式空数组拒绝；对象去重并固定排序。
 
@@ -121,3 +125,11 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 新增响应保留 `kind/account_id/home_id/start/end/records/next_cursor`。游标绑定 kind、家庭身份、绑定记录 updated_at、规范化对象条件和区间；音视频还绑定感知 instanceId，Backend 重启后拒绝旧音视频游标。同一绑定的成员历史可跨进程续页，每页仍重新核验当前资格。分页按完整记录及字节预算交付，游标指向最后实际返回记录，首条单独超预算返回容量错误，无下一页时 next_cursor 为 null。归因修订、晚到内容和淘汰可改变后续页，分页结果不作为完整消费记录。成功无匹配记录返回空数组，来源不可用或读取失败返回错误。
 
 该契约交付已有来源材料，不包含凭据、参考照片、特征向量或媒体字节，不定义模型调查、默认模型输入、生活事件推断或语义回写。
+
+接收观察契约位于 `@home-agent/api/agent-receipts`：索引、记录详情和当前上下文均带 `journal_id`，连接或家庭资格改变后失效。记录内容包括校验后的 snapshot 消息和当时合并结果；索引中的 `payload_bytes` 是 SSE 数据正文字节数，`context_bytes` 是当时完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，当前快照同样携带 `context_bytes`。`context_delta_bytes` 是同一接收会话内相对上一条消息的字节差，初始消息以零为基准；历史记录淘汰不改变该差值。索引和详情的 `changes` 保存全部结构化变化，以 `kind/key/before/after` 区分变化类型、对象标识和前后值；设备相关变化附带当时的名称与属性规格，删除项使用接收前的设备清单解析。Web 从 `changes` 派生前三项预览和变化数量，搜索覆盖全部变化；中文文案、值类型显示和本地时间格式由 Web 生成。摘要在接收时比较前后状态，设备名称、属性定义、单位和枚举说明来自当时收到的设备清单，解析共用 `@home-agent/api/agent-context/devices`。摘要忽略采集的累计接收计数与观察来源的读取时间更新，完整消息仍保留这些字段；统一观察提取线索、时间、引用、成员出现归因修订号及轻量窗口材料摘要变化（内容修订号、原始输入保留状态、片段生成状态／选项／有效期／失败原因、语音启用状态与段数、猫狗声分析状态／结果有效性与检测结果数量），不读取外部材料或推断房间、设备身份。猫狗声分析缺失、未就绪或结果无效时，`pet_sound_count` 为 null；仅 ready 且 valid 的分析提供检测结果数量，零表示该有效结果未命中，不证明没有叫声。`sampledMedia=null` 表示无媒体引用，不等同于 `not_generated`。接收索引查询使用 `agentReceiptQuerySchema`：`journal_id/after_sequence` 同时提供时请求该位置后的新增摘要；返回的 `first_retained_sequence` 用于清理已淘汰记录，会话不匹配时重新读取全部保留摘要。响应预算覆盖 `agentReceiptPolicy.retainedBytes` 和响应信封，包含完整 `changes`。保留策略由 `agentReceiptPolicy` 定义。接口与生命周期见 [Agent 接收说明](../../apps/agent/README.md#当前数据接收与只读历史客户端)。
+
+窗口材料与关联字段的轻量投影由 `@home-agent/api/perception/window-observations` 提供，供感知存储和 Web 共用；成员记录与窗口的组装由 `@home-agent/api/agent-context/observations` 负责。未知目标按逐帧、媒体代次和观察时间核对，未建立轨迹的检测目标保留未归因线索。
+
+## 设备标识与筛选
+
+`@home-agent/api/devices` 的 `deviceRoomKey` 根据家庭与房间 ID 生成筛选标识，房间名称只用于显示。中文值、单位和枚举说明的展示由 Web 的设备展示模块负责。

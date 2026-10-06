@@ -1,3 +1,5 @@
+import { sourceLabels } from "../../modules/devices/presentation";
+import { JsonData } from "../../components/json/JsonData";
 import { twMerge } from "tailwind-merge";
 import {
   memo,
@@ -15,7 +17,7 @@ import { Collapsible } from "radix-ui";
 import { ChevronDown } from "lucide-react";
 import type { LogEntry } from "../../modules/device-history/presentation";
 import { ReturnLatest } from "./ReturnLatest";
-import { sourceLabels, presentLogEntry } from "./presentation";
+import { presentLogEntry } from "./presentation";
 
 /** Hold the visible batch while reading history; reaching the top resumes live rows. */
 export function LogEvents({
@@ -145,7 +147,7 @@ export function LogEvents({
             key="return-latest"
             returning={returning}
             count={shownCount}
-            label={paused ? "回到顶部" : "回到最新"}
+            label={paused ? "回到顶部" : "返回最新记录"}
             scrollY={scrollY}
             onReturn={() => {
               scroller.current?.focus({ preventScroll: true });
@@ -397,20 +399,13 @@ export const LogEventDetail = memo(function LogEventDetail({
           <dd className="mt-1 break-all font-mono text-ink">{row.id}</dd>
         </div>
       </dl>
-      <details className="group/raw mt-6">
-        <summary className="flex min-h-10 cursor-pointer items-center gap-3 text-sm font-medium text-ink list-none before:content-['+'] before:text-lg before:font-normal group-open/raw:before:content-['−'] [&::-webkit-details-marker]:hidden">
-          查看原始数据 <span className="text-muted">JSON</span>
-        </summary>
-        {/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The raw JSON pane scrolls independently and must be keyboard accessible. */}
-        <pre
-          className="my-3 max-h-96 overflow-auto whitespace-pre-wrap break-all bg-transparent p-0 font-mono text-[13px] leading-7 text-ink [scrollbar-gutter:stable]"
-          tabIndex={0}
-          aria-label={`记录 ${row.id} 的原始数据`}
-        >
-          {JSON.stringify(row.record, null, 2)}
-        </pre>
-        {/* oxlint-enable jsx-a11y/no-noninteractive-tabindex */}
-      </details>
+      <div className="mt-6">
+        <JsonData
+          value={row.record}
+          label="原始数据 JSON"
+          name={`device-report-${row.id}`}
+        />
+      </div>
     </div>
   );
 });

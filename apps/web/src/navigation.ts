@@ -1,5 +1,6 @@
 import {
   Database,
+  Radio,
   Bot,
   LayoutGrid,
   Users,
@@ -54,8 +55,15 @@ export const navigation = [
   },
   {
     to: "/data",
-    label: "数据",
+    label: "DB",
     icon: Database,
+    cornerRadius: 14,
+    mobilePrimary: false,
+  },
+  {
+    to: "/agent-context",
+    label: "数据",
+    icon: Radio,
     cornerRadius: 14,
     mobilePrimary: false,
   },

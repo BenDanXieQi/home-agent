@@ -10,6 +10,7 @@ import {
 } from "@home-agent/api/agent-context";
 import { createSseTransport } from "../http/sse-transport";
 import type { createAgentContextService } from "./service";
+import { prepareAgentContextDelivery } from "./delivery";
 
 export function createAgentContextStream(
   service: ReturnType<typeof createAgentContextService>,
@@ -35,6 +36,9 @@ export function createAgentContextStream(
       let dirty = true;
       let first = true;
       let seen = service.revisions();
+      let deliveredSnapshot:
+        | z.infer<typeof agentContextSnapshotSchema>
+        | undefined;
       let pendingClear:
         | {
             snapshot: z.infer<typeof agentContextSnapshotSchema>;
@@ -44,7 +48,8 @@ export function createAgentContextStream(
       function notify(snapshot: z.infer<typeof agentContextSnapshotSchema>) {
         // A reset is a required delivery barrier even if fresh reads finish quickly.
         if (
-          Object.keys(snapshot.parts).length === 5 &&
+          Object.keys(snapshot.parts).length ===
+            agentContextPartsSchema.keyof().options.length &&
           Object.values(snapshot.parts).every((part) => part?.data === null)
         )
           pendingClear = { snapshot, revisions: service.revisions() };
@@ -83,7 +88,13 @@ export function createAgentContextStream(
           }
           first = false;
           dirty = false;
-          const data = snapshot ? JSON.stringify(snapshot) : "{}";
+          const data = snapshot
+            ? (prepareAgentContextDelivery(
+                deliveredSnapshot,
+                snapshot,
+                service.publicationBytes(snapshot),
+              ) ?? service.serialize(snapshot))
+            : "{}";
           if (
             snapshot &&
             Buffer.byteLength(data) > agentContextPolicy.maxSnapshotBytes
@@ -95,6 +106,16 @@ export function createAgentContextStream(
               : { event: "heartbeat", data: "{}" },
           );
           seen = delivered;
+          if (snapshot)
+            deliveredSnapshot = {
+              scope: snapshot.scope,
+              parts: {
+                ...(isDeepStrictEqual(deliveredSnapshot?.scope, snapshot.scope)
+                  ? deliveredSnapshot?.parts
+                  : {}),
+                ...snapshot.parts,
+              },
+            };
           // A clear barrier may precede values already committed before this write.
           dirty ||=
             pendingClear !== undefined ||

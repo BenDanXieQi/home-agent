@@ -1,3 +1,4 @@
+import { formatTime } from "../../modules/presentation/time";
 export const tablePresentation = {
   household_subjects: {
     title: "家庭成员",
@@ -53,7 +54,7 @@ export function displayCell(key: string, value: unknown) {
     if (["kind", "certainty", "entityType", "role"].includes(key))
       return valueLabels[value] ?? value;
     if (["createdAt", "occurredAt", "expiresAt"].includes(key))
-      return new Date(value).toLocaleString("zh-CN", { hour12: false });
+      return formatTime(value);
     return value;
   }
   return JSON.stringify(value);

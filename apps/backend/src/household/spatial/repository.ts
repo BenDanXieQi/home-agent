@@ -82,14 +82,27 @@ function updatedAt(
 }
 
 export function createSpatialRepository(db: Database) {
+  const listeners = new Set<() => void>();
+  function notify() {
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (error) {
+        console.error("Spatial repository subscriber failed", error);
+      }
+    }
+  }
   const transaction = createLockedTransactions(db, 5000, "shared");
   async function run<T>(
     expected: ReturnType<typeof spatialScopeSchema.parse> | undefined,
     work: (
       tx: Transaction,
       scope: ReturnType<typeof spatialScopeSchema.parse>,
+      beforeWrite: () => void,
     ) => Promise<T>,
   ) {
+    let attempted = false;
+    let callbackCompleted = false;
     try {
       return await transaction(householdBindingLock, async (tx) => {
         const rows = await tx.select().from(mijiaHomeSelections).limit(2);
@@ -109,7 +122,11 @@ export function createSpatialRepository(db: Database) {
           "spatial_configuration",
           expected === undefined ? "shared" : "exclusive",
         );
-        return work(tx, scope);
+        const result = await work(tx, scope, () => {
+          attempted = true;
+        });
+        callbackCompleted = true;
+        return result;
       });
     } catch (cause) {
       if (cause instanceof SpatialError) throw cause;
@@ -123,9 +140,18 @@ export function createSpatialRepository(db: Database) {
           throw new SpatialError("record_exists", { cause });
       }
       throw new SpatialError("storage_unavailable", { cause });
+    } finally {
+      // A completed write callback can have an uncertain COMMIT outcome.
+      if (attempted && callbackCompleted) notify();
     }
   }
   return {
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
     read() {
       return run(undefined, async (tx, scope) => ({
         scope,
@@ -147,7 +173,7 @@ export function createSpatialRepository(db: Database) {
       }));
     },
     saveSpace(input: ReturnType<typeof spaceSaveSchema.parse>) {
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(spaces)
@@ -158,6 +184,7 @@ export function createSpatialRepository(db: Database) {
           description: input.description,
           updatedAt: updatedAt(existing),
         };
+        beforeWrite();
         const [row] =
           input.operation === "create"
             ? await tx
@@ -178,7 +205,7 @@ export function createSpatialRepository(db: Database) {
       });
     },
     savePassage(input: ReturnType<typeof passageSaveSchema.parse>) {
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(passages)
@@ -191,6 +218,7 @@ export function createSpatialRepository(db: Database) {
           spaceBId: input.space_b_id,
           updatedAt: updatedAt(existing),
         };
+        beforeWrite();
         const [row] =
           input.operation === "create"
             ? await tx
@@ -216,7 +244,7 @@ export function createSpatialRepository(db: Database) {
         existing: ReturnType<typeof bindingRecord> | undefined,
       ) => void,
     ) {
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(observationBindings)
@@ -232,6 +260,7 @@ export function createSpatialRepository(db: Database) {
           enabled: input.enabled,
           updatedAt: updatedAt(existing),
         };
+        beforeWrite();
         const [row] =
           input.operation === "create"
             ? await tx
@@ -254,12 +283,13 @@ export function createSpatialRepository(db: Database) {
     setObservationBindingEnabled(
       input: ReturnType<typeof observationBindingEnabledSchema.parse>,
     ) {
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(observationBindings)
           .where(eq(observationBindings.id, input.id));
         requireVersion(input.expected_updated_at, existing);
+        beforeWrite();
         const [row] = await tx
           .update(observationBindings)
           .set({ enabled: input.enabled, updatedAt: updatedAt(existing) })
@@ -271,7 +301,7 @@ export function createSpatialRepository(db: Database) {
     },
     deleteSpace(input: ReturnType<typeof spatialDeleteSchema.parse>) {
       const { id } = input;
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select({ id: spaces.id, updatedAt: spaces.updatedAt })
           .from(spaces)
@@ -296,13 +326,14 @@ export function createSpatialRepository(db: Database) {
           references.observation_bindings.length
         )
           return { status: "referenced" as const, id, references };
+        beforeWrite();
         await tx.delete(spaces).where(eq(spaces.id, id));
         return { status: "deleted" as const, id };
       });
     },
     deletePassage(input: ReturnType<typeof spatialDeleteSchema.parse>) {
       const { id } = input;
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select({ id: passages.id, updatedAt: passages.updatedAt })
           .from(passages)
@@ -320,6 +351,7 @@ export function createSpatialRepository(db: Database) {
             id,
             references: { passages: [], observation_bindings: bindings },
           };
+        beforeWrite();
         await tx.delete(passages).where(eq(passages.id, id));
         return { status: "deleted" as const, id };
       });
@@ -328,12 +360,13 @@ export function createSpatialRepository(db: Database) {
       input: ReturnType<typeof spatialDeleteSchema.parse>,
     ) {
       const { id } = input;
-      return run(input.scope, async (tx) => {
+      return run(input.scope, async (tx, _scope, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(observationBindings)
           .where(eq(observationBindings.id, id));
         requireVersion(input.expected_updated_at, existing);
+        beforeWrite();
         const rows = await tx
           .delete(observationBindings)
           .where(eq(observationBindings.id, id))

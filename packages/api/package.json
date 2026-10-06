@@ -24,6 +24,11 @@
     "./devices": "./src/domain/devices.ts",
     "./http/local-access-policy": "./src/http/local-access-policy.ts",
     "./device-history": "./src/contracts/device-history.ts",
+    "./perception/window-observations": "./src/domain/window-observations.ts",
+    "./agent-context/observations": "./src/domain/agent-observations.ts",
+    "./agent-context/devices": "./src/domain/agent-device-metadata.ts",
+    "./agent-context/merge": "./src/domain/agent-context.ts",
+    "./agent-receipts": "./src/contracts/agent-receipts.ts",
     "./agent-context": "./src/contracts/agent-context.ts"
   },
   "scripts": {

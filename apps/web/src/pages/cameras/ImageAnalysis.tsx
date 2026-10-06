@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { ChevronRight, ImagePlus, RotateCcw, Scan, X } from "lucide-react";
+import { JsonData } from "../../components/json/JsonData";
+import { useRef } from "react";
+import { ImagePlus, RotateCcw, Scan, X } from "lucide-react";
 import { Button } from "../../components/Button";
 import { BackLink } from "../../components/BackLink";
 import { Notice, StatusNotice } from "../../components/Notice";
@@ -18,7 +19,6 @@ export default function ImageAnalysisPage() {
     useImageAnalysis();
   const picker = useRef<HTMLInputElement>(null);
   const primaryAction = useRef<HTMLButtonElement>(null);
-  const [expanded, setExpanded] = useState(true);
   const retrying = !!image && !!error;
   const canAnalyze = !!image && !result && !pending;
   const actionKind = pending
@@ -172,37 +172,21 @@ export default function ImageAnalysisPage() {
             </div>
           ) : null}
         </article>
-        <details
-          className="group/inspection min-w-0 rounded-2xl bg-surface p-1.5"
-          open={expanded}
-          onToggle={(event) => setExpanded(event.currentTarget.open)}
-        >
-          <summary className="flex min-h-9 cursor-pointer list-none items-center gap-2 rounded-[10px] px-2 py-1.5 text-[13px] font-medium text-ink hover:bg-surface focus-visible:outline-2 [&::-webkit-details-marker]:hidden">
-            <ChevronRight
-              size={14}
-              aria-hidden="true"
-              className="group-open/inspection:rotate-90"
-            />{" "}
-            检测结果
-            <span className="rounded-md bg-surface px-1.5 py-0.5 font-mono text-[11px] font-normal text-muted">
-              JSON
-            </span>
-          </summary>
-          {expanded ? (
-            result ? (
-              <pre
-                className="max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs"
-                aria-label="图片检测结果 JSON 内容"
-              >
-                {JSON.stringify(result, null, 2)}
-              </pre>
-            ) : (
-              <p className="px-2.5 pb-2.5 text-xs leading-6 text-muted">
-                分析完成后显示本次图片的完整检测结果。
-              </p>
-            )
-          ) : null}
-        </details>
+        <div className="min-w-0">
+          {result ? (
+            <JsonData
+              key={image?.url}
+              value={result}
+              label="检测结果 JSON"
+              name="image-analysis"
+              defaultOpen
+            />
+          ) : (
+            <p className="px-2.5 pb-2.5 text-xs leading-6 text-muted">
+              分析完成后显示本次图片的完整检测结果。
+            </p>
+          )}
+        </div>
       </div>
     </section>
   );

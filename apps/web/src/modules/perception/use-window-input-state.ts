@@ -12,14 +12,13 @@ function useWindowExpired(readableUntil: number | null) {
   return readableUntil !== null && now >= readableUntil;
 }
 
-export function useWindowInputState({
-  inputState,
-  readableUntil,
-}: Pick<WindowListEntry, "inputState" | "readableUntil">) {
+export function useWindowInputState(
+  window: Pick<WindowListEntry, "inputState" | "readableUntil"> | undefined,
+) {
   const expired = useWindowExpired(
-    inputState === "available" ? readableUntil : null,
+    window?.inputState === "available" ? window.readableUntil : null,
   );
-  return expired ? "expired" : inputState;
+  return expired ? "expired" : window?.inputState;
 }
 
 export function useWindowMediaState(

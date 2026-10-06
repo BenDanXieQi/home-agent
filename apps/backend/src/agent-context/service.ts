@@ -1,3 +1,4 @@
+import type { projectWindowObservation } from "@home-agent/api/perception/window-observations";
 import type { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { freeze } from "@home-agent/api/immutable";
@@ -7,14 +8,28 @@ import {
   agentContextScopeSchema,
   agentContextSnapshotSchema,
   agentContextDataSchemas,
+  agentObservationSourceSchema,
 } from "@home-agent/api/agent-context";
 import { accessHousehold } from "../household/access";
 import type { HouseholdRuntime } from "../household/runtime";
+import type { createSpatialRepository } from "../household/spatial/repository";
 import type { createMemberRepository } from "../household/members/repository";
 import type { createMemberActivityRepository } from "../household/identity/activity-repository";
 import type { createPerceptionService } from "../perception/service";
 import { HouseholdError } from "../household/errors";
+import {
+  assembleAgentObservations,
+  memberObservationSchema,
+} from "@home-agent/api/agent-context/observations";
 import { jsonBytes } from "../household/config";
+import { createAgentDeviceStateProjection } from "./device-state";
+
+function observationSourceState(
+  source: z.infer<typeof agentObservationSourceSchema>,
+) {
+  const { read_at: _readAt, ...state } = source;
+  return state;
+}
 
 function emptyParts(available: boolean) {
   const state = available
@@ -22,32 +37,41 @@ function emptyParts(available: boolean) {
     : { status: "unavailable" as const, reason: "household_unavailable" };
   const part = { ...state, read_at: null, data: null, truncated: false };
   return agentContextPartsSchema.parse({
+    spatial: part,
     household: part,
     device_state: part,
     members: part,
-    member_sightings: part,
-    perception: part,
+    observations: part,
   });
 }
 
-function ready<T>(data: T, truncated = false) {
-  return { status: "ready" as const, data, truncated };
+function ready<T>(data: T) {
+  return { status: "ready" as const, data, truncated: false };
 }
 function unavailable(reason: string) {
   return { status: "unavailable" as const, reason };
 }
-function loading() {
-  return { status: "loading" as const };
-}
 
+function observationSource(
+  status: z.infer<typeof agentObservationSourceSchema>["status"] = "loading",
+  reason: string | null = null,
+) {
+  return agentObservationSourceSchema.parse({
+    status,
+    reason,
+    truncated: false,
+    read_at: status === "loading" ? null : new Date().toISOString(),
+  });
+}
 /** One owner refreshes source parts; connections only consume its committed views. */
 export function createAgentContextService(options: {
   household: HouseholdRuntime;
   members: ReturnType<typeof createMemberRepository> | undefined;
+  spatial: ReturnType<typeof createSpatialRepository> | undefined;
   sightings: ReturnType<typeof createMemberActivityRepository> | undefined;
   perception: ReturnType<typeof createPerceptionService>;
 }) {
-  const { household, members, sightings, perception } = options;
+  const { household, members, sightings, perception, spatial } = options;
   const listeners = new Set<
     (snapshot: z.infer<typeof agentContextSnapshotSchema>) => void
   >();
@@ -67,15 +91,24 @@ export function createAgentContextService(options: {
   let scope = currentScope();
   let parts = freeze(emptyParts(eligible));
   const revisions = {
+    spatial: 0,
     household: 0,
     device_state: 0,
     members: 0,
-    member_sightings: 0,
-    perception: 0,
+    observations: 0,
   };
   const partNames = agentContextPartsSchema.keyof().options;
   const partSizes = { ...revisions };
-  for (const key of partNames) partSizes[key] = jsonBytes(parts[key]);
+  const encodedParts = new WeakMap<object, { data: string; bytes: number }>();
+  function encodePart(value: object) {
+    const cached = encodedParts.get(value);
+    if (cached) return cached;
+    const data = JSON.stringify(value);
+    const encoded = { data, bytes: Buffer.byteLength(data) };
+    encodedParts.set(value, encoded);
+    return encoded;
+  }
+  for (const key of partNames) partSizes[key] = encodePart(parts[key]).bytes;
   let cacheBytes = jsonBytes({ scope, parts });
   let scopeBytes = jsonBytes(scope);
   function publish(
@@ -87,7 +120,7 @@ export function createAgentContextService(options: {
     for (const key of partNames) {
       const value = update[key];
       if (value === undefined) continue;
-      const bytes = jsonBytes(value);
+      const bytes = encodePart(value).bytes;
       if (bytes > agentContextPolicy.partBytes[key])
         throw new HouseholdError("capacity_exceeded");
       nextBytes += bytes - partSizes[key];
@@ -98,11 +131,11 @@ export function createAgentContextService(options: {
     const snapshot = freeze({ scope, parts: update });
     // Each updated part was validated by its reader; retain the other owned values.
     parts = freeze({
+      spatial: update.spatial ?? parts.spatial,
       household: update.household ?? parts.household,
       device_state: update.device_state ?? parts.device_state,
       members: update.members ?? parts.members,
-      member_sightings: update.member_sightings ?? parts.member_sightings,
-      perception: update.perception ?? parts.perception,
+      observations: update.observations ?? parts.observations,
     });
     Object.assign(partSizes, sizes);
     cacheBytes = nextBytes;
@@ -117,16 +150,12 @@ export function createAgentContextService(options: {
       }
     }
   }
-  function lane<K extends keyof typeof revisions>(
-    key: K,
-    read: (
-      access: ReturnType<typeof accessHousehold>,
-    ) => Promise<
-      | ReturnType<typeof ready<z.infer<(typeof agentContextDataSchemas)[K]>>>
-      | ReturnType<typeof unavailable>
-      | ReturnType<typeof loading>
-    >,
-  ) {
+  function refreshSource<T>(sourceOptions: {
+    read: (access: ReturnType<typeof accessHousehold>) => Promise<T>;
+    commit: (result: T) => void;
+    failed: (reason: string) => void;
+    tracksDevices?: boolean;
+  }) {
     let dirty = false;
     let running = false;
     let pending = Promise.resolve();
@@ -154,46 +183,25 @@ export function createAgentContextService(options: {
       const captured = generation;
       try {
         const access = accessHousehold(household, household.epoch);
-        const result = await read(access);
+        const result = await sourceOptions.read(access);
         access.assertCurrent();
         if (closed || captured !== generation) return;
         if (
-          (key === "household" ||
-            key === "device_state" ||
-            key === "perception") &&
+          sourceOptions.tracksDevices &&
           household.snapshot().projection.device !==
             access.snapshot.projection.device
         ) {
           dirty = true;
           return;
         }
-        const value =
-          result.status === "ready"
-            ? { ...result, read_at: new Date().toISOString(), reason: null }
-            : {
-                ...result,
-                read_at:
-                  result.status === "loading" ? null : new Date().toISOString(),
-                data: null,
-                truncated: false as const,
-                reason: result.status === "unavailable" ? result.reason : null,
-              };
-        publish({ [key]: value });
+        sourceOptions.commit(result);
         retryMs = agentContextPolicy.retryInitialMs;
       } catch (error) {
         if (closed || captured !== generation) return;
         const capacity =
           error instanceof HouseholdError &&
           error.reason === "capacity_exceeded";
-        publish({
-          [key]: {
-            status: "failed",
-            read_at: new Date().toISOString(),
-            data: null,
-            reason: capacity ? "capacity_exceeded" : "read_failed",
-            truncated: false,
-          },
-        });
+        sourceOptions.failed(capacity ? "capacity_exceeded" : "read_failed");
         timer = setTimeout(() => {
           timer = undefined;
           refresh();
@@ -218,6 +226,70 @@ export function createAgentContextService(options: {
       },
     };
   }
+  function lane<K extends keyof typeof revisions>(
+    key: K,
+    read: (
+      access: ReturnType<typeof accessHousehold>,
+    ) => Promise<
+      | ReturnType<typeof ready<z.infer<(typeof agentContextDataSchemas)[K]>>>
+      | ReturnType<typeof unavailable>
+    >,
+  ) {
+    return refreshSource({
+      read,
+      tracksDevices: key === "household" || key === "device_state",
+      commit(result) {
+        if (key === "observations" && result.status === "ready") {
+          const next = agentContextDataSchemas.observations.parse(result.data);
+          const old = parts.observations;
+          if (
+            old.status === "ready" &&
+            isDeepStrictEqual(old.data.records, next.records) &&
+            (["member_sightings", "perception"] as const).every((name) =>
+              isDeepStrictEqual(
+                observationSourceState(old.data.sources[name]),
+                observationSourceState(next.sources[name]),
+              ),
+            )
+          )
+            return;
+        }
+        publish({
+          [key]:
+            result.status === "ready"
+              ? { ...result, read_at: new Date().toISOString(), reason: null }
+              : {
+                  ...result,
+                  read_at: new Date().toISOString(),
+                  data: null,
+                  truncated: false,
+                },
+        });
+      },
+      failed(reason) {
+        publish({
+          [key]: {
+            status: "failed",
+            read_at: new Date().toISOString(),
+            data: null,
+            reason,
+            truncated: false,
+          },
+        });
+      },
+    });
+  }
+  const spatialLane = lane("spatial", async ({ identity, assertCurrent }) => {
+    if (!spatial) return unavailable("storage_unavailable");
+    const result = await spatial.read();
+    assertCurrent();
+    if (
+      result.scope?.account_id !== identity.accountId ||
+      result.scope?.home_id !== identity.homeId
+    )
+      throw new HouseholdError("stale_session");
+    return ready(agentContextDataSchemas.spatial.parse(result));
+  });
   const householdLane = lane("household", async ({ snapshot }) => {
     const projection = snapshot.projection;
     return ready(
@@ -227,15 +299,9 @@ export function createAgentContextService(options: {
       }),
     );
   });
+  const projectDeviceState = createAgentDeviceStateProjection();
   const deviceLane = lane("device_state", async ({ snapshot }) =>
-    ready(
-      agentContextDataSchemas.device_state.parse({
-        ...snapshot.projection,
-        online: Object.values(snapshot.projection.device).filter(
-          (device) => !device.archived,
-        ),
-      }),
-    ),
+    ready(projectDeviceState(snapshot.projection)),
   );
   const membersLane = lane("members", async (access) =>
     members
@@ -246,137 +312,191 @@ export function createAgentContextService(options: {
         )
       : unavailable("storage_not_configured"),
   );
-  const sightingsLane = lane("member_sightings", async (access) => {
-    if (!sightings) return unavailable("storage_not_configured");
-    const result = await sightings.recent(
-      access.identity,
-      access.assertCurrent,
+  let sightingSource = {
+    state: observationSource(),
+    records: [] as z.infer<typeof memberObservationSchema>[],
+    capacityExceeded: false,
+  };
+  let windowSource = {
+    state: observationSource(),
+    records: [] as ReturnType<typeof projectWindowObservation>[],
+  };
+  let windowVersion: { revision: number; sources: string } | undefined;
+  let observationExpiry: ReturnType<typeof setTimeout> | undefined;
+  const observationsLane = lane("observations", async () => {
+    clearTimeout(observationExpiry);
+    observationExpiry = undefined;
+    const end = Date.now();
+    const start = end - agentContextPolicy.recentObservationMs;
+    sightingSource.records = sightingSource.records.filter(
+      (record) => record.data.lastObservedAt >= start,
     );
-    const records: typeof result.records = [];
-    let bytes = jsonBytes({
-      status: "ready",
-      read_at: new Date().toISOString(),
-      reason: null,
-      truncated: false,
-      data: { records },
-    });
-    for (const record of result.records) {
-      const size = jsonBytes(record) + (records.length ? 1 : 0);
-      if (bytes + size > agentContextPolicy.partBytes.member_sightings) break;
-      records.push(record);
-      bytes += size;
+    windowSource.records = windowSource.records.filter(
+      (record) => record.endedAt >= start,
+    );
+    const oldest = [
+      ...sightingSource.records.map((record) => record.data.lastObservedAt),
+      ...windowSource.records.map((record) => record.endedAt),
+    ].reduce((minimum, at) => Math.min(minimum, at), Infinity);
+    if (Number.isFinite(oldest)) {
+      observationExpiry = setTimeout(
+        () => {
+          observationsLane.refresh();
+          if (sightingSource.capacityExceeded) sightingsLane.refresh();
+        },
+        Math.max(1, oldest + agentContextPolicy.recentObservationMs + 1 - end),
+      );
+      observationExpiry.unref();
     }
-    return ready(
-      { records },
-      result.truncated || records.length < result.records.length,
-    );
-  });
-  let cachedWindows:
-    | {
-        revision: number;
-        sources: string;
-        entries: {
-          window: z.infer<
-            typeof agentContextDataSchemas.perception
-          >["windows"][number];
-          bytes: number;
-        }[];
-        truncated: boolean;
-      }
-    | undefined;
-  const perceptionLane = lane("perception", async () => {
-    const view = perception.snapshot();
-    if (view.status === "starting") return loading();
-    if (view.status === "disabled" || view.status === "closed")
-      return unavailable(`perception_${view.status}`);
-    if (view.status === "unavailable")
-      throw new Error("Perception unavailable");
-    const snapshot = agentContextDataSchemas.perception.shape.snapshot.parse({
-      ...view,
-      settings: view.config,
+    if (sightingSource.capacityExceeded)
+      throw new HouseholdError("capacity_exceeded");
+    return ready({
+      ...assembleAgentObservations(
+        sightingSource.records,
+        windowSource.records,
+      ),
+      range: { start, end },
+      sources: {
+        member_sightings: sightingSource.state,
+        perception: windowSource.state,
+      },
     });
-    const sources = JSON.stringify([
-      household.epoch,
-      snapshot.sources.map(({ source }) => source),
-    ]);
-    const revision = perception.windowRevision();
-    if (
-      !cachedWindows ||
-      cachedWindows.revision !== revision ||
-      cachedWindows.sources !== sources
-    ) {
-      const entries: NonNullable<typeof cachedWindows>["entries"] = [];
-      cachedWindows = undefined;
-      const candidates = snapshot.sources
+  });
+  const sightingsLane = refreshSource({
+    async read(access) {
+      if (!sightings)
+        return {
+          state: observationSource("unavailable", "storage_not_configured"),
+          records: [] as typeof sightingSource.records,
+          capacityExceeded: false,
+        };
+      const records: typeof sightingSource.records = [];
+      let referenceBytes = 2;
+      const complete = await sightings.observationsSince(
+        access.identity,
+        access.assertCurrent,
+        Date.now() - agentContextPolicy.recentObservationMs,
+        (record) => {
+          // Every sighting appears in at least one output reference, even when windows merge it.
+          referenceBytes += jsonBytes(record.id) + (records.length ? 1 : 0);
+          if (referenceBytes > agentContextPolicy.partBytes.observations)
+            return false;
+          records.push(record);
+          return true;
+        },
+      );
+      return {
+        state: observationSource("ready"),
+        records,
+        capacityExceeded: !complete,
+      };
+    },
+    commit(result) {
+      sightingSource = result;
+      observationsLane.refresh();
+    },
+    failed(reason) {
+      sightingSource = {
+        state: observationSource("failed", reason),
+        records: [],
+        capacityExceeded: false,
+      };
+      observationsLane.refresh();
+    },
+  });
+  const windowsLane = refreshSource({
+    tracksDevices: true,
+    async read() {
+      const view = perception.snapshot();
+      const sources = JSON.stringify([
+        household.epoch,
+        view.status,
+        view.sources.map(({ source }) => source),
+      ]);
+      const revision = perception.windowRevision();
+      if (
+        windowVersion?.revision === revision &&
+        windowVersion.sources === sources
+      )
+        return windowSource;
+      if (view.status !== "running" && view.status !== "recovering") {
+        return {
+          state: observationSource(
+            view.status === "starting" ? "loading" : "unavailable",
+            view.status === "starting" ? null : `perception_${view.status}`,
+          ),
+          records: [] as typeof windowSource.records,
+          version: { revision, sources },
+        };
+      }
+      const candidates = view.sources
         .flatMap(
           ({ source }) =>
             perception.windows({ ...source, scopeEpoch: household.epoch })
               .windows,
         )
         .toSorted((a, b) => b.endedAt - a.endedAt || b.id.localeCompare(a.id));
-      let bytes = 0;
-      let truncated = false;
-      for (const candidate of candidates) {
-        if (entries.length === agentContextPolicy.recentWindows) {
-          truncated = true;
-          break;
-        }
-        const detail = perception.window(candidate.id);
-        if (!detail) continue;
-        const window = freeze(
-          agentContextDataSchemas.perception.shape.windows.element.parse(
-            detail,
-          ),
-        );
-        const size = jsonBytes(window);
-        if (size > agentContextPolicy.partBytes.perception)
-          throw new HouseholdError("capacity_exceeded");
-        if (
-          bytes + size + (entries.length ? 1 : 0) >
-          agentContextPolicy.partBytes.perception
-        ) {
-          truncated = true;
-          break;
-        }
-        entries.push({ window, bytes: size });
-        bytes += size + (entries.length > 1 ? 1 : 0);
-      }
-      cachedWindows = { revision, sources, entries, truncated };
-    }
-    const windows: z.infer<
-      typeof agentContextDataSchemas.perception
-    >["windows"] = [];
-    const envelopeBytes = jsonBytes({
-      status: "ready",
-      data: { snapshot, windows },
-      read_at: new Date().toISOString(),
-      reason: null,
-      truncated: false,
-    });
-    let windowBytes = 0;
-    let truncated = cachedWindows.truncated;
-    for (const { window, bytes: size } of cachedWindows.entries) {
-      if (envelopeBytes + size > agentContextPolicy.partBytes.perception)
-        throw new HouseholdError("capacity_exceeded");
-      const addedBytes = size + (windows.length ? 1 : 0);
-      if (
-        envelopeBytes + windowBytes + addedBytes >
-        agentContextPolicy.partBytes.perception
-      ) {
-        truncated = true;
-        break;
-      }
-      windows.push(window);
-      windowBytes += addedBytes;
-    }
-    return ready({ snapshot, windows }, truncated);
+      const since = Date.now() - agentContextPolicy.recentObservationMs;
+      const previous = new Map(
+        windowSource.records.map((record) => [record.id, record]),
+      );
+      const records = candidates
+        .filter((candidate) => candidate.endedAt >= since)
+        .flatMap((candidate) => {
+          const cached = previous.get(candidate.id);
+          if (
+            cached &&
+            cached.material.revision === candidate.revision &&
+            cached.material.inputState === candidate.inputState &&
+            isDeepStrictEqual(
+              cached.material.sampledMedia,
+              candidate.sampledMedia,
+            )
+          )
+            return [cached];
+          const observation = perception.windowObservation(candidate.id);
+          return observation ? [observation] : [];
+        });
+      return {
+        state: observationSource("ready"),
+        records,
+        version: { revision, sources },
+      };
+    },
+    commit(result) {
+      if (result === windowSource) return;
+      windowVersion = "version" in result ? result.version : undefined;
+      windowSource = { state: result.state, records: result.records };
+      observationsLane.refresh();
+    },
+    failed(reason) {
+      windowVersion = undefined;
+      windowSource = {
+        state: observationSource("failed", reason),
+        records: [],
+      };
+      observationsLane.refresh();
+    },
   });
+  function resetObservations() {
+    clearTimeout(observationExpiry);
+    observationExpiry = undefined;
+    sightingSource = {
+      state: observationSource(),
+      records: [],
+      capacityExceeded: false,
+    };
+    windowSource = { state: observationSource(), records: [] };
+    windowVersion = undefined;
+  }
   const lanes = [
+    spatialLane,
     householdLane,
     deviceLane,
     membersLane,
+    observationsLane,
     sightingsLane,
-    perceptionLane,
+    windowsLane,
   ];
   const householdFields = agentContextDataSchemas.household
     .keyof()
@@ -406,7 +526,7 @@ export function createAgentContextService(options: {
     specifications = nextSpecifications;
     if (!isDeepStrictEqual(scope, next) || eligible !== nextEligible) {
       generation++;
-      cachedWindows = undefined;
+      resetObservations();
       scope = next;
       eligible = nextEligible;
       for (const source of lanes) source.reset();
@@ -421,13 +541,32 @@ export function createAgentContextService(options: {
   const releases = [
     household.subscribe(householdChanged),
     members?.subscribe(membersLane.refresh),
+    spatial?.subscribe(spatialLane.refresh),
     sightings?.subscribe(sightingsLane.refresh),
-    perception.subscribeContext(perceptionLane.refresh),
+    perception.subscribeContext(windowsLane.refresh),
   ];
   if (eligible) for (const source of lanes) source.refresh();
   return {
     snapshot: () => ({ scope, parts }),
     revisions: () => ({ ...revisions }),
+    publicationBytes(snapshot: z.infer<typeof agentContextSnapshotSchema>) {
+      let bytes = jsonBytes({ scope: snapshot.scope, parts: {} });
+      let count = 0;
+      for (const [key, part] of Object.entries(snapshot.parts)) {
+        if (part === undefined) continue;
+        bytes += jsonBytes(key) + 1 + encodePart(part).bytes;
+        count++;
+      }
+      return bytes + Math.max(0, count - 1);
+    },
+    serialize(snapshot: z.infer<typeof agentContextSnapshotSchema>) {
+      const entries = Object.entries(snapshot.parts).flatMap(([key, part]) =>
+        part === undefined
+          ? []
+          : [`${JSON.stringify(key)}:${encodePart(part).data}`],
+      );
+      return `{"scope":${JSON.stringify(snapshot.scope)},"parts":{${entries.join(",")}}}`;
+    },
     subscribe(listener: Parameters<typeof listeners.add>[0]) {
       listeners.add(listener);
       return () => {
@@ -438,7 +577,7 @@ export function createAgentContextService(options: {
       if (closed) return;
       closed = true;
       generation++;
-      cachedWindows = undefined;
+      resetObservations();
       for (const release of releases) release?.();
       parts = freeze(emptyParts(false));
       listeners.clear();

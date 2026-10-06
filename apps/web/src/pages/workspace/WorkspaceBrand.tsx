@@ -40,10 +40,7 @@ export function WorkspaceBrand() {
           <ConnectionNotice />
         </Popover.Root>
       ) : (
-        <div
-          className={workspaceBrandClassName}
-          title={activity.label}
-        >
+        <div className={workspaceBrandClassName} title={activity.label}>
           <span className="sr-only">Home Agent，{activity.label}</span>
           <AgentAvatar state={activity.state} />
         </div>

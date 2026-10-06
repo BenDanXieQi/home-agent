@@ -21,7 +21,7 @@ bun run --cwd apps/agent dev
 
 每次请求独立调用 Deep Agents，不传 checkpointer 或持久 Store。显式使用 `new StateBackend()`，虚拟文件工具只操作本次运行的内存状态，没有配置宿主文件系统或 shell。框架内置工具及通用委派由 Deep Agents 提供，没有注册家庭业务工具、专用子 agent、技能或跨请求记忆。
 
-独立接收模块自动订阅 Backend 当前家庭、设备状态、成员、出现记录和感知数据，并通过只读客户端查询实际保留的历史。家庭助手的模型尚未接入这些材料或家庭业务工具，不能安排提醒或控制设备；没有改变现有聊天输入及模型行为。数据来源、保留与验证限制见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。
+独立接收模块自动订阅 Backend 当前家庭、空间关系、设备状态、成员和统一观察，并通过只读客户端查询实际保留的历史。家庭助手的模型尚未接入这些材料或家庭业务工具，不能安排提醒或控制设备；没有改变现有聊天输入及模型行为。数据来源、保留与验证限制见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。
 
 `AGENT_RUN_TIMEOUT_MS` 默认 120,000；模型不自动重试，单次模型输出由 `AGENT_MAX_OUTPUT_TOKENS` 限制，默认 4096，图步数上限 30。请求取消或超时向执行传播取消信号。Bun 保留默认连接空闲超时，仅在请求体完成校验后对本次模型请求关闭空闲计时，由执行期限控制等待。模型明确返回长度截断、内容过滤、未完成或失败状态时，不作为完整回答返回；结果未知时不自动重发。
 
@@ -33,6 +33,8 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 - `config.ts`：服务配置。
 - `main.ts`：独立进程、HTTP 入口、请求校验、模型执行，以及接收器启动／停止与历史客户端装配。
 - `context/receiver.ts`：Backend 专用 SSE 接收、五部分内存状态、连接和家庭资格。
+- `context/receipts.ts`：受接收器管理的有限内存接收记录与当时上下文；`context/receipt-changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
+- `context/material-client.ts`：按成员记录或窗口 ID 读取引用材料，核对当前接收资格，不修改接收状态。
 - `context/history-client.ts`：Backend 三类历史的只读客户端，校验响应与接收资格。
 - `workflows/spatial-planning/index.ts`：空间规划专项 Agent 工厂，使用同一模型配置，由调用方注入共用的 backend 能力。
 - `workflows/spatial-planning/instructions.ts`：空间证据使用、记录匹配、配置写入与结果核对指令。
@@ -51,9 +53,17 @@ Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代
 
 ## 当前数据接收与只读历史客户端
 
+回执摘要在接纳消息时校验并冻结，索引读取复用同一份摘要；详情与摘要共享变化记录，淘汰或清空时一起释放。
+
 `src/context/receiver.ts` 导出 `createContextReceiver({ backendUrl })`。`start()` 自动订阅，`stop()` 取消连接与重连等待；`snapshot()` 提供收到的内存数据，`currentScope()` 仅在当前连接已收到全部五部分初始状态时返回可用家庭身份。SSE 解码使用共享 `@home-agent/api/http/event-stream`，复用成熟的 eventsource-parser。
 
-`GET /api/received-context` 复用 Agent 本机访问限制，返回 `{ scope, connection, parts, received_at }`。connection 包含连接 status、synchronized 与 last_error；全部部分收到初始状态后才标记已同步，部分为 loading、failed 或 unavailable 时仍保留各自状态。last_error 为 null 或 `{ reason, at }`，保留最近失败的安全分类和 UTC 时间，直到收到合法事件后清空。分类区分请求失败、HTTP 状态、无效事件流、超时、JSON／契约错误、流读取失败和正常结束；订阅失败日志最多每 30 秒记录一次，不包含接收正文或原始异常。后续省略部分保留旧值，提供部分整体替换；ready 的空集合清空对应集合，heartbeat 不改变同步。首次连接、重连及家庭资格变化先清空接收数据；断线标记未同步。该入口用于诊断，不新增页面、持久日志或模型输入。
+`GET /api/received-context` 复用 Agent 本机访问限制，返回 `{ scope, connection, parts, received_at, context_bytes }`。connection 包含连接 status、synchronized 与 last_error；全部部分收到初始状态后才标记已同步，部分为 loading、failed 或 unavailable 时仍保留各自状态。last_error 为 null 或 `{ reason, at }`，保留最近失败的安全分类和 UTC 时间，直到收到合法事件后清空。分类区分请求失败、HTTP 状态、无效事件流、超时、JSON／契约错误、流读取失败和正常结束；订阅失败日志最多每 30 秒记录一次，不包含接收正文或原始异常。后续省略部分保留旧值；设备状态增量只更新或删除指定条目，其他提供部分整体替换；ready 的空集合清空对应集合，heartbeat 不改变同步。首次连接、重连及家庭资格变化先清空接收数据；断线标记未同步。该入口用于诊断，不保存持久日志，也不代表模型输入。received_at 只记录数据消息，心跳单独计时。断线、停止及意外失败时清空当前数据。
+
+`GET /api/context-receipts` 返回接收索引、连接、家庭资格、最近数据与心跳时间。首次不带查询参数时读取全部保留摘要；后续同时提供 `journal_id` 和 `after_sequence`，只读取同一接收会话中序号更大的摘要。会话不匹配或请求序号超过当前序号时返回全部保留摘要。响应的 `first_retained_sequence` 标记最早保留序号，无记录时为 `total_received + 1`，客户端据此移除已淘汰记录。`GET /api/context-receipts/:id` 返回单条接收消息与该次合并后的完整上下文；`GET /api/context-receipts/current` 返回带接收会话标识的当前快照。所有入口复用本机访问限制。Web 通过 Backend 只读代理观察，页面用法见[Agent 接收数据观察](../web/README.md#agent-接收数据观察)。
+
+`context/receipts.ts` 由接收器独占，消息在通过校验并合并后记录。设备增量正文只保留本次条目变化，context 保存增量合并后的完整状态；合并使用共享 Mutative 封装，不修改旧接收记录。记录保留接收序号、UTC 时间、初始接收／状态更新、涉及部分、原始正文 `payload_bytes`、合并上下文 `context_bytes` 字节数、校验后的消息和当时上下文；不是原始 SSE 字节归档。`context_bytes` 为完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，接收记录固定为当时大小，当前快照接口按本次读取状态计算；不含连接诊断字段，不代表进程内存占用。接收记录按不可变对象引用缓存字节数，设备增量复用未变化条目的统计；统计过程不重复序列化完整上下文或完整接收记录。最多 1000 条，同时按每条完整序列化体积计入 64 MiB 预算（共享对象仍重复计数），超限淘汰最早记录并累计数量。连接或家庭资格改变时清空记录并更换会话标识，重启丢失，不重放或保存消费进度。心跳不生成接收记录。读取已淘汰记录返回 404。响应上限覆盖整个接收记录保留预算及响应信封，计入变化摘要，保证保留的单条详情和完整索引均可读取。
+
+统一观察保存观察索引、`member_sighting_ids/window_id` 引用、成员出现归因修订号及轻量窗口材料摘要，不保存成员记录正文或完整音视频窗口详情。`createMaterialClient({ backendUrl, receiver })` 由入口装配为 `readMaterial`，接受 `{ kind: "member_sighting" | "perception_window", id }` 和取消信号，自动携带当前 scope 调用 Backend 的 `/api/agent/context/material`。读取前后核对接收资格、响应类型与引用 ID；源材料过期、移除或资格变化时失败，不用旧缓存替代，不写回上下文。返回的是来源当前保留版本，不是当时接收内容。
 
 `src/context/history-client.ts` 导出 `createHistoryClient({ backendUrl, receiver })`，启动入口将客户端装配为 `readHistory`。receiver 提供当前接收资格；调用者传入 `kind=device_reports|member_sightings|perception_windows`、UTC 区间、相应对象条件、分页参数及取消信号。设备分支沿用原读取条件；成员使用可选 member_ids/sources，音视频使用可选 sources，返回完整窗口与匹配引用。用法与字段见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 

@@ -79,6 +79,7 @@ const cameraDetailRoute = createRoute({
   path: "$deviceId/$channel",
   validateSearch: (search: Record<string, unknown>) => ({
     mode: search.mode === "windows" ? search.mode : undefined,
+    window: typeof search.window === "string" ? search.window : undefined,
     activityRun:
       typeof search.activityRun === "string" ? search.activityRun : undefined,
     member: typeof search.member === "string" ? search.member : undefined,
@@ -100,6 +101,7 @@ const cameraRecordingRoute = createRoute({
   path: "$deviceId/$channel/recording",
   validateSearch: (search: Record<string, unknown>) => ({
     member: typeof search.member === "string" ? search.member : undefined,
+    window: typeof search.window === "string" ? search.window : undefined,
     activityRun:
       typeof search.activityRun === "string" ? search.activityRun : undefined,
     activityFirstAt:
@@ -111,6 +113,10 @@ const cameraRecordingRoute = createRoute({
       typeof search.recordingAt === "number" &&
       Number.isFinite(search.recordingAt)
         ? search.recordingAt
+        : undefined,
+    seekAt:
+      typeof search.seekAt === "number" && Number.isFinite(search.seekAt)
+        ? search.seekAt
         : undefined,
     activityAt:
       typeof search.activityAt === "number" &&
@@ -149,6 +155,11 @@ const dataRoute = createRoute({
   path: "/data",
   component: lazyRouteComponent(() => import("./pages/database/index")),
 });
+const agentContextRoute = createRoute({
+  getParentRoute: () => publicWorkspaceRoute,
+  path: "/agent-context",
+  component: lazyRouteComponent(() => import("./pages/agent-context/index")),
+});
 const spacesRoute = createRoute({
   getParentRoute: () => publicWorkspaceRoute,
   path: "/spaces",
@@ -172,7 +183,11 @@ export const router = createRouter({
       dataRoute,
       settingsRoute,
     ]),
-    publicWorkspaceRoute.addChildren([imageAnalysisRoute, spacesRoute]),
+    publicWorkspaceRoute.addChildren([
+      imageAnalysisRoute,
+      spacesRoute,
+      agentContextRoute,
+    ]),
   ]),
   scrollRestoration: true,
   getScrollRestorationKey: (location) => location.href,

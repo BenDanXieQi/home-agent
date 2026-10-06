@@ -37,3 +37,9 @@ export const deviceCapabilitySchema = z.object({
     .optional(),
   prop_description: z.string().optional(),
 });
+
+export function deviceRoomKey(
+  device: Pick<z.infer<typeof inventoryDeviceSchema>, "home_id" | "room_id">,
+) {
+  return JSON.stringify([device.home_id, device.room_id]);
+}

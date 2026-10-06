@@ -1,3 +1,4 @@
+import { formatTime } from "../../modules/presentation/time";
 import { Notice } from "../../components/Notice";
 import { twMerge } from "tailwind-merge";
 import { LeaveDialog } from "../../components/LeaveDialog";
@@ -59,9 +60,7 @@ function ConnectionStatus({
     <div
       className="flex flex-wrap items-center gap-2 max-md:col-start-1"
       title={
-        service
-          ? `检查于 ${new Date(service.checkedAt).toLocaleTimeString("zh-CN")}`
-          : undefined
+        service ? `检查于 ${formatTime(service.checkedAt, "clock")}` : undefined
       }
     >
       <span

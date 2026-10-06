@@ -14,11 +14,17 @@ import {
 import { createAssistant } from "./assistant";
 import { loadConfig } from "./config";
 import { createContextReceiver } from "./context/receiver";
+import { createMaterialClient } from "./context/material-client";
 import { createHistoryClient } from "./context/history-client";
+import { agentReceiptQuerySchema } from "@home-agent/api/agent-receipts";
 
 const config = loadConfig();
 const receiver = createContextReceiver({ backendUrl: config.BACKEND_URL });
 export const readHistory = createHistoryClient({
+  backendUrl: config.BACKEND_URL,
+  receiver,
+});
+export const readMaterial = createMaterialClient({
   backendUrl: config.BACKEND_URL,
   receiver,
 });
@@ -48,6 +54,31 @@ const server = Bun.serve({
         throw new AppError("local_access_required");
       if (request.method === "GET" && path === "/api/received-context")
         return Response.json(receiver.snapshot(), { headers });
+      if (request.method === "GET" && path === "/api/context-receipts") {
+        const query = agentReceiptQuerySchema.safeParse(
+          Object.fromEntries(new URL(request.url).searchParams),
+        );
+        if (!query.success)
+          throw new AppError("invalid_request", {
+            issues: validationIssues(query.error),
+          });
+        return Response.json(receiver.receiptIndex(query.data), { headers });
+      }
+      if (request.method === "GET" && path === "/api/context-receipts/current")
+        return Response.json(
+          { journal_id: receiver.journalId(), context: receiver.snapshot() },
+          { headers },
+        );
+      if (
+        request.method === "GET" &&
+        path.startsWith("/api/context-receipts/")
+      ) {
+        const result = receiver.receipt(
+          path.slice("/api/context-receipts/".length),
+        );
+        if (!result) throw new AppError("not_found");
+        return Response.json(result, { headers });
+      }
       if (request.method !== "POST" || path !== "/api/chat")
         throw new AppError("not_found");
       if (

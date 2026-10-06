@@ -1,7 +1,11 @@
-import { useRef, useState } from "react";
+import { Table } from "../../components/Table";
+import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import { SearchField } from "../../components/SearchField";
+import { JsonData } from "../../components/json/JsonData";
+import { useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Database, RefreshCw, Search, Link2, X } from "lucide-react";
+import { Database, RefreshCw, Link2, X } from "lucide-react";
 import { contextBrowseQuerySchema } from "@home-agent/api/household-context";
 import {
   householdSnapshotAtom,
@@ -35,7 +39,6 @@ function DataBrowser({ scope }: { scope: string }) {
   const [cursors, setCursors] = useState<(typeof input.cursor)[]>([null]);
   const [search, setSearch] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
-  const detailTrigger = useRef<HTMLButtonElement>(null);
   const [selectedKey, selectKey] = useState<string | null>(null);
   const query = useQuery({
     ...contextBrowseOptions(input, page),
@@ -51,6 +54,53 @@ function DataBrowser({ scope }: { scope: string }) {
   const selectedContextId =
     typeof selected?.contextId === "string" ? selected.contextId : undefined;
   const presentation = tablePresentation[displayedInput.table];
+  const columns = useMemo(
+    () =>
+      (table?.columns ?? []).map((column) => ({
+        id: column.key,
+        header: fieldLabels[column.key] ?? column.name,
+        accessorFn: (row: NonNullable<typeof data>["rows"][number]) =>
+          displayCell(column.key, row[column.key]),
+        enableSorting: false,
+      })),
+    [table?.columns],
+  );
+  // oxlint-disable-next-line react/incompatible-library -- Read TanStack Table state directly.
+  const recordsTable = useReactTable({
+    data: data?.rows ?? [],
+    columns,
+    getRowId: rowKey,
+    getRowCanExpand: () => true,
+    state: { expanded: selectedKey ? { [selectedKey]: true } : {} },
+    getCoreRowModel: getCoreRowModel(),
+  });
+  // oxlint-disable-next-line react/incompatible-library -- Read TanStack Table state directly.
+  const schemaTable = useReactTable({
+    data: table?.columns ?? [],
+    columns: [
+      {
+        id: "field",
+        header: "字段",
+        accessorFn: (column) => fieldLabels[column.key] ?? column.name,
+        enableSorting: false,
+      },
+      { accessorKey: "name", header: "列名", enableSorting: false },
+      { accessorKey: "type", header: "类型", enableSorting: false },
+      {
+        id: "nullable",
+        header: "允许空值",
+        accessorFn: (column) => (column.nullable ? "是" : "否"),
+        enableSorting: false,
+      },
+      {
+        id: "primary",
+        header: "主键",
+        accessorFn: (column) => (column.primary ? "是" : "否"),
+        enableSorting: false,
+      },
+    ],
+    getCoreRowModel: getCoreRowModel(),
+  });
   function searchRecords() {
     setInput({ ...input, cursor: null, search: search.trim() });
     setPage(0);
@@ -66,6 +116,76 @@ function DataBrowser({ scope }: { scope: string }) {
     setSearch("");
     selectKey(null);
   }
+  const recordDetail = selected ? (
+    <section aria-label="记录详情" className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="font-semibold">记录详情</h3>
+        <Button
+          variant="ghost"
+          size="small"
+          aria-label="关闭详情"
+          icon={<X size={16} />}
+          onClick={() => {
+            selectKey(null);
+            searchInput.current?.focus();
+          }}
+        />
+      </div>
+      <div className="my-4 flex flex-wrap gap-2">
+        {input.table === "household_subjects" &&
+        typeof selected.id === "string" &&
+        (selected.kind === "person" || selected.kind === "pet") ? (
+          <Button
+            size="small"
+            onClick={() => {
+              const entity = contextBrowseQuerySchema.shape.entity.parse({
+                type: selected.kind,
+                id: selected.id,
+              });
+              navigate({ table: "context_records", entity });
+            }}
+          >
+            查看相关上下文
+          </Button>
+        ) : null}
+        {input.table === "context_records" &&
+        typeof selected.id === "string" ? (
+          <Button
+            size="small"
+            onClick={() =>
+              navigate({
+                table: "context_entities",
+                context_id: selectedId,
+              })
+            }
+          >
+            查看关联对象
+          </Button>
+        ) : null}
+        {input.table === "context_entities" &&
+        typeof selected.contextId === "string" ? (
+          <Button
+            size="small"
+            onClick={() =>
+              navigate({
+                table: "context_records",
+                context_id: selectedContextId,
+              })
+            }
+          >
+            查看上下文正文
+          </Button>
+        ) : null}
+      </div>
+      <JsonData
+        key={selectedId}
+        value={selected}
+        name={`database-${selectedId}`}
+        label="原始记录 JSON"
+        defaultOpen
+      />
+    </section>
+  ) : null;
   return (
     <div>
       <PageHeaderContent slot="details">
@@ -111,33 +231,26 @@ function DataBrowser({ scope }: { scope: string }) {
             searchRecords();
           }}
         >
-          <label className="relative m-0 flex w-60 items-center max-md:w-auto max-md:min-w-0 max-md:flex-1">
-            <Search
-              size={14}
-              className="pointer-events-none absolute left-2.5 text-muted"
-            />
-            <input
-              ref={searchInput}
-              className="h-10 pl-9 text-[13px]"
-              aria-label={
-                input.table === "household_subjects"
-                  ? "搜索名称"
-                  : input.table === "context_records"
-                    ? "搜索描述或主题"
-                    : "搜索对象 ID"
-              }
-              value={search}
-              maxLength={100}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={
-                input.table === "household_subjects"
-                  ? "搜索名称"
-                  : input.table === "context_records"
-                    ? "搜索描述或主题"
-                    : "搜索对象 ID"
-              }
-            />
-          </label>
+          <SearchField
+            label={
+              input.table === "household_subjects"
+                ? "搜索名称"
+                : input.table === "context_records"
+                  ? "搜索描述或主题"
+                  : "搜索对象 ID"
+            }
+            placeholder={
+              input.table === "household_subjects"
+                ? "搜索名称"
+                : input.table === "context_records"
+                  ? "搜索描述或主题"
+                  : "搜索对象 ID"
+            }
+            value={search}
+            onChange={setSearch}
+            inputProps={{ ref: searchInput, maxLength: 100 }}
+            className="w-60 max-md:w-auto max-md:flex-1"
+          />
           <Button type="submit">搜索</Button>
           <Button
             type="button"
@@ -168,48 +281,12 @@ function DataBrowser({ scope }: { scope: string }) {
             <summary className="cursor-pointer font-medium focus-visible:outline-2">
               字段结构 · {table.columns.length} 列
             </summary>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full whitespace-nowrap text-left text-xs">
-                <caption className="sr-only">
-                  {presentation.title}字段结构
-                </caption>
-                <thead className="text-muted">
-                  <tr>
-                    <th scope="col" className="px-3 py-2">
-                      字段
-                    </th>
-                    <th scope="col" className="px-3 py-2">
-                      列名
-                    </th>
-                    <th scope="col" className="px-3 py-2">
-                      类型
-                    </th>
-                    <th scope="col" className="px-3 py-2">
-                      允许空值
-                    </th>
-                    <th scope="col" className="px-3 py-2">
-                      主键
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  {table.columns.map((column) => (
-                    <tr key={column.key}>
-                      <th scope="row" className="px-3 py-2 font-medium">
-                        {fieldLabels[column.key] ?? column.name}
-                      </th>
-                      <td className="px-3 py-2 font-mono">{column.name}</td>
-                      <td className="px-3 py-2 font-mono">{column.type}</td>
-                      <td className="px-3 py-2">
-                        {column.nullable ? "是" : "否"}
-                      </td>
-                      <td className="px-3 py-2">
-                        {column.primary ? "是" : "否"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mt-3">
+              <Table
+                table={schemaTable}
+                label={`${presentation.title}字段结构`}
+                rowLabel={(column) => column.name}
+              />
             </div>
           </details>
         ) : null}
@@ -243,7 +320,13 @@ function DataBrowser({ scope }: { scope: string }) {
             </Button>
           </div>
         ) : null}
-        <div className="overflow-hidden rounded-2xl bg-surface p-2">
+        <div
+          className={
+            data?.rows.length
+              ? ""
+              : "overflow-hidden rounded-2xl bg-surface p-2"
+          }
+        >
           {query.isError && !data ? (
             <div className="grid min-h-64 items-center rounded-xl bg-white p-5">
               <Notice tone="error">
@@ -302,62 +385,17 @@ function DataBrowser({ scope }: { scope: string }) {
               ) : null}
             </EmptyState>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full whitespace-nowrap text-left text-sm">
-                <caption className="sr-only">
-                  {presentation.title}，第 {displayedInput.page + 1} 页
-                </caption>
-                <thead className="bg-surface text-xs text-muted">
-                  <tr>
-                    <th className="px-5 py-3">详情</th>
-                    {table?.columns.map((column) => (
-                      <th key={column.key} className="px-4 py-3 font-medium">
-                        <span>{fieldLabels[column.key] ?? column.name}</span>
-                        <span className="mt-1 block font-mono text-[10px] font-normal">
-                          {column.name}
-                        </span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line/60 bg-white">
-                  {data.rows.map((row) => (
-                    <tr
-                      key={rowKey(row)}
-                      className={
-                        selectedKey === rowKey(row)
-                          ? "bg-surface"
-                          : "hover:bg-surface/60"
-                      }
-                    >
-                      <td className="px-5 py-3">
-                        <button
-                          type="button"
-                          className="text-ink underline underline-offset-4 disabled:cursor-wait disabled:text-muted"
-                          aria-label={`查看 ${rowKey(row)} 的详情`}
-                          disabled={query.isPlaceholderData}
-                          onClick={(event) => {
-                            detailTrigger.current = event.currentTarget;
-                            selectKey(rowKey(row));
-                          }}
-                        >
-                          查看
-                        </button>
-                      </td>
-                      {table?.columns.map((column) => (
-                        <td
-                          key={column.key}
-                          className="max-w-72 truncate px-4 py-3"
-                          title={displayCell(column.key, row[column.key])}
-                        >
-                          {displayCell(column.key, row[column.key])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Table
+              table={recordsTable}
+              label={`${presentation.title}，第 ${displayedInput.page + 1} 页`}
+              rowLabel={rowKey}
+              disabled={query.isPlaceholderData}
+              renderDetails={() => recordDetail}
+              onRowClick={(row) => {
+                const key = rowKey(row);
+                selectKey(selectedKey === key ? null : key);
+              }}
+            />
           )}
         </div>
         {data && (data.rows.length > 0 || displayedInput.page > 0) ? (
@@ -399,78 +437,6 @@ function DataBrowser({ scope }: { scope: string }) {
           </div>
         ) : null}
       </section>
-
-      {selected ? (
-        <section
-          aria-label="记录详情"
-          className="mt-5 rounded-2xl bg-surface p-5"
-        >
-          <div className="flex items-center justify-between">
-            <h3 className="font-semibold">记录详情</h3>
-            <Button
-              variant="ghost"
-              size="small"
-              aria-label="关闭详情"
-              icon={<X size={16} />}
-              onClick={() => {
-                selectKey(null);
-                if (detailTrigger.current?.isConnected)
-                  detailTrigger.current.focus();
-                else searchInput.current?.focus();
-              }}
-            />
-          </div>
-          <div className="my-4 flex flex-wrap gap-2">
-            {input.table === "household_subjects" &&
-            typeof selected.id === "string" &&
-            (selected.kind === "person" || selected.kind === "pet") ? (
-              <Button
-                size="small"
-                onClick={() => {
-                  const entity = contextBrowseQuerySchema.shape.entity.parse({
-                    type: selected.kind,
-                    id: selected.id,
-                  });
-                  navigate({ table: "context_records", entity });
-                }}
-              >
-                查看相关上下文
-              </Button>
-            ) : null}
-            {input.table === "context_records" &&
-            typeof selected.id === "string" ? (
-              <Button
-                size="small"
-                onClick={() =>
-                  navigate({
-                    table: "context_entities",
-                    context_id: selectedId,
-                  })
-                }
-              >
-                查看关联对象
-              </Button>
-            ) : null}
-            {input.table === "context_entities" &&
-            typeof selected.contextId === "string" ? (
-              <Button
-                size="small"
-                onClick={() =>
-                  navigate({
-                    table: "context_records",
-                    context_id: selectedContextId,
-                  })
-                }
-              >
-                查看上下文正文
-              </Button>
-            ) : null}
-          </div>
-          <pre className="max-h-96 overflow-auto rounded-xl bg-surface p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-all">
-            {JSON.stringify(selected, null, 2)}
-          </pre>
-        </section>
-      ) : null}
     </div>
   );
 }

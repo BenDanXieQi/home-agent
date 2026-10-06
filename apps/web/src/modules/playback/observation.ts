@@ -2,7 +2,7 @@ import type { z } from "zod";
 import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import type { WindowListEntry } from "../perception/windows";
 
-export const memberActivitySourceSchema = memberActivityDataSchema.pick({
+export const observationPlaybackSourceSchema = memberActivityDataSchema.pick({
   deviceId: true,
   channel: true,
   sourceRunId: true,
@@ -11,7 +11,7 @@ export const memberActivitySourceSchema = memberActivityDataSchema.pick({
 });
 
 // Sort once per query update and share the run index across all activity rows.
-export function indexPlayableMemberActivityWindows(windows: WindowListEntry[]) {
+export function indexPlayableObservationWindows(windows: WindowListEntry[]) {
   const runs = new Map<string, WindowListEntry[]>();
   for (const entry of windows.toSorted((a, b) => b.startedAt - a.startedAt)) {
     if (
@@ -29,16 +29,18 @@ export function indexPlayableMemberActivityWindows(windows: WindowListEntry[]) {
   return runs;
 }
 
-export function findMemberActivityWindow(
+export function findObservationWindow(
   windows: WindowListEntry[],
   activity: Pick<
-    z.infer<typeof memberActivitySourceSchema>,
+    z.infer<typeof observationPlaybackSourceSchema>,
     "sourceRunId" | "firstObservedAt" | "lastObservedAt"
   >,
   now: number,
+  windowId?: string,
 ) {
   return windows.find(
     (entry) =>
+      (windowId === undefined || entry.id === windowId) &&
       entry.sampledMedia &&
       entry.sampledMedia.readableUntil > now &&
       entry.videoRun?.runId === activity.sourceRunId &&
@@ -47,14 +49,16 @@ export function findMemberActivityWindow(
   );
 }
 
-export function findPlayableMemberActivityWindow(
+export function findPlayableObservationWindow(
   windows: WindowListEntry[],
-  activity: Parameters<typeof findMemberActivityWindow>[1],
+  activity: Parameters<typeof findObservationWindow>[1],
   now: number,
+  windowId?: string,
 ) {
-  return findMemberActivityWindow(
-    indexPlayableMemberActivityWindows(windows).get(activity.sourceRunId) ?? [],
+  return findObservationWindow(
+    indexPlayableObservationWindows(windows).get(activity.sourceRunId) ?? [],
     activity,
     now,
+    windowId,
   );
 }

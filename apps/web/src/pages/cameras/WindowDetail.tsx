@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { JsonData } from "../../components/json/JsonData";
 import { Button } from "../../components/Button";
 import { Notice, StatusNotice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
@@ -10,10 +10,16 @@ import {
   candidateLabel,
   petSoundLabels,
   petSoundStatuses,
-} from "./window-presentation";
+} from "../../modules/perception/window-presentation";
 import { WindowIdentity } from "./WindowIdentity";
 import { WindowRecording } from "./WindowRecording";
 import { WindowSpeech } from "./WindowSpeech";
+import { projectWindowMaterial } from "@home-agent/api/perception/window-observations";
+import { WindowMaterialSummary } from "../../components/WindowMaterialSummary";
+import {
+  windowAudioStates,
+  windowVadStates,
+} from "../../modules/perception/window-presentation";
 
 export function WindowDetail({
   detail,
@@ -23,11 +29,6 @@ export function WindowDetail({
   active: boolean;
 }) {
   const { query, window } = detail;
-  const [jsonOpen, setJsonOpen] = useState(false);
-  const json = useMemo(
-    () => (jsonOpen && window ? JSON.stringify(window, null, 2) : null),
-    [jsonOpen, window],
-  );
   if (windowRequestUnavailable(query.error))
     return <StatusNotice>此窗口已不可读取，请选择新的片段。</StatusNotice>;
   if (query.isError && !query.data)
@@ -57,6 +58,7 @@ export function WindowDetail({
         {windowTime(window.startedAt)} – {windowTime(window.endedAt)} ·{" "}
         {candidateLabel(window)}
       </h3>
+      <WindowMaterialSummary material={projectWindowMaterial(window)} />
       <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
         <dt className="text-muted">视觉筛选</dt>
         <dd>
@@ -64,33 +66,14 @@ export function WindowDetail({
           {(window.gate.changedRatio * 100).toFixed(2)}%
         </dd>
         <dt className="text-muted">声音输入</dt>
-        <dd>
-          {
-            {
-              available: "可用",
-              no_track: "无音轨",
-              missing: "缺失",
-              insufficient_input: "输入不足",
-              failed: "失败",
-            }[window.audio.status]
-          }
-        </dd>
+        <dd>{windowAudioStates[window.audio.status]}</dd>
         <dt className="text-muted">声音筛选</dt>
         <dd>
           {window.gate.audioPassed ? "通过" : "未通过"} · 能量过阈{" "}
           {window.audio.activeEnergyBlocks}/{window.audio.energyBlocks} 块
         </dd>
         <dt className="text-muted">人声检测</dt>
-        <dd>
-          {
-            {
-              speech: "检出人声",
-              no_speech: "未检出人声",
-              insufficient_input: "输入不足",
-              unavailable: "不可用",
-            }[window.audio.vad]
-          }
-        </dd>
+        <dd>{windowVadStates[window.audio.vad]}</dd>
         {window.audio.petSounds ? (
           <>
             <dt className="text-muted">猫狗声音</dt>
@@ -156,19 +139,12 @@ export function WindowDetail({
           </Button>
         </Notice>
       ) : null}
-      <details
-        open={jsonOpen}
-        onToggle={(event) => setJsonOpen(event.currentTarget.open)}
-      >
-        <summary className="cursor-pointer rounded text-xs text-muted focus-visible:outline-2">
-          窗口原始数据 JSON
-        </summary>
-        {jsonOpen ? (
-          <pre className="mt-2 max-h-96 overflow-auto rounded-xl bg-surface p-3 text-xs">
-            {json}
-          </pre>
-        ) : null}
-      </details>
+      <JsonData
+        key={window.id}
+        value={window}
+        label="窗口原始数据 JSON"
+        name={`window-${window.id}`}
+      />
     </article>
   );
 }

@@ -151,10 +151,23 @@ const memberActivity = memberActivityRepository
 perception.start().catch((error: unknown) => {
   console.error("Perception startup failed", error);
 });
+const spatialRepository = database
+  ? createSpatialRepository(database.db)
+  : undefined;
+const spatialService = createSpatialService(spatialRepository, (scope) => {
+  const snapshot = household.snapshot();
+  const current = snapshot.projection.household.household;
+  return household.ready &&
+    scope?.account_id === current.account_id &&
+    scope?.home_id === current.home_id
+    ? Object.values(snapshot.projection.device)
+    : [];
+});
 const shutdown = new AbortController();
 const agentContext = createAgentContextService({
   household,
   members: memberRepository,
+  spatial: spatialRepository,
   sightings: memberActivityRepository,
   perception,
 });
@@ -176,18 +189,7 @@ const app = createApp({
   deviceHistoryQuery: deviceHistoryRepository
     ? createDeviceHistoryQuery(deviceHistoryRepository)
     : undefined,
-  spatialService: createSpatialService(
-    database ? createSpatialRepository(database.db) : undefined,
-    (scope) => {
-      const snapshot = household.snapshot();
-      const current = snapshot.projection.household.household;
-      return household.ready &&
-        scope?.account_id === current.account_id &&
-        scope?.home_id === current.home_id
-        ? Object.values(snapshot.projection.device)
-        : [];
-    },
-  ),
+  spatialService,
   identityEnrollment,
   identityReferences,
   speechInbox,

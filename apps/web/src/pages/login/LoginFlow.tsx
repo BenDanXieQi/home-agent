@@ -1,3 +1,4 @@
+import { formatTime } from "../../modules/presentation/time";
 import { QrCode, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 import { AnimatePresence, m } from "motion/react";
@@ -206,7 +207,7 @@ export function LoginFlow() {
           (login.status === "pending" ||
             (login.status === "security_required" && login.verificationUrl)) ? (
             <p className="mt-3 text-xs text-muted">
-              有效期至 {new Date(login.expiresAt).toLocaleTimeString("zh-CN")}
+              有效期至 {formatTime(login.expiresAt, "clock")}
             </p>
           ) : null}
         </>

@@ -36,7 +36,7 @@ export function useDeviceSelection(
           `${device.name} ${device.room} ${device.id} ${metadata?.model ?? ""}`
             .toLowerCase()
             .includes(search) &&
-          (!room || device.room === room) &&
+          (!room || device.room_key === room) &&
           (!category ||
             (category === "camera"
               ? metadata?.camera
@@ -56,9 +56,11 @@ export function useDeviceSelection(
   const roomOptions = useMemo(
     () => [
       { value: "", label: "全部房间" },
-      ...[...new Set(allDevices.map((device) => device.room))]
-        .toSorted((left, right) => left.localeCompare(right, "zh-CN"))
-        .map((value) => ({ value, label: value })),
+      ...[
+        ...new Map(allDevices.map((device) => [device.room_key, device.room])),
+      ]
+        .toSorted(([, left], [, right]) => left.localeCompare(right, "zh-CN"))
+        .map(([value, label]) => ({ value, label })),
     ],
     [allDevices],
   );

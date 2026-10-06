@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { spatialSnapshotSchema } from "./spatial";
+import { propertyKey } from "./observations";
 import {
   deviceHistoryQuerySchema,
   deviceHistoryResponseSchema,
@@ -11,16 +13,14 @@ import {
   deviceSchema,
   specSchema,
   stateVersionSchema,
+  changeSchema,
 } from "./household";
 import { memberListSchema } from "./household-members";
 import {
   contextEntityTypeSchema,
   contextEntityRoleSchema,
 } from "./household-context";
-import {
-  memberActivityDataSchema,
-  perceptionSnapshotSchema,
-} from "./perception";
+import { memberActivityDataSchema } from "./perception";
 import { windowDetailSchema } from "./perception-window";
 
 /** The shared time schema normalizes UTC to six fractional digits. */
@@ -39,14 +39,13 @@ export const agentContextPolicy = {
   pendingBytes: 16 * 1024 * 1024,
   eventBytes: 16 * 1024 * 1024 + 128,
   partBytes: {
+    spatial: 1024 * 1024,
     household: 8 * 1024 * 1024,
     device_state: 2 * 1024 * 1024,
     members: 1024 * 1024,
-    member_sightings: 2 * 1024 * 1024,
-    perception: 2 * 1024 * 1024,
+    observations: 4 * 1024 * 1024,
   },
-  recentSightings: 200,
-  recentWindows: 100,
+  recentObservationMs: 30 * 60_000,
   connections: 16,
   heartbeatMs: 15_000,
   heartbeatTimeoutMs: 45_000,
@@ -98,7 +97,56 @@ export const perceptionWindowHistoryRecordSchema = z.object({
     ),
   }),
 });
+export const agentObservationReasonSchema = z.enum([
+  "member_sighting",
+  "unidentified_target",
+  "visual_change",
+  "speech",
+  "pet_sound",
+]);
+export const agentObservationSourceSchema = z.object({
+  status: z.enum(["loading", "ready", "unavailable", "failed"]),
+  read_at: z.iso.datetime().nullable(),
+  reason: z.string().nullable(),
+  truncated: z.boolean(),
+});
+export const agentObservationSchema = z.object({
+  id: z.uuid(),
+  startedAt: z.number(),
+  endedAt: z.number(),
+  reasons: z.array(agentObservationReasonSchema).min(1),
+  member_sighting_ids: z.array(memberSightingRecordSchema.shape.id),
+  member_sighting_revisions: z.record(
+    memberSightingRecordSchema.shape.id,
+    memberActivityDataSchema.shape.attribution.shape.revision,
+  ),
+  window_id: windowDetailSchema.shape.id.nullable(),
+  window_material: windowDetailSchema
+    .pick({ revision: true, inputState: true, sampledMedia: true })
+    .extend({
+      speech_count: z.int().nonnegative(),
+      speech_enabled: windowDetailSchema.shape.speech.shape.enabled,
+      pet_sound_analysis: windowDetailSchema.shape.audio.shape.petSounds
+        .unwrap()
+        .pick({ status: true, validity: true })
+        .nullable(),
+      pet_sound_count: z.int().nonnegative().nullable(),
+    })
+    .nullable(),
+});
+export const agentDevicePropertySchema =
+  projectionSchema.shape.latest.valueType.omit({
+    home_id: true,
+    room_id: true,
+    spec_id: true,
+    description: true,
+    type_name: true,
+    service_type_name: true,
+    readable: true,
+    unit: true,
+  });
 export const agentContextDataSchemas = {
+  spatial: spatialSnapshotSchema.omit({ scope: true }),
   household: projectionSchema
     .pick({ household: true, home: true, room: true, device: true })
     .extend({ specs: z.record(z.string(), specSchema) }),
@@ -110,15 +158,19 @@ export const agentContextDataSchemas = {
       collection: true,
     })
     .extend({
+      latest: z.record(z.string(), agentDevicePropertySchema),
       online: z.array(
         deviceSchema.pick({ account_id: true, device_id: true, online: true }),
       ),
     }),
   members: memberListSchema,
-  member_sightings: z.object({ records: z.array(memberSightingRecordSchema) }),
-  perception: z.object({
-    snapshot: perceptionSnapshotSchema,
-    windows: z.array(windowDetailSchema),
+  observations: z.object({
+    range: z.object({ start: z.number(), end: z.number() }),
+    records: z.array(agentObservationSchema),
+    sources: z.object({
+      member_sightings: agentObservationSourceSchema,
+      perception: agentObservationSourceSchema,
+    }),
   }),
 };
 function part<S extends z.ZodType>(data: S) {
@@ -153,17 +205,76 @@ function part<S extends z.ZodType>(data: S) {
 }
 export const agentContextPartsSchema = z.object({
   household: part(agentContextDataSchemas.household),
+  spatial: part(agentContextDataSchemas.spatial),
   device_state: part(agentContextDataSchemas.device_state),
   members: part(agentContextDataSchemas.members),
-  member_sightings: part(agentContextDataSchemas.member_sightings),
-  perception: part(agentContextDataSchemas.perception),
+  observations: part(agentContextDataSchemas.observations),
 });
 export const agentContextSnapshotSchema = z.strictObject({
   scope: agentContextScopeSchema.nullable(),
   parts: agentContextPartsSchema.partial(),
 });
+// Reuse household change validation, including each record's stable identity.
+const otherDeviceChangeSchema = changeSchema.transform((change, ctx) => {
+  switch (change.entity) {
+    case "latest":
+      if (change.op === "remove") return { ...change, entity: change.entity };
+      ctx.addIssue({
+        code: "custom",
+        message: "Expected a dynamic property change",
+      });
+      return z.NEVER;
+    case "source_health":
+    case "device_coverage":
+    case "collection":
+      return { ...change, entity: change.entity };
+    default:
+      ctx.addIssue({ code: "custom", message: "Invalid device state entity" });
+      return z.NEVER;
+  }
+});
+export const agentDeviceChangeSchema = z.union([
+  z
+    .strictObject({
+      op: z.literal("upsert"),
+      entity: z.literal("latest"),
+      key: z.string(),
+      value: agentDevicePropertySchema,
+    })
+    .refine(
+      ({ key, value }) =>
+        key ===
+        propertyKey(value.account_id, value.device_id, value.siid, value.piid),
+      {
+        message: "Property identity mismatch",
+      },
+    ),
+  otherDeviceChangeSchema,
+]);
+export const agentDeviceDeltaSchema = z.strictObject({
+  status: z.literal("delta"),
+  read_at: z.iso.datetime(),
+  truncated: z.literal(false),
+  data: z.strictObject({
+    changes: z.array(agentDeviceChangeSchema),
+    online: agentContextDataSchemas.device_state.shape.online.optional(),
+  }),
+});
+export const agentContextPublicationSchema = agentContextSnapshotSchema.extend({
+  parts: agentContextPartsSchema
+    .extend({
+      device_state: z.union([
+        agentContextPartsSchema.shape.device_state,
+        agentDeviceDeltaSchema,
+      ]),
+    })
+    .partial(),
+});
 export const agentContextEventSchema = z.discriminatedUnion("event", [
-  z.object({ event: z.literal("snapshot"), data: agentContextSnapshotSchema }),
+  z.object({
+    event: z.literal("snapshot"),
+    data: agentContextPublicationSchema,
+  }),
   z.object({ event: z.literal("heartbeat"), data: z.strictObject({}) }),
 ]);
 const sourceSchema = z.strictObject({
@@ -268,4 +379,23 @@ export const agentHistoryResponseSchema = z.discriminatedUnion("kind", [
   deviceHistoryResponseSchema.extend({ kind: z.literal("device_reports") }),
   memberSightingsHistoryResponseSchema,
   perceptionWindowsHistoryResponseSchema,
+]);
+
+/** Resolve one reference against its authoritative source, never embed it in snapshots. */
+export const agentMaterialQuerySchema = z.strictObject({
+  scope: agentContextScopeSchema,
+  kind: z.enum(["member_sighting", "perception_window"]),
+  id: z.uuid(),
+});
+export const agentMaterialResponseSchema = z.discriminatedUnion("kind", [
+  z.object({
+    scope: agentContextScopeSchema,
+    kind: z.literal("member_sighting"),
+    record: memberSightingRecordSchema,
+  }),
+  z.object({
+    scope: agentContextScopeSchema,
+    kind: z.literal("perception_window"),
+    window: windowDetailSchema,
+  }),
 ]);

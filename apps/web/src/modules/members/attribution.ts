@@ -1,3 +1,4 @@
+import { formatTime } from "../presentation/time";
 import type {
   memberAssociationSchema,
   memberAttributionSnapshotSchema,
@@ -6,7 +7,7 @@ import type {
 } from "@home-agent/api/contracts";
 
 export function attributionTime(value: number) {
-  return new Date(value).toLocaleString("zh-CN", { hour12: false });
+  return formatTime(value);
 }
 
 export function associationLabel(

@@ -1,4 +1,5 @@
 import { createWindowVideoObservations } from "./video-observations";
+import { projectWindowObservation } from "@home-agent/api/perception/window-observations";
 import { appendWindowPetSound } from "./pet-sound";
 import type { z } from "zod";
 import { type windowSourceSchema } from "@home-agent/api/contracts";
@@ -817,6 +818,12 @@ export function createWindowStore(options: {
     describe(id: string, now: number) {
       const entry = lookup(id, now);
       return entry ? structuredClone(entry.summary) : undefined;
+    },
+    observation(id: string, now: number) {
+      const entry = lookup(id, now);
+      return entry && entry.summary.inputState !== "revoked"
+        ? projectWindowObservation({ ...entry.summary, sampledMedia: null })
+        : undefined;
     },
     *selectDetails(
       now: number,

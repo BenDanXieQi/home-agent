@@ -66,13 +66,9 @@
         "context_entities_context_id_context_records_id_fk": {
           "name": "context_entities_context_id_context_records_id_fk",
           "tableFrom": "context_entities",
-          "columnsFrom": [
-            "context_id"
-          ],
+          "columnsFrom": ["context_id"],
           "tableTo": "context_records",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -80,12 +76,7 @@
       "compositePrimaryKeys": {
         "context_entities_context_id_entity_type_entity_id_role_pk": {
           "name": "context_entities_context_id_entity_type_entity_id_role_pk",
-          "columns": [
-            "context_id",
-            "entity_type",
-            "entity_id",
-            "role"
-          ]
+          "columns": ["context_id", "entity_type", "entity_id", "role"]
         }
       },
       "uniqueConstraints": {},
@@ -296,10 +287,7 @@
       "compositePrimaryKeys": {
         "household_directories_account_id_home_id_pk": {
           "name": "household_directories_account_id_home_id_pk",
-          "columns": [
-            "account_id",
-            "home_id"
-          ]
+          "columns": ["account_id", "home_id"]
         }
       },
       "uniqueConstraints": {},
@@ -397,13 +385,9 @@
         "identity_features_sample_id_identity_samples_id_fk": {
           "name": "identity_features_sample_id_identity_samples_id_fk",
           "tableFrom": "identity_features",
-          "columnsFrom": [
-            "sample_id"
-          ],
+          "columnsFrom": ["sample_id"],
           "tableTo": "identity_samples",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -437,13 +421,9 @@
         "identity_members_member_id_household_subjects_id_fk": {
           "name": "identity_members_member_id_household_subjects_id_fk",
           "tableFrom": "identity_members",
-          "columnsFrom": [
-            "member_id"
-          ],
+          "columnsFrom": ["member_id"],
           "tableTo": "household_subjects",
-          "columnsTo": [
-            "id"
-          ],
+          "columnsTo": ["id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -586,13 +566,9 @@
         "identity_samples_member_id_identity_members_member_id_fk": {
           "name": "identity_samples_member_id_identity_members_member_id_fk",
           "tableFrom": "identity_samples",
-          "columnsFrom": [
-            "member_id"
-          ],
+          "columnsFrom": ["member_id"],
           "tableTo": "identity_members",
-          "columnsTo": [
-            "member_id"
-          ],
+          "columnsTo": ["member_id"],
           "onUpdate": "no action",
           "onDelete": "cascade"
         }
@@ -601,17 +577,12 @@
       "uniqueConstraints": {
         "identity_samples_image_key_unique": {
           "name": "identity_samples_image_key_unique",
-          "columns": [
-            "image_key"
-          ],
+          "columns": ["image_key"],
           "nullsNotDistinct": false
         },
         "identity_samples_member_sha256_unique": {
           "name": "identity_samples_member_sha256_unique",
-          "columns": [
-            "member_id",
-            "sha256"
-          ],
+          "columns": ["member_id", "sha256"],
           "nullsNotDistinct": false
         }
       },
@@ -661,48 +632,27 @@
     "public.context_certainty": {
       "name": "context_certainty",
       "schema": "public",
-      "values": [
-        "supported",
-        "tentative",
-        "unknown",
-        "conflicting"
-      ]
+      "values": ["supported", "tentative", "unknown", "conflicting"]
     },
     "public.context_entity_role": {
       "name": "context_entity_role",
       "schema": "public",
-      "values": [
-        "subject",
-        "participant",
-        "location",
-        "source"
-      ]
+      "values": ["subject", "participant", "location", "source"]
     },
     "public.context_entity_type": {
       "name": "context_entity_type",
       "schema": "public",
-      "values": [
-        "person",
-        "pet",
-        "room",
-        "device"
-      ]
+      "values": ["person", "pet", "room", "device"]
     },
     "public.context_kind": {
       "name": "context_kind",
       "schema": "public",
-      "values": [
-        "observation",
-        "assessment"
-      ]
+      "values": ["observation", "assessment"]
     },
     "public.household_subject_kind": {
       "name": "household_subject_kind",
       "schema": "public",
-      "values": [
-        "person",
-        "pet"
-      ]
+      "values": ["person", "pet"]
     }
   },
   "schemas": {},

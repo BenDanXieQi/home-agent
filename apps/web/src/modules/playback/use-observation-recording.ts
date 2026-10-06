@@ -5,17 +5,18 @@ import type { z } from "zod";
 import { createPerceptionSourceState } from "../perception/source-state";
 import { useRecordingPlayback } from "../recordings/use-recording-playback";
 import {
-  activityCacheSettled,
-  activityWindowListOptions,
-} from "./activity-cache";
+  observationCacheSettled,
+  observationWindowListOptions,
+} from "./observation-cache";
 import {
-  findMemberActivityWindow,
-  type memberActivitySourceSchema,
-} from "./activity";
+  findObservationWindow,
+  type observationPlaybackSourceSchema,
+} from "./observation";
 
-export function useActivityRecording(
-  activity: z.infer<typeof memberActivitySourceSchema>,
+export function useObservationRecording(
+  activity: z.infer<typeof observationPlaybackSourceSchema>,
   recordingAt: number,
+  windowId?: string,
 ) {
   const [openedAt] = useState(Date.now);
   const [source] = useState(() =>
@@ -26,7 +27,7 @@ export function useActivityRecording(
   );
   const target = useAtomValue(source.playbackTargetAtom);
   const windows = useQuery({
-    ...activityWindowListOptions({
+    ...observationWindowListOptions({
       scopeEpoch: target?.scope_epoch ?? "",
       ...source.target,
     }),
@@ -36,13 +37,14 @@ export function useActivityRecording(
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  const settled = activityCacheSettled(windows);
+  const settled = observationCacheSettled(windows);
   const cached =
     target && settled
-      ? findMemberActivityWindow(
+      ? findObservationWindow(
           windows.data?.get(activity.sourceRunId) ?? [],
           activity,
           Math.max(openedAt, windows.dataUpdatedAt),
+          windowId,
         )
       : undefined;
   const sdTarget = target && settled && !cached ? target : null;

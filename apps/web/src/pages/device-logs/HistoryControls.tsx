@@ -113,7 +113,7 @@ export function HistoryControls({
           />
           {!live ? (
             <Button size="small" disabled={!ready} onClick={onResume}>
-              回到最新
+              返回最新记录
             </Button>
           ) : null}
           {hasMatches && history.error ? (

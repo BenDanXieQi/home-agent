@@ -6,7 +6,7 @@ import { Disclosure } from "../../components/Disclosure";
 import { Button } from "../../components/Button";
 import { requestJson } from "../../api/client";
 import { requestErrorMessage } from "../../messages/zh-CN";
-import { collectionLabels } from "./fact-presentation";
+import { collectionLabels } from "../../modules/devices/presentation";
 
 export function CollectionDetails({ reliable }: { reliable: boolean }) {
   const snapshot = useAtomValue(householdSnapshotAtom);

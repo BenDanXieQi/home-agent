@@ -4,7 +4,7 @@ import {
   identityReasons,
   identityStates,
   windowTime,
-} from "./window-presentation";
+} from "../../modules/perception/window-presentation";
 
 type FrameIdentity = NonNullable<
   PerceptionWindow["frames"][number]["identity"]

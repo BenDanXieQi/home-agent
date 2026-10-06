@@ -1,3 +1,4 @@
+import { SearchField } from "../../components/SearchField";
 import { logViews, filterLogEntries, latestLogValues } from "./log-data";
 import { memo, useMemo, useState } from "react";
 import { Activity, Columns2, Search, X } from "lucide-react";
@@ -104,7 +105,7 @@ export const LogReader = memo(function LogReader({
                 comparison.clearAnchor();
               }}
             >
-              {paused ? "回到顶部" : "回到最新"}
+              {paused ? "回到顶部" : "返回最新记录"}
             </Button>
           ) : null}
           <Button
@@ -155,26 +156,13 @@ export const LogReader = memo(function LogReader({
             options={logViews}
           />
           <div className="flex gap-4 items-center flex-wrap ml-auto min-w-0">
-            <label className="flex min-w-0 items-center gap-2 rounded-lg bg-white px-2.5 text-muted focus-within:outline-1 focus-within:outline-accent/50">
-              <Search size={14} aria-hidden="true" />
-              <input
-                className="min-w-0 w-48 border-0 bg-transparent px-0 py-1.75 text-xs focus-visible:outline-none"
-                aria-label="搜索已加载日志"
-                placeholder="搜索已加载属性、描述或值"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              {query ? (
-                <button
-                  type="button"
-                  className="p-1"
-                  aria-label="清除日志搜索"
-                  onClick={() => setQuery("")}
-                >
-                  <X size={14} />
-                </button>
-              ) : null}
-            </label>
+            <SearchField
+              label="搜索已加载日志"
+              placeholder="搜索已加载属性、描述或值"
+              value={query}
+              onChange={setQuery}
+              className="w-64"
+            />
           </div>
         </div>
       </div>

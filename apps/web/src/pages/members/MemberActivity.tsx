@@ -1,3 +1,4 @@
+import { formatTime } from "../../modules/presentation/time";
 import {
   memberActivityDataSchema,
   type memberAttributionSnapshotSchema,
@@ -11,10 +12,10 @@ import {
   correctionReasons,
   revocationEvidence,
 } from "../../modules/members/attribution";
-import { useActivityPlayback } from "../../modules/members/use-activity-playback";
+import { useObservationPlayback } from "../../modules/playback/use-observation-playback";
 import { useMemo, useState } from "react";
-import { MemberActivityPlaybackLink } from "./MemberActivityPlaybackLink";
-import { memberActivitySourceSchema } from "../../modules/members/activity";
+import { ObservationPlaybackLink } from "../../components/ObservationPlaybackLink";
+import { observationPlaybackSourceSchema } from "../../modules/playback/observation";
 import type { contextCursorSchema } from "@home-agent/api/household-context";
 import { useQuery } from "@tanstack/react-query";
 import { Camera, ChevronDown, Clock3, RefreshCw } from "lucide-react";
@@ -27,15 +28,7 @@ import { requestErrorMessage } from "../../messages/zh-CN";
 
 function displayTime(value: unknown) {
   if (typeof value !== "string") return "时间未知";
-  const time = new Date(value);
-  return Number.isNaN(time.getTime())
-    ? "时间未知"
-    : time.toLocaleString("zh-CN", {
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
+  return formatTime(value, "monthDayMinute", "时间未知");
 }
 
 function memberSightingData(topic: unknown, data: unknown) {
@@ -229,7 +222,7 @@ export function MemberActivity({
       const entries = (query.data?.rows ?? []).map((row) => {
         const source =
           row.topic === "member_sighting"
-            ? memberActivitySourceSchema.safeParse(row.data)
+            ? observationPlaybackSourceSchema.safeParse(row.data)
             : undefined;
         return {
           row,
@@ -245,7 +238,7 @@ export function MemberActivity({
       );
       return { entries, activities };
     }, [query.data?.rows]);
-  const playback = useActivityPlayback(playableActivities, scope);
+  const playback = useObservationPlayback(playableActivities, scope);
   function refresh() {
     if (page > 0) {
       setCursors([null]);
@@ -370,7 +363,7 @@ export function MemberActivity({
                       <div className="relative mt-4 border-t border-line pt-3">
                         {source ? (
                           <div className={parsed ? "sm:pr-44" : undefined}>
-                            <MemberActivityPlaybackLink
+                            <ObservationPlaybackLink
                               source={source}
                               memberId={member.id}
                               availability={

@@ -93,7 +93,14 @@ function CameraDetailModes({
   source: ReturnType<typeof createPerceptionSourceState>;
   scope: string;
 }) {
-  const { mode, activityRun, activityFirstAt, activityAt, member } = useSearch({
+  const {
+    mode,
+    activityRun,
+    activityFirstAt,
+    activityAt,
+    member,
+    window: windowId,
+  } = useSearch({
     from: "/account/cameras/$deviceId/$channel",
   });
   const [windowsVisited, setWindowsVisited] = useState(mode === "windows");
@@ -116,6 +123,7 @@ function CameraDetailModes({
               }}
               search={{
                 mode: value,
+                window: undefined,
                 activityRun: undefined,
                 activityAt: undefined,
                 activityFirstAt: undefined,
@@ -137,7 +145,7 @@ function CameraDetailModes({
       {windowsVisited ? (
         <div hidden={mode !== "windows"}>
           <CameraWindows
-            key={`${activityRun ?? ""}:${activityFirstAt ?? ""}:${activityAt ?? ""}`}
+            key={`${windowId ?? ""}:${activityRun ?? ""}:${activityFirstAt ?? ""}:${activityAt ?? ""}`}
             source={source}
             scope={scope}
             visible={mode === "windows"}

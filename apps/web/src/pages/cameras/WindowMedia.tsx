@@ -13,7 +13,7 @@ import {
   mediaStates,
   representations,
   windowTime,
-} from "./window-presentation";
+} from "../../modules/perception/window-presentation";
 import { useWindowMedia } from "../../modules/perception/use-window-media";
 import {
   useWindowInputState,

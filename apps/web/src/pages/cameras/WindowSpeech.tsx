@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { PerceptionWindow } from "../../modules/perception/windows";
-import { windowTime } from "./window-presentation";
+import { windowTime } from "../../modules/perception/window-presentation";
 
 export function WindowSpeech({ window }: { window: PerceptionWindow }) {
   const { speech } = window;
