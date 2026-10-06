@@ -199,6 +199,16 @@ export function presentReceiptChange(change: Change) {
         detail: `${operation}观察 · ${time(record?.startedAt)} · ${record?.member_sighting_ids.length ?? 0} 条成员引用${record?.window_id ? " · 音视频窗口" : ""}${details.length ? ` · ${details.join(" · ")}` : ""}`,
       };
     }
+    case "member_sighting": {
+      const record = change.after ?? change.before;
+      return {
+        subject:
+          record?.attribution.kind === "known"
+            ? `成员最后出现 / ${record.attribution.association.memberId}`
+            : "未归因目标最后出现",
+        detail: `${operation}出现记录 · ${time(record?.lastObservedAt)} · ${record?.deviceId ?? change.key} / 镜头 ${record?.channel ?? "未知"}`,
+      };
+    }
     case "observation_source":
       return {
         subject:

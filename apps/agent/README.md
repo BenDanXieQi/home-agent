@@ -73,7 +73,7 @@ Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；�
 
 `context/receipts.ts` 由接收器独占，消息在通过校验并合并后记录。设备增量正文只保留本次条目变化，context 保存增量合并后的完整状态；合并使用共享 Mutative 封装，不修改旧接收记录。记录保留接收序号、UTC 时间、初始接收／状态更新、涉及部分、原始正文 `payload_bytes`、合并上下文 `context_bytes` 字节数、校验后的消息和当时上下文；不是原始 SSE 字节归档。`context_bytes` 为完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，接收记录固定为当时大小，当前快照接口按本次读取状态计算；不含连接诊断字段，不代表进程内存占用。接收记录按不可变对象引用缓存字节数，设备增量复用未变化条目的统计；统计过程不重复序列化完整上下文或完整接收记录。最多 1000 条，同时按每条完整序列化体积计入 64 MiB 预算（共享对象仍重复计数），超限淘汰最早记录并累计数量。连接或家庭资格改变时清空记录并更换会话标识，重启丢失，不重放或保存消费进度。心跳不生成接收记录。读取已淘汰记录返回 404。响应上限覆盖整个接收记录保留预算及响应信封，计入变化摘要，保证保留的单条详情和完整索引均可读取。
 
-统一观察保存观察索引、`member_sighting_ids/window_id` 引用、成员出现归因修订号及轻量窗口材料摘要，不保存成员记录正文或完整音视频窗口详情。`createContextReader({ client, receiver })` 提供 `readMaterial` 方法，接受 `{ kind: "member_sighting" | "perception_window", id }` 和取消信号，自动携带当前 scope 调用 Backend 的 `/api/agent/context/material`。读取前后核对接收资格、响应类型与引用 ID；源材料过期、移除或资格变化时失败，不用旧缓存替代，不写回上下文。返回的是来源当前保留版本，不是当时接收内容。
+统一观察保存观察索引、`member_sighting_ids/window_id` 引用、成员出现的轻量身份投影及归因修订号、轻量窗口材料摘要，不保存成员记录正文或完整音视频窗口详情。`createContextReader({ client, receiver })` 提供 `readMaterial` 方法，接受 `{ kind: "member_sighting" | "perception_window", id }` 和取消信号，自动携带当前 scope 调用 Backend 的 `/api/agent/context/material`。读取前后核对接收资格、响应类型与引用 ID；源材料过期、移除或资格变化时失败，不用旧缓存替代，不写回上下文。返回的是来源当前保留版本，不是当时接收内容。
 
 同一读取模块的 `readHistory` 方法读取三类历史。receiver 提供当前接收资格；调用者传入 `kind=device_reports|member_sightings|perception_windows`、UTC 区间、相应对象条件、分页参数及取消信号。设备分支沿用原读取条件；成员使用可选 member_ids/sources，音视频使用可选 sources，返回完整窗口与匹配引用。用法与字段见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 

@@ -116,7 +116,7 @@ export function createMemberActivityRepository(db: Database) {
         return (await sightingRecords(tx, rows))[0] ?? null;
       });
     },
-    async observationsSince(
+    async currentObservations(
       identity: Parameters<typeof access>[0],
       assertCurrent: () => void,
       since: number,
@@ -126,7 +126,16 @@ export function createMemberActivityRepository(db: Database) {
         await tx`select pg_advisory_xact_lock_shared(hashtextextended(${membersLock}, 0))`;
         assertCurrent();
         const query = tx`
-          select id, jsonb_build_object(
+          with ranked as materialized (
+            select id, (data->>'lastObservedAt')::numeric as observed_at, dense_rank() over (
+              partition by case when data #>> '{attribution,current,kind}' = 'known'
+                then jsonb_build_array('member', data #>> '{attribution,current,association,memberId}')
+                else jsonb_build_array('unknown', data->>'deviceId', data->>'channel') end
+              order by (data->>'lastObservedAt')::numeric desc
+            ) as position
+            from context_records where topic = 'member_sighting'
+          )
+          select context_records.id, jsonb_build_object(
             'sourceRunId', data->'sourceRunId',
             'run', data->'run',
             'mediaGeneration', data->'mediaGeneration',
@@ -136,11 +145,21 @@ export function createMemberActivityRepository(db: Database) {
             'firstObservedAt', data->'firstObservedAt',
             'lastObservedAt', data->'lastObservedAt'
           ) as data,
-          data #>> '{attribution,current,kind}' = 'known' as known,
+          case when data #>> '{attribution,current,kind}' = 'known' then
+            jsonb_build_object(
+              'kind', 'known',
+              'association', jsonb_build_object(
+                'memberId', data #> '{attribution,current,association,memberId}',
+                'state', data #> '{attribution,current,association,state}'
+              )
+            )
+          else jsonb_build_object(
+            'kind', data #> '{attribution,current,kind}'
+          ) end as attribution,
           (data #>> '{attribution,revision}')::integer as revision
-          from context_records
-          where topic = 'member_sighting' and (data->>'lastObservedAt')::numeric >= ${since}
-          order by (data->>'lastObservedAt')::numeric desc, id desc
+          from ranked join context_records on context_records.id = ranked.id
+          where ranked.position = 1 or ranked.observed_at >= ${since}
+          order by ranked.observed_at desc, context_records.id desc
         `;
         for await (const rows of query.cursor(16)) {
           for (const row of rows) {

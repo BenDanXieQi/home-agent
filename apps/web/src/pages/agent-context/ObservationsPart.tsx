@@ -244,8 +244,8 @@ export const ObservationsPart = memo(function ObservationsPart({
         这里展示观察索引、材料引用和接收时材料摘要。展开记录才读取源内容；声音不归因给成员，画面变化不是事件结论。
       </p>
       <p className="text-xs text-muted">
-        近期观察：{time(data.range.start)} — {time(data.range.end)}
-        。更早记录通过历史查询读取。
+        最新观察，整理于 {time(data.as_of)}
+        。成员保留最后出现，摄像头按线索类型保留最新记录；历史按需查询。
       </p>
       {Object.entries(data.sources).map(([name, source]) => (
         <p

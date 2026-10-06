@@ -165,6 +165,29 @@ export function receiptChanges(
   const observations = input.message.data.parts.observations;
   if (observations?.status === "ready") {
     const old = before?.observations;
+    const sightings = new Map(
+      old?.status === "ready"
+        ? old.data.member_sightings.map((record) => [record.id, record])
+        : [],
+    );
+    for (const next of observations.data.member_sightings) {
+      const prior = sightings.get(next.id);
+      sightings.delete(next.id);
+      if (!isDeepStrictEqual(prior, next))
+        changes.push({
+          kind: "member_sighting",
+          key: next.id,
+          before: prior ?? null,
+          after: next,
+        });
+    }
+    for (const [key, prior] of sightings)
+      changes.push({
+        kind: "member_sighting",
+        key,
+        before: prior,
+        after: null,
+      });
     const records = new Map(
       old?.status === "ready" ? old.data.records.map((r) => [r.id, r]) : [],
     );
