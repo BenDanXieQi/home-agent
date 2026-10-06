@@ -1,83 +1,27 @@
+import { modelEnvironment } from "@home-agent/model";
 import { z } from "zod";
-
-const optionalText = z.preprocess(
-  (value) =>
-    typeof value === "string" && value.trim() === "" ? undefined : value,
-  z.string().optional(),
-);
-const httpUrl = z.url().refine((value) => {
-  const url = new URL(value);
-  return (
-    ["http:", "https:"].includes(url.protocol) && !url.username && !url.password
-  );
-}, "Use an HTTP(S) URL without embedded credentials");
-
-const environment = z.object({
-  DATABASE_URL: optionalText.pipe(
-    z
-      .url()
-      .refine(
-        (value) =>
-          ["postgres:", "postgresql:"].includes(new URL(value).protocol),
-        "Use a PostgreSQL connection URL",
-      )
-      .optional(),
-  ),
-  AGENT_DATABASE_URL: optionalText.pipe(
-    z
-      .url()
-      .refine(
-        (value) =>
-          ["postgres:", "postgresql:"].includes(new URL(value).protocol),
-        "Use a PostgreSQL connection URL",
-      )
-      .optional(),
-  ),
+const environment = modelEnvironment.extend({
   AGENT_HOST: z.string().min(1).default("127.0.0.1"),
   AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(1811),
-  BACKEND_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
-  AGENT_BACKEND_URL: optionalText.pipe(
-    httpUrl
-      .refine(
-        (value) =>
-          ["localhost", "127.0.0.1", "[::1]"].includes(new URL(value).hostname),
-        "Use a loopback backend URL",
-      )
-      .optional(),
-  ),
-  AGENT_CONTEXT_BYTES: z.coerce
+  AGENT_RUN_TIMEOUT_MS: z.coerce
     .number()
     .int()
-    .min(32_768)
-    .max(1_048_576)
-    .default(65_536),
+    .min(1000)
+    .max(3600000)
+    .default(120000),
   AGENT_MAX_OUTPUT_TOKENS: z.coerce
     .number()
     .int()
     .min(256)
-    .max(32_768)
+    .max(32768)
     .default(4096),
-  AGENT_MODEL: optionalText,
-  AGENT_THINKING: optionalText.pipe(z.enum(["enabled", "disabled"]).optional()),
-  OPENAI_API_KEY: optionalText,
-  OPENAI_BASE_URL: optionalText.pipe(httpUrl.optional()),
-  AGENT_RUN_TIMEOUT_MS: z.coerce
-    .number()
-    .int()
-    .min(1_000)
-    .max(3_600_000)
-    .default(120_000),
 });
-
-export type Config = z.infer<typeof environment>;
-
 export function loadConfig(env: Record<string, string | undefined> = Bun.env) {
   const result = environment.safeParse(env);
-  if (!result.success) {
-    const fields = result.error.issues
-      .map((issue) => issue.path.join("."))
-      .join(", ");
-    throw new Error(`Invalid environment configuration: ${fields}`);
-  }
+  if (!result.success)
+    throw new Error(
+      `Invalid agent configuration: ${result.error.issues.map((issue) => issue.path.join(".")).join(", ")}`,
+    );
   return result.data;
 }
+export type Config = ReturnType<typeof loadConfig>;

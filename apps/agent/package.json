@@ -12,20 +12,16 @@
     "start": "bun --env-file=../../.env dist/main.js",
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
-    "check-types": "tsc --noEmit",
-    "db:setup": "bun --env-file=../../.env scripts/db-setup.ts",
-    "db:check": "bun --env-file=../../.env scripts/db-check.ts"
+    "check-types": "tsc --noEmit"
   },
   "dependencies": {
     "@langchain/core": "catalog:",
-    "@langchain/langgraph": "catalog:",
-    "@langchain/openai": "catalog:",
-    "hono": "catalog:",
     "zod": "catalog:",
-    "@home-agent/observability": "workspace:*",
-    "@langchain/langgraph-checkpoint-postgres": "catalog:",
-    "pg": "catalog:",
-    "@home-agent/api": "workspace:*"
+    "@home-agent/api": "workspace:*",
+    "deepagents": "1.14.2",
+    "langchain": "1.5.15",
+    "@home-agent/model": "workspace:*",
+    "langsmith": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
@@ -33,7 +29,6 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
-    "@types/pg": "catalog:",
     "@home-agent/oxlint-config": "workspace:*"
   }
 }
