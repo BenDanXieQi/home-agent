@@ -1,7 +1,5 @@
 import { householdScopeEpochAtom } from "../../modules/household/state";
-import { roomsAtom } from "../../modules/devices/state";
 import { DeviceStateRow } from "./DeviceStateRow";
-import { RoomAnalysisPanel } from "./RoomAnalysisPanel";
 import { CollectionDetails } from "./CollectionDetails";
 import { DeviceList } from "./DeviceList";
 import { EmptyState } from "../../components/EmptyState";
@@ -62,16 +60,10 @@ export const DeviceBrowser = memo(function DeviceBrowser({
   const [filter, setFilter] = useAtom(deviceFilterAtom);
   const [filters, setFilters] = useAtom(deviceFiltersAtom);
   const scope = useAtomValue(householdScopeEpochAtom);
-  const rooms = useAtomValue(roomsAtom);
   const [expanded, setExpanded] = useState<string | null>(null);
   const changeExpanded = useCallback((deviceId: string, open: boolean) => {
     setExpanded(open ? deviceId : null);
   }, []);
-  const selectedRoom = Object.values(rooms ?? {}).find(
-    (room) =>
-      !room.archived &&
-      JSON.stringify([room.home_id, room.room_id]) === filters.room,
-  );
   const activeRefinements = [
     filters.category,
     filters.capability,
@@ -176,15 +168,6 @@ export const DeviceBrowser = memo(function DeviceBrowser({
           ...options.rooms.map(([value, label]) => ({ value, label })),
         ]}
       />
-      {scope && selectedRoom ? (
-        <RoomAnalysisPanel
-          key={`${scope}/${selectedRoom.room_id}`}
-          scope={scope}
-          roomId={selectedRoom.room_id}
-          roomName={selectedRoom.name}
-          synced={reliable}
-        />
-      ) : null}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-4 max-md:items-stretch">
         <span className="text-xs text-muted">
           {devices.length} 台设备 · 最近状态

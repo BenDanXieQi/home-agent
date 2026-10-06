@@ -40,7 +40,7 @@ bun run --cwd apps/web test -- tests/modules/mijia/commands.test.ts
 - 竞态使用 Promise 屏障，时间策略使用假时钟；每个用例清理账号、定时器、观察、server 和 spy。使用全局 spy 的 Bun 测试不得标记 `test.concurrent`。
 - Bun 的异步 `expect(...).rejects` 必须 `await`；其声明返回 `void` 导致 lint 误报，只在测试文件关闭 `typescript/await-thenable`。
 
-这些测试验证确定性业务契约与协议边界，不测试 React UI，不执行 Go overlay、真实供应商请求、数据库迁移或实机出帧验收。家庭运行时的规则映射与证据边界见[家庭功能测试](household/README.md)。`household/device-reports.test.ts` 通过真实家庭状态机和可控单调时钟，验证报告值、来源与有效期对房间查询、可信变化、规则使用资格和模型上下文的影响；`integration/device-online.test.ts` 通过真实账号、家庭运行时、米家采集适配器与读取入口，验证设备清单初始化在线状态、离线时不请求供应商、未实测型号的合法上线通知恢复读取以及刷新修正遗漏状态；MQTT 重连触发清单刷新的行为由 `mijia/observations/directory-notifications.test.ts` 验证。测试不证明自动补读的全部调度分支、模型调用或真实设备的上报保证。违反契约的实现通过普通失败测试暴露，不用跳过或修改预期掩盖。
+这些测试验证确定性业务契约与协议边界，不测试 React UI，不执行 Go overlay、真实供应商请求、数据库迁移或实机出帧验收。家庭运行时的规则映射与证据边界见[家庭功能测试](household/README.md)。`household/device-reports.test.ts` 通过真实家庭状态机和可控单调时钟，验证报告值、来源与有效期对房间查询、当前值有效性和可信变化的影响；`integration/device-online.test.ts` 通过真实账号、家庭运行时、米家采集适配器与读取入口，验证设备清单初始化在线状态、离线时不请求供应商、未实测型号的合法上线通知恢复读取以及刷新修正遗漏状态；MQTT 重连触发清单刷新的行为由 `mijia/observations/directory-notifications.test.ts` 验证。测试不证明自动补读的全部调度分支、模型调用或真实设备的上报保证。违反契约的实现通过普通失败测试暴露，不用跳过或修改预期掩盖。
 
 参考 [Hono 测试指南](https://hono.dev/docs/guides/testing)。新增测试前需遵循仓库规则，取得用户明确许可。
 

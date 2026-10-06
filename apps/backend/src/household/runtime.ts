@@ -91,13 +91,10 @@ export class HouseholdRuntime {
     if (this.started || this.stopped) return;
     this.started = true;
     let published = this.version();
-    let priorProjection = this.projection;
     this.actor.subscribe(({ context }) => {
       if (context.input_sequence === this.handled) return;
       // Mark the commit before calling subscribers, including reentrant consumers.
       this.handled = context.input_sequence;
-      const beforeProjection = priorProjection;
-      priorProjection = context.projection;
       if (
         context.scope_epoch !== published.scope_epoch ||
         context.sequence !== published.sequence
@@ -114,13 +111,8 @@ export class HouseholdRuntime {
           }
         }
       }
-      if (
-        context.fact_result ||
-        context.changes.some((change) =>
-          ["device", "latest", "room"].includes(change.entity),
-        )
-      ) {
-        const commit = this.factCommit(beforeProjection);
+      const commit = this.factCommit();
+      if (commit.history) {
         for (const listener of this.factListeners) {
           try {
             listener(commit);
@@ -155,7 +147,7 @@ export class HouseholdRuntime {
     if (this.collection) throw new HouseholdError("invalid_state");
     this.collection = collection;
   }
-  private factCommit(before: Projection) {
+  private factCommit() {
     const observation = this.context.fact_result?.observation;
     const event = observation?.event;
     const history =
@@ -183,23 +175,6 @@ export class HouseholdRuntime {
         : null;
     return freeze({
       history,
-      state_version: this.version(),
-      changes: this.context.changes,
-      result: this.context.fact_result,
-      transitions: this.context.changes
-        .filter((change) =>
-          [
-            "latest",
-            "device",
-            "room",
-            "device_coverage",
-            "source_health",
-          ].includes(change.entity),
-        )
-        .map((change) => {
-          const previous: Record<string, unknown> = before[change.entity];
-          return { ...change, before: previous[change.key] ?? null };
-        }),
     });
   }
   subscribeFacts(

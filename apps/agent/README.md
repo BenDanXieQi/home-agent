@@ -4,7 +4,7 @@
 
 ## 运行
 
-根目录 `.env` 配置 `AGENT_MODEL`、`OPENAI_API_KEY`，按需配置 `OPENAI_BASE_URL`。模型必须支持工具调用。支持 `thinking.type` 的供应商可设置 `AGENT_THINKING`。共享模型工厂位于 `packages/model`，backend 的房间解释与语音判断也读取这些配置。
+根目录 `.env` 配置 `AGENT_MODEL`、`OPENAI_API_KEY`，按需配置 `OPENAI_BASE_URL`。模型必须支持工具调用。支持 `thinking.type` 的供应商可设置 `AGENT_THINKING`。共享模型工厂位于 `packages/model`，backend 的语音判断也读取这些配置。
 
 ```sh
 bun install
@@ -44,7 +44,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 当前已提供空间规划模块入口，尚未接入服务请求、前端启动及可选上传、家庭数据通路或 backend 读写能力；现有 `/api/chat` 仍只调用家庭助手。因此还不能从页面启动规划或自动保存空间配置。视觉分析要求所配置模型支持图像输入。
 
-房间观测解释和语音请求判断分别由 backend 的 `room-analysis/interpret.ts`、`conversation/interpret.ts` 负责，不调用此服务。数据库中已有的 `agent_state` 数据不被本服务读取、迁移或删除；若不再需要，可由数据库维护者另行清理。
+语音请求判断由 backend 的 `conversation/interpret.ts` 负责，不调用此服务。数据库中已有的 `agent_state` 数据不被本服务读取、迁移或删除；若不再需要，可由数据库维护者另行清理。
 
 Agent 不安装 Hono 或项目追踪中间件；backend 保留请求入口和代理调用追踪。
 

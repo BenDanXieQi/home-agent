@@ -37,7 +37,7 @@ backend POST /api/chat                   SERVER
 └─ backend → Agent POST /api/chat        CLIENT（直到响应体读完或取消）
 ```
 
-backend 的房间与语音模型解释器保留模型 span。Agent 最简进程未接入 OpenTelemetry。
+backend 的语音模型解释器保留模型 span。Agent 最简进程未接入 OpenTelemetry。
 
 单次聊天在模型执行结束后返回 JSON，失败使用统一 HTTP 错误。backend 代理产生 CLIENT span；Agent HTTP 入口与 Deep Agents 内部步骤未接入自定义 OpenTelemetry span。
 
@@ -51,7 +51,7 @@ backend 的房间与语音模型解释器保留模型 span。Agent 最简进程�
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
 - `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。
 - `apps/backend/src/mijia/media/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。
-- `apps/backend/src/room-analysis/interpret.ts` 与 `conversation/interpret.ts`：结构化模型调用的 span。
+- `apps/backend/src/conversation/interpret.ts`：结构化模型调用的 span。
 
 业务操作通过 `withSpan` 显式埋点；聊天转发和连接探测使用 `tracedFetch` 并消费或取消响应体。米家专用协议在完成错误脱敏后记录 CLIENT span，不记录目标 URL、账号凭据、请求／响应正文或 SDP，也不向 go2rtc 传播追踪上下文；这些 span 描述 backend 发起的调用，尚不包含 go2rtc 内部执行或视频媒体链路。LangGraph 节点、工具和 SDK 内部重试不会自动生成独立 span。
 

@@ -75,7 +75,6 @@ export function emptyProperty(definition: PropertyDefinition) {
     has_value: false,
     value: null,
     reason: capability ? "missing" : "spec_unknown",
-    rule_eligible: false,
     evidence: null,
     applied_at: null,
     expires_at: null,
@@ -154,7 +153,6 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
         (previous.model !== device.model || previous.spec_id !== device.spec_id)
       ) {
         fact.reason = "spec_changed";
-        fact.rule_eligible = false;
         fact.expires_at = null;
         fact.read_candidate = null;
       }
@@ -165,12 +163,10 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
         fact.evidence?.source === "push"
       ) {
         fact.reason = "offline";
-        fact.rule_eligible = false;
         fact.expires_at = null;
       }
       if (stopped) {
         fact.reason = "stopped";
-        fact.rule_eligible = false;
         fact.expires_at = null;
       }
     }
@@ -222,7 +218,6 @@ export function reduceFacts(
       metadata?: ReturnType<typeof deviceHistoryMetadataSchema.parse>;
     } | null;
   } = { observation: null };
-  const edges: { key: string; before: Latest; after: Latest }[] = [];
   const output = produce(projection, (draft) => {
     const status = draft.collection.collection;
     const account = draft.household.household.account_id;
@@ -233,7 +228,6 @@ export function reduceFacts(
       for (const [key, fact] of Object.entries(draft.latest)) {
         if (!predicate(fact)) continue;
         fact.reason = reason;
-        fact.rule_eligible = false;
         fact.expires_at = null;
         delete state.deadlines[key];
       }
@@ -259,7 +253,6 @@ export function reduceFacts(
         delete state.deadlines[key];
         if (fact?.reason === "current") {
           fact.reason = "expired";
-          fact.rule_eligible = false;
           fact.expires_at = null;
         }
       }
@@ -441,7 +434,6 @@ export function reduceFacts(
         draft.latest[key] = {
           ...prior,
           reason: "invalid_value",
-          rule_eligible: false,
           expires_at: null,
         };
         delete state.deadlines[key];
@@ -518,7 +510,6 @@ export function reduceFacts(
         value: event.value,
         evidence,
         reason,
-        rule_eligible: reason === "current" && policy?.rule_eligible === true,
         spec_id: device.spec_id,
         applied_at: clock.at,
         expires_at: null,
@@ -536,7 +527,6 @@ export function reduceFacts(
       }
       if (continuous && prior.value !== fact.value) {
         fact.last_change_at = event.received_at;
-        edges.push({ key, before: prior, after: fact });
       }
     }
     const bytes =
@@ -550,13 +540,11 @@ export function reduceFacts(
     ) {
       status.rejected++;
       status.capacity_degraded = true;
-      edges.length = 0;
       if (event.kind !== "read") delete state.deadlines[key];
       if (prior && event.kind !== "read")
         draft.latest[key] = {
           ...prior,
           reason: "capacity",
-          rule_eligible: false,
           expires_at: null,
         };
       receipt = {
@@ -593,6 +581,5 @@ export function reduceFacts(
     state,
     receipt,
     observation: accepted.observation,
-    edges,
   };
 }

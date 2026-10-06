@@ -67,7 +67,6 @@ export const latestPropertySchema = z.object({
   has_value: z.boolean(),
   value: propertyValueSchema,
   reason: factReasonSchema,
-  rule_eligible: z.boolean(),
   evidence: evidenceSchema.nullable(),
   applied_at: z.iso.datetime().nullable(),
   expires_at: z.iso.datetime().nullable(),

@@ -36,7 +36,6 @@ export const propertyPolicySchema = z
     piid: z.number().int().positive(),
     read: z.boolean(),
     verified_push: z.boolean(),
-    rule_eligible: z.boolean(),
     freshness: freshnessSchema,
   })
   .refine(

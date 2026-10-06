@@ -16,7 +16,6 @@
     "./household": "./src/contracts/household.ts",
     "./device-logs": "./src/contracts/device-logs.ts",
     "./observations": "./src/contracts/observations.ts",
-    "./room-analysis": "./src/contracts/room-analysis.ts",
     "./household-context": "./src/contracts/household-context.ts",
     "./household-members": "./src/contracts/household-members.ts",
     "./spatial": "./src/contracts/spatial.ts",
