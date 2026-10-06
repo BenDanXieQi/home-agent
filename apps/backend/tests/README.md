@@ -83,3 +83,13 @@ Go overlay 的 `TestAudioTimelineSurvivesOpusPackaging` 用真实 FFmpeg 检查�
 ```sh
 bun test apps/backend/tests/perception/video-observations.test.ts apps/backend/tests/perception/native-inference.test.ts apps/backend/tests/perception/reid-native.test.ts
 ```
+
+## 家庭表生命周期与空间写入
+
+`household/spatial/storage.test.ts` 使用 `TEST_DATABASE_URL` 指向的 PostgreSQL 服务创建随机命名的独立数据库，应用真实迁移，完成后删除测试数据库，不清理连接 URL 原有数据库中的业务表。运行账号需要创建数据库权限，服务需要 TimescaleDB。未设置该变量时跳过这组集成用例。
+
+覆盖家庭表清空与安装级数据保留、未登记表阻止切换、清理与绑定事务回滚、旧绑定请求拒绝、记录版本冲突和绑定单字段启停。已有 `household/transaction-outcome.test.ts` 负责提交回执不确定性。
+
+```sh
+TEST_DATABASE_URL=postgresql://... bun test apps/backend/tests/household/spatial/storage.test.ts
+```

@@ -1,11 +1,7 @@
 import { eq } from "drizzle-orm";
 import type { Database } from "../../db";
-import {
-  mijiaHomeSelections,
-  householdDirectories,
-  contextRecords,
-  householdSubjects,
-} from "../../db/schema";
+import { mijiaHomeSelections } from "../../db/schema";
+import { clearHouseholdData } from "../../household/data-lifecycle";
 import { householdLimits } from "../../household/config";
 import { MijiaError } from "../errors";
 import { householdBindingLock } from "../../household/binding-repository";
@@ -62,14 +58,17 @@ export function createHomeSelectionStore(
             )
               throw new MijiaError("binding_conflict");
             if (row?.homeId === homeId) return true;
-            const data = { accountKey, homeId, updatedAt: new Date() };
+            const data = {
+              accountKey,
+              homeId,
+              updatedAt: new Date(
+                Math.max(Date.now(), (row?.updatedAt.getTime() ?? 0) + 1),
+              ),
+            };
             beforeWrite();
             if (previousHomeId !== null) {
-              // Context links are deleted by the context_records foreign key.
-              await tx.delete(contextRecords);
               invalidateReferences();
-              await tx.delete(householdSubjects);
-              await tx.delete(householdDirectories);
+              await clearHouseholdData(tx);
             }
             await tx
               .insert(mijiaHomeSelections)

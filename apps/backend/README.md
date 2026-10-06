@@ -1,10 +1,10 @@
 # Backend
 
-基于 Hono + Bun，负责 Web 静态托管、服务连接配置、米家授权持久化、家庭设备清单与状态订阅、属性读取与 MQTT 观察、受控摄像头播放、本地图片/摄像头持续检测、音频能量、人声分析、本地语音转写和聊天转发。聊天模型执行与对话会话持久化由项目自有的第一方 [Agent](../agent/README.md) 负责。backend 当前没有语义 LLM 调用，检测不依赖 Agent 在线。
+基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、房间观测解释、语音请求判断和聊天转发。房间与语音模块直接调用模型；单次聊天由独立 [Agent](../agent/README.md) 执行。基础检测不依赖 Agent 在线。
 
-当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，已接入成员资料、参考身份关联与可修订的成员出现记录；当前位置、通用活动识别与可执行要求管理尚未实现。相关领域边界见[家庭助手的信息边界与状态归属](../../docs/plans/household-model.md)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
+当前已实现原生属性持续采集、带有效性的当前值与房间事实查询，已接入成员资料、参考身份关联与可修订的成员出现记录；当前位置、通用活动识别与可执行要求管理尚未实现。本次数据交付边界见[实施范围](../../docs/plans/household-automation.md#本次范围)，设备基础与场景依赖见[实施计划](../../docs/plans/README.md)。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和独立 Agent 请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析通过独立 Agent 执行，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和语音请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。房间观测分析由 backend 直接调用模型，当前行为见[房间 AI 上下文](../../docs/contracts/room-analysis.md)。
 
 ## 运行
 
@@ -16,7 +16,7 @@ bun run dev         # 等待 Docker 依赖就绪，再启动 Web、backend 和 A
 bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 ```
 
-开发模式由 nodemon 监听 `src/`、共享 API 与观测包源码及根目录 `.env`。修改后发送 SIGTERM 并等待旧后端退出，再启动新的 Bun 进程；音视频分析子进程随旧后端结束，文件句柄不会跨重载保留。监听范围不包括依赖、构建产物和运行时媒体文件。
+开发模式由 nodemon 监听 `src/`、共享 API、模型与观测包源码及根目录 `.env`。修改后发送 SIGTERM 并等待旧后端退出，再启动新的 Bun 进程；音视频分析子进程随旧后端结束，文件句柄不会跨重载保留。监听范围不包括依赖、构建产物和运行时媒体文件。
 
 默认监听 `http://127.0.0.1:3000`，通过 `BACKEND_HOST`、`BACKEND_PORT` 调整。配置、服务检查、米家和聊天接口同时验证 TCP 对端为 loopback 及 Host／Origin 为允许的本机地址；调整监听地址不会放宽访问限制。当前仅供可信本机使用，尚无用户认证。构建产物需要 workspace 与已安装的依赖。
 
@@ -35,10 +35,11 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | 接口                                                | 职责                                                                                |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | `GET /api/health`                                   | backend 存活状态，不检查外围服务或数据库                                            |
+| `POST /api/spatial/*`                               | 空间、通道与观测绑定的读取和维护，见[空间关系资料](#空间关系资料)                   |
 | `GET /api/config`                                   | 读取连接配置及可写状态                                                              |
 | `PUT /api/config`                                   | 校验并保存完整连接配置                                                              |
 | `GET /api/services/status`                          | 检查 Agent 与 go2rtc 的接口是否可用                                                 |
-| `POST /api/chat`                                    | 绑定家庭范围后转发至 Agent，透传响应与 SSE                                          |
+| `POST /api/chat`                                    | 向 Agent 转发单条消息并校验 JSON 回答，不保存会话                                   |
 | `GET /api/perception`                               | 本地检测、人宠跟踪、人物身份与音频的健康及最新观测                                  |
 | `GET /api/perception/stream`                        | 订阅本地感知当前状态，不传输媒体片段                                                |
 | `POST /api/perception/images/detect`                | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
@@ -79,30 +80,9 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 米家协议适配位于 `src/mijia/protocols/`：`micloud/` 负责扫码、设备清单与属性读取，`oauth/` 负责授权及 token 续期，`miot/` 负责 MQTT 连接与消息解析。下游通过 `src/mijia/media/go2rtc-adapter.ts` 调用 go2rtc 内部接口。资源定义、状态含义与释放规则见[米家与摄像头](../../docs/mijia.md#组件与资源)。
 
-聊天请求最多 32 KiB，超时由 `BACKEND_REQUEST_TIMEOUT_MS` 控制，默认 130 秒；客户端取消会传递到 Agent。`threadId` 与 `X-Thread-Id` 原样透传，backend 不读写 Agent 的 checkpoint 表。
-
-`POST /api/chat/history/list` 和 `POST /api/chat/history/read` 将历史查询转发给 Agent，校验返回结构并限制响应最多 4 MiB、请求最多 4 KiB、上游等待最多 45 秒；不直接访问 Agent 数据库。读取前后家庭运行范围变化时拒绝返回，客户端取消传递到上游。分页与未完成会话的含义见 [Agent 历史会话](../agent/README.md#历史会话)。
-
-聊天代理要求上游为本项目 Agent；响应体原样透传，错误连接到其他服务时不会将其 HTML 等响应转换为本项目错误格式。
+聊天请求最多 32 KiB，超时由 `BACKEND_REQUEST_TIMEOUT_MS` 控制，默认 130 秒；客户端取消会传递到 Agent。代理只提交本次消息，校验并返回 JSON 回答，不提供会话历史、检查点或 SSE。响应读取最多 512 KiB，非本项目格式的上游响应转换为安全错误。
 
 收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
-
-## 家庭只读查询
-
-`src/household/queries/` 为聊天及其他本机调用方提供精简查询，复用家庭运行时和成员仓库。原有 `GET /api/mijia/state`、`POST /api/mijia/facts/query` 和 `POST /api/household-members/list` 仍服务已有页面；查询接口不读取完整原始数据库表，不触发设备刷新、属性补读或模型分析。
-
-| POST 接口                             | 除 `scope_epoch` 外的参数                   | 返回内容                                                       |
-| ------------------------------------- | ------------------------------------------- | -------------------------------------------------------------- |
-| `/api/household/queries/overview`     | `offset?`、`limit?`                         | 分页房间清单、设备总数、未分配设备数、类别数量及人物／宠物数量 |
-| `/api/household/queries/devices`      | `query?`、`room_id?`、`category?`、分页参数 | 设备 ID、名称、别名、型号、房间、类别及可用状态                |
-| `/api/household/queries/device-state` | `device_id`、分页参数                       | 最近属性报告、枚举说明、质量与时间、采集覆盖                   |
-| `/api/household/queries/members`      | `query?`、`kind?`、分页参数                 | 登记的人物及宠物资料，不含位置或活动                           |
-
-请求必须携带当前 `scope_epoch`，范围变化或家庭未就绪时拒绝；数据库查询前后核验访问资格及实际家庭绑定。Agent 的范围由 backend 聊天入口注入，不由模型选择。概览和成员查询需要成员数据库可用，数据库错误不会当作零成员返回。
-
-列表默认 20 项、最多 50 项，`total` 为筛选后的总数，`next_offset` 为下一页起点，无下一页时为 `null`；概览分页仅作用于房间列表。设备文字查询对名称、别名、型号和类别做不区分大小写的子串匹配；成员文字查询匹配名字、物种和描述。`category` 精确匹配概览返回的类别代码；省略 `room_id` 查询全部，`null` 仅查询未分配房间。各页独立读取，返回 `state_version` 与 `queried_at`，不保证多次请求之间设备清单不变。
-
-设备状态返回原始值及有效性，枚举值附 `value_label`；缺少可用规格时标签为空，不猜数字含义。属性分页保留缺值项，不能用空列表判断设备关闭。接口沿用本机访问校验，禁用缓存，请求最多 4 KiB、响应最多 128 KiB；超过响应限额返回容量错误，调用方可缩小分页大小。共享契约位于 `packages/api/src/contracts/household-queries.ts`。
 
 ## 连接配置与探测
 
@@ -173,6 +153,8 @@ src/
 │       ├── oauth/client.ts # 静默授权、token 交换与续期
 │       └── miot/          # MQTT 单次连接、订阅与消息解析
 ├── household/             # 家庭状态机、设备清单存储、规格、属性采集、成员与状态 SSE
+│   ├── data-lifecycle.ts   # 家庭表归属与事务内统一清理
+│   └── spatial/            # 空间资料服务、三张表的事务与引用查询、本机 HTTP 接口
 ├── perception/            # 本地检测、来源协调、人宠跟踪、轨迹身份证据、独立音频解码与连续 VAD、窗口筛选与按需媒体、隔离计算、当前观测与接口
 │   ├── sources.ts          # 感知来源输入边界与媒体访问 IPC 契约
 │   ├── source-lease.ts     # 音视频共用的来源资格撤销与取消联动
@@ -203,9 +185,9 @@ src/
 
 业务错误使用 `AppError`，HTTP 错误通过 `packages/api/src/errors` 的 Hono 处理入口输出；错误码、文案与 SSE 约定见[错误处理](../../packages/api/README.md#错误响应)。
 
-`main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据；应用入口独立创建语音收件箱和 Agent 客户端，感知只接收证据交付与来源失效端口。
+`main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据；应用入口独立创建语音收件箱和模型解释器，感知只接收证据交付与来源失效端口。
 
-语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语义模型归 Agent。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
+语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 `src/conversation/interpret.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
 
 `src/http/snapshot-stream.ts` 负责感知与语音接口共用的当前快照 SSE 传输，只接收变更订阅、快照读取和应用关闭信号；快照内容及有效性仍由各业务模块维护。
 
@@ -217,12 +199,13 @@ src/
 
 ## 数据库
 
+所有应用表集中导出于 `src/db/schema.ts`，使用专用数据库的 `public` schema。`household/data-lifecycle.ts` 为每张表声明家庭或安装级生命周期，新增表漏声明会导致类型检查失败。绑定记录和登录凭据属于安装级数据。家庭重绑定在排他绑定锁内核对实际表清单，并用显式 `TRUNCATE ... RESTRICT` 清空全部家庭表，不依赖手工维护删除顺序或 `CASCADE`。迁移表位于 `drizzle` schema，不参与清理。新增家庭数据写入须共用绑定锁并核对绑定身份；新增外部文件资源须接入相应领域的提交后清理。
+
 使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，由启动入口创建连接并注入凭据存储；未配置时，米家授权操作返回存储错误。backend 进程启动不自动执行迁移；根目录 `dev` 在启动应用前自动准备数据库并执行迁移。
 
 ```sh
-bun run db:migrate                       # 自动启动本机数据库、迁移并初始化 Agent，再检查
+bun run db:migrate                       # 自动启动本机数据库、迁移并检查
 bun run --cwd apps/backend db:check      # 只读检查 backend 迁移和 TimescaleDB
-bun run --cwd apps/agent db:check        # 只读检查 Agent 存储
 bun run --cwd apps/backend db:generate   # 根据 schema 生成迁移
 bun run --cwd apps/backend db:studio     # 数据库管理界面
 docker compose stop db                   # 只停止数据库容器，保留数据卷
@@ -230,11 +213,30 @@ docker compose stop db                   # 只停止数据库容器，保留数�
 
 本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
 
-backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩展；Agent 的 `db:check` 检查 checkpoint 与会话存储。两者都不写入数据，不验证写权限或完整表结构。缺少迁移时运行 `db:migrate`；已执行的迁移文件被修改时，应恢复原文件并新增迁移。
+backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩展，不写入数据，不验证写权限或完整表结构。缺少迁移时运行 `db:migrate`；已执行的迁移文件被修改时，应恢复原文件并新增迁移。
 
 `mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表、选择 API 与切换语义见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 
 `credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。凭据写入与删除使用事务和提交结果确认：确认已提交后采用结果，确认回滚才报告普通存储失败；数据库暂时无法确认时暂停账号访问，待显式重试读取数据库中的保存状态后恢复，不沿用旧内存会话。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
+
+### 空间关系资料
+
+`household/spatial/` 统一维护 `spaces`、`passages`、`observation_bindings` 三张表。空间是可独立引用的位置，通道连接两个存在且不同的空间，观测绑定把设备或镜头关联到一个空间或通道。同一对空间可有多条通道，同一来源可绑定多个目标；名称允许重复，记录使用稳定 UUID，修改内容保留 ID。
+
+这些资料由人维护，用于解释观测，不证明人员进出、当前位置或占用情况。通道端点只表示连接；画面方向和覆盖限制写在绑定的 `description` 中，例如“画面左向右对应客厅→卧室”。空间改名、端点调整、设备移动或镜头转动后，需要人工核对说明，文本不会自动改写。消费者只采用启用绑定，并另行检查来源的实际可用性；当前 Agent 聊天尚未接入空间查询工具。
+
+新建或更换绑定来源时校验当前设备清单：摄像头必须填写设备声明的镜头，普通设备不填镜头，`device_id` 不建立设备表外键。来源暂时不可用时，保留原来源的绑定仍可修改说明、目标、启停或删除。启停只控制说明的采用，不控制设备采集。外键阻止删除仍被通道或绑定引用的目标，停用绑定仍保留引用。
+
+`service.ts` 校验命令和来源，`repository.ts` 处理事务与引用查询，`routes.ts` 转换 HTTP，`errors.ts` 定义模块错误；`main.ts` 装配、`app.ts` 挂载。读写先取得家庭绑定共享锁，再取得空间锁；切换家庭按[统一清理规则](#数据库)清空三张表并拒绝旧绑定请求。首次绑定保留预先登记的资料，退出登录或设备断连不清理。创建时间与更新时间由后端生成，每次更新保证更新时间严格递增，作为并发编辑校验依据，不保存历史修订。
+
+接口要求本机访问，使用 JSON，响应禁用缓存，请求体最多 16 KiB。以下路径均以 `/api/spatial` 为前缀，字段与响应见[共享契约](../../packages/api/README.md#空间资料契约)，字段校验以[spatial.ts](../../packages/api/src/contracts/spatial.ts)为准。
+
+| 方法与路径                                                                          | 用途                                                   |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `POST /read`                                                                        | 返回绑定标识及空间、通道、绑定的完整资料，包含停用绑定 |
+| `POST /spaces/save`、`POST /passages/save`、`POST /observation-bindings/save`       | 新建或编辑，返回保存后的记录                           |
+| `POST /observation-bindings/enabled`                                                | 仅修改绑定启用状态，返回更新后的记录                   |
+| `POST /spaces/delete`、`POST /passages/delete`、`POST /observation-bindings/delete` | 删除记录或返回阻止删除的直接引用                       |
 
 ### 家庭上下文表
 
@@ -252,7 +254,7 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 
 上下文主键由提交方生成并在重试时复用，主键约束阻止重复插入；它不执行语义去重，也不自动将重复插入转为成功。时间检索使用 `(occurred_at, id)` 索引，对象检索使用 `(entity_type, entity_id, context_id)` 索引。切换家庭时，在更新绑定的同一事务中清空上下文、关联和成员，保留登录凭据。
 
-已提供表结构、迁移、切换家庭清理及只读浏览接口；尚未接入上下文自动写入或定期清理。现有房间分析不会自动写入这些表。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
+已提供表结构、迁移、切换家庭清理及只读浏览接口；成员出现记录已由 `household/identity/activity-repository.ts` 自动写入并更新归因关联，尚未接入通用记录生产者或定期清理。现有房间分析不会自动写入这些表。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
 
 成员资料由 `household/members/` 维护，复用 `household_subjects`，不经数据库浏览接口写入。`POST /api/household-members/list` 查询成员；`/save` 使用 `operation: create | update`、稳定 UUID `id` 和 `profile` 新增或更新；`/delete` 按 `id` 删除成员资料，保留上下文及其关联。三个接口都要求当前 `scope_epoch`、已就绪家庭和本机访问资格，返回更新后的成员列表；成员操作持有共享绑定锁，并核对数据库绑定与运行范围；成员写入另持有成员排他锁，家庭切换使用排他绑定锁。
 
@@ -306,6 +308,6 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 
 `createApp` 和各功能路由工厂返回链式注册得到的路由类型。`src/client.ts` 只通过 type import 引用应用类型，并用 `hc` 导出浏览器客户端工厂。`build:rpc` 预编译客户端声明，避免前端反复推导服务端实现。客户端仅依赖 Hono 的浏览器模块；启动、数据库与米家生命周期代码不属于客户端运行时。
 
-JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middleware，handler 通过 `c.req.valid("json")` 读取。该 middleware 复用公共 JSON 读取、Zod 校验和 `AppError`，并将输入类型暴露给 RPC。聊天输入协议由 backend 与 Agent 共同引用 `packages/api`，SSE 转发保持流式响应。新增接口须接入路由链，复用公共 schema，并通过功能 API 模块调用类型化客户端。
+JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middleware，handler 通过 `c.req.valid("json")` 读取。该 middleware 复用公共 JSON 读取、Zod 校验和 `AppError`，并将输入类型暴露给 RPC。聊天输入协议由 backend 与 Agent 共同引用 `packages/api`，返回单次 JSON 回答。新增接口须接入路由链，复用公共 schema，并通过功能 API 模块调用类型化客户端。
 
 服务探测、go2rtc 响应和 MiCloud 响应共同使用 `@home-agent/api/http/read-body` 的有界读取与 reader 清理。JSON 解码和供应商错误转换分别在对应边界处理；读取错误不吞掉传输或取消原因。

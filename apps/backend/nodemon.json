@@ -3,6 +3,7 @@
     "src",
     "../../packages/api/src",
     "../../packages/observability/src",
+    "../../packages/model/src",
     "../../.env"
   ],
   "ext": "ts,json,env",

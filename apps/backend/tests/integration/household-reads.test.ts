@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { MijiaError } from "../../src/mijia/errors";
 import { MiCloudError } from "../../src/mijia/protocols/micloud";
 import { deferred, eventually } from "../support/async";
@@ -110,36 +110,6 @@ describe("running household read authorization", () => {
     expect(await read(h, "stable")).toMatchObject([
       { status: "success", value: 21 },
     ]);
-  });
-
-  test("failed household cleanup preserves current reads and the saved binding", async () => {
-    const resetHomeData = mock(() =>
-      Promise.reject(new MijiaError("home_reset_failed")),
-    );
-    const h = await runningHousehold(householdCatalog(), {
-      homeId: "home-a",
-      resetHomeData,
-    });
-    households.push(h);
-    const pending = await holdRead(h);
-    const epoch = h.runtime.epoch;
-    await expect(h.runtime.bindHome(epoch, "home-b")).rejects.toMatchObject({
-      reason: "home_reset_failed",
-    });
-    expect(resetHomeData).toHaveBeenCalledTimes(1);
-    expect(h.runtime.epoch).toBe(epoch);
-    expect(h.runtime.ready).toBe(true);
-    expect(pending.signal?.aborted).toBe(false);
-    pending.release();
-    expect(await pending.outcome).toMatchObject({ accepted: true });
-    expect(await read(h)).toMatchObject([{ status: "success" }]);
-    await expect(read(h, "device-b")).rejects.toMatchObject({
-      reason: "device_not_found",
-    });
-    expect(h.homes.write).not.toHaveBeenCalled();
-    expect(await h.homes.read(h.service.identity()!)).toEqual({
-      homeId: "home-a",
-    });
   });
 
   test("an ordinary directory refresh error keeps a confirmed household readable", async () => {

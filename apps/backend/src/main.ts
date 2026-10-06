@@ -6,11 +6,14 @@ import { createMemberAccess } from "./household/members/access";
 import { createIdentityReferences } from "./household/identity/references";
 import { createReferenceFiles } from "./household/identity/files";
 import { createSpeechInbox } from "./conversation/speech-inbox";
-import { createSpeechDialogueClient } from "./conversation/agent-client";
+import { createSpeechDialogueInterpreter } from "./conversation/interpret";
+import { loadModelConfig } from "@home-agent/model";
+import { AppError } from "@home-agent/api/errors";
 import { createMemberRepository } from "./household/members/repository";
+import { createSpatialRepository } from "./household/spatial/repository";
+import { createSpatialService } from "./household/spatial/service";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
-import { createAgentHouseholdReset } from "./household/reset-agent";
 import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
@@ -73,7 +76,6 @@ const credentialStore = database
 const mijiaService = new MijiaService({
   readGo2rtcUrl: async () => (await connectionStore.read()).services.go2rtc.url,
   credentialStore,
-  resetHomeData: createAgentHouseholdReset(readAgentUrl),
   homeSelectionStore: database
     ? createHomeSelectionStore(database.db, cleanupIdentity, () => {
         identityReferences?.matching.invalidate();
@@ -107,9 +109,11 @@ const deviceLogs = new DevicePushLogs(
 mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
+const modelConfig = loadModelConfig();
+const interpretSpeech = createSpeechDialogueInterpreter(modelConfig);
 const speechInbox = createSpeechInbox({
   instanceId: crypto.randomUUID(),
-  analyze: createSpeechDialogueClient(readAgentUrl),
+  ...(interpretSpeech ? { analyze: interpretSpeech } : {}),
 });
 const perceptionSources = createPerceptionSources(household, mijiaService);
 const perception = createPerceptionService({
@@ -142,11 +146,19 @@ perception.start().catch((error: unknown) => {
 });
 const shutdown = new AbortController();
 const { RoomAnalysisService } = await import("./room-analysis/service");
-const { createRoomAnalysisClient } =
-  await import("./room-analysis/agent-client");
+const { createRoomAnalysisInterpreter } =
+  await import("./room-analysis/interpret");
+const interpretRoom = createRoomAnalysisInterpreter(modelConfig);
 const roomAnalysis = new RoomAnalysisService(
   household,
-  createRoomAnalysisClient(readAgentUrl),
+  async (input, signal) => {
+    if (!interpretRoom) throw new AppError("model_not_configured");
+    try {
+      return await interpretRoom(input, signal);
+    } catch (cause) {
+      throw new AppError("agent_execution_failed", { cause });
+    }
+  },
 );
 identityEnrollment = identityReferences
   ? createReferenceEnrollment(
@@ -160,6 +172,18 @@ identityEnrollment = identityReferences
     )
   : undefined;
 const app = createApp({
+  spatialService: createSpatialService(
+    database ? createSpatialRepository(database.db) : undefined,
+    (scope) => {
+      const snapshot = household.snapshot();
+      const current = snapshot.projection.household.household;
+      return household.ready &&
+        scope?.account_id === current.account_id &&
+        scope?.home_id === current.home_id
+        ? Object.values(snapshot.projection.device)
+        : [];
+    },
+  ),
   identityEnrollment,
   identityReferences,
   speechInbox,
