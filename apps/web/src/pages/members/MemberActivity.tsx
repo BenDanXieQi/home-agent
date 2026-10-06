@@ -201,6 +201,7 @@ export function MemberActivity({
   scope: string;
 }) {
   const [page, setPage] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
   const [cursors, setCursors] = useState<
     (ReturnType<typeof contextCursorSchema.parse> | null)[]
   >([null]);
@@ -239,15 +240,20 @@ export function MemberActivity({
       return { entries, activities };
     }, [query.data?.rows]);
   const playback = useObservationPlayback(playableActivities, scope);
-  function refresh() {
+  async function refresh() {
     if (page > 0) {
       setCursors([null]);
       setPage(0);
       return;
     }
-    query.refetch().catch((error: unknown) => {
+    setRefreshing(true);
+    try {
+      await query.refetch();
+    } catch (error) {
       console.error("Member activity refresh failed", error);
-    });
+    } finally {
+      setRefreshing(false);
+    }
   }
   return (
     <section aria-labelledby="member-activity-title" className="min-w-0">
@@ -264,7 +270,7 @@ export function MemberActivity({
           size="small"
           variant="ghost"
           icon={<RefreshCw size={14} />}
-          status={query.isFetching ? "pending" : "idle"}
+          status={refreshing ? "pending" : "idle"}
           onClick={refresh}
         >
           刷新记录
@@ -277,7 +283,7 @@ export function MemberActivity({
         </Notice>
       ) : null}
       {query.isPending ? <Skeleton className="h-40 rounded-2xl" /> : null}
-      {query.isSuccess ? (
+      {query.data ? (
         <div>
           {query.data.rows.length ? (
             <ol className="space-y-3">

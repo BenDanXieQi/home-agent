@@ -4,7 +4,7 @@ import type { z } from "zod";
 import type { mijiaRecordingAvailabilitySchema } from "@home-agent/api/mijia-recordings";
 
 export const recordingLookupUnavailableText = {
-  unsupported_source: "当前摄像头或镜头尚不支持 SD 录像回看。",
+  unsupported_source: "本应用暂未接入该摄像头或镜头的 SD 录像回看。",
   not_ready: "摄像头录像尚未就绪，请稍后重试。",
   busy: "摄像头录像查询繁忙，请稍后重试。",
   timeout: "摄像头录像查询超时，请重试。",
@@ -23,7 +23,7 @@ export const recordingLookupUnavailableText = {
 export const recordingUnavailableText = {
   no_matching_recording: "未找到对应时段的 SD 录像。",
   recording_missing: "这段录像已不在摄像头的 SD 卡中。",
-  unsupported_source: "当前摄像头或镜头尚不支持 SD 录像回看。",
+  unsupported_source: "本应用暂未接入该摄像头或镜头的 SD 录像回看。",
   source_unavailable: "摄像头连接暂不可用，请稍后重试。",
   download_failed: "SD 录像读取失败，请重新申请。",
   invalid_media: "摄像头返回的录像暂时无法播放。",

@@ -15,7 +15,6 @@ import (
 	"github.com/AlexxIT/go2rtc/internal/streams"
 	"github.com/AlexxIT/go2rtc/pkg/core"
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
-	"github.com/AlexxIT/go2rtc/pkg/xiaomi/miss"
 	"github.com/google/uuid"
 	"github.com/pion/rtp"
 )
@@ -32,9 +31,8 @@ type homeAgentCameraState struct {
 	activity        atomic.Pointer[homeAgentPacketActivity]
 	timeline        atomic.Pointer[homeAgentMediaTime]
 	releaseSource   func()
-	singleLens      bool
 	recordingsReady bool
-	recordings      *miss.Producer
+	recordings      homeAgentRecordingReader
 }
 
 var homeAgentModel = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
@@ -104,7 +102,6 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	camera := &homeAgentCameraState{
 		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
-		singleLens:    body.ChannelCount == 1,
 		playbacks:     make(map[string]*homeAgentPlaybackState),
 		analyses:      make(map[*homeAgentAnalysisConsumer]context.CancelFunc),
 		audioAnalyses: make(map[*homeAgentAudioConsumer]context.CancelFunc),
@@ -115,7 +112,7 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		homeAgentMu.Lock()
-		camera.recordings, _ = producer.(*miss.Producer)
+		camera.recordings, _ = producer.(homeAgentRecordingReader)
 		camera.recordingsReady = true
 		homeAgentMu.Unlock()
 		return homeAgentTimeProducer(camera, producer), nil

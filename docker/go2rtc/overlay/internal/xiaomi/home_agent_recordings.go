@@ -4,12 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/miss"
 )
+
+type homeAgentRecordingReader interface {
+	ListRecordings(context.Context) (miss.RecordingIndex, error)
+	DownloadRecording(context.Context, uint32, io.Writer, func(int) error) error
+}
 
 // This reader is attached by the resident producer factory; reading a card never
 // dials a camera, modifies recording settings or switches its live media mode.
@@ -41,9 +47,7 @@ func homeAgentRecordings(w http.ResponseWriter, r *http.Request) {
 	}
 	reader := camera.recordings
 	reason := ""
-	if !camera.singleLens {
-		reason = "unsupported_source"
-	} else if !camera.recordingsReady {
+	if !camera.recordingsReady {
 		reason = "not_ready"
 	} else if reader == nil {
 		reason = "unsupported_source"
@@ -64,7 +68,7 @@ func homeAgentRecordings(w http.ResponseWriter, r *http.Request) {
 			reason = "unsupported_source"
 		case errors.Is(err, miss.ErrRecordingsBusy):
 			reason = "busy"
-		case errors.Is(err, miss.ErrRecordingsTimeout):
+		case errors.Is(err, miss.ErrRecordingsTimeout), errors.Is(err, context.DeadlineExceeded):
 			reason = "timeout"
 		case errors.Is(err, miss.ErrRecordingsInvalid):
 			reason = "invalid_response"
