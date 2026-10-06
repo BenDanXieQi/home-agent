@@ -12,6 +12,31 @@ export const errorDefinitions = {
     message: "Use the local management interface.",
   },
   not_found: { status: 404, message: "The requested resource was not found." },
+  spatial_record_changed: {
+    status: 409,
+    message: "The spatial record has changed. Reload before editing.",
+  },
+  spatial_scope_changed: {
+    status: 409,
+    message: "The household binding has changed. Reload spatial data.",
+  },
+  spatial_record_exists: {
+    status: 409,
+    message: "The spatial record already exists.",
+  },
+  spatial_reference_invalid: {
+    status: 400,
+    message: "Select existing, valid spatial references.",
+  },
+  spatial_source_invalid: {
+    status: 400,
+    message: "Select a device and channel from the current inventory.",
+  },
+  spatial_storage_unavailable: {
+    status: 503,
+    message:
+      "Spatial storage is unavailable. Reload to confirm the saved state before retrying a write.",
+  },
   internal_error: { status: 500, message: "An internal error occurred." },
   http_error: {
     status: 400,
@@ -53,23 +78,6 @@ export const errorDefinitions = {
   model_not_configured: {
     status: 503,
     message: "Configure AGENT_MODEL and OPENAI_API_KEY.",
-  },
-  database_not_configured: {
-    status: 503,
-    message: "Configure the Agent database and run db:migrate.",
-  },
-  persistence_unavailable: {
-    status: 503,
-    message: "Check the Agent database and run db:migrate.",
-  },
-  thread_incomplete: {
-    status: 409,
-    message:
-      "This conversation has an unfinished run. Start a new conversation.",
-  },
-  thread_busy: {
-    status: 409,
-    message: "This conversation already has an active run.",
   },
   request_cancelled: { status: 408, message: "The request was cancelled." },
   run_timeout: { status: 504, message: "The Agent run timed out." },

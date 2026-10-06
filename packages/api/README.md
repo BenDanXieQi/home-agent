@@ -8,13 +8,15 @@ Web 通过 `@home-agent/api/contracts`、`@home-agent/api/mijia` 和 `@home-agen
 
 `@home-agent/api/devices` 提供设备清单条目与规格能力的领域 schema；米家协议和家庭规则复用这份定义，供应商原始数据的转换属于接入适配器。
 
+`@home-agent/api/spatial` 提供空间、通道和观测绑定的保存输入、启停命令、公开记录、绑定标识、整体读取及删除结果，见[空间资料契约](#空间资料契约)。端点不同和目标二选一由共享校验表达，设备／镜头合法性由后端核对当前设备清单。
+
 `@home-agent/api/playback` 提供 `src/domain/playback.ts` 中的播放目标、go2rtc 连接观测以及一次性连接耗时摘要，不依赖 HTTP 或存储。播放连接响应将 SDP 与 `connection` 一同返回；客户端据此选择本地预估样本。媒体适配器独立校验外部观测，观测异常不破坏有效的媒体答案。
 
 网络接收入口负责完整校验输入。家庭 SSE（服务端持续推送事件的 HTTP 连接）入口使用 `stateChangeSchema.parse` 一次性校验整批变化及每条数据的标识，再把已校验批次交给 `applyChanges`；后者生成新的状态，不修改原状态，并复用未变化的数据对象。快照通过 `snapshotSchema` 校验结构并复用相同的条目标识规则，不对已校验条目重复运行 schema 校验。
 
 完整规格由后端按 URN 共享，不进入公共状态。设备记录仅包含 `spec_id/spec_status/spec_error`、分类和能力标签；初始准备值由 `initialSpecification` 提供。候选家庭只由设置专用接口返回，当前协议不包含 `latest/source_health/rule_status` 空占位字段。
 
-`src/contracts/perception.ts` 定义本地检测的健康、音轨、可选猫狗声音分类和语音转写快照，通过 `@home-agent/api/contracts` 导出。`@home-agent/api/speech-dialogue` 定义短时语音收件箱及 backend／Agent 的判断请求和响应；采样区间、时间关系及判断字段的一致性由共享 schema 约束，接收边界完整校验，内部使用已校验数据。用法与期限见[语音交付](../../docs/perception.md#语音片段交付与对话判断)。这些契约不提供媒体读取或设备执行；聊天接口仍只承载文本对话。记录查询、变更补读、持续工作与动作接纳的拟实施 API 见[第一方协作计划](../../docs/plans/household-automation.md#接口与工具)。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
+`src/contracts/perception.ts` 定义本地检测的健康、音轨、可选猫狗声音分类和语音转写快照，通过 `@home-agent/api/contracts` 导出。`@home-agent/api/speech-dialogue` 定义短时语音收件箱及 backend 内部语音判断输入和结果；采样区间、时间关系及判断字段的一致性由共享 schema 约束，接收边界完整校验，内部使用已校验数据。用法与期限见[语音交付](../../docs/perception.md#语音片段交付与对话判断)。这些契约不提供媒体读取或设备执行；聊天接口仍只承载文本对话。Backend 向 Agent 交付已有数据的专用协议见[数据交付计划](../../docs/plans/household-automation.md#专用推送与接收)，目前待实施。后续证据与判断边界见[摄像头计划](../../docs/plans/media-perception.md)，不把计划中的接口当作已有协议使用。
 
 `@home-agent/api/immutable` 集中配置 Mutative，更新时只复制变化部分、复用未变化对象，称为“结构共享”：
 
@@ -41,6 +43,18 @@ backend 与 Agent 共用一套错误契约，Web 按错误码显示中文。HTTP
 
 `code` 是稳定的小写下划线标识；`message` 是安全的默认说明，仅供阅读，客户端不解析其内容。可选 `params` 提供大小限制等字符串或数值，`issues` 提供字段路径、原因码与可选参数。启用追踪时可附带 `traceId`。原始异常、输入值、堆栈及凭据不进入响应。
 
+空间删除的引用冲突使用[独立业务结果](#空间资料契约)，通用异常仍使用上述错误格式。调用方按响应结构区分同为 HTTP `409` 的业务结果和错误。
+
+## 空间资料契约
+
+[spatial.ts](src/contracts/spatial.ts) 是空间输入、公开记录及校验的唯一字段定义；接口路径与领域含义见 [Backend 空间关系资料](../../apps/backend/README.md#空间关系资料)。整体读取返回 `scope`、`spaces`、`passages`、`observation_bindings`，消费者按稳定 ID 关联目标与通道端点，设备名称及实时状态从设备清单读取。
+
+所有写入携带读取返回的 `scope`，即账号、家庭及绑定更新时间；尚未绑定时为 `null`。保存区分 `operation: create | update`，调用方生成 UUID：新建要求 ID 不存在，编辑要求存在且提供读取时的 `expected_updated_at`，新建不接受版本字段。删除接受 `scope`、`id`、`expected_updated_at`，启停额外接受 `enabled`。后端在同一事务中检查绑定标识和记录版本。
+
+删除成功返回 HTTP `200 / { status: "deleted", id }`；有引用时返回 HTTP `409 / { status: "referenced", id, references: { passages, observation_bindings } }`，至少一个引用数组非空，数组元素复用公开记录 schema。空间删除只返回直接引用，通道删除的 `passages` 为空。删除对象不存在返回 `404 / not_found`。
+
+其他错误沿用通用格式：`spatial_record_exists`、`spatial_record_changed`、`spatial_scope_changed` 返回 `409`，分别表示 ID 已存在、记录版本变化、家庭绑定变化；`spatial_reference_invalid`、`spatial_source_invalid` 返回 `400`；`spatial_storage_unavailable` 返回 `503`。客户端不自动重试写入，响应丢失时应先读取并确认实际结果。
+
 ## 实现约定
 
 - `src/contracts/errors.ts`：前后端共享的错误码、字段错误及 SSE 失败事件 schema，不包含服务端处理逻辑。
@@ -56,15 +70,11 @@ backend 与 Agent 共用一套错误契约，Web 按错误码显示中文。HTTP
 
 Hono `HTTPException` 由统一入口转换为安全 JSON；保留 HTTP 状态及认证、重试等协议头。启动参数错误和进程初始化失败由启动入口处理，不伪装为 HTTP 响应。
 
-## 流式对话与连接检查
+## 对话与连接检查
 
-SSE 开始后，通过 `run_failed` 发送 `{ runId, threadId, error }`；其中 `error` 与 HTTP 错误结构相同。执行超时使用 `run_timeout`，执行失败使用 `agent_execution_failed`，不尝试在流中改写 HTTP 状态。客户端断开时只取消执行；未收到终止事件的 EOF 不能视为成功。
+`chatInputSchema` 只接受 `message`，`chatResponseSchema` 返回 `answer`。backend 校验 Agent 的 JSON 响应，不转发任意上游 HTML 或原始错误。取消向上游传播，超时和执行失败使用统一 HTTP 错误契约。
 
-聊天代理面向本项目 Agent，原样透传上游状态和响应体。统一错误契约由 backend 与本项目 Agent 共同保证；若连接地址指向其他服务，其 HTML 或其他格式的错误响应也会原样返回，代理不负责转换任意上游协议。
-
-连接状态接口正常完成探测时返回 200，即使外围服务不可用。每个服务返回 `reasonCode` 与可选 `params`，例如 `timeout` 携带 `timeoutMs`、`http_error` 携带上游 `status`。页面负责生成可读说明。读取连接配置失败则返回普通 HTTP 错误。
-
-参考：[Hono 异常处理](https://hono.dev/docs/api/exception)、[流式响应机制](https://hono.dev/docs/helpers/streaming)。
+连接状态接口完成探测时返回 200，即使外围服务不可用。每个服务返回 `reasonCode` 与可选 `params`；页面生成可读说明。读取连接配置失败返回普通 HTTP 错误。
 
 ## 测试
 
@@ -75,11 +85,3 @@ bun run --cwd packages/api test -- tests/contracts/household.test.ts
 ```
 
 消费方只测试自己如何使用契约和处理校验失败，不重复枚举这些共享规则。
-
-## 家庭只读查询
-
-`@home-agent/api/household-queries` 定义四个家庭查询的模型输入、含 `scope_epoch` 的 HTTP 请求和响应结构。输入分页及筛选边界由 Agent 工具和 backend 共用，设备和成员字段从已有领域 schema 派生。接口语义见 [backend 家庭只读查询](../../apps/backend/README.md#家庭只读查询)。公共聊天输入不接受范围参数，内部 `agentChatInputSchema` 要求 backend 注入 `household_scope`。
-
-## 聊天历史
-
-`chatHistoryListInputSchema`／`chatHistoryListSchema` 定义历史会话分页，`before`／`nextBefore` 使用 `{ updatedAt, threadId }` 复合游标，按更新时间和会话 ID 倒序排列。`chatHistoryInputSchema`／`chatHistorySchema` 定义固定检查点的消息分页，继续使用 `checkpointId` 与整数 `before`。`chatTurnSchema` 与 `chatToolCallSchema` 是实时聊天和历史展示共用的视图结构，不复制 LangGraph 存储格式。未完成会话不能直接追加输入，返回 `thread_incomplete`。

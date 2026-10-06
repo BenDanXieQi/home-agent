@@ -9,6 +9,12 @@ export const errorCodeSchema = z.enum([
   "request_too_large",
   "local_access_required",
   "not_found",
+  "spatial_record_exists",
+  "spatial_record_changed",
+  "spatial_scope_changed",
+  "spatial_reference_invalid",
+  "spatial_source_invalid",
+  "spatial_storage_unavailable",
   "internal_error",
   "http_error",
   "connection_config_argument_invalid",
@@ -21,10 +27,6 @@ export const errorCodeSchema = z.enum([
   "agent_timeout",
   "agent_unavailable",
   "model_not_configured",
-  "database_not_configured",
-  "persistence_unavailable",
-  "thread_busy",
-  "thread_incomplete",
   "request_cancelled",
   "run_timeout",
   "agent_execution_failed",
@@ -72,12 +74,6 @@ export const apiErrorSchema = z.object({
   issues: z.array(validationIssueSchema).optional(),
   traceId: z.string().optional(),
 });
-export const runFailedEventSchema = z.object({
-  runId: z.uuid(),
-  threadId: z.uuid(),
-  error: apiErrorSchema,
-});
 export type MessageParams = z.infer<typeof messageParamsSchema>;
 export type ValidationIssue = z.infer<typeof validationIssueSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
-export type RunFailedEvent = z.infer<typeof runFailedEventSchema>;

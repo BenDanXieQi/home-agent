@@ -1,64 +1,22 @@
 import { AppError } from "../errors";
-import { isIP } from "node:net";
 import { getConnInfo } from "hono/bun";
 import { createMiddleware } from "hono/factory";
+import { createLocalAccessCheck } from "./local-access-policy";
 
-const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"]);
-const webEntry = new URL("https://localhost:8443");
-
-function isLoopbackAddress(address: string | undefined) {
-  if (!address) return false;
-  const normalized = address.toLowerCase();
-  if (isIP(normalized) === 4) return normalized.startsWith("127.");
-  if (isIP(normalized) !== 6) return false;
-  const canonical = new URL(`http://[${normalized}]`).hostname;
-  return (
-    canonical === "[::1]" ||
-    /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(canonical)
-  );
-}
-
-// Do not trust forwarded headers. Both local proxies preserve Host and Origin.
-// JSON PUT requests need an explicit Origin check; hono/csrf only covers forms.
 export function requireLocalAccess(
-  ports: readonly number[],
-  options: { webEntry?: boolean } = {},
+  ...args: Parameters<typeof createLocalAccessCheck>
 ) {
-  const allowedPorts = new Set(ports.map(String));
-  const isAllowedManagementUrl = (url: URL) =>
-    ["http:", "https:"].includes(url.protocol) &&
-    loopbackHosts.has(url.hostname) &&
-    allowedPorts.has(url.port || (url.protocol === "https:" ? "443" : "80")) &&
-    !url.username &&
-    !url.password;
-
+  const allowed = createLocalAccessCheck(...args);
   return createMiddleware(async (c, next) => {
     c.header("Cache-Control", "no-store");
-    let isTrustedRequest = false;
+    let address: string | undefined;
     try {
-      const requestUrl = new URL(c.req.url);
-      const host = c.req.header("host");
-      const hostUrl = new URL(`${requestUrl.protocol}//${host ?? ""}`);
-      isTrustedRequest =
-        isLoopbackAddress(getConnInfo(c).remote.address) &&
-        Boolean(host) &&
-        hostUrl.host === host?.toLowerCase() &&
-        (isAllowedManagementUrl(hostUrl) ||
-          (options.webEntry === true && hostUrl.host === webEntry.host));
-      const origin = c.req.header("origin");
-      if (origin !== undefined) {
-        const originUrl = new URL(origin);
-        isTrustedRequest &&=
-          originUrl.origin === origin &&
-          (isAllowedManagementUrl(originUrl) ||
-            (options.webEntry === true && origin === webEntry.origin));
-      }
+      address = getConnInfo(c).remote.address;
     } catch {
-      isTrustedRequest = false;
-    }
-    if (!isTrustedRequest) {
       throw new AppError("local_access_required");
     }
+    if (!allowed(c.req.raw, address))
+      throw new AppError("local_access_required");
     return await next();
   });
 }

@@ -31,3 +31,5 @@ export function errorPayload(error: AppError, traceId?: string) {
 }
 
 export { validationIssues } from "./validation";
+
+export { errorDefinitions } from "./definitions";
