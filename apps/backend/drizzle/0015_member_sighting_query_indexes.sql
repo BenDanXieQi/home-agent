@@ -1,0 +1,4 @@
+CREATE INDEX "context_records_sighting_first_id_idx" ON "context_records" USING btree ((("data"->>'firstObservedAt')::numeric),"id") WHERE "context_records"."topic" = 'member_sighting';--> statement-breakpoint
+CREATE INDEX "context_records_sighting_last_id_idx" ON "context_records" USING btree ((("data"->>'lastObservedAt')::numeric),"id") WHERE "context_records"."topic" = 'member_sighting';--> statement-breakpoint
+CREATE INDEX "context_records_sighting_member_first_id_idx" ON "context_records" USING btree (("data" #>> '{attribution,current,association,memberId}'),(("data"->>'firstObservedAt')::numeric),"id") WHERE "context_records"."topic" = 'member_sighting';--> statement-breakpoint
+CREATE INDEX "context_records_sighting_source_first_id_idx" ON "context_records" USING btree (("data"->>'deviceId'),("data"->>'channel'),(("data"->>'firstObservedAt')::numeric),"id") WHERE "context_records"."topic" = 'member_sighting';

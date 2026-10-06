@@ -22,7 +22,10 @@ export async function consumeEventStream(
   function arm(ms: number) {
     clearTimeout(deadline);
     deadline = setTimeout(
-      () => controller.abort(new Error("Event stream deadline exceeded")),
+      () =>
+        controller.abort(
+          new DOMException("Event stream deadline exceeded", "TimeoutError"),
+        ),
       ms,
     );
   }

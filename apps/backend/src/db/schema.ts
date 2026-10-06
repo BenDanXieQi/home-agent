@@ -209,6 +209,27 @@ export const contextRecords = pgTable(
   },
   (table) => [
     index("context_records_occurred_at_id_idx").on(table.occurredAt, table.id),
+    index("context_records_sighting_first_id_idx")
+      .on(sql`((${table.data}->>'firstObservedAt')::numeric)`, table.id)
+      .where(sql`${table.topic} = 'member_sighting'`),
+    index("context_records_sighting_last_id_idx")
+      .on(sql`((${table.data}->>'lastObservedAt')::numeric)`, table.id)
+      .where(sql`${table.topic} = 'member_sighting'`),
+    index("context_records_sighting_member_first_id_idx")
+      .on(
+        sql`(${table.data} #>> '{attribution,current,association,memberId}')`,
+        sql`((${table.data}->>'firstObservedAt')::numeric)`,
+        table.id,
+      )
+      .where(sql`${table.topic} = 'member_sighting'`),
+    index("context_records_sighting_source_first_id_idx")
+      .on(
+        sql`(${table.data}->>'deviceId')`,
+        sql`(${table.data}->>'channel')`,
+        sql`((${table.data}->>'firstObservedAt')::numeric)`,
+        table.id,
+      )
+      .where(sql`${table.topic} = 'member_sighting'`),
     check(
       "context_records_topic_nonempty",
       sql`length(btrim(${table.topic})) > 0`,

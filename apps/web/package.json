@@ -26,7 +26,6 @@
     "@tanstack/react-router": "^1.170.39",
     "@tanstack/react-virtual": "^3.14.13",
     "cmdk": "^1.1.1",
-    "eventsource-parser": "4.1.1",
     "hono": "catalog:",
     "image-size": "2.0.4",
     "jotai": "^3.0.0",

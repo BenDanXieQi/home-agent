@@ -1,6 +1,7 @@
 import { modelEnvironment } from "@home-agent/model";
 import { z } from "zod";
 const environment = modelEnvironment.extend({
+  BACKEND_URL: z.url({ protocol: /^https?$/ }).default("http://127.0.0.1:3000"),
   AGENT_HOST: z.string().min(1).default("127.0.0.1"),
   AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(1811),
   AGENT_RUN_TIMEOUT_MS: z.coerce

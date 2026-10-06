@@ -2,12 +2,18 @@ import { createMemberAssociations } from "../household/identity/associations";
 import type { createAppearanceIdentity } from "../household/identity/appearance";
 import { identityLimits } from "./identity/config";
 import { reidSha256, reidProcessingVersion } from "./tracking/feature-version";
-import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
+import {
+  agentHistoryTimeDifference,
+  identityReferenceVersionsSchema,
+  perceptionWindowHistoryRecordSchema,
+  type perceptionWindowsHistoryQuerySchema,
+} from "@home-agent/api/contracts";
 import type { createIdentityMatching } from "../household/identity/matching";
 import { identityProcessingVersions } from "./identity/processing-version";
 import type { z } from "zod";
 import type { enrollmentCommandSchema } from "./identity/enrollment-protocol";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { createWindowStore } from "./window/store";
 import { createWindowMedia } from "./media/window-media";
 import type { createSpeechInbox } from "../conversation/speech-inbox";
@@ -21,6 +27,8 @@ import { readPerceptionConfig } from "./config-file";
 import { perceptionConfigSchema, sourceKey } from "./config";
 import { createDetectionPool, DetectionPoolError } from "./compute/pool";
 import { createObservationStore } from "./observation-store";
+
+export class PerceptionHistoryError extends Error {}
 
 // Capture belongs to the backend; browser viewing and freezing do not own its lifetime.
 export function createPerceptionService(options: {
@@ -72,6 +80,7 @@ export function createPerceptionService(options: {
   let configurationError: unknown;
   let computeId: number | undefined;
   const listeners = new Set<() => void>();
+  const contextListeners = new Set<() => void>();
   const shutdown = new AbortController();
   const desired = new Map<
     string,
@@ -93,14 +102,32 @@ export function createPerceptionService(options: {
   );
   let publicationDepth = 0;
   let publicationPending = false;
-  const changed = () => {
+  let contextPublicationPending = false;
+  function contextChanged() {
+    if (stopped) return;
     if (publicationDepth) {
-      publicationPending = true;
+      contextPublicationPending = true;
       return;
     }
-    updateAssociations();
+    contextPublicationPending = false;
+    for (const listener of contextListeners) {
+      try {
+        listener();
+      } catch (cause) {
+        console.error("Perception context notification failed", cause);
+      }
+    }
+  }
+  const changed = (notifyContext = true) => {
+    if (publicationDepth) {
+      publicationPending = true;
+      contextPublicationPending ||= notifyContext;
+      return;
+    }
+    const associationsChanged = updateAssociations();
     sequence++;
     for (const listener of listeners) listener();
+    if (notifyContext || associationsChanged) contextChanged();
   };
   function publishTogether(action: () => void) {
     publicationDepth++;
@@ -110,8 +137,9 @@ export function createPerceptionService(options: {
       publicationDepth--;
       if (!publicationDepth && publicationPending) {
         publicationPending = false;
-        changed();
+        changed(contextPublicationPending);
       }
+      if (!publicationDepth && contextPublicationPending) contextChanged();
     }
   }
   const windows = createWindowStore({
@@ -128,6 +156,13 @@ export function createPerceptionService(options: {
     options.executable,
     join(dirname(options.configPath), "runtime", "perception-clips"),
   );
+  let windowRevision = 0;
+  function windowsChanged() {
+    windowRevision++;
+    contextChanged();
+  }
+  const unsubscribeWindowContent = windows.subscribeContent(windowsChanged);
+  const unsubscribeMedia = media.subscribe(windowsChanged);
   let referenceSnapshot = options.identityReferences?.snapshot() ?? null;
   let referenceDelivery: Promise<void> | undefined;
   let deliveredReferences = "";
@@ -156,7 +191,9 @@ export function createPerceptionService(options: {
       });
   }
   options.appearance?.replaceReferences(performance.now());
-  const unsubscribeAppearance = options.appearance?.subscribe(changed);
+  const unsubscribeAppearance = options.appearance?.subscribe(() => {
+    changed();
+  });
   const unsubscribeReferences = options.identityReferences?.subscribe(() =>
     publishTogether(() => {
       const previousVersion = referenceVersion(referenceSnapshot);
@@ -255,7 +292,7 @@ export function createPerceptionService(options: {
       for (const key of desired.keys()) retire(key, error);
       retryAfter.clear();
       store.retain(new Set());
-      changed();
+      publishReconciliation();
       return;
     }
     const selectedKeys = new Set(selected.map(sourceKey));
@@ -344,7 +381,23 @@ export function createPerceptionService(options: {
         }
       })();
     }
-    changed();
+    publishReconciliation();
+  }
+  let reconciledContext: ReturnType<typeof reconciliationContext> | undefined;
+  function reconciliationContext() {
+    return {
+      status,
+      error,
+      householdVersion,
+      compute: pool?.getStatus() ?? null,
+      audio: audio.snapshot(),
+    };
+  }
+  function publishReconciliation() {
+    const next = reconciliationContext();
+    const notifyContext = !isDeepStrictEqual(reconciledContext, next);
+    reconciledContext = next;
+    changed(notifyContext);
   }
   const unsubscribeSources = options.sources.subscribe((version) => {
     householdVersion = version;
@@ -508,7 +561,7 @@ export function createPerceptionService(options: {
     return initializing;
   }
   function updateAssociations() {
-    associations.update(
+    return associations.update(
       store.snapshot().filter((source) => {
         if (!source.run) return false;
         const entry = desired.get(sourceKey(source.source));
@@ -557,9 +610,81 @@ export function createPerceptionService(options: {
     },
     window: (id: string) => {
       const entry = windows.describe(id, Date.now());
-      return !entry || entry.inputState === "revoked"
+      if (!entry || entry.inputState === "revoked") return undefined;
+      const sampledMedia = media.sampledMedia(id);
+      const access = windows.access(id, Date.now());
+      return !access || access.inputState === "revoked"
         ? undefined
-        : { ...entry, sampledMedia: media.sampledMedia(id) };
+        : { ...entry, sampledMedia };
+    },
+    windowRevision: () => windowRevision,
+    *history(
+      input: Pick<
+        z.infer<typeof perceptionWindowsHistoryQuerySchema>,
+        "start" | "end" | "sources" | "limit"
+      >,
+      after?: Pick<
+        z.infer<typeof perceptionWindowHistoryRecordSchema>["window"],
+        "startedAt" | "id"
+      >,
+    ) {
+      if (stopped || (status !== "running" && status !== "recovering"))
+        throw new PerceptionHistoryError("Perception history unavailable");
+      const start = agentHistoryTimeDifference(input.start);
+      const end = agentHistoryTimeDifference(input.end);
+      const matchesInterval = (first: number, last: number) =>
+        end(first) < 0 && start(last) >= 0;
+      const candidates = windows.selectDetails(Date.now(), {
+        ...(after ? { after } : {}),
+        limit: input.limit + 1,
+        matches: (entry) =>
+          (!input.sources ||
+            input.sources.some(
+              (source) =>
+                source.device_id === entry.run.deviceId &&
+                (source.channel === undefined ||
+                  source.channel === entry.run.channel),
+            )) &&
+          (matchesInterval(entry.startedAt, entry.endedAt) ||
+            (entry.audio.run !== null &&
+              entry.audio.startedAt !== null &&
+              entry.audio.endedAt !== null &&
+              matchesInterval(entry.audio.startedAt, entry.audio.endedAt)) ||
+            entry.speech.segments.some((segment) =>
+              matchesInterval(segment.observedStartAt, segment.observedEndAt),
+            )),
+      });
+      for (const entry of candidates) {
+        const matches = {
+          visual: matchesInterval(entry.startedAt, entry.endedAt)
+            ? [{ window_id: entry.id }]
+            : [],
+          audio:
+            entry.audio.run &&
+            entry.audio.startedAt !== null &&
+            entry.audio.endedAt !== null &&
+            matchesInterval(entry.audio.startedAt, entry.audio.endedAt)
+              ? [
+                  {
+                    track_run_id: entry.audio.run.trackRunId,
+                    generation: entry.audio.generation,
+                  },
+                ]
+              : [],
+          speech: entry.speech.segments
+            .filter((segment) =>
+              matchesInterval(segment.observedStartAt, segment.observedEndAt),
+            )
+            .map((segment) => ({ id: segment.id })),
+        };
+        const sampledMedia = media.sampledMedia(entry.id);
+        const access = windows.access(entry.id, Date.now());
+        if (!access || access.inputState === "revoked") continue;
+        yield perceptionWindowHistoryRecordSchema.parse({
+          window: { ...entry, sampledMedia },
+          matches,
+        });
+      }
     },
     media,
     async detectImage(
@@ -652,10 +777,18 @@ export function createPerceptionService(options: {
         listeners.delete(listener);
       };
     },
+    subscribeContext(listener: () => void) {
+      contextListeners.add(listener);
+      return () => {
+        contextListeners.delete(listener);
+      };
+    },
     close() {
       if (closing) return closing;
       stopped = true;
       unsubscribeWindows();
+      unsubscribeWindowContent();
+      unsubscribeMedia();
       unsubscribeReferences?.();
       shutdown.abort();
       clearInterval(timer);
@@ -686,6 +819,7 @@ export function createPerceptionService(options: {
           store.close();
           windows.close();
           listeners.clear();
+          contextListeners.clear();
         }
       })();
       return closing;

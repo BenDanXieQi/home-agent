@@ -1,4 +1,4 @@
-import { consumeEventStream } from "../../api/event-stream";
+import { consumeEventStream } from "@home-agent/api/http/event-stream";
 import { perceptionSnapshotSchema } from "@home-agent/api/contracts";
 import { rpc } from "../../api/client";
 

@@ -6,6 +6,8 @@ import {
 export const householdLimits = {
   memorySampleMs: 60_000,
   transactionMs: 5_000,
+  memberWrites: 256,
+  memberWriteRetryMs: { initial: 1_000, maximum: 30_000 },
   metadataBytes: 2 * 1024 * 1024,
   directoryBytes: 4 * 1024 * 1024,
   snapshotBytes: householdStreamPolicy.snapshotBytes,

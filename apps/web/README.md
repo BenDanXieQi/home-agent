@@ -2,7 +2,7 @@
 
 基于 React、Vite、Tailwind CSS 4、TanStack Router / Query、Jotai、React Hook Form、Radix 与 Motion 的本机家庭工作台。
 
-当前提供账号登录、房间设备列表、空间关系资料维护、家庭成员资料维护、摄像头预览与分析、短期筛选片段、SD 录像回看、保留帧的人物历史判断、设备日志、家庭数据库浏览、Agent 聊天和设置，尚无行为总结界面。成员归因按本地参考与接纳规则展示，保留推定依据和未知，不能当作当前位置。本次 Backend 到 Agent 的数据交付见[实施范围](../../docs/plans/household-automation.md#本次范围)，不属于当前页面已实现能力。
+当前提供账号登录、房间设备列表、空间关系资料维护、家庭成员资料维护、摄像头预览与分析、短期筛选片段、SD 录像回看、保留帧的人物历史判断、设备日志、家庭数据库浏览、Agent 聊天和设置，尚无行为总结界面。成员归因按本地参考与接纳规则展示，保留推定依据和未知，不能当作当前位置。Backend 到 Agent 的专用数据交付和只读诊断见[当前数据与材料历史](../../docs/household-runtime.md#agent-当前数据与材料历史)。
 
 ## 运行
 
@@ -147,7 +147,7 @@ SD 录像在准备、可播放、过期、撤权及不可用状态下保留相�
 
 ## 状态订阅与播放
 
-家庭、感知和设备历史订阅共用 `src/api/event-stream.ts`：原生 `TextDecoderStream` 与 `eventsource-parser` 的 `EventSourceParserStream` 负责解码和事件解析，`pipeTo` 传递取消并释放流锁；适配器统一处理响应检查、缓冲／消息大小限制和接收期限。各领域维护自己的接纳、版本、业务通知及重连策略。设备历史 live 流只在数据库保存成功后更新；Web 不定时轮询历史，也不从家庭 `latest` 的状态变化复原报告。
+家庭、感知和设备历史订阅共用 `@home-agent/api/http/event-stream`（源码位于 `packages/api/src/http/event-stream.ts`）：原生 `TextDecoderStream` 与 `eventsource-parser` 的 `EventSourceParserStream` 负责解码和事件解析，`pipeTo` 传递取消并释放流锁；适配器统一处理响应检查、缓冲／消息大小限制和接收期限。各领域维护自己的接纳、版本、业务通知及重连策略。设备历史 live 流只在数据库保存成功后更新；Web 不定时轮询历史，也不从家庭 `latest` 的状态变化复原报告。
 
 登录、授权恢复、设备加载和摄像头绑定进展通过同一 SSE 订阅更新，不轮询米家状态。新连接先接收完整快照，再按连续版本应用变化；断流时可保留旧显示并标为未同步，切换账号或家庭时清除旧快照。自动重连、手动重连和页面恢复可见都遵守同一最早重连时间及服务器 `Retry-After`。服务连接仍每 10 秒检查一次，backend 健康状态仍每 30 秒检查一次；这些 Query 检查在后台标签页暂停，恢复焦点或网络连接后刷新。
 

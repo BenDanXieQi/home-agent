@@ -106,6 +106,13 @@
       "when": 1791268231074,
       "tag": "0014_device_history_state",
       "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791293424998,
+      "tag": "0015_member_sighting_query_indexes",
+      "breakpoints": true
     }
   ]
 }

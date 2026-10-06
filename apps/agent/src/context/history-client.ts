@@ -2,30 +2,29 @@ import { z } from "zod";
 import {
   agentHistoryQuerySchema,
   agentHistoryResponseSchema,
+  agentContextPolicy,
 } from "@home-agent/api/agent-context";
-import { deviceHistoryPolicy } from "@home-agent/api/device-history";
 import { readLimitedJson } from "@home-agent/api/http/read-body";
+import type { createContextReceiver } from "./receiver";
 
-const scopeSchema = z.object({
-  account_id: agentHistoryQuerySchema.shape.account_id,
-  home_id: agentHistoryQuerySchema.shape.home_id,
-  scope_epoch: z.uuid(),
-});
-/** The caller owns the received binding and its runtime qualification. */
+type WithoutScope<Input> = Input extends unknown
+  ? Omit<Input, "account_id" | "home_id">
+  : never;
+
+/** History is qualified by the receiver's current connection and household. */
 export function createHistoryClient(options: {
   backendUrl: string;
-  timeoutMs: number;
-  currentScope: () => z.infer<typeof scopeSchema> | null;
+  receiver: Pick<ReturnType<typeof createContextReceiver>, "qualification">;
 }) {
   const base = z.url({ protocol: /^https?$/ }).parse(options.backendUrl);
   return async (
-    query: Omit<
-      z.input<typeof agentHistoryQuerySchema>,
-      "account_id" | "home_id"
-    >,
+    query: WithoutScope<z.input<typeof agentHistoryQuerySchema>>,
     callerSignal: AbortSignal,
   ) => {
-    const scope = scopeSchema.parse(options.currentScope());
+    const qualification = options.receiver.qualification();
+    if (!qualification)
+      throw new Error("Received household context is not synchronized");
+    const scope = qualification.scope;
     const input = agentHistoryQuerySchema.parse({
       ...query,
       account_id: scope.account_id,
@@ -33,7 +32,7 @@ export function createHistoryClient(options: {
     });
     const signal = AbortSignal.any([
       callerSignal,
-      AbortSignal.timeout(options.timeoutMs),
+      AbortSignal.timeout(agentContextPolicy.historyTimeoutMs),
     ]);
     const response = await fetch(new URL("/api/agent/context/history", base), {
       method: "POST",
@@ -43,19 +42,21 @@ export function createHistoryClient(options: {
     });
     const body = await readLimitedJson(
       response,
-      deviceHistoryPolicy.responseBytes,
+      agentContextPolicy.historyResponseBytes,
       signal,
     );
     if (!response.ok)
       throw new Error(`History request failed (${response.status})`);
     const result = agentHistoryResponseSchema.parse(body);
     signal.throwIfAborted();
-    const current = options.currentScope();
+    const current = options.receiver.qualification();
     if (
       !current ||
-      current.scope_epoch !== scope.scope_epoch ||
-      current.account_id !== scope.account_id ||
-      current.home_id !== scope.home_id ||
+      current.generation !== qualification.generation ||
+      current.scope.scope_epoch !== scope.scope_epoch ||
+      current.scope.account_id !== scope.account_id ||
+      current.scope.home_id !== scope.home_id ||
+      result.kind !== input.kind ||
       result.account_id !== scope.account_id ||
       result.home_id !== scope.home_id ||
       result.start !== input.start ||
