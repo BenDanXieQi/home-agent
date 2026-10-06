@@ -8,7 +8,7 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
-`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后执行 backend 迁移、Agent 存储初始化和两者的数据库检查，成功后才启动 HTTPS 入口和应用。已有迁移和初始化可重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后执行 backend 迁移和数据库检查，成功后才启动 HTTPS 入口和应用。已有迁移可重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
 
 两种模式都需要 Docker，分别用于数据库和 go2rtc 构建／运行，无需本机安装 Go。首次构建需联网。模式切换由启动命令管理，会中断现有播放；不要同时手工启动另一套 go2rtc。
 
@@ -28,7 +28,7 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 服务仅面向可信本机，尚无用户认证。数据库与 go2rtc 管理端口限制在本机访问，不应暴露到公网。摄像头用法与限制见[米家与摄像头](mijia.md)，构建说明见 [go2rtc](../docker/go2rtc/README.md)。
 
-生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库迁移需事先准备；本机数据库准备可直接运行 `bun run db:migrate`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，直接执行各应用的数据库命令，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
+生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库迁移需事先准备；本机数据库准备可直接运行 `bun run db:migrate`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，直接执行 backend 的数据库命令，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
 
 ## HTTPS 与 HTTP/2 入口
 
@@ -96,7 +96,7 @@ bun --env-file=.env apps/backend/dist/main.js --config ./local-config/config.yam
 
 ## 单独启动与检查
 
-根目录保留完整服务操作和仓库质量检查；单应用开发、数据库生成／浏览／检查使用所属应用命令，独立入口操作直接调用脚本。只读数据库检查分别运行 `bun run --cwd apps/backend db:check` 与 `bun run --cwd apps/agent db:check`。
+根目录保留完整服务操作和仓库质量检查；单应用开发、数据库生成／浏览／检查使用所属应用命令，独立入口操作直接调用脚本。只读数据库检查运行 `bun run --cwd apps/backend db:check`。
 
 ```sh
 bunx turbo run dev --filter=@home-agent/web
@@ -108,6 +108,6 @@ bun run build
 
 单独启动应用不会管理依赖，也不纳入 `bun run stop` 的进程管理。
 
-仅开发 backend 感知、暂不启动 Agent 时，先准备已配置模式的 go2rtc、backend 数据库及迁移、米家授权，以及检测需要的 FFmpeg 和 `config/perception.json`，再分别运行 `bun run --cwd apps/backend dev`，需要页面时运行 `bunx turbo run dev --filter=@home-agent/web` 和 `bun --env-file=.env scripts/web-entry.ts development`，首次完成 `bun run web:trust`。不要使用会统一启动 Agent 的根目录 `dev`/`start` 代替此方式。根目录 `db:migrate` 自动准备本机数据库，也包含 Agent checkpoint；仅准备 backend 可使用 `bun run --cwd apps/backend db:migrate` 和 `bun run --cwd apps/backend db:check`。当前未提供自动准备依赖的“仅感知”启动模式。
+仅开发 backend 感知时，先准备 go2rtc、backend 数据库及迁移、米家授权、FFmpeg 和感知配置，再运行 `bun run --cwd apps/backend dev`；需要页面时按下方 Web 启动命令运行。根目录 `db:migrate` 只迁移并检查 backend 数据库，Agent 不需要数据库初始化。
 
 `bun run check` 执行格式、lint 和类型检查，覆盖各 workspace 及根目录 `scripts/`。共享 lint 与 TypeScript 配置分别由 `@home-agent/oxlint-config` 和 `@home-agent/typescript-config` 提供，各包通过 workspace 依赖引用；Turbo 负责检查任务和构建依赖，前端构建先完成类型检查。
