@@ -34,18 +34,23 @@
     "./agent-workflows": "./src/contracts/agent-workflows.ts",
     "./automation-reviews": "./src/contracts/automation-reviews.ts",
     "./household-events": "./src/contracts/household-events.ts",
+    "./household-model-view": "./src/domain/household-model-view/index.ts",
+    "./household-model-view/format": "./src/domain/household-model-view/format.ts",
+    "./household-model-view/decoding": "./src/domain/household-model-view/decoding.ts",
     "./http/request-json": "./src/http/request-json.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "context:format": "bun src/cli/household-model-view.ts"
   },
   "dependencies": {
     "@home-agent/observability": "workspace:*",
-    "hono": "catalog:",
+    "es-toolkit": "^1.52.0",
     "eventsource-parser": "4.1.1",
+    "hono": "catalog:",
     "mutative": "1.3.0",
     "zod": "catalog:"
   },

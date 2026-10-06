@@ -141,3 +141,9 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 ## 自动化规则契约
 
 `@home-agent/api/automations` 提供条件树、触发与固定动作契约，以及属性、时间窗口和三值逻辑求值。设备数值与动作参数共用 `@home-agent/api/devices` 的格式、枚举、范围及步长校验，动作输入保留规格中的 `piid`。AI 条件和动作选择契约仍可表达停用定义，但当前能力校验拒绝启用或生成这些配置；它们不代表可用执行能力。公共生成入口使用 `@home-agent/api/agent-workflows`，详细语义见[家庭自动化](../../docs/automations.md)。
+
+## 家庭模型视图
+
+`@home-agent/api/household-model-view` 提供 `createHouseholdModelView`、`encodeHouseholdContext` 和 `attentionSchema`，由共享离线 CLI 与 Web 压缩上下文页直接共用。实现位于 `src/domain/household-model-view/`，不读取网络、文件或接收器，也不依赖模型框架。输入与筛选规则、查询及编码用法见 [Agent 家庭模型视图](../../apps/agent/README.md#家庭模型视图)。编码结构由 `@home-agent/api/household-model-view/format` 定义，`@home-agent/api/household-model-view/decoding` 的 `decodeHouseholdContext` 据此校验结构及引用。解码入口使用 Node.js 的深度相等比较，独立于浏览器使用的视图与编码入口。
+
+离线命令入口位于 `src/cli/household-model-view.ts`，运行 `bun run --cwd packages/api context:format --help` 查看参数。Agent 的同名命令直接运行此文件。CLI 负责文件读写与命令行参数处理，领域模块负责转换、编码及解码。

@@ -1,4 +1,6 @@
+import { Copy } from "lucide-react";
 import { JsonExport } from "./JsonExport";
+import { JsonToolbar } from "./JsonReading";
 import { memo, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "../Button";
@@ -12,17 +14,21 @@ import type { layoutJson } from "./json-format.worker";
 export const VirtualJson = memo(function VirtualJson({
   value,
   name,
+  live = false,
 }: {
   value: unknown;
   name: string;
+  live?: boolean;
 }) {
   const scroller = useRef<HTMLElement>(null);
+  const [attempt, setAttempt] = useState(0);
   const [reading, setReading] = useState<{
     value: unknown;
     result: ReturnType<typeof layoutJson>;
     json: string;
   } | null>(null);
-  const displayedReading = reading && reading.value === value ? reading : null;
+  const displayedReading =
+    reading && (live || reading.value === value) ? reading : null;
   const result = displayedReading?.result ?? null;
   const json = displayedReading?.json ?? "";
   const [resizing, setResizing] = useState(false);
@@ -33,6 +39,7 @@ export const VirtualJson = memo(function VirtualJson({
   const copyStatus =
     copyFeedback && copyFeedback.value === value ? copyFeedback.status : "idle";
   const alive = useRef(true);
+  const updateValue = useRef<((next: unknown) => void) | null>(null);
   useEffect(() => {
     const element = scroller.current;
     if (!element) return undefined;
@@ -40,16 +47,36 @@ export const VirtualJson = memo(function VirtualJson({
     let observer: ResizeObserver | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let active = true;
-    let initialized = false;
+    let latest: { value: unknown } | undefined;
+    let prepared: typeof latest;
     let requestId = 0;
     let previousWidth = 0;
     let inFlight = false;
     let appliedWidth = 0;
     let formattedJson = "";
     function setResult(output: ReturnType<typeof layoutJson>) {
-      setReading({ value, result: output, json: formattedJson });
+      setReading({
+        value: prepared?.value,
+        result: output,
+        json: formattedJson,
+      });
+    }
+    function fail(error: string) {
+      active = false;
+      worker?.terminate();
+      observer?.disconnect();
+      clearTimeout(timer);
+      const failure = { kind: "failed" as const, requestId, error };
+      updateValue.current = (next) => {
+        setReading({ value: next, result: failure, json: "" });
+      };
+      setReading({ value: latest?.value, result: failure, json: "" });
+      setResizing(false);
     }
     alive.current = true;
+    updateValue.current = (next) => {
+      latest = { value: next };
+    };
     try {
       worker = new Worker(new URL("./json-format.worker.ts", import.meta.url), {
         type: "module",
@@ -60,33 +87,28 @@ export const VirtualJson = memo(function VirtualJson({
           !active ||
           inFlight ||
           previousWidth <= 0 ||
-          previousWidth === appliedWidth
+          !latest ||
+          (previousWidth === appliedWidth && latest === prepared)
         )
           return;
         clearTimeout(timer);
-        const request: JsonLayoutRequest = initialized
-          ? { kind: "resize", requestId: ++requestId, width: previousWidth }
-          : {
-              kind: "prepare",
-              requestId: ++requestId,
-              width: previousWidth,
-              value,
-              locale: document.documentElement.lang || "zh-CN",
-            };
+        const request: JsonLayoutRequest =
+          latest === prepared
+            ? { kind: "resize", requestId: ++requestId, width: previousWidth }
+            : {
+                kind: "prepare",
+                requestId: ++requestId,
+                width: previousWidth,
+                value: latest.value,
+                locale: document.documentElement.lang || "zh-CN",
+              };
         try {
           inFlight = true;
+          prepared = latest;
           // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Dedicated worker messaging has no targetOrigin.
           current.postMessage(request);
-          initialized = true;
         } catch {
-          current.terminate();
-          observer?.disconnect();
-          setResult({
-            kind: "failed",
-            requestId,
-            error: "无法读取 JSON，请重新读取。",
-          });
-          setResizing(false);
+          fail("无法读取 JSON，请重新读取。");
         }
       }
       current.addEventListener(
@@ -95,11 +117,7 @@ export const VirtualJson = memo(function VirtualJson({
           if (!active || event.data.requestId !== requestId) return;
           inFlight = false;
           if (event.data.kind === "failed") {
-            setResult(event.data);
-            setResizing(false);
-            current.terminate();
-            observer?.disconnect();
-            clearTimeout(timer);
+            fail(event.data.error);
             return;
           }
           if (event.data.json !== undefined) formattedJson = event.data.json;
@@ -107,6 +125,7 @@ export const VirtualJson = memo(function VirtualJson({
           if (appliedWidth === previousWidth) {
             setResult(event.data);
             setResizing(false);
+            sendLayout();
           } else {
             // One in-flight layout, plus only the latest requested width.
             sendLayout();
@@ -117,18 +136,21 @@ export const VirtualJson = memo(function VirtualJson({
         "error",
         () => {
           if (!active) return;
-          setResult({
-            kind: "failed",
-            requestId,
-            error: "JSON 排版失败，请重新读取。",
-          });
-          setResizing(false);
-          current.terminate();
-          observer?.disconnect();
-          clearTimeout(timer);
+          fail("JSON 排版失败，请重新读取。");
         },
         { once: true },
       );
+      current.addEventListener(
+        "messageerror",
+        () => {
+          if (active) fail("无法接收 JSON 排版结果，请重新读取。");
+        },
+        { once: true },
+      );
+      updateValue.current = (next) => {
+        latest = { value: next };
+        sendLayout();
+      };
       observer = new ResizeObserver(([entry]) => {
         if (!active || !entry) return;
         const width = Math.floor(entry.contentRect.width);
@@ -136,28 +158,26 @@ export const VirtualJson = memo(function VirtualJson({
         previousWidth = width;
         setResizing(inFlight || width !== appliedWidth);
         clearTimeout(timer);
-        timer = setTimeout(sendLayout, initialized ? 100 : 0);
+        timer = setTimeout(sendLayout, prepared ? 100 : 0);
       });
       observer.observe(element);
     } catch {
-      worker?.terminate();
       queueMicrotask(() => {
-        if (active)
-          setResult({
-            kind: "failed",
-            requestId,
-            error: "无法启动 JSON 阅读器，请重新读取。",
-          });
+        if (active) fail("无法启动 JSON 阅读器，请重新读取。");
       });
     }
     return () => {
       active = false;
+      updateValue.current = null;
       alive.current = false;
       clearTimeout(timer);
       observer?.disconnect();
       worker?.terminate();
     };
-  }, [value]);
+  }, [attempt]);
+  useEffect(() => {
+    updateValue.current?.(value);
+  }, [value, attempt]);
   const lines = result?.kind === "ready" ? result.lines : [];
   // oxlint-disable-next-line react/incompatible-library -- Read the virtualizer's current visible range on each render.
   const virtualizer = useVirtualizer({
@@ -178,30 +198,46 @@ export const VirtualJson = memo(function VirtualJson({
   }
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-        <output>
-          {result?.kind === "ready"
+      <JsonToolbar
+        status={
+          result?.kind === "ready"
             ? `${json.length.toLocaleString()} 字符${resizing ? " · 排版中…" : ""}`
             : result?.kind === "failed"
               ? result.error
-              : "正在格式化…"}
-        </output>
-        <div className="flex flex-wrap items-center gap-2">
-          {result?.kind === "ready" ? (
-            <JsonExport source={{ kind: "formatted", json }} name={name} />
-          ) : null}
+              : "正在格式化…"
+        }
+      >
+        <JsonExport
+          source={
+            result?.kind === "ready"
+              ? { kind: "formatted", json }
+              : { kind: "value", value }
+          }
+          name={name}
+        />
+        {result?.kind === "failed" ? (
           <Button
             size="small"
-            disabled={result?.kind !== "ready"}
-            onClick={copyJson}
+            onClick={() => {
+              setReading(null);
+              setAttempt((previous) => previous + 1);
+            }}
           >
-            {copyStatus === "copied" ? "已复制" : "复制 JSON"}
+            重新读取 JSON
           </Button>
-        </div>
-      </div>
+        ) : null}
+        <Button
+          size="small"
+          disabled={result?.kind !== "ready"}
+          icon={<Copy size={14} />}
+          onClick={copyJson}
+        >
+          {copyStatus === "copied" ? "已复制到剪贴板" : "复制 JSON 内容"}
+        </Button>
+      </JsonToolbar>
       {copyStatus === "failed" ? (
         <p role="alert" className="text-xs text-danger">
-          复制失败，请检查浏览器剪贴板权限，或使用详情中的 JSON 导出。
+          复制失败，请检查浏览器剪贴板权限，或下载 JSON 文件。
         </p>
       ) : null}
       <section

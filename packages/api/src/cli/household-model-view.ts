@@ -1,10 +1,14 @@
 import { mkdir, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { agentCurrentContextSchema } from "@home-agent/api/agent-receipts";
-import { attentionSchema } from "./source";
-import { createHouseholdModelView } from "./view";
-import { decodeHouseholdContext, encodeHouseholdContext } from "./encoding";
+import {
+  attentionSchema,
+  createHouseholdModelView,
+  encodeHouseholdContext,
+} from "@home-agent/api/household-model-view";
+import { decodeHouseholdContext } from "@home-agent/api/household-model-view/decoding";
 
 async function main() {
   const { values, positionals } = parseArgs({
@@ -25,7 +29,8 @@ async function main() {
     return;
   }
   if (!values.input) throw new Error("--input is required");
-  const input: unknown = await Bun.file(values.input).json();
+  const inputText = await Bun.file(values.input).text();
+  const input: unknown = JSON.parse(inputText);
   const [command = "overview", deviceId, ...keys] = positionals;
   if (values.remember && command !== "spec" && command !== "state")
     throw new Error("--remember requires a spec/state query");
@@ -92,12 +97,19 @@ async function main() {
     const text = JSON.stringify(encoded);
     const formatted = `${JSON.stringify(encoded, null, 2)}\n`;
     const manifest = {
+      input_sha256: createHash("sha256").update(inputText).digest("hex"),
+      context_sha256: createHash("sha256").update(text).digest("hex"),
+      semantic_bytes: Buffer.byteLength(JSON.stringify(view.semantic)),
       devices: encoded.D.length,
       capabilities: encoded.D.reduce(
-        (sum, d) => sum + (encoded.S[d[5]]?.length ?? 0),
+        (sum, d) => sum + (encoded.S[d[4]]?.length ?? 0),
         0,
       ),
-      reports: encoded.R.reduce((sum, r) => sum + r[5].length, 0),
+      reports: encoded.states.reduce(
+        (sum, r) =>
+          sum + r.reports.reduce((count, group) => count + group[1].length, 0),
+        0,
+      ),
       characters: Array.from(text).length,
       bytes: Buffer.byteLength(text),
       capability_limit: null,

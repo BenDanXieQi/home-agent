@@ -2,7 +2,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { z } from "zod";
 import {
   agentReceiptIndexSchema,
-  agentReceiptDetailSchema,
   agentCurrentContextSchema,
 } from "@home-agent/api/agent-receipts";
 import { requestJson } from "../../api/client";
@@ -49,24 +48,6 @@ export function useReceiptIndex() {
     },
     refetchInterval: 2000,
     retry: false,
-    gcTime: 0,
-  });
-}
-export function useReceipt(journalId: string, id: string) {
-  return useQuery({
-    queryKey: ["agent-receipt", journalId, id],
-    queryFn: async ({ signal }) => {
-      const detail = await requestJson(
-        (client, options) =>
-          client.api.agent.receipts[":id"].$get({ param: { id } }, options),
-        agentReceiptDetailSchema,
-        { signal },
-      );
-      if (detail.journal_id !== journalId) throw new Error("接收会话已变化");
-      return detail.receipt;
-    },
-    retry: false,
-    staleTime: Infinity,
     gcTime: 0,
   });
 }
