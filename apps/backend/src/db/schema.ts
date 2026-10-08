@@ -1,3 +1,4 @@
+export { perceptionWindows } from "../perception/history/schema";
 import type {
   automationDecisionInputSchema,
   automationDecisionResultSchema,

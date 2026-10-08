@@ -10,6 +10,7 @@ import {
 import { mediaFrameTimeSchema, frameFingerprintSchema } from "./media";
 
 export const windowSpeechSegmentLimit = 16;
+export const windowHistoryRetentionMs = 365 * 24 * 60 * 60_000;
 
 export const windowPolicySchema = z.strictObject({
   retentionMs: z.int().min(1000).max(60_000).default(12_000),
@@ -126,6 +127,12 @@ export const windowSourceSchema = windowSummarySchema.shape.run.pick({
   deviceId: true,
   channel: true,
 });
+export const windowListQuerySchema = windowSourceSchema.extend({
+  before: z.number().optional(),
+  beforeId: z.uuid().optional(),
+  start: z.number().optional(),
+  end: z.number().optional(),
+});
 export const windowSampledMediaSchema = z.object({
   selection: mediaSelectionSchema,
   state: mediaStateSchema,
@@ -165,6 +172,8 @@ export const windowListEntrySchema = windowDetailSchema
   });
 export const windowListSchema = z.object({
   windows: z.array(windowListEntrySchema),
+  next: z.object({ before: z.number(), beforeId: z.uuid() }).nullable(),
+  history: z.object({ enabled: z.boolean(), error: z.string().nullable() }),
 });
 
 export const mediaViewSchema = z.object({

@@ -1,15 +1,28 @@
 import { useEffect, useState } from "react";
 import type { WindowListEntry } from "./windows";
 
-function useWindowExpired(readableUntil: number | null) {
-  const [now, setNow] = useState(Date.now);
+export function useWindowExpired(readableUntil: number | null) {
+  const [expiredAt, setExpiredAt] = useState(() =>
+    readableUntil !== null && Date.now() >= readableUntil
+      ? readableUntil
+      : null,
+  );
   useEffect(() => {
     if (readableUntil === null) return undefined;
-    const remaining = readableUntil - Date.now();
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, remaining));
+    const deadline = readableUntil;
+    let timer: ReturnType<typeof setTimeout>;
+    function check() {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) {
+        setExpiredAt(readableUntil);
+        return;
+      }
+      timer = setTimeout(check, Math.min(2_147_483_647, remaining));
+    }
+    check();
     return () => clearTimeout(timer);
   }, [readableUntil]);
-  return readableUntil !== null && now >= readableUntil;
+  return readableUntil !== null && expiredAt === readableUntil;
 }
 
 export function useWindowInputState(

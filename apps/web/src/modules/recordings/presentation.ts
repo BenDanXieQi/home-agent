@@ -21,6 +21,8 @@ export const recordingLookupUnavailableText = {
 >;
 
 export const recordingUnavailableText = {
+  window_unavailable: "观察记录已到期或不可读取，请选择其他记录。",
+  window_read_failed: "观察记录读取失败，请稍后重试。",
   no_matching_recording: "未找到对应时段的 SD 录像。",
   recording_missing: "这段录像已不在摄像头的 SD 卡中。",
   unsupported_source: "本应用暂未接入该摄像头或镜头的 SD 录像回看。",

@@ -193,6 +193,11 @@ function ReadyRecording({
         <p className="text-xs text-muted">
           从所选录像开头播放，可拖动进度查看。
         </p>
+      ) : alignment.reason === "resolution_mismatch" ? (
+        <Notice tone="warning">
+          观察画面与 SD
+          原录像的分辨率不同，无法精确定位这条记录。可手动查看附近录像；提高后续采集画质不会补齐这条旧记录的原始画面。
+        </Notice>
       ) : (
         <Notice tone="warning">
           这是附近时段的候选录像，事件位置尚未对齐。请手动查看；窗口的本机接收时间不代表录像中的准确位置。

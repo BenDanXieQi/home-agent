@@ -100,7 +100,7 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 统一观察推送包含索引、引用、成员出现归因修订号及轻量窗口材料摘要，成员正文与完整窗口详情保留在各自来源。`POST /api/agent/context/material` 按 scope、kind 和 ID 只读解析单个引用，校验家庭资格与响应大小，过期或移除返回 404；允许可信本机 Web 和 Agent 访问，不触发媒体生成。
 
-`POST /api/agent/context/history` 按 `kind` 返回 `device_reports`、`member_sightings` 或 `perception_windows`。成员分支从身份仓库读取数据库当前归因，音视频分支读取当前仍有访问资格的完整窗口，保留视觉、音频、转写与媒体状态。两者支持时间和来源筛选，成员另可按成员 ID 筛选；它们独立于推送中的有界最近集合查询。协议、区间边界、分页与保留限制见[Agent 数据交付](../../docs/household-runtime.md#agent-当前数据与材料历史)，字段定义见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
+`POST /api/agent/context/history` 按 `kind` 返回 `device_reports`、`member_sightings` 或 `perception_windows`。成员分支从身份仓库读取数据库当前归因，音视频分支从 `perception_windows` 读取当前仍有访问资格的完整观察记录，并合并尚在内存的最新窗口，保留视觉、音频、转写与现有媒体状态。记录保留 365 天，视频缓存仍为 30 分钟；数据库不保存媒体字节。 `perception/history/` 分别拥有归档写入与清理、索引查询、历史读取投影；原始窗口接纳由 `perception/window/` 负责。两者支持时间和来源筛选，成员另可按成员 ID 筛选；它们独立于推送中的有界最近集合查询。协议、区间边界、分页与保留限制见[Agent 数据交付](../../docs/household-runtime.md#agent-当前数据与材料历史)，字段定义见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 
 `agent-client.ts` 集中聊天、专项任务及接收记录的 Agent 调用，每次请求解析当前连接配置中的 Agent 地址，配置更新影响后续请求。请求使用原生 RequestInit、`tracedFetch` 及共享有界 JSON 读取，保留公共错误码和字段说明，不自动重试。发送参数使用入口已校验的值，不再次校验同一份输入；响应仍在接收边界校验。调用方保留各自容量与期限，workflow 的能力准备、运行失效取消和结果复核仍由 workflow 路由拥有。
 

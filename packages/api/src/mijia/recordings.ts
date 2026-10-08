@@ -84,6 +84,13 @@ const playbackResource = z.strictObject({
   expiresAt: timestamp,
 });
 
+export const recordingAlignmentUnknownReasonSchema = z.enum([
+  "clip_selected",
+  "no_frame_mapping",
+  "clock_unverified",
+  "resolution_mismatch",
+]);
+
 export const mijiaRecordingPlaybackStateSchema = z.discriminatedUnion("state", [
   playbackResource.extend({ state: z.literal("preparing") }),
   playbackResource
@@ -120,11 +127,7 @@ export const mijiaRecordingPlaybackStateSchema = z.discriminatedUnion("state", [
         }),
         z.strictObject({
           type: z.literal("unknown"),
-          reason: z.enum([
-            "clip_selected",
-            "no_frame_mapping",
-            "clock_unverified",
-          ]),
+          reason: recordingAlignmentUnknownReasonSchema,
         }),
       ]),
       eventFrameOffsets: z
@@ -158,6 +161,8 @@ export const mijiaRecordingPlaybackStateSchema = z.discriminatedUnion("state", [
   playbackResource.extend({
     state: z.literal("unavailable"),
     reason: z.enum([
+      "window_unavailable",
+      "window_read_failed",
       "no_matching_recording",
       "recording_missing",
       "unsupported_source",

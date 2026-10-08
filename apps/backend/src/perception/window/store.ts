@@ -120,6 +120,7 @@ export function createWindowStore(options: {
     z.infer<typeof perceptionConfigSchema>,
     "window" | "speech" | "petSounds" | "maxFrameAgeMs" | "sampleFps"
   >;
+  record?: (summary: z.infer<typeof windowSummarySchema>) => void;
   authorized: (run: z.infer<typeof runSchema>, identity: string) => boolean;
 }) {
   const sources = new Map<string, ReturnType<typeof source>>();
@@ -338,6 +339,7 @@ export function createWindowStore(options: {
         petAcceptingUntil,
       );
     } else counters.candidates++;
+    if (admitted) options.record?.(summary);
     const identities = windowIdentities(summary.frames);
     const result = retained(
       summary,
@@ -563,7 +565,10 @@ export function createWindowStore(options: {
       entry.analysisBytes = analysisBytes;
       descriptionBytes += addedBytes;
       entry.descriptionBytes += addedBytes;
-      if (admitted) contentChanged();
+      if (admitted) {
+        options.record?.(entry.summary);
+        contentChanged();
+      }
       if (!wasAdmitted && admitted && entry.summary.inputState === "available")
         for (const listener of listeners) listener(id);
     }

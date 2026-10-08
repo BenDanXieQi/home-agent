@@ -1,19 +1,25 @@
 import type { z } from "zod";
 import type { windowSummarySchema } from "@home-agent/api/contracts";
-import type { fingerprintRecording } from "./media";
+import type { recordingAlignmentUnknownReasonSchema } from "@home-agent/api/mijia-recordings";
+import type { fingerprintRecording, inspectRecording } from "./media";
 
-function unknown(reason: "no_frame_mapping" | "clock_unverified") {
+function unknown(
+  reason: Exclude<
+    z.infer<typeof recordingAlignmentUnknownReasonSchema>,
+    "clip_selected"
+  >,
+) {
   return { type: "unknown" as const, reason };
 }
 
 /** Compare exact decoded frames. Host receipt times never establish alignment. */
 export function alignRecordingFrames(
   window: z.infer<typeof windowSummarySchema>,
-  candidates: readonly {
+  candidates: readonly ({
     startAt: number;
     mediaStartMs: number;
     frames: Awaited<ReturnType<typeof fingerprintRecording>>;
-  }[],
+  } & Pick<Awaited<ReturnType<typeof inspectRecording>>, "width" | "height">)[],
 ) {
   const frames = window.frames
     .filter((frame) => frame.fingerprint !== undefined)
@@ -35,6 +41,14 @@ export function alignRecordingFrames(
       fingerprint.height !== frame.height
     )
       return unknown("no_frame_mapping");
+    if (
+      !candidates.some(
+        (candidate) =>
+          candidate.width === fingerprint.width &&
+          candidate.height === fingerprint.height,
+      )
+    )
+      return unknown("resolution_mismatch");
     const locations = candidates.flatMap((candidate) =>
       candidate.frames
         .filter(

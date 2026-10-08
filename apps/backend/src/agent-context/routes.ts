@@ -19,7 +19,7 @@ import type { createDeviceHistoryQuery } from "../household/history/query";
 import type { createAgentContextService } from "./service";
 import type { createMemberActivityRepository } from "../household/identity/activity-repository";
 import type { createPerceptionService } from "../perception/service";
-import { PerceptionHistoryError } from "../perception/service";
+import { PerceptionHistoryError } from "../perception/history/reader";
 import { createAgentHistoryReader } from "./history";
 import { createAgentContextStream } from "./stream";
 import { createDeviceHistoryReader } from "../household/history/read";

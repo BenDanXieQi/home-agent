@@ -116,7 +116,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 `device_state.data.latest` 只包含属性身份、值、来源证据、质量及时间，不重复家庭／房间、规格 ID、描述、类型、可读性和单位。静态信息由 `household.data.device/specs` 提供，规格中的属性键为 `prop.<siid>.<piid>`；设备的房间归属由设备清单提供。动态属性 schema 从已有属性 schema 派生。
 
-`observations.data` 包含 `as_of/records/member_sightings/sources`；`as_of` 为整理时间。每位成员保留最后出现，同一时刻保留并列来源，不因超过 30 分钟而清空；未知身份按设备与镜头保留最新出现。窗口线索在来源仍保留的最近材料中按摄像头／镜头和类型保留最后一条，重复窗口合并，历史通过专用接口查询。`member_sightings` 每条保存材料 ID、观察起止时间、设备与镜头、主机接收时间依据及当前轻量身份归属（成员、候选／确认／推断状态和修订号），不含身份图片或特征证据；身份撤回标记 unknown。每条观察的 `source` 保存设备与镜头。每条窗口观察使用 `window_id` 引用唯一窗口，使用 `member_sighting_ids` 引用关联成员记录；统一快照不嵌入成员记录正文、检测帧、转写或完整窗口详情。`POST /api/agent/context/material` 使用 `agentMaterialQuerySchema` 的 `{ scope, kind, id }` 按需解析单个引用；`agentMaterialResponseSchema` 返回当前成员记录或窗口详情，过期／移除返回 404，读取结果不合并进统一快照。没有可关联窗口的成员记录形成 `window_id=null` 的独立出现观察。`reasons` 表示窗口选取依据，不是事件结论或说话人归因；窗口级声音和变化线索不复制到各成员的出现观察上。关联规则由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。`sources.member_sightings/perception` 分别包含 `status/read_at/reason/truncated`，表示独立读取与重试状态；统一部分 ready 不表示来源全部成功。交付不调用模型或生成媒体。
+`observations.data` 包含 `as_of/records/member_sightings/sources`；`as_of` 为整理时间。每位成员保留最后出现，同一时刻保留并列来源，不因超过 30 分钟而清空；未知身份按设备与镜头保留最新出现。窗口线索在来源仍保留的最近材料中按摄像头／镜头和类型保留最后一条，重复窗口合并，历史通过专用接口查询。`member_sightings` 每条保存材料 ID、观察起止时间、设备与镜头、主机接收时间依据及当前轻量身份归属（成员、候选／确认／推断状态和修订号），不含身份图片或特征证据；身份撤回标记 unknown。每条观察的 `source` 保存设备与镜头。每条窗口观察使用 `window_id` 引用唯一窗口，使用 `member_sighting_ids` 引用关联成员记录；统一快照不嵌入成员记录正文、检测帧、转写或完整窗口详情。`POST /api/agent/context/material` 使用 `agentMaterialQuerySchema` 的 `{ scope, kind, id }` 按需解析单个引用；`agentMaterialResponseSchema` 返回当前成员记录或窗口详情，过期／移除返回 404，读取结果不合并进统一快照；等待期间可响应取消和请求截止时间，结果返回前仍核验家庭资格。没有可关联窗口的成员记录形成 `window_id=null` 的独立出现观察。`reasons` 表示窗口选取依据，不是事件结论或说话人归因；窗口级声音和变化线索不复制到各成员的出现观察上。关联规则由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。`sources.member_sightings/perception` 分别包含 `status/read_at/reason/truncated`，表示独立读取与重试状态；统一部分 ready 不表示来源全部成功。交付不调用模型或生成媒体。
 
 合并后的每部分包含 `status/read_at/data/reason/truncated`。设备增量消息包含 `status=delta/read_at/data/truncated=false`，不作为独立上下文部分保存；缺少当前家庭的 ready 基线时拒绝增量并重新连接。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。当前交付不裁剪记录，truncated 为 false；时间范围和材料保留不证明历史完整。近期成员投影按 `lastObservedAt/id` 降序读取，统一观察按 `endedAt/id` 降序交付。任一部分超出发布容量时报告失败，不交付静默裁剪的集合。
 
@@ -124,9 +124,9 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 成员响应的 records 由 `memberSightingRecordSchema` 定义，保留记录 ID、原时间、原 data/evidence、当前归因及 context_entities 关联。区间条件为 `firstObservedAt < end && lastObservedAt >= start`，按 `firstObservedAt/id` 升序分页。member_ids 匹配当前已知归因，sources 匹配记录来源，两类筛选取交集。retention 明确数据库存储、当前修订、观察跨度不证明持续在场、分页不保持快照。
 
-音视频响应的每条记录包含完整 `window` 与 `matches`。后者分别引用命中的视觉窗口 ID、音轨 run/代次和转写片段 ID；视觉、非空音频及每条转写的原观察区间任一满足相同重叠规则即返回整体窗口。按 `startedAt/id` 升序分页，媒体仅返回现有状态与引用。retention 明确内存存储、最长约 30 分钟、可能提前淘汰、重启丢失及区间完整性不保证；已不存在或已撤销的窗口不返回。
+音视频响应的每条记录包含完整 `window` 与 `matches`。后者分别引用命中的视觉窗口 ID、音轨 run/代次和转写片段 ID；视觉、非空音频及每条转写的原观察区间任一满足相同重叠规则即返回整体窗口。按 `startedAt/id` 升序分页，媒体仅返回现有状态与引用。retention 明确数据库存储、365 天保留、已提交记录不随重启丢失及区间完整性不保证；媒体缓存独立过期，SD 录像可用性不保证，未提交记录可能因异常退出或写入队列满丢失。过期或当前无访问资格的窗口不返回。
 
-新增响应保留 `kind/account_id/home_id/start/end/records/next_cursor`。游标绑定 kind、家庭身份、绑定记录 updated_at、规范化对象条件和区间；音视频还绑定感知 instanceId，Backend 重启后拒绝旧音视频游标。同一绑定的成员历史可跨进程续页，每页仍重新核验当前资格。分页按完整记录及字节预算交付，游标指向最后实际返回记录，首条单独超预算返回容量错误，无下一页时 next_cursor 为 null。归因修订、晚到内容和淘汰可改变后续页，分页结果不作为完整消费记录。成功无匹配记录返回空数组，来源不可用或读取失败返回错误。
+新增响应保留 `kind/account_id/home_id/start/end/records/next_cursor`。游标绑定 kind、家庭身份、绑定记录 updated_at、规范化对象条件和区间；成员与音视频历史均可在同一绑定下跨进程续页，每页仍重新核验当前资格。分页按完整记录及字节预算交付，游标指向最后实际返回记录，首条单独超预算返回容量错误，无下一页时 next_cursor 为 null。归因修订、晚到内容和淘汰可改变后续页，分页结果不作为完整消费记录。成功无匹配记录返回空数组，来源不可用或读取失败返回错误。
 
 该契约交付已有来源材料，不包含凭据、参考照片、特征向量或媒体字节，不定义模型调查、默认模型输入、生活事件推断或语义回写。
 

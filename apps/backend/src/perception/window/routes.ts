@@ -6,14 +6,21 @@ import {
   mediaRequestSchema,
   mediaSelectionSchema,
   windowSourceSchema,
+  windowListQuerySchema,
+  windowSummarySchema,
   type ErrorCode,
 } from "@home-agent/api/contracts";
 import { AppError, validationIssues } from "@home-agent/api/errors";
 import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
 import type { createPerceptionService } from "../service";
 import { WindowMediaError } from "../media/window-media";
+import { HouseholdError } from "../../household/errors";
+import { householdHttpError } from "../../household/http-errors";
 
-const windowQuerySchema = windowSourceSchema.extend({
+const windowQuerySchema = windowListQuerySchema.extend({
+  before: z.string().transform(Number).pipe(z.number().finite()).optional(),
+  start: z.string().transform(Number).pipe(z.number().finite()).optional(),
+  end: z.string().transform(Number).pipe(z.number().finite()).optional(),
   channel: z.string().transform(Number).pipe(windowSourceSchema.shape.channel),
 });
 const windowQuery = validator("query", (value) => {
@@ -22,6 +29,13 @@ const windowQuery = validator("query", (value) => {
     throw new AppError("invalid_request", {
       issues: validationIssues(parsed.error),
     });
+  if (
+    (parsed.data.beforeId !== undefined && parsed.data.before === undefined) ||
+    (parsed.data.start !== undefined &&
+      parsed.data.end !== undefined &&
+      parsed.data.start >= parsed.data.end)
+  )
+    throw new AppError("invalid_request");
   return parsed.data;
 });
 
@@ -68,13 +82,24 @@ export function createWindowRoutes(
 ) {
   return new Hono()
     .onError((error, c) => {
+      if (c.req.raw.signal.aborted)
+        return errorResponse(c, new AppError("request_cancelled"));
+      if (error instanceof HouseholdError)
+        return errorResponse(c, householdHttpError(error));
       if (error instanceof WindowMediaError)
         return errorResponse(c, new AppError(mediaErrorCode[error.reason]));
       throw error;
     })
-    .get("/", windowQuery, (c) => c.json(service.windows(c.req.valid("query"))))
-    .get("/:id", (c) => {
-      const window = service.window(c.req.param("id"));
+    .get("/", windowQuery, async (c) =>
+      c.json(await service.listWindows(c.req.valid("query"), c.req.raw.signal)),
+    )
+    .get("/cached", windowQuery, (c) =>
+      c.json(service.windows(c.req.valid("query"))),
+    )
+    .get("/:id", async (c) => {
+      const id = windowSummarySchema.shape.id.safeParse(c.req.param("id"));
+      if (!id.success) throw new AppError("invalid_request");
+      const window = await service.readWindow(id.data, c.req.raw.signal);
       if (!window) throw new AppError("not_found");
       return c.json(window);
     })
