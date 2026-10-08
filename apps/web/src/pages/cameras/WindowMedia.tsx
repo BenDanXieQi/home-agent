@@ -47,16 +47,22 @@ export function WindowMedia({
   };
   return (
     <section aria-label="窗口媒体" className="space-y-3 pb-4 [&>p]:px-4">
-      <MediaRequest
-        key={`${representation}:${selection.includeAudio}`}
-        scope={scope}
-        id={window.id}
-        selection={selection}
-        canGenerate={canGenerate}
-        active={active}
-        autoPlay={autoPlay}
-        observedAt={observedAt}
-      />
+      {!window.sampledMedia && !canGenerate ? (
+        <div className="grid aspect-video max-h-[65dvh] place-items-center bg-[#111111] px-4 text-center text-sm text-white/70">
+          视频缓存已不可用，文字记录仍保留。可在详情中查找对应的 SD 录像。
+        </div>
+      ) : (
+        <MediaRequest
+          key={`${representation}:${selection.includeAudio}`}
+          scope={scope}
+          id={window.id}
+          selection={selection}
+          canGenerate={canGenerate}
+          active={active}
+          autoPlay={autoPlay}
+          observedAt={observedAt}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-3 px-4">
         <label className="flex items-center gap-2 whitespace-nowrap text-sm">
           媒体类型

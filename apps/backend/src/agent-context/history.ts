@@ -23,7 +23,6 @@ import type { createPerceptionService } from "../perception/service";
 const cursorSchema = z.strictObject({
   query: z.string().regex(/^[a-f0-9]{64}$/),
   bindingUpdatedAt: deviceHistoryTimeSchema,
-  instanceId: z.uuid().optional(),
   position: z.union([
     memberSightingPositionSchema,
     z.strictObject({ startedAt: z.number(), id: z.uuid() }),
@@ -92,14 +91,11 @@ export function createAgentHistoryReader(options: {
       const cursor = decodeCursor(input.cursor);
       if (cursor && cursor.query !== hash)
         throw new AppError("invalid_request");
-      const instanceId = perception.snapshot().instanceId;
       if (
         cursor &&
         (input.kind === "perception_windows"
-          ? cursor.instanceId !== instanceId ||
-            !("startedAt" in cursor.position)
-          : cursor.instanceId !== undefined ||
-            !("firstObservedAt" in cursor.position))
+          ? !("startedAt" in cursor.position)
+          : !("firstObservedAt" in cursor.position))
       )
         throw new AppError("invalid_request");
       const bindingUpdatedAt = await sightings.binding(
@@ -126,6 +122,7 @@ export function createAgentHistoryReader(options: {
               cursor && "startedAt" in cursor.position
                 ? cursor.position
                 : undefined,
+              signal,
             );
       const records: Extract<
         z.infer<typeof agentHistoryResponseSchema>,
@@ -150,9 +147,12 @@ export function createAgentHistoryReader(options: {
         next_cursor: null,
       });
       let recordBytes = 0;
-      const iterator = candidates[Symbol.iterator]();
+      const iterator =
+        Symbol.asyncIterator in candidates
+          ? candidates[Symbol.asyncIterator]()
+          : candidates[Symbol.iterator]();
       try {
-        let candidate = iterator.next();
+        let candidate = await iterator.next();
         while (!candidate.done) {
           if (records.length === input.limit) {
             more = true;
@@ -167,11 +167,10 @@ export function createAgentHistoryReader(options: {
             JSON.stringify({
               query: hash,
               bindingUpdatedAt,
-              ...(input.kind === "perception_windows" ? { instanceId } : {}),
               position,
             }),
           ).toString("base64url");
-          candidate = iterator.next();
+          candidate = await iterator.next();
           const nextCursor = candidate.done ? null : candidateCursor;
           const size = jsonBytes(record) + (records.length ? 1 : 0);
           if (
@@ -187,7 +186,7 @@ export function createAgentHistoryReader(options: {
           next = nextCursor;
         }
       } finally {
-        iterator.return?.();
+        await iterator.return?.();
       }
       assertCurrent();
       if (
@@ -204,7 +203,7 @@ export function createAgentHistoryReader(options: {
       if (result.kind === "perception_windows") {
         for (const record of result.records) {
           if (!("window" in record)) continue;
-          const current = perception.window(record.window.id);
+          const current = perception.historyAccess(record.window);
           if (!current) throw new HouseholdError("stale_session");
           record.window.inputState = current.inputState;
           record.window.sampledMedia = current.sampledMedia;

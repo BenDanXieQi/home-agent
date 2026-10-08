@@ -14,9 +14,11 @@ import { requestErrorMessage } from "../../messages/zh-CN";
 import type { createPerceptionSourceState } from "../../modules/perception/source-state";
 import {
   windowListOptions,
+  cachedWindowListOptions,
   windowQueryScope,
   windowRequestUnavailable,
   type WindowListEntry,
+  type WindowListCursor,
 } from "../../modules/perception/windows";
 import { useWindowMediaState } from "../../modules/perception/use-window-input-state";
 import {
@@ -29,6 +31,8 @@ import { cameraTileClassName } from "./camera-styles";
 import { useWindowDetail } from "../../modules/perception/use-window-detail";
 import { WindowMedia } from "./WindowMedia";
 import { WindowDetail } from "./WindowDetail";
+
+const windowDisplayBatch = 50;
 
 export function CameraWindows({
   source,
@@ -60,8 +64,23 @@ export function CameraWindows({
   }, [visible]);
   const device = useAtomValue(source.deviceAtom);
   const client = useQueryClient();
+  const [day, setDay] = useState("");
+  const [cursor, setCursor] = useState<WindowListCursor>();
+  const [visibleCount, setVisibleCount] = useState(windowDisplayBatch);
+  const dayStart = day ? new Date(`${day}T00:00:00`) : undefined;
+  const dayEnd = dayStart ? new Date(dayStart) : undefined;
+  dayEnd?.setDate(dayEnd.getDate() + 1);
   const query = useQuery({
-    ...windowListOptions({ scopeEpoch: scope, ...source.target }),
+    ...(fromActivity && !day && !cursor
+      ? cachedWindowListOptions({ scopeEpoch: scope, ...source.target })
+      : windowListOptions({
+          scopeEpoch: scope,
+          ...source.target,
+          ...cursor,
+          ...(dayStart && dayEnd
+            ? { start: dayStart.getTime(), end: dayEnd.getTime() }
+            : {}),
+        })),
     enabled: (cached) =>
       active && !windowRequestUnavailable(cached.state.error),
   });
@@ -73,7 +92,6 @@ export function CameraWindows({
     client.cancelQueries({ queryKey: windowQueryScope(scope) });
   }, [active, client, scope]);
   const [selection, select] = useState<WindowListEntry>();
-  const [visibleCount, setVisibleCount] = useState(50);
   if (!fromActivity && !selection && active && !query.isError) {
     const playable = query.data?.windows.filter(
       (entry) =>
@@ -108,6 +126,12 @@ export function CameraWindows({
     windows.find((entry) => entry.id === selection?.id) ??
     selection ??
     activityWindow;
+  const visibleWindows = windows.slice(0, visibleCount);
+  // Keep an activity target visible without rendering every newer cache entry.
+  const selectedOutsideList =
+    selected && windows.indexOf(selected) >= visibleCount
+      ? selected
+      : undefined;
   const detail = useWindowDetail(selected, scope, active);
   const media =
     detail.window &&
@@ -132,8 +156,45 @@ export function CameraWindows({
           <>
             <div className="flex items-center justify-between gap-2 px-1 text-sm">
               <h2 className="font-medium">筛选片段</h2>
-              <span className="text-xs text-muted">最多保留 30 分钟</span>
+              <span className="text-xs text-muted">视频缓存 30 分钟</span>
             </div>
+            <p className="px-1 text-xs text-muted">
+              {!query.data
+                ? "正在读取记录…"
+                : query.data.history.enabled
+                  ? "文字与时间记录保留一年"
+                  : "历史存储未启用，仅显示当前缓存"}
+            </p>
+            <label className="flex items-center gap-2 px-1 text-sm">
+              记录日期
+              <input
+                type="date"
+                aria-label="记录日期"
+                value={day}
+                className="min-h-10 rounded-lg border border-line bg-surface px-2"
+                onChange={(event) => {
+                  setDay(event.target.value);
+                  setCursor(undefined);
+                  setVisibleCount(windowDisplayBatch);
+                  select(undefined);
+                }}
+              />
+            </label>
+            {cursor || day ? (
+              <Button
+                onClick={() => {
+                  setCursor(undefined);
+                  setDay("");
+                  setVisibleCount(windowDisplayBatch);
+                  select(undefined);
+                }}
+              >
+                返回最新记录
+              </Button>
+            ) : null}
+            {query.data?.history.error ? (
+              <Notice tone="warning">{query.data.history.error}</Notice>
+            ) : null}
             {fromActivity ? (
               <StatusNotice>
                 活动观察时间：{formatTime(activityAt)}
@@ -169,7 +230,18 @@ export function CameraWindows({
                 aria-label="最近片段"
                 className="max-h-80 space-y-2 overflow-y-auto p-1"
               >
-                {windows.slice(0, visibleCount).map((entry) => (
+                {selectedOutsideList ? (
+                  <>
+                    <li className="px-1 text-xs text-muted">当前选择</li>
+                    <WindowRow
+                      entry={selectedOutsideList}
+                      selected
+                      select={select}
+                    />
+                    <li className="px-1 text-xs text-muted">最近片段</li>
+                  </>
+                ) : null}
+                {visibleWindows.map((entry) => (
                   <WindowRow
                     key={entry.id}
                     entry={entry}
@@ -180,9 +252,24 @@ export function CameraWindows({
                 {visibleCount < windows.length ? (
                   <li>
                     <Button
-                      onClick={() => setVisibleCount((count) => count + 50)}
+                      onClick={() => {
+                        setVisibleCount((count) => count + windowDisplayBatch);
+                      }}
                     >
-                      显示更早的片段
+                      显示更多片段
+                    </Button>
+                  </li>
+                ) : null}
+                {query.data?.next ? (
+                  <li>
+                    <Button
+                      onClick={() => {
+                        if (query.data?.next) setCursor(query.data.next);
+                        setVisibleCount(windowDisplayBatch);
+                        select(undefined);
+                      }}
+                    >
+                      查看更早的记录
                     </Button>
                   </li>
                 ) : null}
@@ -229,7 +316,7 @@ export function CameraWindows({
                       ? `${activityUnavailableReason} 活动记录仍然保留。`
                       : windows.length
                         ? "选择列表中的片段查看内容。"
-                        : "片段是短期缓存，最多保留 30 分钟，后台重启后会清理。检测到画面变化或识别出说话内容后，新片段会自动出现在这里。"
+                        : "视频缓存最多保留 30 分钟；启用历史存储后，文字与时间记录保留一年，可查找对应 SD 录像。"
                 }
                 className="h-full min-h-0 rounded-none bg-surface shadow-none"
               />
@@ -261,7 +348,7 @@ const WindowRow = memo(function WindowRow({
       >
         <span className="flex flex-wrap justify-between gap-2 font-medium">
           <span>
-            {windowTime(entry.startedAt)} – {windowTime(entry.endedAt)}
+            {formatTime(entry.startedAt)} – {windowTime(entry.endedAt)}
           </span>
           <span>
             {entry.gate.visual === "changed"
@@ -274,7 +361,11 @@ const WindowRow = memo(function WindowRow({
           </span>
         </span>
         <span className="mt-1 block text-xs text-muted">
-          {entry.gate.candidate === "none" ? "仅文字" : mediaStateLabel(state)}
+          {!state || state === "expired" || state === "evicted"
+            ? "文字记录 · 可查找 SD 录像"
+            : state === "ready"
+              ? "缓存可播放"
+              : mediaStateLabel(state)}
           {entry.incomplete ? " · 不完整窗口" : ""}
         </span>
         {entry.petSoundKinds?.length ? (

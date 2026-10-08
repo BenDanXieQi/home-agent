@@ -16,6 +16,8 @@ import { loadModelConfig } from "@home-agent/model";
 import { createMemberRepository } from "./household/members/repository";
 import { createSpatialRepository } from "./household/spatial/repository";
 import { createSpatialService } from "./household/spatial/service";
+import { createWindowHistory } from "./perception/history/service";
+import { createWindowHistoryRepository } from "./perception/history/repository";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
 import { join, resolve as resolvePath } from "node:path";
@@ -121,6 +123,15 @@ const speechInbox = createSpeechInbox({
 });
 const perceptionSources = createPerceptionSources(household, mijiaService);
 const perception = createPerceptionService({
+  ...(database
+    ? {
+        history: createWindowHistory({
+          repository: createWindowHistoryRepository(database.db),
+          household,
+          sources: perceptionSources,
+        }),
+      }
+    : {}),
   identityReferences: identityReferences?.matching,
   ...(identityReferences
     ? {
@@ -238,6 +249,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (shutdown.signal.aborted) return;
     shutdown.abort();
     const contextClosing = agentContext.close();
+    const perceptionClosing = perception.close();
     identityEnrollment?.close();
     (async () => {
       const drain = new AbortController();
@@ -248,7 +260,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
             contextClosing,
             server.stop(),
             automations?.close(),
-            perception.close(),
+            perceptionClosing,
             app.closeRecordings(),
             speechInbox.close(),
             (async () => {
@@ -264,7 +276,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
                     memberActivityRepository?.close(),
                   ]);
                 } finally {
-                  await household.close();
+                  try {
+                    await perceptionClosing;
+                  } finally {
+                    await household.close();
+                  }
                 }
               }
             })(),

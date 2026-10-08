@@ -7,6 +7,7 @@ import {
   type mediaSelectionSchema,
   windowDetailSchema,
   type windowSourceSchema,
+  type windowListQuerySchema,
   type windowListEntrySchema,
 } from "@home-agent/api/contracts";
 import { requestJson, requestBlob } from "../../api/client";
@@ -14,6 +15,9 @@ import { RequestError } from "../../api/errors";
 
 export type PerceptionWindow = z.infer<typeof windowDetailSchema>;
 export type WindowListEntry = z.infer<typeof windowListEntrySchema>;
+export type WindowListCursor = NonNullable<
+  z.infer<typeof windowListSchema>["next"]
+>;
 export type WindowSource = z.infer<typeof windowSourceSchema>;
 export type WindowMediaSelection = z.infer<typeof mediaSelectionSchema>;
 
@@ -43,8 +47,9 @@ export function windowListOptions({
   scopeEpoch,
   deviceId,
   channel,
-}: WindowSource) {
-  const source = { scopeEpoch, deviceId, channel };
+  ...range
+}: z.infer<typeof windowListQuerySchema>) {
+  const source = { scopeEpoch, deviceId, channel, ...range };
   return queryOptions({
     ...windowQueryPolicy,
     queryKey: [...windowQueryScope(source.scopeEpoch), "list", source],
@@ -53,7 +58,15 @@ export function windowListOptions({
         (client, options) =>
           client.api.perception.windows.$get(
             {
-              query: { ...source, channel: String(source.channel) },
+              query: {
+                scopeEpoch,
+                deviceId,
+                channel: String(channel),
+                ...(range.before === undefined ? {} : { before: range.before }),
+                ...(range.beforeId ? { beforeId: range.beforeId } : {}),
+                ...(range.start === undefined ? {} : { start: range.start }),
+                ...(range.end === undefined ? {} : { end: range.end }),
+              },
             },
             options,
           ),
@@ -70,6 +83,23 @@ export function windowListOptions({
             )
           ? 1000
           : 4000,
+  });
+}
+
+export function cachedWindowListOptions(source: WindowSource) {
+  return queryOptions({
+    ...windowListOptions(source),
+    queryKey: [...windowQueryScope(source.scopeEpoch), "cached", source],
+    queryFn: ({ signal }) =>
+      requestJson(
+        (client, options) =>
+          client.api.perception.windows.cached.$get(
+            { query: { ...source, channel: String(source.channel) } },
+            options,
+          ),
+        windowListSchema,
+        { signal },
+      ),
   });
 }
 

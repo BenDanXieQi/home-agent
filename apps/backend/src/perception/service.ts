@@ -2,18 +2,15 @@ import { createMemberAssociations } from "../household/identity/associations";
 import type { createAppearanceIdentity } from "../household/identity/appearance";
 import { identityLimits } from "./identity/config";
 import { reidSha256, reidProcessingVersion } from "./tracking/feature-version";
-import {
-  agentHistoryTimeDifference,
-  identityReferenceVersionsSchema,
-  perceptionWindowHistoryRecordSchema,
-  type perceptionWindowsHistoryQuerySchema,
-} from "@home-agent/api/contracts";
+import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
 import type { createIdentityMatching } from "../household/identity/matching";
 import { identityProcessingVersions } from "./identity/processing-version";
 import type { z } from "zod";
 import type { enrollmentCommandSchema } from "./identity/enrollment-protocol";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import type { createWindowHistory } from "./history/service";
+import { createWindowHistoryReader } from "./history/reader";
 import { createWindowStore } from "./window/store";
 import { createWindowMedia } from "./media/window-media";
 import type { createSpeechInbox } from "../conversation/speech-inbox";
@@ -27,8 +24,6 @@ import { readPerceptionConfig } from "./config-file";
 import { perceptionConfigSchema, sourceKey } from "./config";
 import { createDetectionPool, DetectionPoolError } from "./compute/pool";
 import { createObservationStore } from "./observation-store";
-
-export class PerceptionHistoryError extends Error {}
 
 // Capture belongs to the backend; browser viewing and freezing do not own its lifetime.
 export function createPerceptionService(options: {
@@ -44,6 +39,7 @@ export function createPerceptionService(options: {
       >
     | undefined;
   appearance?: ReturnType<typeof createAppearanceIdentity>;
+  history?: ReturnType<typeof createWindowHistory>;
   configPath: string;
   executable: string;
   sources: PerceptionSources;
@@ -144,6 +140,9 @@ export function createPerceptionService(options: {
   }
   const windows = createWindowStore({
     config: () => config,
+    ...(options.history
+      ? { record: (summary) => options.history?.record(summary) }
+      : {}),
     authorized: (run, identity) => {
       const access = options.sources.eligibility(run);
       return (
@@ -260,8 +259,14 @@ export function createPerceptionService(options: {
     options.appearance?.tick(performance.now());
     windows.tick(Date.now());
     media.prune();
-    const selected =
-      config.sources === "household" ? options.sources.list() : config.sources;
+    const selected = (
+      config.sources === "household" ? options.sources.list() : config.sources
+    ).map((source) => ({
+      ...config.sourceProfiles.find(
+        (profile) => sourceKey(profile) === sourceKey(source),
+      ),
+      ...source,
+    }));
     windows.reconcile(
       selected.length > 8
         ? []
@@ -597,6 +602,16 @@ export function createPerceptionService(options: {
   }
   return {
     start: initialize,
+    ...createWindowHistoryReader({
+      windows,
+      media,
+      history: options.history,
+      sources: options.sources,
+      stopped: () => stopped,
+      unavailable: () =>
+        stopped ||
+        (!options.history && status !== "running" && status !== "recovering"),
+    }),
     windows: (selection: Parameters<typeof windows.snapshot>[1]) => {
       const snapshot = windows.snapshot(Date.now(), selection);
       return {
@@ -606,16 +621,9 @@ export function createPerceptionService(options: {
           sampledMedia: media.sampledMedia(entry.id),
         })),
         media: media.snapshot(),
+        next: null,
+        history: options.history?.status() ?? { enabled: false, error: null },
       };
-    },
-    window: (id: string) => {
-      const entry = windows.describe(id, Date.now());
-      if (!entry || entry.inputState === "revoked") return undefined;
-      const sampledMedia = media.sampledMedia(id);
-      const access = windows.access(id, Date.now());
-      return !access || access.inputState === "revoked"
-        ? undefined
-        : { ...entry, sampledMedia };
     },
     windowRevision: () => windowRevision,
     windowObservation(id: string) {
@@ -629,74 +637,6 @@ export function createPerceptionService(options: {
             },
           }
         : undefined;
-    },
-    *history(
-      input: Pick<
-        z.infer<typeof perceptionWindowsHistoryQuerySchema>,
-        "start" | "end" | "sources" | "limit"
-      >,
-      after?: Pick<
-        z.infer<typeof perceptionWindowHistoryRecordSchema>["window"],
-        "startedAt" | "id"
-      >,
-    ) {
-      if (stopped || (status !== "running" && status !== "recovering"))
-        throw new PerceptionHistoryError("Perception history unavailable");
-      const start = agentHistoryTimeDifference(input.start);
-      const end = agentHistoryTimeDifference(input.end);
-      const matchesInterval = (first: number, last: number) =>
-        end(first) < 0 && start(last) >= 0;
-      const candidates = windows.selectDetails(Date.now(), {
-        ...(after ? { after } : {}),
-        limit: input.limit + 1,
-        matches: (entry) =>
-          (!input.sources ||
-            input.sources.some(
-              (source) =>
-                source.device_id === entry.run.deviceId &&
-                (source.channel === undefined ||
-                  source.channel === entry.run.channel),
-            )) &&
-          (matchesInterval(entry.startedAt, entry.endedAt) ||
-            (entry.audio.run !== null &&
-              entry.audio.startedAt !== null &&
-              entry.audio.endedAt !== null &&
-              matchesInterval(entry.audio.startedAt, entry.audio.endedAt)) ||
-            entry.speech.segments.some((segment) =>
-              matchesInterval(segment.observedStartAt, segment.observedEndAt),
-            )),
-      });
-      for (const entry of candidates) {
-        const matches = {
-          visual: matchesInterval(entry.startedAt, entry.endedAt)
-            ? [{ window_id: entry.id }]
-            : [],
-          audio:
-            entry.audio.run &&
-            entry.audio.startedAt !== null &&
-            entry.audio.endedAt !== null &&
-            matchesInterval(entry.audio.startedAt, entry.audio.endedAt)
-              ? [
-                  {
-                    track_run_id: entry.audio.run.trackRunId,
-                    generation: entry.audio.generation,
-                  },
-                ]
-              : [],
-          speech: entry.speech.segments
-            .filter((segment) =>
-              matchesInterval(segment.observedStartAt, segment.observedEndAt),
-            )
-            .map((segment) => ({ id: segment.id })),
-        };
-        const sampledMedia = media.sampledMedia(entry.id);
-        const access = windows.access(entry.id, Date.now());
-        if (!access || access.inputState === "revoked") continue;
-        yield perceptionWindowHistoryRecordSchema.parse({
-          window: { ...entry, sampledMedia },
-          matches,
-        });
-      }
     },
     media,
     async detectImage(
@@ -832,6 +772,7 @@ export function createPerceptionService(options: {
           windows.close();
           listeners.clear();
           contextListeners.clear();
+          await options.history?.close();
         }
       })();
       return closing;

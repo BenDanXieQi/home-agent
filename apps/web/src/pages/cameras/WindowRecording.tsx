@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useWindowExpired } from "../../modules/perception/use-window-input-state";
 import { useAtomValue } from "jotai";
 import { Button } from "../../components/Button";
 import { StatusNotice } from "../../components/Notice";
@@ -21,32 +22,23 @@ export function WindowRecording({
     }),
   );
   const target = useAtomValue(source.playbackTargetAtom);
-  const authorized = active && target?.scope_epoch === window.run.scopeEpoch;
+  const authorized = active && !!target;
   const playback = useRecordingPlayback(authorized ? target : null);
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = setTimeout(
-      () => setNow(Date.now()),
-      Math.max(0, window.summaryUntil - Date.now()),
-    );
-    return () => clearTimeout(timer);
-  }, [window.summaryUntil]);
-  const summaryAvailable = now < window.summaryUntil;
+  const summaryAvailable = !useWindowExpired(window.summaryUntil);
 
   return (
     <div className="space-y-3 rounded-xl border border-line p-3">
       <div>
         <h3 className="text-sm font-medium">摄像头原始录像</h3>
         <p className="mt-1 text-xs leading-5 text-muted">
-          可从 SD
-          卡查找这一事件附近的完整录像。本地采样媒体过期后，保留的窗口摘要仍可用于查找。
+          可从 SD 卡查找这一事件附近的完整录像。视频缓存过期后仍可查找；SD
+          卡录像已被覆盖时，文字记录仍保留。
         </p>
       </div>
       {!playback.request ? (
         <Button
           disabled={!authorized || !summaryAvailable}
           onClick={() => {
-            setNow(Date.now());
             if (Date.now() >= window.summaryUntil) return;
             playback.start({ kind: "window", windowId: window.id });
           }}
@@ -55,7 +47,9 @@ export function WindowRecording({
         </Button>
       ) : null}
       {!summaryAvailable ? (
-        <StatusNotice>片段摘要已过期，无法再查找对应的 SD 录像。</StatusNotice>
+        <StatusNotice>
+          文字记录已到保留期限，无法再查找对应的 SD 录像。
+        </StatusNotice>
       ) : !authorized ? (
         <StatusNotice>等待当前家庭与摄像头连接就绪后查找。</StatusNotice>
       ) : null}

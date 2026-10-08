@@ -1,5 +1,5 @@
 import type { UseQueryResult } from "@tanstack/react-query";
-import { windowListOptions } from "../perception/windows";
+import { cachedWindowListOptions } from "../perception/windows";
 import { indexPlayableObservationWindows } from "./observation";
 
 function selectWindows(data: {
@@ -9,9 +9,9 @@ function selectWindows(data: {
 }
 
 export function observationWindowListOptions(
-  source: Parameters<typeof windowListOptions>[0],
+  source: Parameters<typeof cachedWindowListOptions>[0],
 ) {
-  return { ...windowListOptions(source), select: selectWindows };
+  return { ...cachedWindowListOptions(source), select: selectWindows };
 }
 
 // Existing data does not confirm a cache miss while a refresh is fetching or paused.

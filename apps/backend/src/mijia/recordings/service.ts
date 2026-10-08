@@ -69,7 +69,7 @@ class RecordingResource {
   constructor(
     readonly input: PlaybackInput,
     readonly source: ReturnType<MijiaService["recordingAccess"]>,
-    readonly window: WindowSummary | undefined,
+    public window: WindowSummary | undefined,
     resources: ReturnType<typeof createMediaResources>,
   ) {
     this.view = {
@@ -117,10 +117,13 @@ function requestKey(input: PlaybackInput) {
 }
 
 export function createRecordingService(options: {
-  household: HouseholdRuntime;
-  mijia: MijiaService;
+  household: Pick<HouseholdRuntime, "ready" | "epoch" | "subscribe">;
+  mijia: Pick<MijiaService, "recordingAccess" | "readRecordings">;
   shutdown: AbortSignal;
-  resolveWindow?: (id: string) => WindowSummary | undefined;
+  resolveWindow?: (
+    id: string,
+    signal?: AbortSignal,
+  ) => WindowSummary | undefined | Promise<WindowSummary | undefined>;
   executable?: string;
   directory?: string;
 }) {
@@ -317,7 +320,29 @@ export function createRecordingService(options: {
       generate: async () => {
         assertCurrent(item);
         signal.throwIfAborted();
+        const input = item.input;
+        if (input.selection.kind === "window") {
+          failure = "window_read_failed";
+          const found = await options.resolveWindow?.(
+            input.selection.windowId,
+            signal,
+          );
+          if (
+            !found ||
+            found.id !== input.selection.windowId ||
+            found.inputState === "revoked" ||
+            found.summaryUntil <= Date.now() ||
+            found.run.deviceId !== input.deviceId ||
+            found.run.channel !== input.channel
+          )
+            throw new RecordingGenerationError("window_unavailable");
+          item.window = windowSummarySchema.parse(found);
+        }
+        assertCurrent(item);
+        signal.throwIfAborted();
+        failure = "source_unavailable";
         const clips = await candidates(item, signal);
+        failure = "download_failed";
         const tools = (mediaTools ??= await import("./media"));
         if (!root) root = prepareRoot();
         const parent = await root;
@@ -385,6 +410,8 @@ export function createRecordingService(options: {
                   return {
                     startAt: candidate.clip.startAt,
                     mediaStartMs,
+                    width: candidate.media.width,
+                    height: candidate.media.height,
                     frames: candidate.frames,
                   };
                 }),
@@ -495,7 +522,7 @@ export function createRecordingService(options: {
         item.view = view;
       },
       failed: (cause) => {
-        if (!item.media.retired) {
+        if (!item.media.retired && current(item)) {
           item.view = {
             ...resourceBase(item),
             state: "unavailable",
@@ -598,25 +625,10 @@ export function createRecordingService(options: {
       input.channel,
     );
     source.signal.throwIfAborted();
-    let summary: WindowSummary | undefined;
-    if (input.selection.kind === "window") {
-      const found = options.resolveWindow?.(input.selection.windowId);
-      if (
-        !found ||
-        found.id !== input.selection.windowId ||
-        found.inputState === "revoked" ||
-        found.summaryUntil <= Date.now() ||
-        found.run.scopeEpoch !== input.scope_epoch ||
-        found.run.deviceId !== input.deviceId ||
-        found.run.channel !== input.channel
-      )
-        throw new RecordingResourceError("not_found");
-      summary = windowSummarySchema.parse(found);
-    }
     const item = new RecordingResource(
       structuredClone(input),
       source,
-      summary,
+      undefined,
       media,
     );
     resources.set(input.id, item);

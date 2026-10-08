@@ -104,7 +104,9 @@ export function createApp({
     household,
     mijia: mijiaService,
     shutdown: shutdownSignal,
-    resolveWindow: recordings?.resolveWindow ?? perception.window,
+    resolveWindow:
+      recordings?.resolveWindow ??
+      ((id, signal) => perception.readWindow(id, signal)),
   });
   const app = new Hono();
   app.use(httpTracing());

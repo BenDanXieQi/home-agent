@@ -24,7 +24,10 @@ import {
   memberActivityDataSchema,
   memberAttributionSnapshotSchema,
 } from "./perception";
-import { windowDetailSchema } from "./perception-window";
+import {
+  windowDetailSchema,
+  windowHistoryRetentionMs,
+} from "./perception-window";
 
 /** The shared time schema normalizes UTC to six fractional digits. */
 export function agentHistoryTimeDifference(
@@ -374,10 +377,10 @@ export const memberSightingsRetention = {
   pagination: "live_without_snapshot",
 } as const;
 export const perceptionWindowsRetention = {
-  storage: "memory",
-  maximum_ms: 30 * 60_000,
-  early_eviction: true,
-  restart_loss: true,
+  storage: "database",
+  maximum_ms: windowHistoryRetentionMs,
+  early_eviction: false,
+  restart_loss: false,
   completeness: "not_guaranteed",
   pagination: "live_without_snapshot",
 } as const;

@@ -5,6 +5,7 @@ import type { Transaction } from "../db/transaction-outcome";
 
 // Every table must declare its lifetime. Adding a table without a policy is a type error.
 const tableLifetime = {
+  perceptionWindows: "household",
   credentials: "installation",
   mijiaHomeSelections: "installation",
   householdDirectories: "household",

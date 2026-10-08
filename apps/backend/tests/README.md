@@ -85,3 +85,13 @@ Go overlay 的 `TestAudioTimelineSurvivesOpusPackaging` 用真实 FFmpeg 检查�
 ```sh
 bun test apps/backend/tests/perception/video-observations.test.ts apps/backend/tests/perception/native-inference.test.ts apps/backend/tests/perception/reid-native.test.ts
 ```
+
+## 观察归档与 SD 回放
+
+`perception/history-reader.test.ts` 使用真实窗口存储、历史服务和材料读取入口，替换数据库与家庭运行边界，验证存储失败时当前记录可读、归档缺失不冒充成功、取消与请求期限、停止和撤权后的迟到结果隔离，以及待写修订和丢弃提示。测试不连接实际数据库，不替代迁移、跨重启读取和实际晚到分析的组合验收。
+
+`mijia/recordings/playback.test.ts` 通过真实回放服务和媒体资源管理器，验证观察记录不可用、记录读取失败、SD 缺录像和来源索引失败的区分，并核对准备期间取消及撤权。有效归档窗口用例通过假供应商 HTTP 文件服务和真实 FFmpeg 生成、转换并读取视频；需要 PATH 中可执行的 `ffmpeg`/`ffprobe` 和本机回环监听权限，不需要摄像头或 go2rtc。该用例验证资源链路，不证明真实 SD 协议或帧指纹精确对齐。
+
+```sh
+bun test apps/backend/tests/perception/history-reader.test.ts apps/backend/tests/mijia/recordings/playback.test.ts
+```

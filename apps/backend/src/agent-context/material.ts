@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import pTimeout from "p-timeout";
 import {
   agentContextPolicy,
   agentMaterialResponseSchema,
@@ -15,7 +16,7 @@ import type { createPerceptionService } from "../perception/service";
 export function createAgentMaterialReader(
   household: HouseholdRuntime,
   sightings: ReturnType<typeof createMemberActivityRepository> | undefined,
-  perception: ReturnType<typeof createPerceptionService>,
+  perception: Pick<ReturnType<typeof createPerceptionService>, "readWindow">,
   shutdown: AbortSignal,
   timeoutMs: number,
 ) {
@@ -34,14 +35,17 @@ export function createAgentMaterialReader(
     const assertCurrent = () => {
       if (signal.aborted)
         throw new AppError(
-          timeout.aborted ? "agent_timeout" : "request_cancelled",
+          signal.reason instanceof DOMException &&
+            signal.reason.name === "TimeoutError"
+            ? "agent_timeout"
+            : "request_cancelled",
         );
       access.assertCurrent();
     };
     assertCurrent();
     if (input.kind === "member_sighting" && !sightings)
       throw new HouseholdError("home_storage");
-    const result =
+    const run = async () =>
       input.kind === "member_sighting"
         ? {
             scope: input.scope,
@@ -55,15 +59,17 @@ export function createAgentMaterialReader(
         : {
             scope: input.scope,
             kind: input.kind,
-            window: perception.window(input.id),
+            window: await perception.readWindow(input.id, signal),
           };
+    const result = await pTimeout(run(), {
+      milliseconds: Number.POSITIVE_INFINITY,
+      signal,
+    }).catch((cause: unknown) => {
+      assertCurrent();
+      throw cause;
+    });
     assertCurrent();
     if (result.kind === "member_sighting" ? !result.record : !result.window)
-      throw new AppError("not_found");
-    if (
-      result.kind === "perception_window" &&
-      result.window?.run.scopeEpoch !== input.scope.scope_epoch
-    )
       throw new AppError("not_found");
     const response = agentMaterialResponseSchema.parse(result);
     if (jsonBytes(response) > agentContextPolicy.historyResponseBytes)

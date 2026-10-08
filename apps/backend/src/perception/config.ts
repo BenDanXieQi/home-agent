@@ -26,6 +26,10 @@ export const perceptionConfigSchema = z
     sources: z
       .union([z.literal("household"), z.array(sourceSelectionSchema).max(8)])
       .default([]),
+    sourceProfiles: z
+      .array(sourceSelectionSchema.required({ videoQuality: true }))
+      .max(8)
+      .default([]),
     sampleFps: z.number().positive().max(30).default(3),
     firstFrameTimeoutMs: z.int().min(100).max(300_000).default(90_000),
     silenceTimeoutMs: z.int().min(100).max(300_000).default(30_000),
@@ -34,6 +38,12 @@ export const perceptionConfigSchema = z
   .refine(
     (config) => !config.dialogue.enabled || config.speech.enabled,
     "Dialogue requires speech transcription",
+  )
+  .refine(
+    (config) =>
+      new Set(config.sourceProfiles.map(sourceKey)).size ===
+      config.sourceProfiles.length,
+    "Duplicate camera channel profile",
   )
   .refine(
     (config) => config.silenceTimeoutMs > 1000 / config.sampleFps,
