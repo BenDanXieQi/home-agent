@@ -14,7 +14,10 @@ import { WindowView } from "./WindowView";
 import { RecordBrowser } from "./RecordBrowser";
 import { identified, time, type Parts, statusLabels } from "./presentation";
 import { useObservationPlayback } from "../../modules/playback/use-observation-playback";
-import { observationPlaybackSourceSchema } from "../../modules/playback/observation";
+import {
+  memberObservationPlaybackSource,
+  observationPlaybackSourceSchema,
+} from "../../modules/playback/observation";
 import { ObservationPlaybackLink } from "../../components/ObservationPlaybackLink";
 import { WindowMaterialSummary } from "../../components/WindowMaterialSummary";
 
@@ -59,7 +62,9 @@ function ObservationView({
         firstObservedAt: window.startedAt,
         lastObservedAt: window.endedAt,
       }
-    : sightings[0]?.data;
+    : sightings[0]
+      ? memberObservationPlaybackSource(sightings[0].data)
+      : undefined;
   const { deviceId, channel, sourceRunId, firstObservedAt, lastObservedAt } =
     playbackSource ?? {};
   const windowId = window?.id;

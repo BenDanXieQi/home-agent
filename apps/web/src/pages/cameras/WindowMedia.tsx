@@ -26,11 +26,13 @@ export function WindowMedia({
   scope,
   active,
   autoPlay = false,
+  observedAt,
 }: {
   window: PerceptionWindow;
   scope: string;
   active: boolean;
   autoPlay?: boolean;
+  observedAt?: number | undefined;
 }) {
   const canGenerate = useWindowInputState(window) === "available";
   const [representation, setRepresentation] = useState<
@@ -53,6 +55,7 @@ export function WindowMedia({
         canGenerate={canGenerate}
         active={active}
         autoPlay={autoPlay}
+        observedAt={observedAt}
       />
       <div className="flex flex-wrap items-center gap-3 px-4">
         <label className="flex items-center gap-2 whitespace-nowrap text-sm">
@@ -108,6 +111,7 @@ function MediaRequest({
   canGenerate,
   active,
   autoPlay,
+  observedAt,
 }: {
   canGenerate: boolean;
   scope: string;
@@ -115,6 +119,7 @@ function MediaRequest({
   selection: WindowMediaSelection;
   active: boolean;
   autoPlay: boolean;
+  observedAt: number | undefined;
 }) {
   const { query, mutation, error } = useWindowMedia(
     scope,
@@ -125,6 +130,26 @@ function MediaRequest({
   const media = query.data;
   const state = useWindowMediaState(media);
   const unavailable = windowRequestUnavailable(error);
+  const observationFrame =
+    observedAt !== undefined && media
+      ? media.parameters.frames.reduce<
+          (typeof media.parameters.frames)[number] | undefined
+        >(
+          (nearest, frame) =>
+            !nearest ||
+            Math.abs(media.parameters.startedAt + frame.offsetMs - observedAt) <
+              Math.abs(
+                media.parameters.startedAt + nearest.offsetMs - observedAt,
+              )
+              ? frame
+              : nearest,
+          undefined,
+        )
+      : undefined;
+  const frameObservedAt =
+    media && observationFrame
+      ? media.parameters.startedAt + observationFrame.offsetMs
+      : undefined;
   return (
     <div className="space-y-3 [&>p]:px-4">
       <div className="grid aspect-video max-h-[65dvh] place-items-center overflow-hidden bg-[#111111] text-white/70">
@@ -142,6 +167,9 @@ function MediaRequest({
             available={state === "ready"}
             active={active}
             autoPlay={autoPlay}
+            initialTime={
+              observationFrame ? observationFrame.offsetMs / 1000 : undefined
+            }
           />
         ) : (
           <span className="text-sm">
@@ -149,6 +177,13 @@ function MediaRequest({
           </span>
         )}
       </div>
+      {frameObservedAt !== undefined ? (
+        <p className="text-xs text-muted">
+          {frameObservedAt === observedAt
+            ? `已保留该观察时刻的采样帧，定位时间：${windowTime(frameObservedAt)}。`
+            : `原观察帧未保存在此采样媒体中，定位到最近保留帧：${windowTime(frameObservedAt)}。附近画面不能证明原观察时刻没有目标。`}
+        </p>
+      ) : null}
       {active && query.isPending ? (
         <StatusNotice>正在查询媒体状态…</StatusNotice>
       ) : null}

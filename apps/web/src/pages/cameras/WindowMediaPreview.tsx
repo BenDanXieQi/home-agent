@@ -17,6 +17,7 @@ export function WindowMediaPreview({
   available,
   active,
   autoPlay,
+  initialTime,
 }: {
   available: boolean;
   active: boolean;
@@ -25,6 +26,7 @@ export function WindowMediaPreview({
   id: string;
   selection: WindowMediaSelection;
   mediaId: string;
+  initialTime: number | undefined;
 }) {
   const query = useQuery({
     ...windowBytesOptions(scope, id, selection, mediaId),
@@ -117,6 +119,10 @@ export function WindowMediaPreview({
           playsInline
           aria-label="所选窗口采样视频"
           className="size-full object-contain"
+          onLoadedMetadata={(event) => {
+            if (initialTime !== undefined)
+              event.currentTarget.currentTime = initialTime;
+          }}
           onError={() => setFailed(true)}
         />
       )}
