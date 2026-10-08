@@ -119,6 +119,9 @@ export function CameraWindows({
         scope={scope}
         active={active}
         autoPlay={fromActivity}
+        observedAt={
+          selected?.id === activityWindow?.id ? activityAt : undefined
+        }
       />
     ) : null;
   return (
@@ -137,7 +140,7 @@ export function CameraWindows({
                 {query.isSuccess
                   ? activityWindow
                     ? activityAt <= activityWindow.endedAt
-                      ? "。已定位对应片段。"
+                      ? "。已定位该时刻所在的采样片段，原观察帧是否保留见播放器提示。"
                       : "。已定位该活动期间最近的筛选片段。"
                     : `。${activityUnavailableReason}`
                   : "。正在查找对应片段。"}

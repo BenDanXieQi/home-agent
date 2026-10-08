@@ -10,6 +10,27 @@ export const observationPlaybackSourceSchema = memberActivityDataSchema.pick({
   lastObservedAt: true,
 });
 
+export function memberObservationPlaybackSource(
+  data: z.infer<typeof memberActivityDataSchema>,
+) {
+  const current = data.attribution.current;
+  // A revocation can originate from a different camera. Replay the target's
+  // previous attribution evidence, not the remote revocation timestamp.
+  const evidence =
+    current.kind === "known"
+      ? current
+      : (data.attribution.lastCorrection?.before ?? data.attribution.original);
+  const observedAt =
+    evidence.kind === "known"
+      ? evidence.association.observedAt
+      : data.lastObservedAt;
+  return observationPlaybackSourceSchema.parse({
+    ...data,
+    firstObservedAt: observedAt,
+    lastObservedAt: observedAt,
+  });
+}
+
 // Sort once per query update and share the run index across all activity rows.
 export function indexPlayableObservationWindows(windows: WindowListEntry[]) {
   const runs = new Map<string, WindowListEntry[]>();

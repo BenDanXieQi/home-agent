@@ -15,7 +15,7 @@ import {
 import { useObservationPlayback } from "../../modules/playback/use-observation-playback";
 import { useMemo, useState } from "react";
 import { ObservationPlaybackLink } from "../../components/ObservationPlaybackLink";
-import { observationPlaybackSourceSchema } from "../../modules/playback/observation";
+import { memberObservationPlaybackSource } from "../../modules/playback/observation";
 import type { contextCursorSchema } from "@home-agent/api/household-context";
 import { useQuery } from "@tanstack/react-query";
 import { Camera, ChevronDown, Clock3, RefreshCw } from "lucide-react";
@@ -221,17 +221,14 @@ export function MemberActivity({
   const { entries: activityEntries, activities: playableActivities } =
     useMemo(() => {
       const entries = (query.data?.rows ?? []).map((row) => {
-        const source =
-          row.topic === "member_sighting"
-            ? observationPlaybackSourceSchema.safeParse(row.data)
-            : undefined;
+        const attribution = memberSightingData(row.topic, row.data);
         return {
           row,
           source:
-            source?.success && typeof row.id === "string"
-              ? source.data
+            attribution && typeof row.id === "string"
+              ? memberObservationPlaybackSource(attribution)
               : undefined,
-          attribution: memberSightingData(row.topic, row.data),
+          attribution,
         };
       });
       const activities = entries.flatMap(({ row, source }) =>
