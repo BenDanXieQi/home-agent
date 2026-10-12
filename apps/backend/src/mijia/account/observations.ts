@@ -1,12 +1,17 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 import { MiotMqtt, isMqttAuthenticationFailure } from "../protocols/miot/mqtt";
-import { deviceTopics, type MiotObservation } from "../protocols/miot/messages";
+import {
+  eventTopics,
+  deviceTopics,
+  type MiotObservation,
+} from "../protocols/miot/messages";
 import { safeMijiaError } from "../errors";
 import { mijiaOperation } from "../operation";
 
 type Watch = {
   selection:
     | { kind: "devices"; ids: readonly string[] }
+    | { kind: "events"; ids: readonly string[] }
     | { kind: "topics"; topics: readonly string[] };
   listener: (event: MiotObservation) => void;
   signal: AbortSignal;
@@ -142,7 +147,9 @@ export class AccountObservations {
       watch.selection.kind === "devices"
         ? connection.observe(watch.selection.ids, listener, watch.signal)
         : connection.observeTopics(
-            watch.selection.topics,
+            watch.selection.kind === "events"
+              ? watch.selection.ids.flatMap(eventTopics)
+              : watch.selection.topics,
             listener,
             watch.signal,
           );
@@ -165,6 +172,13 @@ export class AccountObservations {
   ) {
     return this.watch({ kind: "devices", ids: [...ids] }, listener, signal);
   }
+  observeEvents(
+    ids: readonly string[],
+    listener: Watch["listener"],
+    signal: AbortSignal,
+  ) {
+    return this.watch({ kind: "events", ids: [...ids] }, listener, signal);
+  }
   observeTopics(
     topics: readonly string[],
     listener: Watch["listener"],
@@ -179,15 +193,18 @@ export class AccountObservations {
   revokeDevices(ids: readonly string[]) {
     const revoked = new Set(ids);
     for (const watch of this.watches) {
-      if (watch.selection.kind !== "devices") continue;
+      if (watch.selection.kind === "topics") continue;
       const removed = watch.selection.ids.filter((id) => revoked.has(id));
       if (!removed.length) continue;
+      const topics =
+        watch.selection.kind === "events" ? eventTopics : deviceTopics;
       watch.selection = {
-        kind: "devices",
+        kind: watch.selection.kind,
         ids: watch.selection.ids.filter((id) => !revoked.has(id)),
       };
-      watch.binding?.removeTopics(removed.flatMap(deviceTopics));
-      if (!watch.selection.ids.length) this.removeWatch(watch);
+      watch.binding?.removeTopics(removed.flatMap(topics));
+      if (watch.selection.kind !== "topics" && !watch.selection.ids.length)
+        this.removeWatch(watch);
     }
   }
 

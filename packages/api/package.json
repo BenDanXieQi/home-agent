@@ -37,7 +37,8 @@
     "./household-model-view": "./src/domain/household-model-view/index.ts",
     "./household-model-view/format": "./src/domain/household-model-view/format.ts",
     "./household-model-view/decoding": "./src/domain/household-model-view/decoding.ts",
-    "./http/request-json": "./src/http/request-json.ts"
+    "./http/request-json": "./src/http/request-json.ts",
+    "./action-provenance": "./src/contracts/action-provenance.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

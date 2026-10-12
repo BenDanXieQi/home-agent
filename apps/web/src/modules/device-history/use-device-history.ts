@@ -252,7 +252,7 @@ export function useDeviceHistory(
   // oxlint-enable react/exhaustive-effect-dependencies
 
   // Keep a completed result and its query together while only the kind changes.
-  // Other household, device, range changes clear it.
+  // Other display-scope changes clear it.
   const display =
     displayed?.displayScopeKey === displayScopeKey ? displayed : undefined;
   const displayInput = display

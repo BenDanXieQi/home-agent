@@ -184,7 +184,7 @@ export function createAutomationRepository(db: Database) {
       const recordingStartedAt = new Date().toISOString();
       const recorded = await transaction(scope, async (tx) => {
         // Logs do not grant execution permission. Retain real results after a
-        // revision change, but never recreate a deleted rule or an old household.
+        // revision change, but never recreate a deleted rule.
         if (!(await find(tx, scope, execution.run.automationId))) return false;
         await tx
           .insert(automationRuns)

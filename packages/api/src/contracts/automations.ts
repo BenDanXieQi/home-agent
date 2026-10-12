@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { deviceValueSchema } from "../domain/devices";
-import { latestPropertySchema, propertyValueSchema } from "./observations";
+import { latestPropertySchema } from "./observations";
 
 export const automationLimits = {
   nodes: 128,
@@ -475,14 +475,7 @@ export const automationActionTimingSchema = z.object({
   sent_at: z.iso.datetime().optional(),
   response_received_at: z.iso.datetime().optional(),
   finished_at: z.iso.datetime().optional(),
-  feedback: z
-    .object({
-      observation_id: z.uuid(),
-      received_at: z.iso.datetime(),
-      observed_at: z.iso.datetime().nullable(),
-      value: propertyValueSchema,
-    })
-    .optional(),
+  command_id: z.uuid().optional(),
 });
 export const automationDecisionTimingSchema = z.object({
   queued_at: z.iso.datetime().optional(),

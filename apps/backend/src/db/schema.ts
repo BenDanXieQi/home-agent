@@ -203,6 +203,8 @@ export const householdSubjects = pgTable(
 export const contextRecords = pgTable(
   "context_records",
   {
+    sourceKey: text("source_key"),
+    sourceOccurredAt: timestamp("source_occurred_at", { withTimezone: true }),
     // Producers reuse this ID when retrying the same submission.
     id: uuid("id").primaryKey(),
     kind: contextKind("kind").notNull(),
@@ -222,6 +224,28 @@ export const contextRecords = pgTable(
     scopeEpoch: text("scope_epoch").notNull(),
   },
   (table) => [
+    unique("context_records_source_key_unique").on(table.sourceKey),
+    index("context_records_material_source_time_idx")
+      .on(table.topic, table.sourceOccurredAt, table.id)
+      .where(sql`${table.kind} = 'observation'`),
+    index("context_records_material_scope_source_time_idx")
+      .on(
+        sql`(${table.data}->>'account_id')`,
+        sql`(${table.data}->>'home_id')`,
+        table.sourceOccurredAt,
+        table.id,
+      )
+      .where(sql`${table.kind} = 'observation'`),
+    index("context_records_material_scope_time_idx")
+      .on(
+        sql`(${table.data}->>'account_id')`,
+        sql`(${table.data}->>'home_id')`,
+        table.topic,
+        table.occurredAt,
+        table.id,
+      )
+      .where(sql`${table.kind} = 'observation'`),
+    index("context_records_topic_expiry_idx").on(table.topic, table.expiresAt),
     index("context_records_occurred_at_id_idx").on(table.occurredAt, table.id),
     index("context_records_sighting_first_id_idx")
       .on(sql`((${table.data}->>'firstObservedAt')::numeric)`, table.id)
@@ -438,6 +462,12 @@ export const deviceObservations = pgTable(
         >
       >()
       .notNull(),
+    sourceMetadata:
+      jsonb("source_metadata").$type<
+        z.infer<
+          typeof import("@home-agent/api/action-provenance").sourceMetadataSchema
+        >
+      >(),
     source: text("source")
       .$type<
         z.infer<
@@ -599,3 +629,36 @@ export {
   automationReviews,
   automationReviewRuns,
 } from "../household/automations/reviews/schema";
+
+export const deviceCommands = pgTable(
+  "device_commands",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    homeId: text("home_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    calledAt: timestamp("called_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    data: jsonb("data")
+      .$type<
+        z.infer<
+          typeof import("@home-agent/api/action-provenance").commandRecordSchema
+        >
+      >()
+      .notNull(),
+  },
+  (table) => [
+    index("device_commands_household_time_idx").on(
+      table.accountId,
+      table.homeId,
+      table.calledAt,
+      table.id,
+    ),
+    index("device_commands_device_time_idx").on(
+      table.deviceId,
+      table.calledAt,
+      table.id,
+    ),
+    index("device_commands_expiry_idx").on(table.expiresAt),
+  ],
+);

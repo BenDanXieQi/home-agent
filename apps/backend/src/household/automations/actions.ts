@@ -1,17 +1,9 @@
 import PQueue from "p-queue";
-import { and, desc, eq, sql } from "drizzle-orm";
-import { isDeepStrictEqual } from "node:util";
-import type { latestPropertySchema } from "@home-agent/api/observations";
 import type { HouseholdRuntime } from "../runtime";
 import type { Database } from "../../db";
-import {
-  automations,
-  automationActions,
-  automationRuns,
-} from "../../db/schema";
-import type { MijiaService } from "../../mijia/service";
 import type { accessHousehold } from "../access";
-import { createHouseholdBindingAccess } from "../binding-repository";
+import type { createDeviceOperations } from "../operations/service";
+import { commandSourceSchema } from "@home-agent/api/action-provenance";
 import { createAutomationRepository } from "./repository";
 import {
   summarizeAutomationActions,
@@ -25,33 +17,6 @@ import type {
 } from "@home-agent/api/automations";
 
 type Scope = ReturnType<typeof accessHousehold>;
-function feedbackFor(
-  action: typeof automationActions.$inferSelect.action,
-  sentAt: string | undefined,
-  fact: z.infer<typeof latestPropertySchema> | undefined,
-) {
-  const evidence = fact?.evidence;
-  if (
-    action.kind !== "set_property" ||
-    !sentAt ||
-    !fact?.has_value ||
-    fact.device_id !== action.device_id ||
-    `prop.${fact.siid}.${fact.piid}` !== action.property_key ||
-    evidence?.source !== "push" ||
-    evidence.delivery_kind !== "live" ||
-    Date.parse(evidence.received_at) < Date.parse(sentAt) ||
-    Date.parse(evidence.received_at) > Date.parse(sentAt) + 30_000 ||
-    !isDeepStrictEqual(fact.value, action.value)
-  )
-    return undefined;
-  return {
-    observation_id: evidence.observation_id,
-    received_at: evidence.received_at,
-    observed_at: evidence.observed_at,
-    value: fact.value,
-  };
-}
-
 function logFailure(error: unknown) {
   console.warn(
     "自动化执行记录未保存，设备动作不会重发",
@@ -61,7 +26,7 @@ function logFailure(error: unknown) {
 
 export function createAutomationActions(deps: {
   db: Database;
-  mijia: MijiaService;
+  operations: ReturnType<typeof createDeviceOperations>;
   signal: AbortSignal;
   snapshot: HouseholdRuntime["snapshot"];
   eligible: (
@@ -72,7 +37,7 @@ export function createAutomationActions(deps: {
   ) => boolean;
   isCurrent: (id: string, revision: number) => boolean;
 }) {
-  const access = createHouseholdBindingAccess(deps.db);
+  const operations = deps.operations;
   const repository = createAutomationRepository(deps.db);
   const controls = new PQueue({ concurrency: 4 });
   const logs = new PQueue({ concurrency: 1 });
@@ -93,72 +58,8 @@ export function createAutomationActions(deps: {
     logs
       .add(async () => {
         await repository.recordExecution(scope, execution);
-        // A report may arrive before the asynchronous execution log is committed.
-        const latest = Object.values(deps.snapshot().projection.latest);
-        for (const row of execution.actions) {
-          if (row.action.kind !== "set_property" || !row.timing.sent_at)
-            continue;
-          const fact = latest.find((item) =>
-            feedbackFor(row.action, row.timing.sent_at, item),
-          );
-          if (fact) await observeReport(scope, fact);
-        }
       })
       .catch(logFailure);
-  }
-  async function observeReport(
-    scope: Scope,
-    fact: z.infer<typeof latestPropertySchema>,
-  ) {
-    if (
-      fact.evidence?.source !== "push" ||
-      fact.evidence.delivery_kind !== "live"
-    )
-      return;
-    const receivedAt = fact.evidence.received_at;
-    await access(scope.identity, scope.assertCurrent, async (tx) => {
-      const [row] = await tx
-        .select({ action: automationActions })
-        .from(automationActions)
-        .innerJoin(
-          automationRuns,
-          eq(automationRuns.id, automationActions.runId),
-        )
-        .innerJoin(automations, eq(automations.id, automationRuns.automationId))
-        .where(
-          and(
-            eq(automations.accountId, scope.identity.accountId),
-            eq(automations.homeId, scope.identity.homeId),
-            sql`${automationRuns.input}->>'scope_epoch' = ${scope.snapshot.scope_epoch}`,
-            sql`${automationActions.action}->>'kind' = 'set_property'`,
-            sql`${automationActions.action}->>'device_id' = ${fact.device_id}`,
-            sql`${automationActions.action}->>'property_key' = ${`prop.${fact.siid}.${fact.piid}`}`,
-            sql`(${automationActions.timing}->>'sent_at')::timestamptz between ${receivedAt}::timestamptz - interval '30 seconds' and ${receivedAt}::timestamptz`,
-          ),
-        )
-        .orderBy(desc(sql`${automationActions.timing}->>'sent_at'`))
-        .limit(1);
-      // Correlate with the latest command for this property, including an
-      // intervening conflicting command. A matching report is not causality proof.
-      if (!row || row.action.timing.feedback) return;
-      const feedback = feedbackFor(
-        row.action.action,
-        row.action.timing.sent_at,
-        fact,
-      );
-      if (!feedback) return;
-      await tx
-        .update(automationActions)
-        .set({
-          timing: sql`${automationActions.timing} || ${JSON.stringify({ feedback })}::jsonb`,
-        })
-        .where(
-          and(
-            eq(automationActions.id, row.action.id),
-            sql`${automationActions.timing}->'feedback' is null`,
-          ),
-        );
-    });
   }
   async function execute(
     scope: Scope,
@@ -208,35 +109,51 @@ export function createAutomationActions(deps: {
             : action.action_key
         ).split(".");
         timing.dispatch_started_at = new Date().toISOString();
-        const result =
+        const source = commandSourceSchema.parse({
+          entrypoint: "automation",
+          executor: "automation",
+          rule_id: execution.run.automationId,
+          rule_revision: execution.run.revision,
+          run_id: execution.run.id,
+          action_id: row.id,
+        });
+        timing.command_id = row.id;
+        const command =
           action.kind === "set_property"
-            ? (
-                await deps.mijia.writeProperties(
-                  [
-                    {
-                      did: action.device_id,
-                      siid: Number(parts[1]),
-                      piid: Number(parts[2]),
-                      value: action.value,
-                    },
-                  ],
-                  signal,
-                  assertCurrent,
-                )
-              )[0]
-            : await deps.mijia.invokeAction(
+            ? await operations.executePropertyWrite(
+                scope,
+                source,
                 {
-                  did: action.device_id,
+                  device_id: action.device_id,
                   siid: Number(parts[1]),
-                  aiid: Number(parts[2]),
-                  in: action.inputs,
+                  piid: Number(parts[2]),
+                  value: action.value,
                 },
                 signal,
                 assertCurrent,
+                execution.run.id,
+                row.id,
+              )
+            : await operations.executeDeviceAction(
+                scope,
+                source,
+                {
+                  device_id: action.device_id,
+                  siid: Number(parts[1]),
+                  aiid: Number(parts[2]),
+                  inputs: action.inputs,
+                },
+                signal,
+                assertCurrent,
+                execution.run.id,
+                row.id,
               );
+        timing.command_id = command.command_id;
+        const result = command.result;
         if (result) {
           if (result.sent_at) timing.sent_at = result.sent_at;
-          timing.response_received_at = result.received_at;
+          if (result.received_at)
+            timing.response_received_at = result.received_at;
           status = result.status;
           reason =
             result.status === "accepted"
@@ -254,17 +171,9 @@ export function createAutomationActions(deps: {
     row.status = status;
     row.reason = reason;
     row.updatedAt = new Date();
-    if (row.action.kind === "set_property" && timing.sent_at) {
-      const fact = Object.values(deps.snapshot().projection.latest).find(
-        (item) => feedbackFor(row.action, timing.sent_at, item),
-      );
-      const feedback = feedbackFor(row.action, timing.sent_at, fact);
-      if (feedback) timing.feedback = feedback;
-    }
   }
 
   return {
-    observeReport,
     schedule(
       scope: Scope,
       execution: ReturnType<typeof createAutomationExecution>,

@@ -75,12 +75,8 @@
           "name": "automation_actions_run_id_automation_runs_id_fk",
           "tableFrom": "automation_actions",
           "tableTo": "automation_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -140,12 +136,8 @@
           "name": "automation_decisions_id_automation_runs_id_fk",
           "tableFrom": "automation_decisions",
           "tableTo": "automation_runs",
-          "columnsFrom": [
-            "id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -317,12 +309,8 @@
           "name": "automation_review_runs_review_id_automation_reviews_id_fk",
           "tableFrom": "automation_review_runs",
           "tableTo": "automation_reviews",
-          "columnsFrom": [
-            "review_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["review_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -455,12 +443,8 @@
           "name": "automation_reviews_automation_id_automations_id_fk",
           "tableFrom": "automation_reviews",
           "tableTo": "automations",
-          "columnsFrom": [
-            "automation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["automation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -566,12 +550,8 @@
           "name": "automation_runs_automation_id_automations_id_fk",
           "tableFrom": "automation_runs",
           "tableTo": "automations",
-          "columnsFrom": [
-            "automation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["automation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -730,12 +710,8 @@
           "name": "context_entities_context_id_context_records_id_fk",
           "tableFrom": "context_entities",
           "tableTo": "context_records",
-          "columnsFrom": [
-            "context_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["context_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -743,12 +719,7 @@
       "compositePrimaryKeys": {
         "context_entities_context_id_entity_type_entity_id_role_pk": {
           "name": "context_entities_context_id_entity_type_entity_id_role_pk",
-          "columns": [
-            "context_id",
-            "entity_type",
-            "entity_id",
-            "role"
-          ]
+          "columns": ["context_id", "entity_type", "entity_id", "role"]
         }
       },
       "uniqueConstraints": {},
@@ -1064,10 +1035,7 @@
       "compositePrimaryKeys": {
         "device_history_state_device_id_item_pk": {
           "name": "device_history_state_device_id_item_pk",
-          "columns": [
-            "device_id",
-            "item"
-          ]
+          "columns": ["device_id", "item"]
         }
       },
       "uniqueConstraints": {},
@@ -1238,12 +1206,8 @@
           "name": "device_observations_definition_id_device_property_definitions_id_fk",
           "tableFrom": "device_observations",
           "tableTo": "device_property_definitions",
-          "columnsFrom": [
-            "definition_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["definition_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1251,10 +1215,7 @@
       "compositePrimaryKeys": {
         "device_observations_received_at_observation_id_pk": {
           "name": "device_observations_received_at_observation_id_pk",
-          "columns": [
-            "received_at",
-            "observation_id"
-          ]
+          "columns": ["received_at", "observation_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1402,10 +1363,7 @@
       "compositePrimaryKeys": {
         "household_directories_account_id_home_id_pk": {
           "name": "household_directories_account_id_home_id_pk",
-          "columns": [
-            "account_id",
-            "home_id"
-          ]
+          "columns": ["account_id", "home_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1558,12 +1516,7 @@
         "household_events_source_identity": {
           "name": "household_events_source_identity",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "home_id",
-            "producer_id",
-            "source_event_id"
-          ]
+          "columns": ["account_id", "home_id", "producer_id", "source_event_id"]
         }
       },
       "policies": {},
@@ -1655,12 +1608,8 @@
           "name": "identity_members_member_id_household_subjects_id_fk",
           "tableFrom": "identity_members",
           "tableTo": "household_subjects",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1771,12 +1720,8 @@
           "name": "identity_samples_member_id_identity_members_member_id_fk",
           "tableFrom": "identity_samples",
           "tableTo": "identity_members",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "member_id"
-          ],
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["member_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1786,17 +1731,12 @@
         "identity_samples_image_key_unique": {
           "name": "identity_samples_image_key_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "image_key"
-          ]
+          "columns": ["image_key"]
         },
         "identity_samples_member_sha256_unique": {
           "name": "identity_samples_member_sha256_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "member_id",
-            "sha256"
-          ]
+          "columns": ["member_id", "sha256"]
         }
       },
       "policies": {},
@@ -1940,12 +1880,8 @@
           "name": "observation_bindings_space_id_spaces_id_fk",
           "tableFrom": "observation_bindings",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -1953,12 +1889,8 @@
           "name": "observation_bindings_passage_id_passages_id_fk",
           "tableFrom": "observation_bindings",
           "tableTo": "passages",
-          "columnsFrom": [
-            "passage_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["passage_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2069,12 +2001,8 @@
           "name": "passages_space_a_id_spaces_id_fk",
           "tableFrom": "passages",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_a_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_a_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2082,12 +2010,8 @@
           "name": "passages_space_b_id_spaces_id_fk",
           "tableFrom": "passages",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_b_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_b_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2163,48 +2087,27 @@
     "public.context_certainty": {
       "name": "context_certainty",
       "schema": "public",
-      "values": [
-        "supported",
-        "tentative",
-        "unknown",
-        "conflicting"
-      ]
+      "values": ["supported", "tentative", "unknown", "conflicting"]
     },
     "public.context_entity_role": {
       "name": "context_entity_role",
       "schema": "public",
-      "values": [
-        "subject",
-        "participant",
-        "location",
-        "source"
-      ]
+      "values": ["subject", "participant", "location", "source"]
     },
     "public.context_entity_type": {
       "name": "context_entity_type",
       "schema": "public",
-      "values": [
-        "person",
-        "pet",
-        "room",
-        "device"
-      ]
+      "values": ["person", "pet", "room", "device"]
     },
     "public.context_kind": {
       "name": "context_kind",
       "schema": "public",
-      "values": [
-        "observation",
-        "assessment"
-      ]
+      "values": ["observation", "assessment"]
     },
     "public.household_subject_kind": {
       "name": "household_subject_kind",
       "schema": "public",
-      "values": [
-        "person",
-        "pet"
-      ]
+      "values": ["person", "pet"]
     }
   },
   "schemas": {},

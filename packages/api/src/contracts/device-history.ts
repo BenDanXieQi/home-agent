@@ -1,3 +1,6 @@
+import { deviceHistoryTimeSchema } from "./history-time";
+export { deviceHistoryTimeSchema } from "./history-time";
+import { sourceMetadataSchema } from "./action-provenance";
 import { z } from "zod";
 import { deviceCapabilitySchema } from "../domain/devices";
 import { propertyAddressSchema, propertyValueSchema } from "./observations";
@@ -36,6 +39,7 @@ const online = z.object({
   source: z.enum(["push", "retained", "directory"]),
 });
 const report = z.object({
+  source_metadata: sourceMetadataSchema.nullable().optional(),
   observation_id: z.uuid(),
   received_at: z.iso.datetime(),
   scope_epoch: z.uuid(),
@@ -45,18 +49,6 @@ export const deviceHistoryReportSchema = z.discriminatedUnion("kind", [
   property.extend(report.shape),
   online.extend(report.shape),
 ]);
-export const deviceHistoryTimeSchema = z.iso
-  .datetime()
-  .refine((value) => !value.startsWith("0000-"), {
-    message: "Use a PostgreSQL-compatible year",
-  })
-  .refine((value) => (value.match(/\.(\d+)Z$/)?.[1]?.length ?? 0) <= 6, {
-    message: "Use at most microsecond precision",
-  })
-  .transform(
-    (value) =>
-      `${new Date(value).toISOString().slice(0, 19)}.${(value.match(/\.(\d+)Z$/)?.[1] ?? "").padEnd(6, "0")}Z`,
-  );
 export const deviceHistoryQuerySchema = z
   .strictObject({
     account_id: z.string().min(1).max(512),
@@ -96,6 +88,7 @@ export const deviceHistoryQuerySchema = z
   });
 const storedProperty = property.extend({ definition_id: z.uuid() });
 const observation = z.object({
+  source_metadata: sourceMetadataSchema.nullable().optional(),
   observation_id: z.uuid(),
   received_at: z.iso.datetime(),
 });

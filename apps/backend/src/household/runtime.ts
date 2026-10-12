@@ -154,7 +154,24 @@ export class HouseholdRuntime {
     const observation = context.fact_result?.observation;
     const event = observation?.event;
     if (!observation || !event) return freeze({ ...commit, history: null });
+    const sourceDevice =
+      "did" in event
+        ? context.projection.device[
+            entityKey(
+              context.projection.household.household.account_id ?? "",
+              event.did,
+            )
+          ]
+        : undefined;
     const envelope = {
+      source_metadata:
+        "source_metadata" in event && event.source_metadata
+          ? {
+              ...event.source_metadata,
+              specification: sourceDevice?.spec_id ?? null,
+              model: sourceDevice?.model ?? null,
+            }
+          : undefined,
       observation_id: observation.observation_id,
       received_at: event.received_at,
       scope_epoch: context.scope_epoch,

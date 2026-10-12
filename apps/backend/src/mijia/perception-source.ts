@@ -55,7 +55,7 @@ export function createPerceptionSources(
     const snapshot = household.snapshot();
     const ready = household.ready;
     // The committed projection is immutable. All windows for a source reuse its
-    // grant until the household changes; every access still checks the current state.
+    // grant while the projection is current; every access still checks the current state.
     if (
       snapshot.projection !== current.snapshot.projection ||
       snapshot.scope_epoch !== current.snapshot.scope_epoch ||

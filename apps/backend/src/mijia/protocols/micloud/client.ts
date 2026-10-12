@@ -1,3 +1,13 @@
+import { parseProviderJson } from "../json";
+import {
+  deviceDataRequestSchema,
+  deviceDataRawRequestSchema,
+  userDeviceLogRequestSchema,
+  deviceDataRowSchema,
+  userDeviceLogRowSchema,
+  sceneHistoryResponseSchema,
+} from "./history";
+import { MicoClient } from "./mico";
 // Adapted from homebridge-miot/lib/protocol/MiCloud.js at the commit in ../README.md.
 // Copyright (c) 2025 Marcin. MIT license; see ../LICENSE.
 import { createHash, randomInt, randomBytes } from "node:crypto";
@@ -72,8 +82,8 @@ function parseJson(content: string) {
     let source = content.replace(/^&&&START&&&/, "");
     const jsonp = source.match(/^[A-Za-z_$][\w.$]*\s*\((.*)\);?$/s);
     if (jsonp?.[1]) source = jsonp[1];
-    const value: unknown = JSON.parse(source);
-    return object(value);
+    const decoded = parseProviderJson(source);
+    return object(decoded);
   } catch {
     throw new MiCloudError("invalid-response");
   }
@@ -104,6 +114,113 @@ function seconds(
 /** Owns one cloud identity; renewal returns an isolated candidate for durable adoption. */
 export class MiCloud {
   readonly region: MiCloudRegion;
+  #mico: MicoClient | undefined;
+  mico() {
+    return (this.#mico ??= new MicoClient(this.exportSession()));
+  }
+  async sceneHistory(homeId: string, ownerId: string, signal: AbortSignal) {
+    const result = await this.#deviceRequest(
+      "/scene/history",
+      {
+        home_id: homeId,
+        uid: this.getCredentials().userId,
+        owner_uid: ownerId,
+        command: "history",
+        limit: 100,
+      },
+      signal,
+    );
+    const response = sceneHistoryResponseSchema.parse(result);
+    if (response.history.some((row) => row.homeId !== homeId))
+      throw new MiCloudError("invalid-response");
+    return response;
+  }
+  async getDeviceData(
+    data: z.infer<typeof deviceDataRequestSchema>,
+    signal: AbortSignal,
+  ) {
+    const input = deviceDataRequestSchema.parse(data);
+    const rows = deviceDataRowSchema
+      .array()
+      .max(1000)
+      .parse(
+        await this.#deviceRequest(
+          "/user/get_user_device_data",
+          { ...input, uid: this.getCredentials().userId, group: "raw" },
+          signal,
+        ),
+      );
+    if (
+      rows.some(
+        (row) =>
+          row.did !== input.did ||
+          row.key !== input.key ||
+          row.type !== input.type ||
+          row.time < input.time_start ||
+          row.time > input.time_end,
+      )
+    )
+      throw new MiCloudError("invalid-response");
+    return rows;
+  }
+  async getDeviceDataRaw(
+    data: z.infer<typeof deviceDataRawRequestSchema>,
+    signal: AbortSignal,
+  ) {
+    const input = deviceDataRawRequestSchema.parse(data);
+    const rows = deviceDataRowSchema
+      .array()
+      .max(500)
+      .parse(
+        await this.#deviceRequest(
+          "/v2/user/get_device_data_raw",
+          {
+            ...input,
+            time_start: String(input.time_start),
+            time_end: String(input.time_end),
+            limit: String(input.limit),
+            uid: this.getCredentials().userId,
+          },
+          signal,
+        ),
+      );
+    if (
+      rows.some(
+        (row) =>
+          row.did !== input.did ||
+          row.key !== input.key ||
+          row.type !== input.type ||
+          row.time < input.time_start ||
+          row.time > input.time_end,
+      )
+    )
+      throw new MiCloudError("invalid-response");
+    return rows;
+  }
+  async getUserDeviceLog(
+    data: z.infer<typeof userDeviceLogRequestSchema>,
+    signal: AbortSignal,
+  ) {
+    const input = userDeviceLogRequestSchema.parse(data);
+    const rows = userDeviceLogRowSchema
+      .array()
+      .max(50)
+      .parse(
+        await this.#deviceRequest(
+          "/v2/user/get_user_device_log",
+          input,
+          signal,
+        ),
+      );
+    if (
+      rows.some(
+        (row) =>
+          row.timestamp < input.time_start || row.timestamp > input.time_end,
+      )
+    )
+      throw new MiCloudError("invalid-response");
+    return rows;
+  }
   #identity = {
     clientId: randomCharacters(
       6,
@@ -657,6 +774,7 @@ export class MiCloud {
   }
 
   dispose() {
+    this.#mico?.dispose();
     this.#transport.dispose();
     this.#session = undefined;
     this.#serviceToken = undefined;

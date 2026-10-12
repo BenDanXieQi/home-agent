@@ -1,3 +1,4 @@
+import { sourceMetadata } from "../protocols/source-metadata";
 import { z } from "zod";
 import { MiCloudError, type MiCloud } from "../protocols/micloud";
 import {
@@ -18,7 +19,9 @@ const scalarSchema = z.union([
 ]);
 
 type ReadOutcome =
-  | ReturnType<typeof classifyRow>
+  | (ReturnType<typeof classifyRow> & {
+      source_metadata?: ReturnType<typeof sourceMetadata>;
+    })
   | ReturnType<typeof requestFailure>;
 
 export type PropertyReadObservation = ReturnType<
@@ -249,7 +252,18 @@ export class PropertyReader {
         const key = propertyKey(parsed.data);
         if (!requestedKeys.has(key)) continue;
         const previous = outcomes.get(key);
-        const outcome = classifyRow(parsed.data);
+        const outcome = {
+          ...classifyRow(parsed.data),
+          source_metadata: {
+            ...sourceMetadata("/miotspec/prop/get", row),
+            collection: {
+              source_id: context.source_id,
+              generation: context.collection_generation,
+              delivery_kind: "baseline" as const,
+              packet_id: null,
+            },
+          },
+        };
         // A repeated failure or malformed row cannot erase an accepted value.
         if (
           !previous ||

@@ -1,3 +1,4 @@
+import type { createProvenanceRoutes } from "./records/routes";
 import {
   propertyReadRequestSchema,
   collectionRetrySchema,
@@ -15,7 +16,10 @@ import {
 import type { HouseholdRuntime } from "./runtime";
 import { createHouseholdStream } from "./stream";
 
-export function createHouseholdRoutes(runtime: HouseholdRuntime) {
+export function createHouseholdRoutes(
+  runtime: HouseholdRuntime,
+  provenance?: Parameters<typeof createProvenanceRoutes>[1],
+) {
   return new Hono()
     .post("/facts/query", validateJson(roomFactsQuerySchema), (c) =>
       c.json(selectRoomFacts(runtime.snapshot(), c.req.valid("json"))),
@@ -38,7 +42,17 @@ export function createHouseholdRoutes(runtime: HouseholdRuntime) {
       c.json(runtime.retryCollection(c.req.valid("json").scope_epoch)),
     )
     .get("/state", (c) => c.json(runtime.snapshot()))
-    .get("/diagnostics", (c) => c.json(runtime.diagnostics()))
+    .get("/diagnostics", (c) =>
+      c.json({
+        ...runtime.diagnostics(),
+        provenance: provenance
+          ? {
+              ...provenance.collectors.diagnostics(),
+              commands: provenance.operations.diagnostics(),
+            }
+          : null,
+      }),
+    )
     .get("/events", createHouseholdStream(runtime))
     .get("/setup/homes", (c) => c.json(runtime.setupHomes()))
     .put("/scope/homes", validateJson(selectHomeSchema), async (c) => {

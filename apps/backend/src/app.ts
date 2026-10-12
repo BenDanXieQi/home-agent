@@ -1,3 +1,4 @@
+import { createProvenanceRoutes } from "./household/records/routes";
 import { createAgentClient } from "./agent-client";
 import { createAutomationRoutes } from "./household/automations/routes";
 import type { AutomationService } from "./household/automations/service";
@@ -41,6 +42,7 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  provenance?: Parameters<typeof createProvenanceRoutes>[1];
   automations?: AutomationService | undefined;
   agentContext: ReturnType<typeof createAgentContextService>;
   memberActivityRepository:
@@ -74,6 +76,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  provenance,
   automations,
   agentContext,
   memberActivityRepository,
@@ -184,6 +187,10 @@ export function createApp({
       createMemberRoutes(environment.BACKEND_PORT, household, memberRepository),
     )
     .route(
+      "/api/provenance",
+      createProvenanceRoutes(environment.BACKEND_PORT, provenance),
+    )
+    .route(
       "/api/household-context",
       createContextRoutes(
         environment.BACKEND_PORT,
@@ -242,7 +249,12 @@ export function createApp({
     )
     .route(
       "/api/mijia",
-      createMijiaRoutes(environment.BACKEND_PORT, household, mijiaService),
+      createMijiaRoutes(
+        environment.BACKEND_PORT,
+        household,
+        mijiaService,
+        provenance,
+      ),
     );
   // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));

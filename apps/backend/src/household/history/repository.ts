@@ -105,7 +105,7 @@ export function createDeviceHistoryRepository(db: Database) {
           }
           observations.push({
             report,
-            values: sql`(${report.received_at}::timestamptz, ${report.observation_id}::uuid, ${report.kind}::text, ${report.device_id}::text, ${definitionId}::uuid, ${report.scope_epoch}::uuid, ${String(report.input_sequence)}::bigint, ${JSON.stringify(report.value)}::jsonb, ${report.source}::text)`,
+            values: sql`(${report.received_at}::timestamptz, ${report.observation_id}::uuid, ${report.kind}::text, ${report.device_id}::text, ${definitionId}::uuid, ${report.scope_epoch}::uuid, ${String(report.input_sequence)}::bigint, ${JSON.stringify(report.value)}::jsonb, ${report.source}::text, ${JSON.stringify(report.source_metadata ?? null)}::jsonb)`,
           });
         }
         const currentDeviceIds = context.currentDeviceIds();
@@ -115,7 +115,7 @@ export function createDeviceHistoryRepository(db: Database) {
         if (!accepted.length) return { saved: [], suppressed: 0 };
         const inserted = await tx.execute(sql`
           WITH incoming (received_at, observation_id, kind, device_id, definition_id,
-            scope_epoch, input_sequence, value, source) AS (
+            scope_epoch, input_sequence, value, source, source_metadata) AS (
             VALUES ${sql.join(
               accepted.map((observation) => observation.values),
               sql`, `,
@@ -156,9 +156,9 @@ export function createDeviceHistoryRepository(db: Database) {
               IS DISTINCT FROM (excluded.value, excluded.metadata)
           )
           insert into device_observations
-          (received_at, observation_id, kind, device_id, definition_id, scope_epoch, input_sequence, value, source)
+          (received_at, observation_id, kind, device_id, definition_id, scope_epoch, input_sequence, value, source, source_metadata)
           SELECT received_at, observation_id, kind, device_id, definition_id,
-            scope_epoch, input_sequence, value, source FROM changes
+            scope_epoch, input_sequence, value, source, source_metadata FROM changes
           RETURNING observation_id`);
         const insertedIds = new Set(
           inserted.map((row) => z.uuid().parse(row.observation_id)),
@@ -266,7 +266,7 @@ export function createDeviceHistoryRepository(db: Database) {
       AND o.received_at >= GREATEST(${input.start}::timestamptz, now() - make_interval(days => ${deviceHistoryPolicy.retentionDays}))
       AND o.received_at < ${input.end}::timestamptz`;
           const record = sql`jsonb_build_object('kind', o.kind, 'device_id', o.device_id,
-            'value', o.value, 'source', o.source)
+            'value', o.value, 'source', o.source, 'source_metadata', o.source_metadata)
             || CASE WHEN o.kind = 'property' THEN jsonb_build_object(
               'siid', d.siid, 'piid', d.piid, 'definition_id', d.id, 'metadata', d.metadata)
               ELSE '{}'::jsonb END`;
