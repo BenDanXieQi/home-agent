@@ -447,10 +447,73 @@ export class MijiaService {
     return this.directoryNotifications.snapshot();
   }
 
+  observeDeviceEvents(
+    deviceIds: readonly string[],
+    receive: (event: MiotObservation) => void,
+    signal: AbortSignal,
+  ) {
+    return this.observeDevices(deviceIds, receive, signal, true);
+  }
+
+  materialSession(signal: AbortSignal, deviceId?: string) {
+    signal.throwIfAborted();
+    const client = this.accountClient;
+    if (!client) throw new MijiaError("not_bound");
+    if (
+      !this.activeAccount(client) ||
+      !this.discovery.catalogConfirmed ||
+      !this.household?.ready()
+    )
+      throw new MijiaError("devices_failed");
+    const home = this.discovery.requireHome();
+    const generation = this.readGeneration;
+    const device =
+      deviceId === undefined ? undefined : this.discovery.find(deviceId);
+    if (deviceId !== undefined && !device)
+      throw new MijiaError("device_not_found");
+    const combined = AbortSignal.any([
+      signal,
+      this.readScope.signal,
+      ...(deviceId === undefined ? [] : [this.deviceReadSignal(deviceId)]),
+    ]);
+    const assertCurrent = () => {
+      combined.throwIfAborted();
+      if (
+        !this.activeAccount(client) ||
+        this.readGeneration !== generation ||
+        !this.discovery.catalogConfirmed
+      )
+        throw new MijiaError("stale_session");
+      this.discovery.requireHome();
+      if (deviceId !== undefined) {
+        const current = this.discovery.find(deviceId);
+        if (!current) throw new MijiaError("device_not_found");
+        if (
+          current.home_id !== device?.home_id ||
+          current.model !== device?.model ||
+          current.spec_type !== device?.spec_type
+        )
+          throw new MijiaError("stale_session");
+      }
+    };
+    return {
+      client,
+      home,
+      revision: generation,
+      signal: combined,
+      assertCurrent,
+      devices: () => {
+        assertCurrent();
+        return this.discovery.list();
+      },
+    };
+  }
+
   async observeDevices(
     deviceIds: readonly string[],
     onObservation: (observation: MiotObservation) => void,
     signal: AbortSignal,
+    events = false,
   ) {
     signal.throwIfAborted();
     if (!this.household?.ready()) throw new MijiaError("devices_failed");
@@ -472,7 +535,6 @@ export class MijiaService {
         throw new MijiaError("stale_session");
     };
     // Revocation removes only the affected topics from the account-owned watch.
-    // The scope revision changes only when the entire household is replaced.
     const assertDevices = () => {
       assertCurrent();
       this.discovery.requireHome();
@@ -494,7 +556,10 @@ export class MijiaService {
       if (!this.accountOAuth || this.accountOAuth.expiresAt <= Date.now())
         throw new MijiaError("authentication");
       const mqtt = this.accountObservations(account);
-      const observation = mqtt.observe(
+      const observe = events
+        ? mqtt.observeEvents.bind(mqtt)
+        : mqtt.observe.bind(mqtt);
+      const observation = observe(
         ids,
         (event) => {
           // Scope-invalidated control events are allowed to explain lost coverage;

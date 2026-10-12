@@ -1,3 +1,4 @@
+import type { createProvenanceRoutes } from "../household/records/routes";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { AppError } from "@home-agent/api/errors";
@@ -24,6 +25,7 @@ export function createMijiaRoutes(
   port: number,
   runtime: HouseholdRuntime,
   service: MijiaService,
+  provenance?: Parameters<typeof createProvenanceRoutes>[1],
 ) {
   const commandResult = () => {
     service.flushChanges();
@@ -112,7 +114,7 @@ export function createMijiaRoutes(
       await service.release(c.req.param("id"));
       return c.body(null, 204);
     })
-    .route("/", createHouseholdRoutes(runtime));
+    .route("/", createHouseholdRoutes(runtime, provenance));
   app.onError((error, c) =>
     handleHttpError(
       error instanceof HouseholdError ? safeMijiaError(error) : error,

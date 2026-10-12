@@ -1,3 +1,13 @@
+import { createMijiaDeviceControl } from "./mijia/control/adapter";
+import { createStoredRecordAccess } from "./household/records/access";
+import { createRecordWriter } from "./household/records/writer";
+import { createRecordMaintenance } from "./household/records/maintenance";
+import { createDeviceOperations } from "./household/operations/service";
+import { createCommandRepository } from "./household/operations/repository";
+import { createMaterialRepository } from "./household/materials/repository";
+import { createMijiaMaterials } from "./mijia/materials/service";
+import { materialCollectionConfigSchema } from "./mijia/materials/config";
+import { recordRetentionConfigSchema } from "./household/records/config";
 import { createDeviceHistoryQuery } from "./household/history/query";
 import { createDeviceHistoryRepository } from "./household/history/repository";
 import { createDeviceHistoryService } from "./household/history/service";
@@ -105,6 +115,52 @@ const household = createMijiaHousehold(
   ),
   collectionPolicy,
 );
+const shutdown = new AbortController();
+const provenanceConfigFile = Bun.file(
+  resolvePath(import.meta.dir, "../../..", "config/provenance.json"),
+);
+const provenanceConfig: unknown = (await provenanceConfigFile.exists())
+  ? await provenanceConfigFile.json()
+  : {};
+const recordRetention = recordRetentionConfigSchema.parse(provenanceConfig);
+const materialCollectionConfig =
+  materialCollectionConfigSchema.parse(provenanceConfig);
+const commands = database ? createCommandRepository(database.db) : undefined;
+const materials = database ? createMaterialRepository(database.db) : undefined;
+const recordWriter = createRecordWriter();
+const recordMaintenance =
+  materials && commands
+    ? createRecordMaintenance(materials, commands)
+    : undefined;
+const operations = commands
+  ? createDeviceOperations(
+      createMijiaDeviceControl(mijiaService),
+      commands,
+      recordWriter,
+      recordRetention.retention_days,
+    )
+  : undefined;
+const collectors = materials
+  ? createMijiaMaterials({
+      mijia: mijiaService,
+      household,
+      repository: materials,
+      config: materialCollectionConfig,
+      retention: recordRetention,
+      writer: recordWriter,
+      signal: shutdown.signal,
+    })
+  : undefined;
+const provenance =
+  commands && materials && collectors && operations && database
+    ? {
+        commands,
+        materials,
+        collectors,
+        operations,
+        access: createStoredRecordAccess(database.db, household),
+      }
+    : undefined;
 const deviceHistoryRepository = database
   ? createDeviceHistoryRepository(database.db)
   : undefined;
@@ -175,7 +231,6 @@ const spatialService = createSpatialService(spatialRepository, (scope) => {
     ? Object.values(snapshot.projection.device)
     : [];
 });
-const shutdown = new AbortController();
 const agentContext = createAgentContextService({
   household,
   members: memberRepository,
@@ -194,17 +249,19 @@ identityEnrollment = identityReferences
       },
     )
   : undefined;
-const automations = database
-  ? createAutomationService({
-      db: database.db,
-      household,
-      mijia: mijiaService,
-      signal: shutdown.signal,
-      readEventTypes: () => [],
-    })
-  : undefined;
+const automations =
+  database && operations
+    ? createAutomationService({
+        db: database.db,
+        household,
+        operations,
+        signal: shutdown.signal,
+        readEventTypes: () => [],
+      })
+    : undefined;
 await automations?.start();
 const app = createApp({
+  provenance,
   agentContext,
   memberActivityRepository,
   deviceHistory,
@@ -259,7 +316,10 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
           Promise.allSettled([
             contextClosing,
             server.stop(),
-            automations?.close(),
+            recordMaintenance?.close(),
+            Promise.all([automations?.close(), collectors?.close()]).then(() =>
+              recordWriter.close(),
+            ),
             perceptionClosing,
             app.closeRecordings(),
             speechInbox.close(),

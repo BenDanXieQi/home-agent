@@ -1,5 +1,7 @@
 # API 契约与错误处理
 
+`@home-agent/api/action-provenance` 提供命令、来源元数据、供应商材料、分页和诊断 schema。History 复用来源字段，自动化动作只引用命令，不含反馈匹配字段。用法与限制见[家庭运行时](../../docs/household-runtime.md#命令与供应商材料)。
+
 `@home-agent/api` 统一约定 Web、backend 与 Agent 交换数据时的字段、类型和错误格式（数据契约），并提供服务端请求校验及错误处理工具。
 
 ## 模块边界
@@ -104,7 +106,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 [`src/contracts/agent-context.ts`](src/contracts/agent-context.ts) 从已有家庭、空间、成员、感知与窗口 schema 派生专用推送和历史分支，统一通过 `@home-agent/api/agent-context` 导入。`agentContextPolicy` 定义整理缓存、各部分、待发送内容、单次传输及历史响应的预算；来源语义与验证限制由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。
 
-`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部五部分，后续只提供变化部分；省略表示保留。设备状态在同一连接已有 ready 基线时可发送 `status=delta`：`data.changes` 复用家庭变化契约，包含 `latest/source_health/device_coverage/collection` 的 upsert 或 remove，`data.online` 仅在线列表变化时提供。增量只替换或删除指定条目；其他部分及非增量设备状态整体替换，ready 的空集合清空旧集合。每个连接以最后成功发送的完整状态为基线计算差异；增量比全量大时发送全量。heartbeat 数据为空对象，不改变业务部分或同步状态。Agent 接收器使用 `@home-agent/api/agent-context/merge` 的不可变增量合并、整部分替换与家庭资格隔离规则，连接重试由接收适配器维护。Web 数据页通过只读代理查看 Agent 接收记录。
+`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部五部分，后续只提供变化部分；省略表示保留。设备状态在同一连接已有 ready 基线时可发送 `status=delta`：`data.changes` 复用家庭变化契约，包含 `latest/source_health/device_coverage/collection` 的 upsert 或 remove，`data.online` 仅在线列表变化时提供。增量只替换或删除指定条目；其他部分及非增量设备状态整体替换，ready 的空集合清空旧集合。每个连接以最后成功发送的完整状态为基线计算差异；增量比全量大时发送全量。heartbeat 数据为空对象，不改变业务部分或同步状态。Agent 接收器使用 `@home-agent/api/agent-context/merge` 的不可变增量合并、整部分替换规则，连接重试由接收适配器维护。Web 数据页通过只读代理查看 Agent 接收记录。
 
 | 部分           | data 来源                                        |
 | -------------- | ------------------------------------------------ |

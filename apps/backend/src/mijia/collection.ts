@@ -10,7 +10,7 @@ export function createMijiaCollectionSource(service: MijiaService) {
       service.observeDevices(
         [id],
         (event) => {
-          if (event.kind === "directory") return;
+          if (event.kind === "directory" || event.kind === "event") return;
           if (event.kind === "subscription") {
             const match =
               /^device\/([^/]+)\/(up\/properties_changed|state)\/#$/.exec(

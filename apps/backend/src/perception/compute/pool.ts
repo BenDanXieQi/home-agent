@@ -34,6 +34,7 @@ const optionsSchema = z.object({
   closeTimeoutMs: z.int().min(100).max(300_000).default(10_000),
   recoveryDelayMs: z.int().nonnegative().max(30_000).default(250),
   recoveryResetMs: z.int().positive().max(3_600_000).default(60_000),
+  recoveryCooldownMs: z.int().positive().max(3_600_000).default(60_000),
   maxRestarts: z.int().nonnegative().max(3).default(2),
 });
 
@@ -108,7 +109,15 @@ export async function createDetectionPool(
   let healthySince: number | undefined;
   let recovery: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
+  let recoveryTimer: ReturnType<typeof setTimeout> | undefined;
+  function cancelScheduledRecovery() {
+    clearTimeout(recoveryTimer);
+    recoveryTimer = undefined;
+  }
   const stopping = new AbortController();
+  stopping.signal.addEventListener("abort", cancelScheduledRecovery, {
+    once: true,
+  });
   const onShutdown = () => stopping.abort(new Error("Perception stopping"));
   shutdownSignal?.addEventListener("abort", onShutdown, { once: true });
   if (shutdownSignal?.aborted) onShutdown();
@@ -126,6 +135,25 @@ export async function createDetectionPool(
   function recordHealthy(now = performance.now()) {
     healthySince ??= now;
     if (now - healthySince >= options.recoveryResetMs) consecutiveRestarts = 0;
+  }
+
+  function scheduleRecovery() {
+    if (
+      stopping.signal.aborted ||
+      status !== "unavailable" ||
+      options.maxRestarts === 0 ||
+      recoveryTimer !== undefined
+    )
+      return;
+    // A cooldown opens a new bounded recovery cycle; retry still confirms
+    // the retired process has exited before creating its replacement.
+    recoveryTimer = setTimeout(() => {
+      recoveryTimer = undefined;
+      retry().catch((error: unknown) => {
+        console.error("Detection cooldown recovery failed", error);
+      });
+    }, options.recoveryCooldownMs);
+    recoveryTimer.unref();
   }
 
   async function retire(
@@ -224,6 +252,8 @@ export async function createDetectionPool(
         status = "unavailable";
         notifyStatus();
       }
+    } finally {
+      scheduleRecovery();
     }
   }
 
@@ -232,6 +262,7 @@ export async function createDetectionPool(
       throw new DetectionPoolError("closed", "Detection pool is closed");
     if (status === "ready") return;
     if (status === "unavailable" && current) {
+      cancelScheduledRecovery();
       consecutiveRestarts = 0;
       healthySince = undefined;
       status = "recovering";

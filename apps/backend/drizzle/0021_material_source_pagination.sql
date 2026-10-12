@@ -1,0 +1,1 @@
+CREATE INDEX "context_records_material_scope_source_time_idx" ON "context_records" USING btree (("data"->>'account_id'),("data"->>'home_id'),"source_occurred_at","id") WHERE "context_records"."kind" = 'observation';

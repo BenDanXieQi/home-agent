@@ -7,6 +7,7 @@ import type { Transaction } from "../db/transaction-outcome";
 const tableLifetime = {
   perceptionWindows: "household",
   credentials: "installation",
+  deviceCommands: "household",
   mijiaHomeSelections: "installation",
   householdDirectories: "household",
   householdSubjects: "household",

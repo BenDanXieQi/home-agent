@@ -19,7 +19,7 @@ import { AppError } from "@home-agent/api/errors";
 import type { Database } from "../../db";
 import { automations } from "../../db/schema";
 import type { HouseholdRuntime } from "../runtime";
-import type { MijiaService } from "../../mijia/service";
+import type { createDeviceOperations } from "../operations/service";
 import { accessHousehold } from "../access";
 import { createAutomationActions } from "./actions";
 import { createAutomationRepository } from "./repository";
@@ -32,13 +32,12 @@ type StoredAutomation = typeof automations.$inferSelect;
 export function createAutomationService(deps: {
   db: Database;
   household: HouseholdRuntime;
-  mijia: MijiaService;
+  operations: ReturnType<typeof createDeviceOperations>;
   signal: AbortSignal;
   readEventTypes: () => string[];
 }) {
   const repository = createAutomationRepository(deps.db);
   const writes = new PQueue({ concurrency: 1 });
-  const feedbackWrites = new Set<Promise<void>>();
   const definitions = new Map<string, StoredAutomation>();
   const states = new Map<
     string,
@@ -390,34 +389,6 @@ export function createAutomationService(deps: {
         for (const row of definitions.values())
           if (row.enabled) ids.add(row.id);
     }
-    const current = scope();
-    if (
-      report &&
-      reported &&
-      [...definitions.values()].some((row) =>
-        row.definition.actions.some(
-          (action) =>
-            action.kind === "set_property" &&
-            action.device_id === report.device_id &&
-            action.property_key === report.property_key,
-        ),
-      )
-    ) {
-      if (feedbackWrites.size < 64) {
-        const task = actions.observeReport(current, reported);
-        feedbackWrites.add(task);
-        task
-          .catch((error: unknown) => {
-            console.warn(
-              "自动化设备反馈时间未保存",
-              error instanceof Error ? error.name : "unknown",
-            );
-          })
-          .finally(() => {
-            feedbackWrites.delete(task);
-          });
-      } else console.warn("自动化设备反馈记录繁忙，本次反馈未保存");
-    }
     for (const id of ids) {
       const row = definitions.get(id);
       if (!row) continue;
@@ -426,7 +397,7 @@ export function createAutomationService(deps: {
   });
   const actionDependencies = {
     db: deps.db,
-    mijia: deps.mijia,
+    operations: deps.operations,
     signal: deps.signal,
     snapshot: () => deps.household.snapshot(),
     isCurrent: (id, revision) =>
@@ -619,10 +590,7 @@ export function createAutomationService(deps: {
       await refreshTask?.catch(onFailure);
       await writes.onIdle();
       await actions.close();
-      await Promise.allSettled([
-        ...feedbackWrites,
-        ...(cleanupTask ? [cleanupTask] : []),
-      ]);
+      await Promise.allSettled(cleanupTask ? [cleanupTask] : []);
     },
   };
 }

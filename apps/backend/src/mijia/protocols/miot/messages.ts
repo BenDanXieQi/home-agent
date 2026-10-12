@@ -1,3 +1,5 @@
+import { parseProviderJson } from "../json";
+import { sourceMetadata } from "../source-metadata";
 import { z } from "zod";
 
 const scalar = z.union([
@@ -15,6 +17,23 @@ const change = z.object({
   piid: z.number().int().positive(),
   value: scalar,
 });
+const eventEnvelope = z.object({
+  method: z.literal("event_occured"),
+  params: z.object({
+    did: z.union([z.string(), z.number().int().safe()]).optional(),
+    siid: z.number().int().positive(),
+    eiid: z.number().int().positive(),
+    arguments: z.array(
+      z.object({
+        piid: z.number().int().positive(),
+        value: z.unknown(),
+      }),
+    ),
+  }),
+});
+export function eventTopics(did: string) {
+  return [`device/${did}/up/event_occured/#`];
+}
 export function deviceTopics(did: string) {
   return [`device/${did}/up/properties_changed/#`, `device/${did}/state/#`];
 }
@@ -38,7 +57,7 @@ export function subscribableDevice(did: string) {
     !did.includes(String.fromCharCode(0))
   );
 }
-export function decodePush(topic: string, payload: Buffer) {
+function decodeMessage(topic: string, raw: unknown) {
   // Directory notifications are invalidations, not authoritative field updates.
   // Their undocumented payload is neither retained nor used to mutate the catalog.
   const directory =
@@ -46,31 +65,63 @@ export function decodePush(topic: string, payload: Buffer) {
       topic,
     );
   if (directory)
-    return [{ kind: "directory" as const, did: directory[3] ?? "", topic }];
+    return [
+      {
+        observation: {
+          kind: "directory" as const,
+          did: directory[3] ?? "",
+          topic,
+        },
+        raw: {},
+      },
+    ];
   const online = /^device\/([^/]+)\/state\/(online|offline)$/.exec(topic);
   if (online)
     return [
       {
-        kind: "online" as const,
-        did: online[1]!,
-        online: online[2] === "online",
+        observation: {
+          kind: "online" as const,
+          did: online[1]!,
+          online: online[2] === "online",
+        },
+        raw,
       },
     ];
+  const eventAddress =
+    /^device\/([^/]+)\/up\/event_occured(?:\/(\d+)\/(\d+))?$/.exec(topic);
+  if (eventAddress) {
+    const parsed = eventEnvelope.safeParse(raw);
+    if (!parsed.success) return [];
+    const event = parsed.data.params;
+    if (
+      (event.did !== undefined && String(event.did) !== eventAddress[1]) ||
+      (eventAddress[2] !== undefined &&
+        (Number(eventAddress[2]) !== event.siid ||
+          Number(eventAddress[3]) !== event.eiid))
+    )
+      return [];
+    return [
+      {
+        observation: {
+          kind: "event" as const,
+          did: eventAddress[1]!,
+          siid: event.siid,
+          eiid: event.eiid,
+          arguments: event.arguments,
+        },
+        raw,
+      },
+    ];
+  }
   const address =
     /^device\/([^/]+)\/up\/properties_changed(?:\/(\d+)\/(\d+))?$/.exec(topic);
   if (!address) return [];
-  let raw: unknown;
-  try {
-    raw = JSON.parse(payload.toString("utf8"));
-  } catch {
-    return [];
-  }
   const parsed = envelope.safeParse(raw);
   if (!parsed.success) return [];
   const entries = Array.isArray(parsed.data.params)
     ? parsed.data.params
     : [parsed.data.params];
-  const changes: z.infer<typeof change>[] = [];
+  const changes: { value: z.infer<typeof change>; raw: object }[] = [];
   for (const row of entries) {
     if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
     const did = "did" in row ? row.did : undefined;
@@ -82,20 +133,46 @@ export function decodePush(topic: string, payload: Buffer) {
     )
       return [];
     const value = change.safeParse(row);
-    if (value.success && Object.hasOwn(row, "value")) changes.push(value.data);
+    if (value.success && Object.hasOwn(row, "value"))
+      changes.push({ value: value.data, raw: row });
   }
   if (
     changes.length === 1 &&
     address[2] !== undefined &&
-    (changes[0]!.siid !== Number(address[2]) ||
-      changes[0]!.piid !== Number(address[3]))
+    (changes[0]!.value.siid !== Number(address[2]) ||
+      changes[0]!.value.piid !== Number(address[3]))
   )
     return [];
+  // Each report owns only its source row. Repeating params for every property
+  // makes one packet quadratic in both the live queue and history storage.
+  const fields = raw && typeof raw === "object" ? raw : {};
   return changes.map((item) => ({
-    kind: "property" as const,
-    did: address[1]!,
-    ...item,
+    observation: {
+      kind: "property" as const,
+      did: address[1]!,
+      ...item.value,
+    },
+    raw: {
+      ...("id" in fields ? { id: fields.id } : {}),
+      ...("time" in fields ? { time: fields.time } : {}),
+      ...("timestamp" in fields ? { timestamp: fields.timestamp } : {}),
+      method: parsed.data.method,
+      params: item.raw,
+    },
   }));
+}
+function parsePushPayload(payload: Buffer) {
+  try {
+    return parseProviderJson(payload.toString("utf8"));
+  } catch {
+    // State topics can carry opaque payloads; data topics still require valid JSON.
+    return null;
+  }
+}
+export function decodePush(topic: string, payload: Buffer) {
+  return decodeMessage(topic, parsePushPayload(payload)).map(
+    ({ observation }) => observation,
+  );
 }
 export function pushObservations(
   topic: string,
@@ -104,21 +181,39 @@ export function pushObservations(
   source_id: string,
   collection_generation: string,
 ) {
+  const decoded = decodeMessage(topic, parsePushPayload(payload));
   const received_at = new Date().toISOString();
   const packet_id = crypto.randomUUID();
-  return decodePush(topic, payload).map((item) => ({
-    ...item,
-    topic,
-    source_id,
-    collection_generation,
-    delivery_kind: retain ? ("baseline" as const) : ("live" as const),
-    observed_at: null,
-    received_at,
-    packet_id,
-    packet_bytes: payload.length,
-    source_event_id: null,
-    source_sequence: null,
-  }));
+  return decoded.map(({ observation, raw }) => {
+    const source = sourceMetadata(topic, raw);
+    if (observation.kind === "property") {
+      if (source.completeness === "received_fields")
+        source.completeness = "partial";
+      source.limitations.push("property_row_payload_only");
+    }
+    return {
+      ...observation,
+      source_metadata: {
+        ...source,
+        collection: {
+          source_id,
+          generation: collection_generation,
+          delivery_kind: retain ? ("baseline" as const) : ("live" as const),
+          packet_id,
+        },
+      },
+      topic,
+      source_id,
+      collection_generation,
+      delivery_kind: retain ? ("baseline" as const) : ("live" as const),
+      observed_at: null,
+      received_at,
+      packet_id,
+      packet_bytes: payload.length,
+      source_event_id: null,
+      source_sequence: null,
+    };
+  });
 }
 export function connectionObservation(
   source_id: string,

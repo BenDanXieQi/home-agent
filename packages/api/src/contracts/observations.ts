@@ -1,3 +1,7 @@
+import {
+  sourceMetadataSchema,
+  sourceDeliveryKindSchema,
+} from "./action-provenance";
 import { z } from "zod";
 import { deviceValueSchema } from "../domain/devices";
 
@@ -40,7 +44,7 @@ const evidenceSchema = z.object({
   source_id: z.string(),
   collection_generation: z.string(),
   source: z.enum(["push", "read"]),
-  delivery_kind: z.enum(["live", "baseline", "replayed", "unknown"]),
+  delivery_kind: sourceDeliveryKindSchema,
   observed_at: z.iso.datetime().nullable(),
   received_at: z.iso.datetime(),
   read_started_at: z.iso.datetime().nullable(),
@@ -138,6 +142,7 @@ const sourceEnvelope = z.object({
   received_at: z.iso.datetime(),
 });
 const observationEnvelope = sourceEnvelope.extend({
+  source_metadata: sourceMetadataSchema.optional(),
   did: propertyAddressSchema.shape.did,
   delivery_kind: evidenceSchema.shape.delivery_kind,
   observed_at: z.iso.datetime().nullable(),
@@ -168,6 +173,7 @@ export const householdObservationSchema = z.discriminatedUnion("kind", [
   }),
   sourceEnvelope.extend({
     kind: z.literal("read"),
+    source_metadata: sourceMetadataSchema.optional(),
     ...propertyAddressSchema.shape,
     value: propertyValueSchema,
     observed_at: z.iso.datetime().nullable(),

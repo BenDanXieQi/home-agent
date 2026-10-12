@@ -6,6 +6,7 @@ import {
   subscriptionObservation,
   pushObservations,
   deviceTopics,
+  eventTopics,
   subscribableDevice,
   type MiotObservation,
 } from "./messages";
@@ -111,7 +112,9 @@ export class MiotMqtt {
         const filter =
           event.kind === "directory"
             ? event.topic
-            : deviceTopics(event.did)[event.kind === "property" ? 0 : 1]!;
+            : event.kind === "event"
+              ? eventTopics(event.did)[0]!
+              : deviceTopics(event.did)[event.kind === "property" ? 0 : 1]!;
         const subscription = this.topics.get(filter);
         if (!subscription?.listeners.size) {
           this.stats.discarded++;

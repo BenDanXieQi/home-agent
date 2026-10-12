@@ -1,5 +1,9 @@
 # Backend RPC 客户端
 
+命令和材料通过 `client.api.provenance.commands`、`client.api.provenance.materials` 与 `client.api.provenance.diagnostics` 调用，响应可用 `@home-agent/api/action-provenance` 的 schema 校验。参数和限制见[家庭运行时](../../docs/household-runtime.md#命令与供应商材料)。
+
+显式历史采集遇到同设备、同接口的在途请求时，返回 HTTP 409、`mijia_collection_busy`；调用方检查错误并稍后重试。
+
 `@home-agent/backend-client` 提供 Web 与 Agent 共用的 `createBackendClient`，使用 Hono 原生 `hc`，路径、参数与响应类型从 Backend 实际路由推导。它不启动服务，不拥有家庭状态、连接重试、模型或数据库，也不自动执行响应校验或读取响应正文。
 
 ```ts

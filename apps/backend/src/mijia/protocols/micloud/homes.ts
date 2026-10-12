@@ -12,6 +12,7 @@ const roomSchema = z.object({ id, name: z.string(), dids });
 const homeSchema = z.object({
   id,
   name: z.string(),
+  uid: id.optional(),
   dids,
   roomlist: z.array(roomSchema),
 });
@@ -40,6 +41,7 @@ const pageSchema = z.object({
 function homeEntry(home: z.infer<typeof homeSchema>, shared: boolean) {
   return {
     id: home.id,
+    ...(home.uid === undefined ? {} : { ownerId: home.uid }),
     name: home.name,
     shared,
     deviceIds: home.dids,
