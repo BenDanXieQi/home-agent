@@ -1,5 +1,5 @@
 import { createWindowVideoObservations } from "./video-observations";
-import { projectWindowObservation } from "@home-agent/api/perception/window-observations";
+import { projectWindowObservation } from "./observation";
 import { appendWindowPetSound } from "./pet-sound";
 import type { z } from "zod";
 import { type windowSourceSchema } from "@home-agent/api/contracts";

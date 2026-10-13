@@ -137,7 +137,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 接收观察契约位于 `@home-agent/api/agent-receipts`：索引、记录详情和当前上下文均带 `journal_id`，连接或家庭资格改变后失效。记录内容包括校验后的 snapshot 消息和当时合并结果；索引中的 `payload_bytes` 是 SSE 数据正文字节数，`context_bytes` 是当时完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，当前快照同样携带 `context_bytes`。`context_delta_bytes` 是同一接收会话内相对上一条消息的字节差，初始消息以零为基准；历史记录淘汰不改变该差值。索引和详情的 `changes` 保存全部结构化变化，以 `kind/key/before/after` 区分变化类型、对象标识和前后值；设备相关变化附带当时的名称与属性规格，删除项使用接收前的设备清单解析。Web 从 `changes` 派生前三项预览和变化数量，搜索覆盖全部变化；中文文案、值类型显示和本地时间格式由 Web 生成。摘要在接收时比较前后状态，设备名称、属性定义、单位和枚举说明来自当时收到的设备清单，解析共用 `@home-agent/api/agent-context/devices`。`member_sighting` 变化单独比较成员出现投影，覆盖最后出现时间、身份归属及最新记录替换，不依赖关联窗口是否变化。摘要忽略采集的累计接收计数与观察来源的读取时间更新，完整消息仍保留这些字段；统一观察提取线索、时间、引用、成员出现归因修订号及轻量窗口材料摘要变化（内容修订号、原始输入保留状态、片段生成状态／选项／有效期／失败原因、语音启用状态与段数、猫狗声分析状态／结果有效性与检测结果数量），不读取外部材料或推断房间、设备身份。猫狗声分析缺失、未就绪或结果无效时，`pet_sound_count` 为 null；仅 ready 且 valid 的分析提供检测结果数量，零表示该有效结果未命中，不证明没有叫声。`sampledMedia=null` 表示无媒体引用，不等同于 `not_generated`。接收索引查询使用 `agentReceiptQuerySchema`：`journal_id/after_sequence` 同时提供时请求该位置后的新增摘要；返回的 `first_retained_sequence` 用于清理已淘汰记录，会话不匹配时重新读取全部保留摘要。响应预算覆盖 `agentReceiptPolicy.retainedBytes` 和响应信封，包含完整 `changes`。保留策略由 `agentReceiptPolicy` 定义。接口与生命周期见 [Agent 接收说明](../../apps/agent/README.md#当前数据接收与只读历史客户端)。
 
-窗口材料与关联字段的轻量投影由 `@home-agent/api/perception/window-observations` 提供，供感知存储和 Web 共用；成员记录与窗口的组装由 `@home-agent/api/agent-context/observations` 负责。未知目标按逐帧、媒体代次和观察时间核对，未建立轨迹的检测目标保留未归因线索。
+窗口材料的轻量投影由 `@home-agent/api/perception/window-observations` 的 `projectWindowMaterial` 提供，供 Backend 和 Web 共用。来源窗口与目标的判断由 Backend `perception/window/observation.ts` 负责，成员记录与窗口的选择、关联和组装由 Backend `agent-context/observations.ts` 负责。未知目标按逐帧、媒体代次和观察时间核对，未建立轨迹的检测目标保留未归因线索。
 
 ## 设备标识与筛选
 
