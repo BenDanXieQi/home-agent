@@ -1,28 +1,10 @@
-import { z } from "zod";
-import { memberActivityDataSchema } from "../contracts/perception";
+import type { z } from "zod";
 import {
-  agentSightingAttributionSchema,
   agentSightingSummarySchema,
   type agentObservationSchema,
-} from "../contracts/agent-context";
-import type { projectWindowObservation } from "./window-observations";
-
-/** Sighting association fields and attribution revisions cross the storage boundary. */
-export const memberObservationSchema = z.object({
-  id: z.uuid(),
-  data: memberActivityDataSchema.pick({
-    sourceRunId: true,
-    run: true,
-    mediaGeneration: true,
-    trackId: true,
-    deviceId: true,
-    channel: true,
-    firstObservedAt: true,
-    lastObservedAt: true,
-  }),
-  attribution: agentSightingAttributionSchema,
-  revision: memberActivityDataSchema.shape.attribution.shape.revision,
-});
+} from "@home-agent/api/agent-context";
+import type { memberObservationSchema } from "../household/identity/activity-repository";
+import type { projectWindowObservation } from "../perception/window/observation";
 
 export function sightingStateKey(
   record: z.infer<typeof memberObservationSchema>,

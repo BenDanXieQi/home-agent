@@ -1,5 +1,5 @@
 import type { createCommandRepository } from "../household/operations/repository";
-import type { projectWindowObservation } from "@home-agent/api/perception/window-observations";
+import type { projectWindowObservation } from "../perception/window/observation";
 import type { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
 import { freeze } from "@home-agent/api/immutable";
@@ -15,15 +15,17 @@ import { accessHousehold } from "../household/access";
 import type { HouseholdRuntime } from "../household/runtime";
 import type { createSpatialRepository } from "../household/spatial/repository";
 import type { createMemberRepository } from "../household/members/repository";
-import type { createMemberActivityRepository } from "../household/identity/activity-repository";
+import type {
+  createMemberActivityRepository,
+  memberObservationSchema,
+} from "../household/identity/activity-repository";
 import type { createPerceptionService } from "../perception/service";
 import { HouseholdError } from "../household/errors";
 import {
   assembleAgentObservations,
-  memberObservationSchema,
   latestMemberObservations,
   sightingStateKey,
-} from "@home-agent/api/agent-context/observations";
+} from "./observations";
 import { jsonBytes } from "../household/config";
 import { createAgentDeviceStateProjection } from "./device-state";
 

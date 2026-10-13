@@ -3,10 +3,10 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { memberActivityDataSchema } from "@home-agent/api/contracts";
 import {
+  agentSightingAttributionSchema,
   memberSightingRecordSchema,
   memberSightingsHistoryQuerySchema,
 } from "@home-agent/api/agent-context";
-import { memberObservationSchema } from "@home-agent/api/agent-context/observations";
 import { AppError } from "@home-agent/api/errors";
 import type { Database } from "../../db";
 import {
@@ -27,6 +27,23 @@ import {
 import type { memberActivity } from "./activity";
 
 const memberSightingTopic = sql`${contextRecords.topic} = 'member_sighting'`;
+
+/** Sighting association fields and attribution revisions cross the storage boundary. */
+export const memberObservationSchema = z.object({
+  id: z.uuid(),
+  data: memberActivityDataSchema.pick({
+    sourceRunId: true,
+    run: true,
+    mediaGeneration: true,
+    trackId: true,
+    deviceId: true,
+    channel: true,
+    firstObservedAt: true,
+    lastObservedAt: true,
+  }),
+  attribution: agentSightingAttributionSchema,
+  revision: memberActivityDataSchema.shape.attribution.shape.revision,
+});
 
 export const memberSightingPositionSchema = z.strictObject({
   firstObservedAt: memberActivityDataSchema.shape.firstObservedAt,
