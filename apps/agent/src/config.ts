@@ -1,4 +1,4 @@
-import { modelEnvironment } from "@home-agent/model";
+import { modelEnvironment } from "@home-agent/configuration/models";
 import { z } from "zod";
 const environment = modelEnvironment.extend({
   BACKEND_URL: z.url({ protocol: /^https?$/ }).default("http://127.0.0.1:3000"),

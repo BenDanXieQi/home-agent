@@ -43,8 +43,7 @@
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit",
-    "test": "bun test",
-    "context:format": "bun src/cli/household-model-view.ts"
+    "test": "bun test"
   },
   "dependencies": {
     "@home-agent/observability": "workspace:*",

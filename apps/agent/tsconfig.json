@@ -1,5 +1,5 @@
 {
   "extends": "@home-agent/typescript-config/bun.json",
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "scripts/format-context.ts"],
   "exclude": ["node_modules", "dist"]
 }

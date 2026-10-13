@@ -11,3 +11,4 @@ export {
   SpanStatusCode,
 } from "./spans";
 export { httpTracing, tracedFetch } from "./http";
+export { observeProvider } from "./model";

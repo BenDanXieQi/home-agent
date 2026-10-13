@@ -1,5 +1,11 @@
 import { createBackendClient } from "@home-agent/backend-client";
-import { initializeTelemetry, tracedFetch } from "@home-agent/observability";
+import {
+  initializeTelemetry,
+  tracedFetch,
+  observeProvider,
+} from "@home-agent/observability";
+import { createModels, createProvider } from "@earendil-works/pi-ai";
+import { modelProviderSettings } from "@home-agent/configuration/models";
 import { createAssistant } from "./assistant";
 import { createChat } from "./chat";
 import { createAgentApp } from "./app";
@@ -9,13 +15,17 @@ import { createWorkflows } from "./workflows";
 
 const telemetry = initializeTelemetry("home-agent-agent");
 const config = loadConfig();
+const settings = modelProviderSettings(config);
+const models = createModels();
+if (settings) models.setProvider(observeProvider(createProvider(settings)));
+const model = settings?.models[0];
 const client = createBackendClient(config.BACKEND_URL, { fetch: tracedFetch });
 const receiver = createContextReceiver({ client });
 const app = createAgentApp({
   port: config.AGENT_PORT,
   receiver,
-  chat: createChat(createAssistant(config), config),
-  runWorkflow: createWorkflows(config),
+  chat: createChat(createAssistant(config, models, model)),
+  runWorkflow: createWorkflows(config, models, model),
 });
 const server = Bun.serve({
   hostname: config.AGENT_HOST,
