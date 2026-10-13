@@ -51,6 +51,13 @@ export function presentReceiptChange(change: Change) {
         ? "首次接收"
         : "更新";
   switch (change.kind) {
+    case "operation": {
+      const record = change.after ?? change.before;
+      return {
+        subject: `近期操作 / ${record?.target.device_id ?? change.key}`,
+        detail: `${change.after === null ? "移出近期窗口（不代表撤销）" : operation} · ${JSON.stringify(record?.source)} · ${JSON.stringify(record?.target)}`,
+      };
+    }
     case "property": {
       const old = propertyDisplayValue(change.metadata, change.before);
       const next = propertyDisplayValue(change.metadata, change.after);

@@ -55,7 +55,7 @@ bun run setup
 bun run dev
 ```
 
-首次启动后运行 `bun run web:trust`，按系统提示完成本地证书信任。打开 <https://localhost:8443/>，使用米家 App 扫码登录。设备与摄像头仅接入已选择的家庭；首次使用请在“设置 → 米家家庭”选择要接入的家庭。日常运行 `bun run dev`，停止应用与依赖使用 `bun run stop`，查看状态使用 `bun run status`。`dev` 自动启动并等待数据库就绪、执行 backend 迁移，再检查数据库；新增迁移后重新运行 `dev` 即可。只准备数据库时运行 `bun run db:migrate`，无需先启动其他服务。
+首次启动后运行 `bun run web:trust`，按系统提示完成本地证书信任。打开 <https://localhost:8443/>，使用米家 App 扫码登录。设备与摄像头仅接入已选择的家庭；首次使用请在“设置 → 米家家庭”选择要接入的家庭。日常运行 `bun run dev`，停止应用与依赖使用 `bun run stop`，查看状态使用 `bun run status`。`dev` 自动启动并等待数据库就绪，由 Drizzle 应用当前初始化基线，再检查数据库。只准备数据库时运行 `bun run db:init`，无需先启动其他服务。
 
 本机配置与凭据不提交 Git。恢复已有数据库授权时，还需恢复对应的凭据加密密钥；详见[米家与摄像头](docs/mijia.md)。
 

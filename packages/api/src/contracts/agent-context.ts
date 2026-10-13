@@ -1,3 +1,4 @@
+import { commandRecordSchema } from "./action-provenance";
 import { z } from "zod";
 import { spatialSnapshotSchema } from "./spatial";
 import { propertyKey } from "./observations";
@@ -45,12 +46,15 @@ export const agentContextPolicy = {
   pendingBytes: 16 * 1024 * 1024,
   eventBytes: 16 * 1024 * 1024 + 128,
   partBytes: {
+    operations: 256 * 1024,
     spatial: 1024 * 1024,
     household: 8 * 1024 * 1024,
     device_state: 2 * 1024 * 1024,
     members: 1024 * 1024,
     observations: 4 * 1024 * 1024,
   },
+  recentOperationMs: 30 * 60_000,
+  recentOperationLimit: 100,
   recentObservationMs: 30 * 60_000,
   connections: 16,
   heartbeatMs: 15_000,
@@ -176,6 +180,10 @@ export const agentDevicePropertySchema =
     unit: true,
   });
 export const agentContextDataSchemas = {
+  operations: z.object({
+    records: z.array(commandRecordSchema),
+    complete_audit: z.literal(false),
+  }),
   spatial: spatialSnapshotSchema.omit({ scope: true }),
   household: projectionSchema
     .pick({ household: true, home: true, room: true, device: true })
@@ -240,6 +248,7 @@ export const agentContextPartsSchema = z.object({
   device_state: part(agentContextDataSchemas.device_state),
   members: part(agentContextDataSchemas.members),
   observations: part(agentContextDataSchemas.observations),
+  operations: part(agentContextDataSchemas.operations),
 });
 export const agentContextSnapshotSchema = z.strictObject({
   scope: agentContextScopeSchema.nullable(),

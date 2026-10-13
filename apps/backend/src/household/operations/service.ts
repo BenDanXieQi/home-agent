@@ -1,9 +1,10 @@
-import { entityKey } from "@home-agent/api/household";
+import { freeze } from "@home-agent/api/immutable";
 import {
   provenancePolicy,
   commandSourceSchema,
   commandRecordSchema,
-  type commandTargetSchema,
+  commandTargetSchema,
+  deviceControlResultSchema,
 } from "@home-agent/api/action-provenance";
 import type { DeviceControl } from "./control";
 import type { createRecordWriter } from "../records/writer";
@@ -20,17 +21,10 @@ export function createDeviceOperations(
   retentionDays: number,
 ) {
   const diagnostics = { saved: 0, failed: 0, dropped: 0 };
-  function recordCommand(record: ReturnType<typeof commandRecordSchema.parse>) {
-    if (jsonBytes(record) > provenancePolicy.recordBytes) {
-      record = {
-        ...record,
-        response: null,
-        output: null,
-        message: null,
-        error: null,
-        completeness: "omitted",
-      };
-    }
+  function recordCommand(
+    scope: Scope,
+    record: ReturnType<typeof commandRecordSchema.parse>,
+  ) {
     const size = jsonBytes(record);
     if (size > provenancePolicy.recordBytes) {
       diagnostics.dropped++;
@@ -38,7 +32,7 @@ export function createDeviceOperations(
     }
     const submission = structuredClone(record);
     writer
-      .submit(submission, () => repository.recordCommand(submission))
+      .submit(submission, () => repository.recordCommand(scope, submission))
       .then(() => {
         diagnostics.saved++;
       })
@@ -49,9 +43,12 @@ export function createDeviceOperations(
         );
       });
   }
-  function recordBestEffort(record: Parameters<typeof recordCommand>[0]) {
+  function recordBestEffort(
+    scope: Scope,
+    record: Parameters<typeof recordCommand>[1],
+  ) {
     try {
-      recordCommand(record);
+      recordCommand(scope, record);
     } catch {
       diagnostics.failed++;
       console.warn("Device command snapshot could not be recorded");
@@ -62,74 +59,54 @@ export function createDeviceOperations(
     scope: Scope,
     source: Source,
     target: ReturnType<typeof commandTargetSchema.parse>,
-    parentRequestId: string,
     id: string,
     signal: AbortSignal,
     assertCurrent: () => void,
   ) {
-    const capturedSource = commandSourceSchema.parse(source);
     const calledAt = new Date();
-    const device =
-      scope.snapshot.projection.device[
-        entityKey(scope.identity.accountId, target.device_id)
-      ];
-    const base = {
+    const base = freeze({
       id,
-      parent_request_id: parentRequestId,
-      account_id: scope.identity.accountId,
-      home_id: scope.identity.homeId,
-      source: capturedSource,
-      device_snapshot: {
-        name: device?.name ?? null,
-        model: device?.model ?? null,
-        specification: device?.spec_id ?? null,
-        room_id: device?.room_id ?? null,
-      },
-      endpoint: control.endpoint(target),
-      target: structuredClone(target),
+      source: commandSourceSchema.parse(source),
+      target: commandTargetSchema.parse(target),
       called_at: calledAt.toISOString(),
       expires_at: new Date(
         calledAt.getTime() + retentionDays * 86400_000,
       ).toISOString(),
-      completeness: "received_fields" as const,
-    };
+    });
+    const sending: { at: string | null } = { at: null };
+    let result;
     try {
-      const result = await control.dispatch(base.target, signal, assertCurrent);
-      recordBestEffort({
-        ...base,
-        sent_at: result.sent_at,
-        received_at: result.received_at,
-        outcome: result.outcome,
-        response_matches: result.response_matches,
-        completeness: result.completeness,
-        provider_code: result.provider_code,
-        message: result.message,
-        output: result.output,
-        response: result.response,
-        error: result.error,
-      });
-      const status =
-        result.outcome === "provider_succeeded" || result.outcome === "pending"
-          ? ("accepted" as const)
-          : result.outcome === "rejected"
-            ? ("rejected" as const)
-            : ("unknown" as const);
-      return { command_id: id, result: { ...result, status } };
+      result = deviceControlResultSchema.parse(
+        await control.dispatch(base.target, signal, assertCurrent, (at) => {
+          sending.at ??= at;
+        }),
+      );
     } catch (error) {
-      recordBestEffort({
-        ...base,
-        sent_at: null,
-        received_at: null,
-        outcome: "preflight_failed",
+      if (sending.at === null) {
+        recordBestEffort(scope, { ...base, sent_at: null });
+        throw error;
+      }
+      result = deviceControlResultSchema.parse({
+        sent_at: sending.at,
+        received_at: new Date().toISOString(),
+        outcome: "unknown",
         response_matches: 0,
+        completeness: "omitted",
         provider_code: null,
         message: null,
         output: null,
         response: null,
-        error: control.failure(error),
+        error: { message: "Control response unavailable after sending began" },
       });
-      throw error;
     }
+    recordBestEffort(scope, { ...base, sent_at: sending.at });
+    const status =
+      result.outcome === "provider_succeeded" || result.outcome === "pending"
+        ? ("accepted" as const)
+        : result.outcome === "rejected"
+          ? ("rejected" as const)
+          : ("unknown" as const);
+    return { command_id: id, result: { ...result, status } };
   }
   return {
     executePropertyWrite(
@@ -144,7 +121,6 @@ export function createDeviceOperations(
       >,
       signal: AbortSignal,
       assertCurrent: () => void,
-      parentRequestId: string,
       commandId: string = crypto.randomUUID(),
     ) {
       return execute(
@@ -157,7 +133,6 @@ export function createDeviceOperations(
           piid: request.piid,
           value: request.value,
         },
-        parentRequestId,
         commandId,
         signal,
         assertCurrent,
@@ -175,7 +150,6 @@ export function createDeviceOperations(
       >,
       signal: AbortSignal,
       assertCurrent: () => void,
-      parentRequestId: string,
       commandId: string = crypto.randomUUID(),
     ) {
       return execute(
@@ -188,7 +162,6 @@ export function createDeviceOperations(
           aiid: request.aiid,
           inputs: request.inputs,
         },
-        parentRequestId,
         commandId,
         signal,
         assertCurrent,

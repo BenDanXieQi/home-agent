@@ -227,6 +227,7 @@ export function createHouseholdModelView(
     家庭: Object.values(household.home)
       .filter((h) => !h.archived)
       .map((h) => ({ 名称: h.name, id: h.home_id })),
+    空间关系: source.spatial,
     说明: {
       范围: "完整展示领域规则允许的设备能力；spec/state仅接受该设备已列出的能力键，不能查询被规则排除的能力。报告仅列有值且含义明确的状态；已列出能力的配置值可通过state读取，规格详情通过spec读取",
       能力键: "能力按权限、数据类型分组；语义键可直接传入查询命令；同名以服务名称消歧",
@@ -236,6 +237,7 @@ export function createHouseholdModelView(
     设备组: groups,
     状态报告: reports,
     最新观察: latestObservations(source),
+    近期操作: source.operations,
     ...(Object.keys(recent).length ? { 最近关注: recent } : {}),
   };
 

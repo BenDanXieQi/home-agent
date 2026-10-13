@@ -1,3 +1,4 @@
+import type { createCommandRepository } from "../household/operations/repository";
 import type { projectWindowObservation } from "@home-agent/api/perception/window-observations";
 import type { z } from "zod";
 import { isDeepStrictEqual } from "node:util";
@@ -44,11 +45,12 @@ function emptyParts(available: boolean) {
     device_state: part,
     members: part,
     observations: part,
+    operations: part,
   });
 }
 
-function ready<T>(data: T) {
-  return { status: "ready" as const, data, truncated: false };
+function ready<T>(data: T, truncated = false) {
+  return { status: "ready" as const, data, truncated };
 }
 function unavailable(reason: string) {
   return { status: "unavailable" as const, reason };
@@ -72,6 +74,12 @@ export function createAgentContextService(options: {
   spatial: ReturnType<typeof createSpatialRepository> | undefined;
   sightings: ReturnType<typeof createMemberActivityRepository> | undefined;
   perception: ReturnType<typeof createPerceptionService>;
+  commands:
+    | Pick<
+        ReturnType<typeof createCommandRepository>,
+        "readRecentCommands" | "subscribe"
+      >
+    | undefined;
 }) {
   const { household, members, sightings, perception, spatial } = options;
   const listeners = new Set<
@@ -98,6 +106,7 @@ export function createAgentContextService(options: {
     device_state: 0,
     members: 0,
     observations: 0,
+    operations: 0,
   };
   const partNames = agentContextPartsSchema.keyof().options;
   const partSizes = { ...revisions };
@@ -113,6 +122,7 @@ export function createAgentContextService(options: {
   for (const key of partNames) partSizes[key] = encodePart(parts[key]).bytes;
   let cacheBytes = jsonBytes({ scope, parts });
   let scopeBytes = jsonBytes(scope);
+  let publishedScope = scope;
   function publish(
     update: z.infer<typeof agentContextSnapshotSchema>["parts"],
   ) {
@@ -122,6 +132,14 @@ export function createAgentContextService(options: {
     for (const key of partNames) {
       const value = update[key];
       if (value === undefined) continue;
+      if (key === "operations" && isDeepStrictEqual(scope, publishedScope)) {
+        const { read_at: _oldRead, ...old } = parts.operations;
+        const { read_at: _nextRead, ...next } = value;
+        if (isDeepStrictEqual(old, next)) {
+          delete update[key];
+          continue;
+        }
+      }
       const bytes = encodePart(value).bytes;
       if (bytes > agentContextPolicy.partBytes[key])
         throw new HouseholdError("capacity_exceeded");
@@ -130,6 +148,7 @@ export function createAgentContextService(options: {
     }
     if (nextBytes > agentContextPolicy.cacheBytes)
       throw new HouseholdError("capacity_exceeded");
+    if (!Object.keys(update).length) return;
     const snapshot = freeze({ scope, parts: update });
     // Each updated part was validated by its reader; retain the other owned values.
     parts = freeze({
@@ -138,10 +157,12 @@ export function createAgentContextService(options: {
       device_state: update.device_state ?? parts.device_state,
       members: update.members ?? parts.members,
       observations: update.observations ?? parts.observations,
+      operations: update.operations ?? parts.operations,
     });
     Object.assign(partSizes, sizes);
     cacheBytes = nextBytes;
     scopeBytes = nextScopeBytes;
+    publishedScope = scope;
     for (const key of partNames)
       if (update[key] !== undefined) revisions[key]++;
     for (const listener of listeners) {
@@ -285,6 +306,60 @@ export function createAgentContextService(options: {
       },
     });
   }
+  let operationsExpiry: ReturnType<typeof setTimeout> | undefined;
+  function resetOperations() {
+    clearTimeout(operationsExpiry);
+    operationsExpiry = undefined;
+  }
+  const operationsLane = lane("operations", async (access) => {
+    if (!options.commands) return unavailable("storage_not_configured");
+    const captured = generation;
+    const asOf = new Date();
+    const candidates = await options.commands.readRecentCommands(access, asOf);
+    access.assertCurrent();
+    if (closed || captured !== generation)
+      throw new HouseholdError("stale_session");
+    resetOperations();
+    if (candidates.length) {
+      const expires = Math.min(
+        ...candidates.flatMap((record) => [
+          Date.parse(record.called_at) + agentContextPolicy.recentOperationMs,
+          Date.parse(record.expires_at),
+        ]),
+      );
+      operationsExpiry = setTimeout(
+        () => {
+          operationsExpiry = undefined;
+          operationsLane.refresh();
+        },
+        Math.max(1, expires - Date.now()),
+      );
+      operationsExpiry.unref();
+    }
+    const data = agentContextDataSchemas.operations.parse({
+      records: [],
+      complete_audit: false,
+    });
+    // The ready envelope and ISO timestamp have fixed size; count each full
+    // record once rather than serializing every growing prefix again.
+    let bytes = jsonBytes({
+      ...ready(data),
+      read_at: asOf.toISOString(),
+      reason: null,
+    });
+    for (const record of candidates.slice(
+      0,
+      agentContextPolicy.recentOperationLimit,
+    )) {
+      const size = jsonBytes(record) + (data.records.length ? 1 : 0);
+      if (bytes + size > agentContextPolicy.partBytes.operations) break;
+      data.records.push(record);
+      bytes += size;
+    }
+    if (candidates.length && !data.records.length)
+      throw new HouseholdError("capacity_exceeded");
+    return ready(data, data.records.length < candidates.length);
+  });
   const spatialLane = lane("spatial", async ({ identity, assertCurrent }) => {
     if (!spatial) return unavailable("storage_unavailable");
     const result = await spatial.read();
@@ -509,6 +584,7 @@ export function createAgentContextService(options: {
     windowVersion = undefined;
   }
   const lanes = [
+    operationsLane,
     spatialLane,
     householdLane,
     deviceLane,
@@ -546,6 +622,7 @@ export function createAgentContextService(options: {
     if (!isDeepStrictEqual(scope, next) || eligible !== nextEligible) {
       generation++;
       resetObservations();
+      resetOperations();
       scope = next;
       eligible = nextEligible;
       for (const source of lanes) source.reset();
@@ -559,6 +636,7 @@ export function createAgentContextService(options: {
   // Register all notifications before starting the initial asynchronous reads.
   const releases = [
     household.subscribe(householdChanged),
+    options.commands?.subscribe(operationsLane.refresh),
     members?.subscribe(membersLane.refresh),
     spatial?.subscribe(spatialLane.refresh),
     sightings?.subscribe(sightingsLane.refresh),
@@ -597,6 +675,7 @@ export function createAgentContextService(options: {
       closed = true;
       generation++;
       resetObservations();
+      resetOperations();
       for (const release of releases) release?.();
       parts = freeze(emptyParts(false));
       listeners.clear();

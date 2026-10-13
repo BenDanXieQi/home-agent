@@ -11,6 +11,7 @@ export const partLabels = {
   device_state: "设备状态",
   members: "成员资料",
   observations: "统一观察",
+  operations: "近期操作",
 } as const;
 export const statusLabels = {
   ready: "读取成功",
@@ -54,6 +55,7 @@ export function countPart(
   if ("spaces" in data)
     return `${data.spaces.length} 个空间 · ${data.passages.length} 条通道 · ${data.observation_bindings.length} 条观测绑定`;
   if ("latest" in data) return `${Object.keys(data.latest).length} 条属性`;
+  if ("complete_audit" in data) return `${data.records.length} 条操作`;
   if ("members" in data) return `${data.members.length} 位成员`;
   return `${data.records.length} 条观察 · ${new Set(data.records.flatMap((record) => (record.window_id ? [record.window_id] : []))).size} 个音视频窗口引用`;
 }

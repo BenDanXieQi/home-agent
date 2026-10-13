@@ -10,6 +10,7 @@ import {
 import { requireLocalAccess } from "@home-agent/api/local-access";
 import {
   provenanceQuerySchema,
+  commandQuerySchema,
   provenanceReadSchema,
   deviceHistoryCollectionSchema,
 } from "@home-agent/api/action-provenance";
@@ -64,15 +65,8 @@ export function createProvenanceRoutes(
     return provenance;
   }
   return app
-    .post("/commands/query", validateJson(provenanceQuerySchema), async (c) => {
+    .post("/commands/query", validateJson(commandQuerySchema), async (c) => {
       const input = c.req.valid("json");
-      if (
-        input.time_basis !== "received" ||
-        input.scene_id ||
-        input.speaker_id ||
-        input.topic
-      )
-        throw new AppError("invalid_request");
       return c.json(
         await requireStorage().commands.queryCommands(
           await requireStorage().access(input.scope_epoch, c.req.raw.signal),

@@ -8,7 +8,7 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
-`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后执行 backend 迁移和数据库检查，成功后才启动 HTTPS 入口和应用。已有迁移可重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。数据库结构由 Drizzle 当前初始化基线建立，已登记应用的 SQL 不重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
 
 两种模式都需要 Docker，分别用于数据库和 go2rtc 构建／运行，无需本机安装 Go。首次构建需联网。模式切换由启动命令管理，会中断现有播放；不要同时手工启动另一套 go2rtc。
 
@@ -28,7 +28,7 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 服务仅面向可信本机，尚无用户认证。数据库与 go2rtc 管理端口限制在本机访问，不应暴露到公网。摄像头用法与限制见[米家与摄像头](mijia.md)，构建说明见 [go2rtc](../docker/go2rtc/README.md)。
 
-生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库迁移需事先准备；本机数据库准备可直接运行 `bun run db:migrate`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，直接执行 backend 的数据库命令，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
+生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库结构需事先准备；本机数据库准备可直接运行 `bun run db:init`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，执行 `bun run --cwd apps/backend db:migrate`，再运行 `bun run --cwd apps/backend db:check`，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
 
 ## HTTPS 与 HTTP/2 入口
 
@@ -72,7 +72,7 @@ services:
 
 连接 YAML 仅保存服务地址，不保存账号凭据或运行状态；数据库、远程语言模型服务与追踪使用各自的环境变量。本地目标检测模型固定放在 `apps/backend/models/det_4C.onnx`，由感知模块内部常量引用。地址必须是无内嵌凭据的 HTTP(S) 服务根地址，可带端口，不支持路径前缀、query 或 fragment。go2rtc 自身的监听与用户流配置使用 `config/go2rtc/go2rtc.yaml`；米家摄像头共享流由 backend 在 go2rtc 内存中创建，不写入这两个文件。原生／容器模式通过启动命令切换，无需修改地址。
 
-服务设置页与手动编辑使用同一文件。配置查询、聊天转发和连接检查每次重新读取文件，内容变化后重新校验，下次请求生效；在途请求沿用开始时读取的地址。米家媒体连接由后台每 3 秒检查配置变更并自动迁移。文件损坏或无法读取时，相关调用暂停，页面显示错误；修复后下次请求恢复，无需重启。backend 的 `/api/health` 独立于连接配置。
+服务设置页与手动编辑使用同一文件。配置查询、聊天转发和连接检查每次重新读取文件，内容变化后重新校验，下次请求生效；在途请求沿用开始时读取的地址。米家媒体连接由后台每 3 秒检查配置变更并更新连接。文件损坏或无法读取时，相关调用暂停，页面显示错误；修复后下次请求恢复，无需重启。backend 的 `/api/health` 独立于连接配置。
 
 配置必须完整，拒绝未知字段、重复 YAML key、别名引用和超过 64 KiB 的文件。schema 导出或写入失败只提示，不影响有效 YAML 的读取。保存尽量保留注释并原子替换文件，需要可写目录，单文件挂载不满足条件；只读文件或目录仍可读取，页面禁用保存。手动编辑与页面保存应错开，当前没有并发修改冲突检测。
 
@@ -98,7 +98,7 @@ bun --env-file=.env apps/backend/dist/main.js --config ./local-config/config.yam
 
 ## 单独启动与检查
 
-根目录保留完整服务操作和仓库质量检查；单应用开发、数据库生成／浏览／检查使用所属应用命令，独立入口操作直接调用脚本。只读数据库检查运行 `bun run --cwd apps/backend db:check`。
+根目录保留完整服务操作和仓库质量检查；单应用开发、数据库结构生成／应用／浏览／检查使用所属应用命令，独立入口操作直接调用脚本。只读数据库检查运行 `bun run --cwd apps/backend db:check`。
 
 ```sh
 bunx turbo run dev --filter=@home-agent/web
@@ -110,6 +110,6 @@ bun run build
 
 单独启动应用不会管理依赖，也不纳入 `bun run stop` 的进程管理。
 
-仅开发 backend 感知时，先准备 go2rtc、backend 数据库及迁移、米家授权、FFmpeg 和感知配置，再运行 `bun run --cwd apps/backend dev`；需要页面时按下方 Web 启动命令运行。根目录 `db:migrate` 只迁移并检查 backend 数据库，Agent 不需要数据库初始化。
+仅开发 backend 感知时，先准备 go2rtc、已初始化的 backend 数据库、米家授权、FFmpeg 和感知配置，再运行 `bun run --cwd apps/backend dev`；需要页面时按下方 Web 启动命令运行。根目录 `db:init` 应用当前初始化基线并检查 backend 数据库，`db:migrate` 同样使用原生 Drizzle 应用和检查；Agent 不需要数据库初始化。
 
 `bun run check` 执行格式、lint 和类型检查，覆盖各 workspace 及根目录 `scripts/`。共享 lint 与 TypeScript 配置分别由 `@home-agent/oxlint-config` 和 `@home-agent/typescript-config` 提供，各包通过 workspace 依赖引用；Turbo 负责检查任务和构建依赖，前端构建先完成类型检查。

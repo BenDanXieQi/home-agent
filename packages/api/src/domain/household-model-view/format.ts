@@ -3,6 +3,7 @@ import { propertyValueSchema } from "@home-agent/api/observations";
 import { memberListSchema } from "@home-agent/api/household-members";
 import {
   agentContextDataSchemas,
+  agentContextPartsSchema,
   agentObservationReasonSchema,
 } from "@home-agent/api/agent-context";
 
@@ -37,6 +38,8 @@ export const latestObservationsSchema = z.object({
     }),
   ),
 });
+
+export const operationsSchema = agentContextPartsSchema.shape.operations;
 
 export const reference = z.int().nonnegative();
 export const timeCell = z.string();
@@ -74,6 +77,7 @@ export const capabilityGroup = z.tuple([
 ]);
 export const metaSchema = z.object({
   家庭: z.array(z.object({ 名称: z.string(), id: z.string() })),
+  空间关系: agentContextDataSchemas.spatial,
 });
 
 export const format = {
@@ -93,8 +97,12 @@ export const format = {
   ],
   V: ["query_key", "raw_value", "unit", "enum_label", "last_change_at"],
   time: "Preserve exact timestamps. Top-level received_at is snapshot reception; report received_at is report reception, not measurement time. Missing trailing report/V cells mean null; unknown times never mean realtime or unlimited validity. raw_value preserves null/false/0.",
+  spatial:
+    "meta.空间关系 preserves all configured spaces, passages and observation_bindings, including IDs, descriptions, enabled flags and timestamps. Passage space_a_id/space_b_id reference spaces; bindings map device_id/channel to space_id or passage_id. Disabled bindings do not establish observation coverage. Configuration does not prove current presence, passage activity or historical coverage; do not infer spatial IDs from room names.",
   observations:
     "Members include profiles and their latest known sightings, which may be old. last_seen is not current presence; empty means no retained sighting or source unavailable (see sources). as_of is assembly time, not observation time. Location distinguishes configured coverage from camera source. Latest camera clues are not attributed to members; no clues does not prove absence.",
+  operations:
+    "Recent operations within 30 minutes, at most 100 records; truncated indicates omitted records. Not a complete audit. Preserve status, reason, read_at, truncated and all six record fields, including full target addresses and ordered input values. source.executor: human=user request including delegated Agent, automation=rule, agent=explicit autonomous action. request_text and rule_name are nonempty; trigger_text and reason may be null when unknown. sent_at only proves sending began, never delivery or device effect. Removal from the recent window does not revoke a command.",
   access: {
     "1": "read",
     "2": "write",

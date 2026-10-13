@@ -19,10 +19,17 @@ export class ModelContextError extends Error {
 }
 
 export function requireReadyContext(snapshot: ReceivedContext) {
-  const { household, device_state, members, spatial, observations } =
-    snapshot.parts;
+  const {
+    household,
+    device_state,
+    members,
+    spatial,
+    observations,
+    operations,
+  } = snapshot.parts;
   if (
     !snapshot.scope ||
+    !operations ||
     household?.status !== "ready" ||
     device_state?.status !== "ready" ||
     members?.status !== "ready" ||
@@ -31,7 +38,7 @@ export function requireReadyContext(snapshot: ReceivedContext) {
   ) {
     throw new ModelContextError(
       "not_ready",
-      "Model context requires a household scope and all five ready parts",
+      "Model context requires a household scope and five ready parts and a received operations part",
     );
   }
   return {
@@ -41,6 +48,7 @@ export function requireReadyContext(snapshot: ReceivedContext) {
     members: members.data.members,
     spatial: spatial.data,
     observations: observations.data,
+    operations,
     receivedAt: snapshot.received_at,
   };
 }

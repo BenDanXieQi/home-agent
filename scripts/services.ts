@@ -28,12 +28,12 @@ const [action, ...args] = process.argv.slice(2);
 const requestedMode =
   args.length === 2 && args[0] === "--mode" ? args[1] : undefined;
 if (
-  !["dev", "stop", "status", "migrate"].includes(action ?? "") ||
+  !["dev", "stop", "status", "initialize", "migrate"].includes(action ?? "") ||
   (args.length > 0 &&
     (action !== "dev" || !["native", "docker"].includes(requestedMode ?? "")))
 )
   throw new Error(
-    "用法：bun run dev [--mode native|docker]，bun run stop，bun run status，bun run db:migrate",
+    "用法：bun run dev [--mode native|docker]，bun run stop，bun run status，bun run db:init，bun run db:migrate",
   );
 const env = {
   ...process.env,
@@ -143,7 +143,7 @@ try {
     await stopNative();
     await runDocker(["compose", "stop"]);
     console.info("本项目管理的开发应用、go2rtc 和数据库已停止，数据保留。");
-  } else if (action === "migrate") {
+  } else if (action === "initialize" || action === "migrate") {
     await runBun(["scripts/setup-local.ts"]);
     await prepareDatabase();
   } else {

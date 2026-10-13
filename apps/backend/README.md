@@ -1,6 +1,6 @@
 # Backend
 
-命令由 `household/operations/` 保存到 `device_commands`，家庭层定义最小控制接口，`mijia/control/adapter.ts` 负责协议目标、端点和错误转换；材料由 `household/materials/` 保存到上下文表，该模块的 `collection.ts` 定义路由所需的采集和诊断接口，不暴露供应商采集器的生命周期。`mijia/materials/` 负责供应商采集，其中 `events.ts` 拥有事件订阅和恢复，`conversations.ts` 拥有单音箱分页、去重和材料接纳流程，`access.ts` 组合家庭与设备访问资格，`storage.ts` 统一材料脱敏和保存接纳，`service.ts` 协调轮询和诊断；`household/records/` 拥有综合查询路由、读取资格、有界写入和定期清理，清理调度不依赖供应商会话。`records/config.ts` 定义记录保留策略，`mijia/materials/config.ts` 定义采集频率和分页预算，`main.ts` 从同一 `config/provenance.json` 读取后分别校验和注入。材料的来源时间查询分别使用按主题和按家庭排序的索引，支持单主题及跨主题分页。迁移后使用 `/api/provenance/`，配置和限制见[家庭运行时](../../docs/household-runtime.md#命令与供应商材料)。场景与云端历史接口只提供读取诊断。
+命令由 `household/operations/` 保存到 `device_commands`，家庭层定义最小控制接口，`mijia/control/adapter.ts` 负责协议目标、发送开始通知和控制结果转换；材料由 `household/materials/` 保存到上下文表，该模块的 `collection.ts` 定义路由所需的采集和诊断接口，不暴露供应商采集器的生命周期。`mijia/materials/` 负责供应商采集，其中 `events.ts` 拥有事件订阅和恢复，`conversations.ts` 拥有单音箱分页、去重和材料接纳流程，`access.ts` 组合家庭与设备访问资格，`storage.ts` 统一材料脱敏和保存接纳，`service.ts` 协调轮询和诊断；`household/records/` 拥有综合查询路由、读取资格、有界写入和定期清理，清理调度不依赖供应商会话。`records/config.ts` 定义记录保留策略，`mijia/materials/config.ts` 定义采集频率和分页预算，`main.ts` 从同一 `config/provenance.json` 读取后分别校验和注入。材料的来源时间查询分别使用按主题和按家庭排序的索引，支持单主题及跨主题分页。接口位于 `/api/provenance/`，配置和限制见[家庭运行时](../../docs/household-runtime.md#命令与供应商材料)。场景与云端历史接口只提供读取诊断。
 
 基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、语音请求判断和聊天转发。语音模块直接调用模型；单次聊天由独立 [Agent](../agent/README.md) 执行。基础检测不依赖 Agent 在线。
 
@@ -94,7 +94,7 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 ## Agent 当前数据与历史
 
-`agent-context/service.ts` 常驻整理五部分数据：家庭、房间、设备与完整规格 `household`，空间、通道和观测绑定 `spatial`，属性报告、在线值及采集／来源状态 `device_state`，成员登记 `members`，统一观察 `observations`（成员出现、未关联成员的人宠目标、画面变化、语音与猫狗叫声，以及共用的音视频窗口依据）。`main.ts` 注入家庭运行时、成员、空间与出现记录仓库、感知服务，并在退出时停止整理；`app.ts` 挂载本机专用 `GET /api/agent/context/stream`。整理直接读取内部来源，多个连接共用监听和结果，不回读 Web API。
+`agent-context/service.ts` 常驻整理六部分数据：家庭、房间、设备与完整规格 `household`，空间、通道和观测绑定 `spatial`，属性报告、在线值及采集／来源状态 `device_state`，成员登记 `members`，统一观察 `observations`（成员出现、未关联成员的人宠目标、画面变化、语音与猫狗叫声，以及共用的音视频窗口依据）。近期操作 `operations` 读取六字段记录，按保存通知及到期时间刷新。`main.ts` 注入家庭运行时、成员、空间、出现记录与命令仓库、感知服务，并在退出时停止整理；`app.ts` 挂载本机专用 `GET /api/agent/context/stream`。整理直接读取内部来源，多个连接共用监听和结果，不回读 Web API。
 
 `agent-context/device-state.ts` 从已提交的家庭属性生成动态状态，按来源对象复用已校验记录；描述、单位和规格等静态信息由 `household` 交付。整理服务按不可变部分共享紧凑 JSON 与字节统计。`agent-context/delivery.ts` 对照每个连接最后成功发送的状态生成增量，并按已统计的全量大小选择发送正文；`stream.ts` 负责连接、清空屏障和发送完成后推进基线。Agent 与 Web 的增量合并规则共用 `packages/api`，不依赖后端运行时。
 
@@ -229,29 +229,32 @@ src/
 
 米家内部按职责分开管理状态：`MijiaService` 管理当前 MiCloud 与 OAuth 账号会话、读取和观察范围；`LoginFlow` 与 `AccountMaintenance` 管理各自的操作状态、任务、计时器及准备中的新会话。家庭运行时管理已生效的家庭设备清单、规格和作用域；作用域指当前账号和家庭这一轮运行的范围。`DeviceDiscovery` 负责向供应商获取清单，并生成可访问设备索引；`MediaSession` 管理绑定与播放状态，`PropertyReader` 管理属性批次的串行执行和大小限制，`AccountObservations` 管理活动 MQTT 观察。协调层通过回调提供当前账号、任务有效性、凭据保存和续期操作，并将设备清单交给媒体模块；子模块不引用协调服务或 Hono Context。凭据和家庭选择保存使用账号串行队列；媒体安装与清理使用媒体模块自己的串行队列，通过账号实例、媒体实例及取消信号隔离切换后的迟到结果。媒体网络等待不阻塞账号写入。会话替换、失效、退出或关闭会使旧读取结果失效；同账号续期保留仍可访问设备的 MQTT 观察，OAuth token 改变时重建连接。属性传输失败不自动更换协议。家庭 HTTP 状态查询只读取已生效的快照；播放连接响应一次返回协商耗时与源活动状态。后台任务和播放资源可以在请求结束后继续运行。
 
-连接配置路径由 `connections/store.ts` 解析，仓库根目录由顶层入口传入，避免移动功能目录改变用户配置位置。`drizzle/` 存放迁移，`scripts/` 存放开发与构建工具，[`tests/`](tests/README.md) 保存测试用例，范围和运行方式见该目录的说明。
+连接配置路径由 `connections/store.ts` 解析，仓库根目录由顶层入口传入，避免移动功能目录改变用户配置位置。`drizzle/` 存放当前初始化基线与 Drizzle 元数据，`scripts/` 存放开发与构建工具，[`tests/`](tests/README.md) 保存测试用例，范围和运行方式见该目录的说明。
 
 ## 数据库
 
-所有应用表集中导出于 `src/db/schema.ts`，使用专用数据库的 `public` schema。`household/data-lifecycle.ts` 为每张表声明家庭或安装级生命周期，新增表漏声明会导致类型检查失败。绑定记录和登录凭据属于安装级数据。迁移表位于 `drizzle` schema，不参与清理。新增家庭数据写入须共用绑定锁并核对绑定身份；新增外部文件资源须接入相应领域的提交后清理。
+所有应用表集中导出于 `src/db/schema.ts`，使用专用数据库的 `public` schema。`household/data-lifecycle.ts` 为每张表声明家庭或安装级生命周期，新增表漏声明会导致类型检查失败。绑定记录和登录凭据属于安装级数据。Drizzle 的结构应用登记位于 `drizzle` schema，不参与家庭数据清理。新增家庭数据写入须共用绑定锁并核对绑定身份；新增外部文件资源须接入相应领域的提交后清理。
 
-使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，由启动入口创建连接并注入凭据存储；未配置时，米家授权操作返回存储错误。backend 进程启动不自动执行迁移；根目录 `dev` 在启动应用前自动准备数据库并执行迁移。
+使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，由启动入口创建连接并注入凭据存储；未配置时，米家授权操作返回存储错误。backend 进程启动不自动初始化数据库；根目录 `dev` 在启动应用前自动准备、初始化并检查数据库。
 
 ```sh
-bun run db:migrate                       # 自动启动本机数据库、迁移并检查
-bun run --cwd apps/backend db:check      # 只读检查 backend 迁移和 TimescaleDB
-bun run --cwd apps/backend db:generate   # 根据 schema 生成迁移
+bun run db:init                          # 自动启动本机数据库、初始化并检查
+bun run db:migrate                       # 自动准备本机数据库、应用结构变更并检查
+bun run --cwd apps/backend db:check      # 只读检查应用登记、SQL 哈希和 TimescaleDB
+bun run --cwd apps/backend db:generate   # 使用原生 Drizzle 生成结构变更 SQL
 bun run --cwd apps/backend db:studio     # 数据库管理界面
 docker compose stop db                   # 只停止数据库容器，保留数据卷
 ```
 
 本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
 
-backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩展，不写入数据，不验证写权限或完整表结构。缺少迁移时运行 `db:migrate`；已执行的迁移文件被修改时，应恢复原文件并新增迁移。
+当前 `drizzle/` 只有一份[初始化基线](drizzle/0000_initialize_database.sql)及其元数据，建立完整业务表、索引和 TimescaleDB 配置，不包含旧数据转换。`db:init` 与 `db:migrate` 均由原生 Drizzle 应用 SQL，再运行数据库检查；已经登记应用的文件不重复执行。结构变更使用原生 `db:generate` 生成、`db:migrate` 应用。使用外部数据库时，执行 `bun run --cwd apps/backend db:migrate`，随后执行 `bun run --cwd apps/backend db:check`。
+
+backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文件哈希和 TimescaleDB 扩展，不写入数据，不检查完整表结构、记录内容或写权限。缺少登记时运行 `db:init` 或 `db:migrate`；已应用 SQL 的哈希与仓库不一致时，恢复对应文件，并将结构变更写入新 SQL。
 
 `mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表与选择 API 见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 
-`credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。凭据写入与删除使用事务和提交结果确认：确认已提交后采用结果，确认回滚才报告普通存储失败；数据库暂时无法确认时暂停账号访问，待显式重试读取数据库中的保存状态后恢复，不沿用旧内存会话。业务表定义放在 `src/db/schema.ts`，TimescaleDB 专有 SQL 使用自定义迁移；迁移 SQL 与 `drizzle/meta` 一起提交，通过 `db:migrate` 应用，不使用 schema push。
+`credentials` 表保存按名称索引的加密授权及更新时间，密钥由独立文件提供；backend 每次读写授权重新读取密钥。凭据写入与删除使用事务和提交结果确认：确认已提交后采用结果，确认回滚才报告普通存储失败；数据库暂时无法确认时暂停账号访问，待显式重试读取数据库中的保存状态后恢复，不沿用旧内存会话。业务表定义放在 `src/db/schema.ts`，使用原生 `db:generate` 生成 SQL 与 `drizzle/meta` 元数据并一同提交，通过 `db:migrate` 应用。TimescaleDB 专有配置保存在对应 SQL 中，不使用 schema push。
 
 ### 空间关系资料
 
@@ -288,9 +291,9 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 
 上下文主键由提交方生成并在重试时复用，主键约束阻止重复插入；它不执行语义去重，也不自动将重复插入转为成功。通用时间检索使用 `(occurred_at, id)` 索引，对象检索使用 `(entity_type, entity_id, context_id)` 索引。成员出现另有按首次／最后观察时间、当前成员及摄像头来源建立的部分表达式索引，仅索引 `member_sighting` 记录。
 
-成员出现索引由 `0015_member_sighting_query_indexes` 迁移建立；已有数据库需执行 `bun run --cwd apps/backend db:migrate` 后才能使用这些索引。
+成员出现查询使用按时间和对象条件建立的索引，随当前数据库结构初始化。
 
-已提供表结构、迁移及只读浏览接口；成员出现记录已由 `household/identity/activity-repository.ts` 自动写入并更新归因关联，尚未接入通用记录生产者或定期清理。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
+已提供表结构、初始化 SQL 及只读浏览接口；成员出现记录已由 `household/identity/activity-repository.ts` 自动写入并更新归因关联，尚未接入通用记录生产者或定期清理。`scope_epoch` 只是保存运行标识，数据库不会自行核对当前运行或接纳判断；这些表不构成当前情景状态机或自动控制依据。
 
 成员资料由 `household/members/` 维护，复用 `household_subjects`，不经数据库浏览接口写入。`POST /api/household-members/list` 查询成员；`/save` 使用 `operation: create | update`、稳定 UUID `id` 和 `profile` 新增或更新；`/delete` 按 `id` 删除成员资料，保留上下文及其关联。三个接口都要求当前 `scope_epoch`、已就绪家庭和本机访问资格，返回更新后的成员列表；成员操作持有共享绑定锁，并核对数据库绑定与运行范围；成员写入另持有成员排他锁。
 
@@ -336,7 +339,7 @@ backend 的 `db:check` 核对迁移时间戳、文件哈希和 TimescaleDB 扩�
 
 接口仅允许本机访问，接纳后端直连、Vite 开发入口和 `https://localhost:8443` 正式页面入口；继续校验实际回环对端、Host 与 Origin，不信任转发头。成员接口使用相同入口规则。数据浏览不提供任意 SQL、其他数据库表或写入操作。读取前后核验家庭运行资格和请求的运行标识，数据库读取持有共享绑定事务锁，并核对账号和家庭绑定。历史记录不要求其保存的 `scope_epoch` 等于当前运行；当前请求的运行标识用于隔离旧请求。该浏览器是数据检查入口，不是 Agent 的情景检索或判断接纳接口。
 
-配置协调由后台周期任务执行，状态查询没有维护副作用。保存新的 go2rtc 地址后自动迁移连接；`POST /api/mijia/connection/retry` 只恢复未就绪部分。纯设备识别位于 `devices/mapping.ts`，摄像头共享流规格由 `media/camera-source-spec.ts` 定义。
+配置协调由后台周期任务执行，状态查询没有维护副作用。保存新的 go2rtc 地址后自动更新连接；`POST /api/mijia/connection/retry` 只恢复未就绪部分。纯设备识别位于 `devices/mapping.ts`，摄像头共享流规格由 `media/camera-source-spec.ts` 定义。
 
 连接重试的执行结果通过公共快照中的 `connection` 记录提供，复用 `@home-agent/api/contracts` 的操作协议和错误结构；页面通过 SSE 接收更新，不轮询米家状态。观看资源支持重复 PUT 复用协商结果，以及 GET 查询；DELETE 与服务端期限负责终止已开始的协商。
 
@@ -356,4 +359,4 @@ JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middl
 
 ## 家庭自动化
 
-`household/automations/` 提供规则管理、内存条件求值、固定动作调度及执行记录；`mijia/control/` 负责设备控制边界。规则 API 挂载于 `/api/household/automations`，生成沿用 `/api/workflows`。启动需要数据库与 `0016_automations.sql`，不启动 AI 复核、动作选择或模型任务 worker。条件语义、动作资格、容量和验收边界统一见[家庭自动化](../../docs/automations.md)。
+`household/automations/` 提供规则管理、内存条件求值、固定动作调度及执行记录；`mijia/control/` 负责设备控制边界。规则 API 挂载于 `/api/household/automations`，生成沿用 `/api/workflows`。启动需要已初始化的数据库，不启动 AI 复核、动作选择或模型任务 worker。条件语义、动作资格、容量和验收边界统一见[家庭自动化](../../docs/automations.md)。

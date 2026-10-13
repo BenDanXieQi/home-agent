@@ -3,7 +3,6 @@ import type { HouseholdRuntime } from "../runtime";
 import type { Database } from "../../db";
 import type { accessHousehold } from "../access";
 import type { createDeviceOperations } from "../operations/service";
-import { commandSourceSchema } from "@home-agent/api/action-provenance";
 import { createAutomationRepository } from "./repository";
 import {
   summarizeAutomationActions,
@@ -109,20 +108,12 @@ export function createAutomationActions(deps: {
             : action.action_key
         ).split(".");
         timing.dispatch_started_at = new Date().toISOString();
-        const source = commandSourceSchema.parse({
-          entrypoint: "automation",
-          executor: "automation",
-          rule_id: execution.run.automationId,
-          rule_revision: execution.run.revision,
-          run_id: execution.run.id,
-          action_id: row.id,
-        });
         timing.command_id = row.id;
         const command =
           action.kind === "set_property"
             ? await operations.executePropertyWrite(
                 scope,
-                source,
+                execution.source,
                 {
                   device_id: action.device_id,
                   siid: Number(parts[1]),
@@ -131,12 +122,11 @@ export function createAutomationActions(deps: {
                 },
                 signal,
                 assertCurrent,
-                execution.run.id,
                 row.id,
               )
             : await operations.executeDeviceAction(
                 scope,
-                source,
+                execution.source,
                 {
                   device_id: action.device_id,
                   siid: Number(parts[1]),
@@ -145,7 +135,6 @@ export function createAutomationActions(deps: {
                 },
                 signal,
                 assertCurrent,
-                execution.run.id,
                 row.id,
               );
         timing.command_id = command.command_id;

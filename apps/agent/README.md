@@ -11,7 +11,7 @@ bun install
 bun run --cwd apps/agent dev
 ```
 
-`AGENT_HOST` 默认 `127.0.0.1`，`AGENT_PORT` 默认 `1811`。`BACKEND_URL` 使用 HTTP(S) 地址，默认 `http://127.0.0.1:3000`；Backend 使用自定义监听地址时显式配置。无需数据库、迁移或 Agent Server。根目录开发命令仍会启动本项目其他服务。后台上下文接收不要求模型配置。独立运行类型检查或 lint 前先执行 `bunx turbo run build --filter=@home-agent/backend-client`，生成服务端及客户端声明；Turbo 的 Agent 构建、检查和开发命令已声明该依赖，开发时同时维护两份声明。生成职责见[共享 Backend 客户端](../../packages/backend-client/README.md)。
+`AGENT_HOST` 默认 `127.0.0.1`，`AGENT_PORT` 默认 `1811`。`BACKEND_URL` 使用 HTTP(S) 地址，默认 `http://127.0.0.1:3000`；Backend 使用自定义监听地址时显式配置。无需数据库或 Agent Server。根目录开发命令仍会启动本项目其他服务。后台上下文接收不要求模型配置。独立运行类型检查或 lint 前先执行 `bunx turbo run build --filter=@home-agent/backend-client`，生成服务端及客户端声明；Turbo 的 Agent 构建、检查和开发命令已声明该依赖，开发时同时维护两份声明。生成职责见[共享 Backend 客户端](../../packages/backend-client/README.md)。
 
 ## 接口
 
@@ -42,7 +42,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 - `main.ts`：配置、共享 Backend RPC 客户端与应用装配，以及服务器、接收器和追踪的启动／关闭。
 - `app.ts`：无启动副作用的 Hono 应用工厂，复用本机访问、JSON 校验、请求大小限制、错误处理及 HTTP 追踪中间件。
 - `chat.ts`：单次模型执行、取消与期限、完整回答校验。
-- `context/receiver.ts`：Backend 专用 SSE 接收、五部分内存状态、连接和家庭资格。
+- `context/receiver.ts`：Backend 专用 SSE 接收、六部分内存状态、连接和家庭资格。
 - `context/receipts.ts`：受接收器管理的有限内存接收记录与当时上下文；`context/receipt-changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
 - `context/reader.ts`：历史与引用材料读取；使用共享 Backend RPC 客户端，负责当前接收资格及响应与请求的匹配校验。
 - 家庭模型视图：转换、编码、解码及离线 CLI 均由根目录共享包 `packages/api/` 提供；Agent 的 `context:format` 命令直接运行共享 CLI。
@@ -57,7 +57,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 当前已提供空间规划模块入口，尚未接入服务请求、前端启动及可选上传、家庭数据通路或 backend 读写能力；现有 `/api/chat` 仍只调用家庭助手。因此还不能从页面启动规划或自动保存空间配置。视觉分析要求所配置模型支持图像输入。
 
-语音请求判断由 backend 的 `conversation/interpret.ts` 负责，不调用此服务。数据库中已有的 `agent_state` 数据不被本服务读取、迁移或删除；若不再需要，可由数据库维护者另行清理。
+语音请求判断由 backend 的 `conversation/interpret.ts` 负责，不调用此服务。
 
 Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；共享 RPC 客户端使用 `hono/client`，服务调用通过 `tracedFetch` 传播追踪上下文。Agent 在读取请求体前保存 Bun 原始 Request；校验成功后仅对本次模型请求关闭连接空闲计时，模型执行期限仍由聊天或 workflow 管理。
 
@@ -65,7 +65,7 @@ Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；�
 
 回执摘要在接纳消息时校验并冻结，索引读取复用同一份摘要；详情与摘要共享变化记录，淘汰或清空时一起释放。
 
-`src/context/receiver.ts` 导出 `createContextReceiver({ client })`，使用 `@home-agent/backend-client` 创建的 RPC 客户端。`start()` 自动订阅，`stop()` 取消连接与重连等待；`snapshot()` 提供收到的内存数据，`currentScope()` 仅在当前连接已收到全部五部分初始状态时返回可用家庭身份。SSE 解码使用共享 `@home-agent/api/http/event-stream`，复用成熟的 eventsource-parser。
+`src/context/receiver.ts` 导出 `createContextReceiver({ client })`，使用 `@home-agent/backend-client` 创建的 RPC 客户端。`start()` 自动订阅，`stop()` 取消连接与重连等待；`snapshot()` 提供收到的内存数据，`currentScope()` 仅在当前连接已收到全部六部分初始状态时返回可用家庭身份。SSE 解码使用共享 `@home-agent/api/http/event-stream`，复用成熟的 eventsource-parser。
 
 `GET /api/received-context` 复用 Agent 本机访问限制，返回 `{ scope, connection, parts, received_at, context_bytes }`。connection 包含连接 status、synchronized 与 last_error；全部部分收到初始状态后才标记已同步，部分为 loading、failed 或 unavailable 时仍保留各自状态。last_error 为 null 或 `{ reason, at }`，保留最近失败的安全分类和 UTC 时间，直到收到合法事件后清空。分类区分请求失败、HTTP 状态、无效事件流、超时、JSON／契约错误、流读取失败和正常结束；订阅失败日志最多每 30 秒记录一次，不包含接收正文或原始异常。后续省略部分保留旧值；设备状态增量只更新或删除指定条目，其他提供部分整体替换；ready 的空集合清空对应集合，heartbeat 不改变同步。首次连接、重连及家庭资格变化先清空接收数据；断线标记未同步。该入口用于诊断，不保存持久日志，也不代表模型输入。received_at 只记录数据消息，心跳单独计时。断线、停止及意外失败时清空当前数据。
 
@@ -81,7 +81,7 @@ Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；�
 
 ## 家庭模型视图
 
-共享包 `@home-agent/api/household-model-view` 的 `createHouseholdModelView(context)` 接受已校验的接收快照，生成设备清单、能力、有值状态与最新观察摘要，并提供受相同规则约束的 `spec/state` 查询。输入必须有家庭范围和五部分 ready 数据；缺少规格的设备仍在设备清单中，不编造能力。该模块由 Agent 和 Web 压缩上下文页共用，Backend 和接收器继续保存完整来源事实。当前聊天入口尚未调用此模块。
+共享包 `@home-agent/api/household-model-view` 的 `createHouseholdModelView(context)` 接受已校验的接收快照，生成设备清单、能力、有值状态、完整空间关系、最新观察摘要与近期操作，并提供受相同规则约束的 `spec/state` 查询。输入必须有家庭范围、`household/spatial/device_state/members/observations` 五部分 ready 数据以及已收到的 `operations` 部分；`operations` 即使 loading/unavailable/failed 也保留其状态，不阻止原有数据展示；缺少规格的设备仍在设备清单中，不编造能力。该模块由 Agent 和 Web 压缩上下文页共用，Backend 和接收器继续保存完整来源事实。当前聊天入口尚未调用此模块。
 
 模块直接接收数据，不依赖接收器、模型框架或 CLI。`createHouseholdModelView` 与 `encodeHouseholdContext` 在内存中同步执行，没有订阅、定时器、网络／文件读写或跨调用缓存；CLI 单独负责文件读写。进程内用法如下（`snapshot` 为已校验的接收快照）：
 
@@ -97,7 +97,7 @@ const contextJson = JSON.stringify(encodeHouseholdContext(view.semantic));
 
 `view.query(deviceId, keys, "spec" | "state")` 始终查询创建该视图时的同一份快照，返回的 `source` 为 `snapshot`。转换时隔离所使用的来源数据，调用方之后修改输入不会改变该视图的查询结果；查询结果也不会修改来源数据。读取更新后的状态需要向转换函数传入新快照，已有视图不会自动更新。能力规格仅在单次转换内复用。
 
-接收器继续拥有当前快照、版本、连接状态和家庭范围；调用方负责选择快照及判断连接新鲜度。接收时间不等于属性测量时间，转换不会把旧状态升级成实时状态。输入缺少家庭范围或任一部分未 ready 时抛出错误，不隐式复用上一次结果。当前没有模型上下文自动注入逻辑。
+接收器继续拥有当前快照、版本、连接状态和家庭范围；调用方负责选择快照及判断连接新鲜度。接收时间不等于属性测量时间，转换不会把旧状态升级成实时状态。输入缺少家庭范围、上述五部分中任一未 ready 或尚未收到 `operations` 时抛出错误；已收到的 `operations` 保留非 ready 状态。转换不隐式复用上一次结果。当前没有模型上下文自动注入逻辑。
 
 摄像头只展示切换常看位置、巡航开关／模式／位置；人在传感器只展示可明确辨认的整体有人／无人属性，无法确认整体项时不选某个分区替代。人体移动传感器保留移动事件，不由此推断持续有人。自检、开发者模式、码库匹配、协议载荷和内部标识等细节由 `policy.ts` 排除。摄像头分析及事件归 Backend。缺值和未知规格不生成状态占位；缓存、待验证、过期等原始质量及时间保持不变。
 
@@ -107,7 +107,9 @@ const contextJson = JSON.stringify(encodeHouseholdContext(view.semantic));
 
 `states` 按设备合并在线状态与属性报告，每条直接带设备 ID 和名称，通过 ID 与设备清单对应，不依赖数组位置；没有属性报告的设备仍保留在线状态和空报告数组。报告组共享质量与时间，值行直接保存查询键、原始值、单位、枚举标签及可信变化时间。省略的尾部字段表示未知；合法的 `false`、`0` 和 `null` 原样保留。报告接收时间不是测量时间，顶层 `received_at` 只表示快照接收时间。解码校验格式、能力索引与权限、设备身份和名称、每台设备唯一状态、属性归属、重复查询键及关注项。
 
-序列化顺序为 `schema / instructions / C / S / D / meta / attention（可选）/ received_at / states / observations`。格式说明、共享能力、设备清单和家庭资料位于稳定前部，动态状态和观察放在后部；成员资料与最近出现合并，不再单独放入 `meta`。调用方应保留该顺序，以便支持前缀缓存的模型服务复用稳定内容。实际缓存命中取决于服务端支持、缓存保留和完整请求布局；当前格式在实际聊天入口的命中率、费用及延迟收益尚未验证。
+序列化顺序为 `schema / instructions / C / S / D / meta / attention（可选）/ received_at / states / observations / operations`。格式说明、共享能力、设备清单和家庭资料位于稳定前部，动态状态、观察和近期操作放在后部；成员资料与最近出现合并，不再单独放入 `meta`。调用方应保留该顺序，以便支持前缀缓存的模型服务复用稳定内容。实际缓存命中取决于服务端支持、缓存保留和完整请求布局；当前格式在实际聊天入口的命中率、费用及延迟收益尚未验证。
+
+`meta.空间关系` 完整保留同一快照的 `spaces/passages/observation_bindings`，包括所有空间、通道两端的空间 ID、设备／镜头到空间或通道的观测绑定，以及各记录的 ID、说明、创建／更新时间和绑定启用状态；不按是否出现成员或是否绑定设备筛选。解码后还原为语义视图的 `空间关系`。这些是配置关系，不代表成员当前位置、通道实时通行状态或过去的观测覆盖；停用绑定不用于定位，设备清单中的房间名称也不能替代空间 ID。
 
 `observations.members` 每位成员只出现一次，包含 ID、名字、类型、物种、简介和 `last_seen`；成员资料取自同一快照，ID 用于区分同名成员。最近出现保留时间、观测区域或摄像头来源及已确认／待确认／推断状态。`observations.clues` 按摄像头汇总未识别目标、画面变化、语音和猫狗声，直接包含设备 ID、别名或名称和镜头编号。同类线索只保留最后时间，详细依据、材料引用和修订信息不进入摘要；需要细节时读取原始观察或历史。时间使用 ISO 字符串。
 
@@ -128,6 +130,8 @@ bun run --cwd apps/agent context:format --input /path/model-context/context.json
 `spec/state` 的显式键查询可附带 `--attention <file> --remember`，成功后记录关注键；`overview` 读取同一 `--attention` 文件时只突出仍有效的关注项，不删减其他能力。全量查询不记录关注。查询仅读取保存快照，不刷新设备、不执行动作，不重新带入领域规则排除的内容。原始快照和输出应放在本地数据位置，不提交设备及成员资料。
 
 ### 格式比较与模型理解检查
+
+近期操作保持原部分的状态、读取时间、原因、截断及六字段记录；压缩编码的 `operations` 完整保留 source 文本、target 地址、参数顺序与 false/0/null，解码还原为 `近期操作`。不二次筛选、不补写名称或指令。范围为最近 30 分钟、最多 100 条，非完整审计；发送时间只表示发送开始。设备清单和能力可辅助解析目标，接收上下文不表示已注入聊天模型。
 
 压缩方案比较须固定同一输入指纹，并分别记录筛选后的属性值数量与目标分词器的 token 数。单项编码候选先比较 token 收益，再组合；字符或字节减少不保证 token 减少。CLI 的还原校验只证明筛选后视图的编解码一致性，不证明模型理解准确率。
 
