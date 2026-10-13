@@ -226,6 +226,8 @@ src/
 
 语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 `src/conversation/interpret.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
 
+`conversation/interpret.ts` 直接调用 pi-ai `Models.complete()` 请求严格工具输出，并校验完成状态、单工具结果及语音判定 schema。
+
 `src/http/sse-transport.ts` 通过原生 `WritableStream`、Hono `writeSSE` 与 `p-timeout` 提供家庭状态、设备历史和当前快照共用的串行写入、事件／队列容量、心跳、超时与取消。每条连接持有独立资源，领域适配器维护各自的协议、资格、通知和连接数。`snapshot-stream.ts` 合并感知与语音的快照通知；家庭状态流维护版本及实体变化，历史流读取已保存页并计算页增量，三者不合并数据语义。
 
 聊天路由只接收 Agent 地址读取函数、端口与超时；米家服务接收 go2rtc 地址读取函数、凭据仓库和家庭选择存储模块。地址函数由启动入口连接到配置仓库，调用时读取当前配置，业务模块不依赖 YAML 存储结构。数据库连接由存储模块使用，不放入 HTTP 请求上下文。`environment.ts` 负责读取和校验进程环境变量。

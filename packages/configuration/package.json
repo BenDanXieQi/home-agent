@@ -1,5 +1,5 @@
 {
-  "name": "@home-agent/model",
+  "name": "@home-agent/configuration",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -12,8 +12,7 @@
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@langchain/openai": "catalog:",
-    "@langchain/core": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
@@ -25,6 +24,6 @@
     "@home-agent/oxlint-config": "workspace:*"
   },
   "exports": {
-    ".": "./src/index.ts"
+    "./models": "./src/models.ts"
   }
 }

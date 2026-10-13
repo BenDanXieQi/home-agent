@@ -52,13 +52,9 @@
     ],
     "catalog": {
       "postgres": "3.4.9",
-      "@langchain/core": "1.2.14",
-      "@langchain/langgraph": "1.4.17",
-      "@langchain/openai": "1.5.13",
       "@types/bun": "1.4.2",
       "eslint-plugin-turbo": "2.11.3",
       "hono": "4.13.9",
-      "langsmith": "0.9.0",
       "oxfmt": "0.70.0",
       "oxlint": "1.85.0",
       "oxlint-tsgolint": "7.0.2003",
@@ -82,7 +78,11 @@
       "drizzle-kit": "0.31.11",
       "yaml": "2.8.3",
       "write-file-atomic": "7.0.0",
-      "@types/write-file-atomic": "4.0.3"
+      "@types/write-file-atomic": "4.0.3",
+      "@earendil-works/pi-ai": "1.2.0",
+      "@earendil-works/pi-durable": "1.2.0",
+      "@earendil-works/chord": "1.2.0",
+      "@langfuse/otel": "5.13.1"
     }
   },
   "patchedDependencies": {

@@ -21,7 +21,7 @@ Home Agent 是一个本地运行的家庭助手项目。backend 提供有来源�
 ## 当前能力
 
 - 米家登录与授权恢复、家庭选择、设备清单保存、设备规格准备、后台属性采集和带质量的当前值查询已实现。设备状态历史保存原生属性、在线通知与设备清单在线值，提供按时间、设备和记录类型筛选的只读查询。Web 可在 `/devices` 按房间查看设备和最近属性报告，在 `/device-logs` 读取、比较与导出历史报告。
-- Web 提供单次 Agent 问答、成员资料与识别参考管理、家庭数据库浏览。Agent 使用 Deep Agents，独立接收模块自动接收家庭上下文，并支持只读查询三类历史；模型尚未接入这些材料、家庭业务工具或持久会话。
+- Web 提供单次 Agent 问答、成员资料与识别参考管理、家庭数据库浏览。Agent 使用 pi-durable，独立接收模块自动接收家庭上下文，并支持只读查询三类历史；模型尚未接入这些材料、家庭业务工具或持久会话。
 - 本地检测、人宠跟踪、参考身份关联及可修订的成员出现记录已接入；人体短期外观归因仍有校准与专项验收限制，正式装配不输出外观成员归属。摄像头预览、筛选窗口、短期媒体、音频分析与本地语音转写已提供，具体使用与验证范围见[感知说明](docs/perception.md)。
 - 语音判断只识别转写是否构成完整助手请求。持续职责、到期通知、Agent 多模态调查、长期记忆及设备控制闭环尚未接入，不能从已有接口或计划推定可用。
 
@@ -29,12 +29,12 @@ Home Agent 是一个本地运行的家庭助手项目。backend 提供有来源�
 
 ## 当前服务分工
 
-技术栈：Bun、TypeScript、React、Hono、LangGraph、PostgreSQL 和 go2rtc。
+技术栈：Bun、TypeScript、React、Hono、pi-durable、Langfuse、PostgreSQL 和 go2rtc。
 
 | 模块           | 已实现职责                                                                        |
 | -------------- | --------------------------------------------------------------------------------- |
 | `apps/backend` | 来源接入、设备事实、成员与身份接纳、感知和媒体、语音交付、聊天转发与 Web 静态托管 |
-| `apps/agent`   | Deep Agents 单次文本问答、独立上下文接收和只读历史客户端，不保存持久会话          |
+| `apps/agent`   | pi-durable 单次文本问答、独立上下文接收和只读历史客户端，不保存持久会话           |
 | `apps/web`     | 登录、设备与房间、成员、摄像头与分析、设备日志、数据库浏览、聊天和设置            |
 | go2rtc         | 摄像头取流与浏览器媒体连接                                                        |
 
@@ -49,7 +49,7 @@ bun install --frozen-lockfile
 bun run setup
 ```
 
-编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_MODEL`、`OPENAI_API_KEY`，按需填写 `OPENAI_BASE_URL`。
+编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_PROVIDER`、`AGENT_MODEL`、`OPENAI_API_KEY`，端点与自定义模型说明见[共享配置](packages/configuration/README.md)。
 
 ```sh
 bun run dev

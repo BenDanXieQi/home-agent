@@ -1,4 +1,6 @@
 import type { z } from "zod";
+import type { Models } from "@earendil-works/pi-ai";
+import type { ConfiguredModel } from "@home-agent/configuration/models";
 import {
   type agentWorkflowInputSchema,
   agentWorkflowResultSchema,
@@ -8,8 +10,12 @@ import { AppError } from "@home-agent/api/errors";
 import type { Config } from "../config";
 import { createAutomationGeneration } from "./automation-generation";
 
-export function createWorkflows(config: Config) {
-  const generate = createAutomationGeneration(config);
+export function createWorkflows(
+  config: Config,
+  models: Models,
+  model: ConfiguredModel | undefined,
+) {
+  const generate = createAutomationGeneration(config, models, model);
   let active = 0;
 
   return async (

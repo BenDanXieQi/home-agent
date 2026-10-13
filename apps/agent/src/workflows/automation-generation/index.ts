@@ -1,9 +1,4 @@
 import {
-  AIMessage,
-  HumanMessage,
-  SystemMessage,
-} from "@langchain/core/messages";
-import {
   automationDraftSchema,
   type automationGenerationInputSchema,
   automationGenerationLimits,
@@ -11,7 +6,8 @@ import {
   type AutomationCapabilities,
 } from "@home-agent/api/automations";
 import { AppError } from "@home-agent/api/errors";
-import { createModel } from "@home-agent/model";
+import type { Models } from "@earendil-works/pi-ai";
+import type { ConfiguredModel } from "@home-agent/configuration/models";
 import { z } from "zod";
 import { withSpan, telemetryStatus } from "@home-agent/observability";
 import type { Config } from "../../config";
@@ -32,10 +28,6 @@ const invalidDraft = automationDraftSchema.parse({
   definition: null,
   behavior: "本次未能生成有效的规则草稿，已有配置没有修改。请重试生成。",
   clarifications: [],
-});
-const usageSchema = z.object({
-  input_tokens: z.number().int().nonnegative(),
-  output_tokens: z.number().int().nonnegative(),
 });
 
 function modelCapabilities(capabilities: AutomationCapabilities) {
@@ -81,23 +73,12 @@ function modelCapabilities(capabilities: AutomationCapabilities) {
   };
 }
 
-export function createAutomationGeneration(config: Config) {
-  const chatModel = createModel(config, {
-    streaming: false,
-    maxRetries: 0,
-    timeout: Math.min(
-      config.AGENT_RUN_TIMEOUT_MS,
-      automationGenerationLimits.timeoutMs,
-    ),
-    maxTokens: Math.min(config.AGENT_MAX_OUTPUT_TOKENS, 6144),
-  });
-  if (!chatModel) return undefined;
-  const model = chatModel.withStructuredOutput(modelDraftSchema, {
-    name: "draft_automation",
-    method: "functionCalling",
-    strict: true,
-    includeRaw: true,
-  });
+export function createAutomationGeneration(
+  config: Config,
+  models: Models,
+  model: ConfiguredModel | undefined,
+) {
+  if (!model) return undefined;
   return async (
     input: z.infer<typeof automationGenerationInputSchema>,
     signal: AbortSignal,
@@ -112,52 +93,56 @@ export function createAutomationGeneration(config: Config) {
     return withSpan(
       "automation.generate",
       {
-        "langsmith.span.kind": "llm",
-        "gen_ai.operation.name": "chat",
-        "gen_ai.request.model": chatModel.model,
-        "gen_ai.system": config.OPENAI_BASE_URL
-          ? "openai-compatible"
-          : "openai",
+        "automation.model": model.id,
       },
       async (span) => {
         span.setAttribute("automation.draft.valid", false);
         if (telemetryStatus().includeContent)
-          span.setAttribute("gen_ai.prompt", context);
-        const response = await model.invoke(
-          [
-            new SystemMessage(automationGenerationInstructions),
-            new HumanMessage(context),
-          ],
-          { signal },
+          span.setAttribute("langfuse.observation.input", context);
+        const response = await models.complete(
+          model,
+          {
+            systemPrompt: automationGenerationInstructions,
+            messages: [
+              { role: "user", content: context, timestamp: Date.now() },
+            ],
+            tools: [
+              {
+                name: "draft_automation",
+                description: "提交家庭自动化规则草稿及需要澄清的信息",
+                parameters: z.toJSONSchema(modelDraftSchema),
+                constrainedSampling: { type: "json_schema", strict: "require" },
+              },
+            ],
+          },
+          {
+            toolChoice: "required",
+            samplingParams: { parallel_tool_calls: false },
+            maxRetries: 0,
+            timeoutMs: Math.min(
+              config.AGENT_RUN_TIMEOUT_MS,
+              automationGenerationLimits.timeoutMs,
+            ),
+            maxTokens: Math.min(
+              config.AGENT_MAX_OUTPUT_TOKENS,
+              model.maxTokens,
+              6144,
+            ),
+            signal,
+          },
         );
         signal.throwIfAborted();
-        if (AIMessage.isInstance(response.raw)) {
-          const usage = usageSchema.safeParse(response.raw.usage_metadata);
-          if (usage.success) {
-            span.setAttribute(
-              "gen_ai.usage.input_tokens",
-              usage.data.input_tokens,
-            );
-            span.setAttribute(
-              "gen_ai.usage.output_tokens",
-              usage.data.output_tokens,
-            );
-          }
-        }
+        const calls = response.content.filter(
+          (block) => block.type === "toolCall",
+        );
+        const call = calls[0];
         if (
-          !AIMessage.isInstance(response.raw) ||
-          response.raw.invalid_tool_calls?.length ||
-          response.raw.tool_calls?.length !== 1 ||
-          response.raw.tool_calls[0]?.name !== "draft_automation" ||
-          ["length", "content_filter"].includes(
-            String(response.raw.response_metadata.finish_reason),
-          ) ||
-          ["incomplete", "failed"].includes(
-            String(response.raw.response_metadata.status),
-          )
+          !["stop", "toolUse"].includes(response.stopReason) ||
+          calls.length !== 1 ||
+          call?.name !== "draft_automation"
         )
           throw new AppError("agent_execution_failed");
-        const envelope = modelDraftSchema.safeParse(response.parsed);
+        const envelope = modelDraftSchema.safeParse(call.arguments);
         if (!envelope.success) return invalidDraft;
         let definition: unknown = null;
         if (envelope.data.definition_json !== null) {
@@ -204,7 +189,10 @@ export function createAutomationGeneration(config: Config) {
           result.clarifications.length,
         );
         if (telemetryStatus().includeContent)
-          span.setAttribute("gen_ai.completion", JSON.stringify(result));
+          span.setAttribute(
+            "langfuse.observation.output",
+            JSON.stringify(result),
+          );
         return result;
       },
     );

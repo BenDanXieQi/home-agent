@@ -10,22 +10,21 @@
     "dev": "bun --env-file=../../.env --watch src/main.ts",
     "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
     "start": "bun --env-file=../../.env dist/main.js",
-    "context:format": "bun ../../packages/api/src/cli/household-model-view.ts",
+    "context:format": "bun scripts/format-context.ts",
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
     "check-types": "tsc --noEmit"
   },
   "dependencies": {
-    "@langchain/core": "catalog:",
     "zod": "catalog:",
     "@home-agent/api": "workspace:*",
-    "deepagents": "1.14.2",
-    "langchain": "1.5.15",
-    "@home-agent/model": "workspace:*",
-    "langsmith": "catalog:",
     "@home-agent/observability": "workspace:*",
     "@home-agent/backend-client": "workspace:*",
-    "hono": "catalog:"
+    "hono": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
+    "@home-agent/configuration": "workspace:*",
+    "@earendil-works/chord": "catalog:",
+    "@earendil-works/pi-durable": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",

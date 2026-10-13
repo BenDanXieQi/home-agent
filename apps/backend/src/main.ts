@@ -22,7 +22,11 @@ import { createIdentityReferences } from "./household/identity/references";
 import { createReferenceFiles } from "./household/identity/files";
 import { createSpeechInbox } from "./conversation/speech-inbox";
 import { createSpeechDialogueInterpreter } from "./conversation/interpret";
-import { loadModelConfig } from "@home-agent/model";
+import {
+  loadModelConfig,
+  modelProviderSettings,
+} from "@home-agent/configuration/models";
+import { createModels, createProvider } from "@earendil-works/pi-ai";
 import { createMemberRepository } from "./household/members/repository";
 import { createSpatialRepository } from "./household/spatial/repository";
 import { createSpatialService } from "./household/spatial/service";
@@ -31,7 +35,10 @@ import { createWindowHistoryRepository } from "./perception/history/repository";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
 import { join, resolve as resolvePath } from "node:path";
-import { initializeTelemetry } from "@home-agent/observability";
+import {
+  initializeTelemetry,
+  observeProvider,
+} from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
 import { createDatabase } from "./db";
 import { createContextRepository } from "./household-context/repository";
@@ -172,7 +179,13 @@ mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
 const modelConfig = loadModelConfig();
-const interpretSpeech = createSpeechDialogueInterpreter(modelConfig);
+const settings = modelProviderSettings(modelConfig);
+const models = createModels();
+if (settings) models.setProvider(observeProvider(createProvider(settings)));
+const interpretSpeech = createSpeechDialogueInterpreter(
+  models,
+  settings?.models[0],
+);
 const speechInbox = createSpeechInbox({
   instanceId: crypto.randomUUID(),
   ...(interpretSpeech ? { analyze: interpretSpeech } : {}),

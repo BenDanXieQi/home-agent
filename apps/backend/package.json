@@ -56,8 +56,8 @@
     "xstate": "5.33.2",
     "yaml": "catalog:",
     "zod": "catalog:",
-    "@home-agent/model": "workspace:*",
-    "@langchain/core": "catalog:"
+    "@earendil-works/pi-ai": "catalog:",
+    "@home-agent/configuration": "workspace:*"
   },
   "devDependencies": {
     "@home-agent/oxlint-config": "workspace:*",

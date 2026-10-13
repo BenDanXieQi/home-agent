@@ -7,6 +7,7 @@ import {
   DiagLogLevel,
 } from "@opentelemetry/api";
 import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
@@ -44,10 +45,9 @@ const schema = z.object({
   OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
   OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: endpoint,
   OTEL_INCLUDE_CONTENT: z.enum(["true", "false"]).default("false"),
-  LANGSMITH_ENDPOINT: endpoint,
-  LANGSMITH_API_KEY: optionalText,
-  LANGSMITH_PROJECT: z.string().min(1).default("home-agent"),
-  LANGSMITH_WORKSPACE_ID: optionalText,
+  LANGFUSE_BASE_URL: endpoint,
+  LANGFUSE_PUBLIC_KEY: optionalText,
+  LANGFUSE_SECRET_KEY: optionalText,
 });
 
 let state: { shutdown: () => Promise<void> } | undefined;
@@ -68,13 +68,6 @@ export function initializeTelemetry(serviceName: string) {
   }
   const config = result.data;
   includeContent = config.OTEL_INCLUDE_CONTENT === "true";
-  // This application exports a single OTel tree, never parallel LangSmith REST runs.
-  // The installed @langchain/core enables tracing if ANY of these flags is true.
-  // Disable every trigger to prevent duplicate exports and unintended content capture.
-  process.env.LANGSMITH_TRACING = "false";
-  process.env.LANGSMITH_TRACING_V2 = "false";
-  process.env.LANGCHAIN_TRACING = "false";
-  process.env.LANGCHAIN_TRACING_V2 = "false";
   if (config.OTEL_TRACES_EXPORTER === "none") {
     state = { shutdown: drainOperations };
     return state;
@@ -86,44 +79,45 @@ export function initializeTelemetry(serviceName: string) {
     (config.OTEL_EXPORTER_OTLP_ENDPOINT
       ? `${config.OTEL_EXPORTER_OTLP_ENDPOINT.replace(/\/$/, "")}/v1/traces`
       : undefined);
-  if (
-    config.OTEL_TRACES_EXPORTER === "otlp" &&
-    !customEndpoint &&
-    !config.LANGSMITH_API_KEY
-  ) {
-    throw new Error(
-      "Set LANGSMITH_API_KEY for direct export, or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT for a collector",
+  const spanProcessors = [];
+  if (config.OTEL_TRACES_EXPORTER === "console") {
+    spanProcessors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+  } else if (customEndpoint) {
+    spanProcessors.push(
+      new BatchSpanProcessor(
+        new OTLPTraceExporter({
+          url: customEndpoint,
+          // Custom collectors use standard OTEL_EXPORTER_OTLP_*_HEADERS.
+          timeoutMillis: 10_000,
+        }),
+        { scheduledDelayMillis: 1_000, exportTimeoutMillis: 12_000 },
+      ),
+    );
+  } else {
+    if (!config.LANGFUSE_PUBLIC_KEY || !config.LANGFUSE_SECRET_KEY) {
+      throw new Error(
+        "Set LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY for direct export, or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT for a collector",
+      );
+    }
+    spanProcessors.push(
+      new LangfuseSpanProcessor({
+        publicKey: config.LANGFUSE_PUBLIC_KEY,
+        secretKey: config.LANGFUSE_SECRET_KEY,
+        baseUrl: (
+          config.LANGFUSE_BASE_URL ?? "https://cloud.langfuse.com"
+        ).replace(/\/$/, ""),
+        // Retain HTTP and application ancestors of model observations.
+        shouldExportSpan: () => true,
+        flushInterval: 1,
+        timeout: 10,
+      }),
     );
   }
-  const processor =
-    config.OTEL_TRACES_EXPORTER === "console"
-      ? new SimpleSpanProcessor(new ConsoleSpanExporter())
-      : new BatchSpanProcessor(
-          new OTLPTraceExporter({
-            url:
-              customEndpoint ??
-              `${(config.LANGSMITH_ENDPOINT ?? "https://api.smith.langchain.com").replace(/\/$/, "")}/otel/v1/traces`,
-            // Custom collectors use standard OTEL_EXPORTER_OTLP_*_HEADERS; no LangSmith key is forwarded.
-            ...(customEndpoint
-              ? {}
-              : {
-                  headers: {
-                    "x-api-key": config.LANGSMITH_API_KEY!,
-                    "Langsmith-Project": config.LANGSMITH_PROJECT,
-                    ...(config.LANGSMITH_WORKSPACE_ID
-                      ? { "x-tenant-id": config.LANGSMITH_WORKSPACE_ID }
-                      : {}),
-                  },
-                }),
-            timeoutMillis: 10_000,
-          }),
-          { scheduledDelayMillis: 1_000, exportTimeoutMillis: 12_000 },
-        );
   const provider = new BasicTracerProvider({
     resource: defaultResource().merge(
       resourceFromAttributes({ "service.name": serviceName }),
     ),
-    spanProcessors: [processor],
+    spanProcessors,
   });
   const manager = new AsyncLocalStorageContextManager().enable();
   context.setGlobalContextManager(manager);
