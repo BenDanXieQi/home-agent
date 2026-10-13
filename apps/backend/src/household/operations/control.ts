@@ -1,31 +1,14 @@
 import type {
-  commandRecordSchema,
+  deviceControlResultSchema,
   commandTargetSchema,
 } from "@home-agent/api/action-provenance";
 
-type Command = ReturnType<typeof commandRecordSchema.parse>;
-type Target = ReturnType<typeof commandTargetSchema.parse>;
-/** The household owns command records; adapters own protocol dispatch and failures. */
+/** Adapters own protocol dispatch; send start is independent of response validation. */
 export type DeviceControl = {
-  endpoint: (target: Target) => string;
   dispatch: (
-    target: Target,
+    target: ReturnType<typeof commandTargetSchema.parse>,
     signal: AbortSignal,
     assertCurrent: () => void,
-  ) => Promise<
-    Pick<
-      Command,
-      | "sent_at"
-      | "received_at"
-      | "outcome"
-      | "response_matches"
-      | "completeness"
-      | "provider_code"
-      | "message"
-      | "output"
-      | "response"
-      | "error"
-    >
-  >;
-  failure: (error: unknown) => Command["error"];
+    onSendStarted: (at: string) => void,
+  ) => Promise<ReturnType<typeof deviceControlResultSchema.parse>>;
 };

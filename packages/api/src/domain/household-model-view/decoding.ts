@@ -10,6 +10,7 @@ import {
   deviceStateSchema,
   metaSchema,
   latestObservationsSchema,
+  operationsSchema,
 } from "./format";
 
 export const encodedContextSchema = z.object({
@@ -28,6 +29,7 @@ export const encodedContextSchema = z.object({
   D: z.array(deviceRow),
   states: z.array(deviceStateSchema),
   observations: latestObservationsSchema,
+  operations: operationsSchema,
 });
 
 function resolveReference<T>(rows: readonly T[], index: number, name: string) {
@@ -174,6 +176,7 @@ export function decodeHouseholdContext(input: unknown) {
     设备组: groups,
     状态报告: byDevice,
     最新观察: encoded.observations,
+    近期操作: encoded.operations,
     ...(encoded.attention !== undefined ? { 最近关注: encoded.attention } : {}),
   };
 }

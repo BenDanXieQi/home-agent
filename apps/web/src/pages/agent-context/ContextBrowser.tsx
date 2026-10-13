@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { entityKey } from "@home-agent/api/household";
 import type { z } from "zod";
 import {
   agentContextPartsSchema,
@@ -49,11 +50,35 @@ export function ContextBrowser({
   );
   const members = snapshot.parts.members;
   const observations = snapshot.parts.observations;
+  const operations = snapshot.parts.operations;
+  function operationTitle(
+    record: z.infer<
+      typeof import("@home-agent/api/action-provenance").commandRecordSchema
+    >,
+  ) {
+    const targetDevice =
+      household?.status === "ready" && snapshot.scope
+        ? household.data.device[
+            entityKey(snapshot.scope.account_id, record.target.device_id)
+          ]
+        : undefined;
+    const address =
+      record.target.kind === "property"
+        ? `prop.${record.target.siid}.${record.target.piid}`
+        : `action.${record.target.siid}.${record.target.aiid}`;
+    const capability =
+      household?.status === "ready" && targetDevice?.spec_id
+        ? household.data.specs[targetDevice.spec_id]?.spec[address]
+        : undefined;
+    return targetDevice && capability
+      ? `${targetDevice.name} / ${capability.description}（按当前快照解析）`
+      : JSON.stringify(record.target);
+  }
   return (
     <div className="space-y-4">
       <nav
         aria-label="上下文分类"
-        className="grid grid-cols-2 gap-2 lg:grid-cols-5"
+        className="grid grid-cols-2 gap-2 lg:grid-cols-6"
       >
         {agentContextPartsSchema.keyof().options.map((key) => {
           const label = partLabels[key];
@@ -164,6 +189,23 @@ export function ContextBrowser({
               没有家庭范围信息，无法按引用读取观察材料。
             </Notice>
           )
+        ) : null}
+        {selected === "operations" && operations?.status === "ready" ? (
+          <>
+            <p className="text-xs text-muted">
+              最近 30 分钟，最多 100
+              条，非完整审计。发送开始不代表设备生效；移出窗口不代表撤销。
+            </p>
+            <RecordBrowser
+              rows={operations.data.records}
+              identify={identified}
+              title={operationTitle}
+              describe={(row) =>
+                `${JSON.stringify(row.source)} · target=${JSON.stringify(row.target)} · 调用 ${time(row.called_at)} · 发送开始 ${time(row.sent_at)} · 到期 ${time(row.expires_at)}`
+              }
+              label="近期操作"
+            />
+          </>
         ) : null}
         {part ? (
           <JsonData value={part} label={`${partLabels[selected]}完整 JSON`} />

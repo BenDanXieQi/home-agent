@@ -126,12 +126,16 @@ export function encodeHouseholdContext(semantic: Semantic) {
     C: groups,
     S: sets,
     D: devices,
-    meta: structuredClone({ 家庭: semantic.家庭 }),
+    meta: structuredClone({
+      家庭: semantic.家庭,
+      空间关系: semantic.空间关系,
+    }),
     ...(semantic.最近关注 !== undefined
       ? { attention: structuredClone(semantic.最近关注) }
       : {}),
     received_at: semantic.快照接收时间,
     states,
     observations: structuredClone(semantic.最新观察),
+    operations: structuredClone(semantic.近期操作),
   };
 }

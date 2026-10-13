@@ -1,3 +1,5 @@
+import { createAutomationSource } from "./source";
+import { freeze } from "@home-agent/api/immutable";
 import type {
   automations,
   automationRuns,
@@ -10,6 +12,7 @@ export function createAutomationExecution(
   input: typeof automationRuns.$inferSelect.input,
   evaluation: typeof automationRuns.$inferSelect.evaluation,
   timing: typeof automationRuns.$inferSelect.timing,
+  context: Parameters<typeof createAutomationSource>[3],
   id: string = crypto.randomUUID(),
   selectedActions = automation.definition.actions,
 ) {
@@ -38,7 +41,10 @@ export function createAutomationExecution(
     };
     return row;
   });
-  return { definition: automation.definition, run, actions };
+  const source = freeze(
+    createAutomationSource(automation.definition, input, evaluation, context),
+  );
+  return { definition: automation.definition, run, actions, source };
 }
 
 export function summarizeAutomationActions(

@@ -110,6 +110,7 @@ export const agentReceiptChangeSchema = z.discriminatedUnion("kind", [
       { accepted: true },
     ),
   ),
+  change("operation", agentContextDataSchemas.operations.shape.records.element),
   change("observation", agentObservationSchema),
   change("member_sighting", agentSightingSummarySchema),
   change(

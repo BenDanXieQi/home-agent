@@ -2,6 +2,8 @@
 
 `@home-agent/api/action-provenance` 提供命令、来源元数据、供应商材料、分页和诊断 schema。History 复用来源字段，自动化动作只引用命令，不含反馈匹配字段。用法与限制见[家庭运行时](../../docs/household-runtime.md#命令与供应商材料)。
 
+`commandRecordSchema` 只定义 id/source/target/called_at/sent_at/expires_at，列表与详情共用该结构。`commandSourceSchema` 统一校验 human、automation 和 agent 三类来源：用户原文 `request_text`、规则名 `rule_name` 必须非空；触发依据 `trigger_text` 与自主原因 `reason` 可为 null，非 null 时必须非空，不使用默认值。`deviceControlResultSchema` 独立校验控制回执，不写入操作记录。`commandQuerySchema` 仅接受 scope_epoch/start/end/device_id/source/limit/cursor，source 是 executor 分类；材料继续使用原查询契约。接收变化通过 operation 按 ID 比较新增、修订及移出，移出不代表撤销。
+
 `@home-agent/api` 统一约定 Web、backend 与 Agent 交换数据时的字段、类型和错误格式（数据契约），并提供服务端请求校验及错误处理工具。
 
 ## 模块边界
@@ -106,21 +108,22 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 [`src/contracts/agent-context.ts`](src/contracts/agent-context.ts) 从已有家庭、空间、成员、感知与窗口 schema 派生专用推送和历史分支，统一通过 `@home-agent/api/agent-context` 导入。`agentContextPolicy` 定义整理缓存、各部分、待发送内容、单次传输及历史响应的预算；来源语义与验证限制由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。
 
-`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部五部分，后续只提供变化部分；省略表示保留。设备状态在同一连接已有 ready 基线时可发送 `status=delta`：`data.changes` 复用家庭变化契约，包含 `latest/source_health/device_coverage/collection` 的 upsert 或 remove，`data.online` 仅在线列表变化时提供。增量只替换或删除指定条目；其他部分及非增量设备状态整体替换，ready 的空集合清空旧集合。每个连接以最后成功发送的完整状态为基线计算差异；增量比全量大时发送全量。heartbeat 数据为空对象，不改变业务部分或同步状态。Agent 接收器使用 `@home-agent/api/agent-context/merge` 的不可变增量合并、整部分替换规则，连接重试由接收适配器维护。Web 数据页通过只读代理查看 Agent 接收记录。
+`GET /api/agent/context/stream` 使用 `snapshot` 与 `heartbeat` 事件。snapshot 固定为 `{ scope, parts }`，scope 为 null 或 `{ account_id, home_id, scope_epoch }`；运行标识只用于接收适配器核对资格。初始快照提供全部六部分，后续只提供变化部分；省略表示保留。设备状态在同一连接已有 ready 基线时可发送 `status=delta`：`data.changes` 复用家庭变化契约，包含 `latest/source_health/device_coverage/collection` 的 upsert 或 remove，`data.online` 仅在线列表变化时提供。增量只替换或删除指定条目；其他部分及非增量设备状态整体替换，ready 的空集合清空旧集合。每个连接以最后成功发送的完整状态为基线计算差异；增量比全量大时发送全量。heartbeat 数据为空对象，不改变业务部分或同步状态。Agent 接收器使用 `@home-agent/api/agent-context/merge` 的不可变增量合并、整部分替换规则，连接重试由接收适配器维护。Web 数据页通过只读代理查看 Agent 接收记录。
 
-| 部分           | data 来源                                        |
-| -------------- | ------------------------------------------------ |
-| `household`    | 家庭、房间、设备及完整规格                       |
-| `spatial`      | 空间、通道和观测绑定（包含停用记录）             |
-| `device_state` | 最新属性报告、设备在线值、采集与来源状态         |
-| `members`      | 人物／宠物登记资料                               |
-| `observations` | 统一观察索引、成员记录和音视频窗口引用、来源状态 |
+| 部分           | data 来源                                                                         |
+| -------------- | --------------------------------------------------------------------------------- |
+| `household`    | 家庭、房间、设备及完整规格                                                        |
+| `spatial`      | 空间、通道和观测绑定（包含停用记录）                                              |
+| `device_state` | 最新属性报告、设备在线值、采集与来源状态                                          |
+| `members`      | 人物／宠物登记资料                                                                |
+| `observations` | 统一观察索引、成员记录和音视频窗口引用、来源状态                                  |
+| `operations`   | 近期六字段操作记录与 complete_audit:false；最多 30 分钟／100 条／整个部分 256 KiB |
 
 `device_state.data.latest` 只包含属性身份、值、来源证据、质量及时间，不重复家庭／房间、规格 ID、描述、类型、可读性和单位。静态信息由 `household.data.device/specs` 提供，规格中的属性键为 `prop.<siid>.<piid>`；设备的房间归属由设备清单提供。动态属性 schema 从已有属性 schema 派生。
 
 `observations.data` 包含 `as_of/records/member_sightings/sources`；`as_of` 为整理时间。每位成员保留最后出现，同一时刻保留并列来源，不因超过 30 分钟而清空；未知身份按设备与镜头保留最新出现。窗口线索在来源仍保留的最近材料中按摄像头／镜头和类型保留最后一条，重复窗口合并，历史通过专用接口查询。`member_sightings` 每条保存材料 ID、观察起止时间、设备与镜头、主机接收时间依据及当前轻量身份归属（成员、候选／确认／推断状态和修订号），不含身份图片或特征证据；身份撤回标记 unknown。每条观察的 `source` 保存设备与镜头。每条窗口观察使用 `window_id` 引用唯一窗口，使用 `member_sighting_ids` 引用关联成员记录；统一快照不嵌入成员记录正文、检测帧、转写或完整窗口详情。`POST /api/agent/context/material` 使用 `agentMaterialQuerySchema` 的 `{ scope, kind, id }` 按需解析单个引用；`agentMaterialResponseSchema` 返回当前成员记录或窗口详情，过期／移除返回 404，读取结果不合并进统一快照；等待期间可响应取消和请求截止时间，结果返回前仍核验家庭资格。没有可关联窗口的成员记录形成 `window_id=null` 的独立出现观察。`reasons` 表示窗口选取依据，不是事件结论或说话人归因；窗口级声音和变化线索不复制到各成员的出现观察上。关联规则由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。`sources.member_sightings/perception` 分别包含 `status/read_at/reason/truncated`，表示独立读取与重试状态；统一部分 ready 不表示来源全部成功。交付不调用模型或生成媒体。
 
-合并后的每部分包含 `status/read_at/data/reason/truncated`。设备增量消息包含 `status=delta/read_at/data/truncated=false`，不作为独立上下文部分保存；缺少当前家庭的 ready 基线时拒绝增量并重新连接。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。当前交付不裁剪记录，truncated 为 false；时间范围和材料保留不证明历史完整。近期成员投影按 `lastObservedAt/id` 降序读取，统一观察按 `endedAt/id` 降序交付。任一部分超出发布容量时报告失败，不交付静默裁剪的集合。
+合并后的每部分包含 `status/read_at/data/reason/truncated`。设备增量消息包含 `status=delta/read_at/data/truncated=false`，不作为独立上下文部分保存；缺少当前家庭的 ready 基线时拒绝增量并重新连接。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。operations 超出条数或字节上限时交付完整记录前缀并标 truncated，其他部分不裁剪记录；时间范围和材料保留不证明历史完整。近期成员投影按 `lastObservedAt/id` 降序读取，统一观察按 `endedAt/id` 降序交付。operations 首条无法容纳或其他部分超出发布容量时报告失败。
 
 历史 `POST /api/agent/context/history` 的输入和响应均按 kind 定义判别联合，各分支只接受自己的字段。公共输入为预期绑定 `account_id/home_id`、UTC 半开区间 `start/end`、`limit/cursor`，默认每页 100 条、上限 1,000 条。`member_sightings` 可选 `member_ids` 和 `sources`，`perception_windows` 可选 `sources`；sources 为 `{ device_id, channel? }` 数组，镜头值复用已有窗口 schema，省略 channel 匹配该设备全部镜头。筛选数组省略表示不筛选，显式空数组拒绝；对象去重并固定排序。
 

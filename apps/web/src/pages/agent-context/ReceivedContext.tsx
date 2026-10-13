@@ -81,7 +81,8 @@ export function ReceivedContext({
         <>
           <p className="text-xs leading-6 text-muted">
             展示设备最新属性、成员资料与最后出现，以及各摄像头的最新线索。最后出现可能早于
-            30 分钟，不代表当前位置。
+            30 分钟，不代表当前位置。近期操作保留最近 30 分钟内最多 100
+            条记录及完整参数，不是完整审计；发送开始不代表设备生效。点击“获取最新上下文”更新展示。
           </p>
           <JsonData
             key={name}

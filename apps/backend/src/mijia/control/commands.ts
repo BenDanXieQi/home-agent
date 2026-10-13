@@ -18,6 +18,7 @@ type CommandContext = {
   accountKey: string;
   signal: AbortSignal;
   assertCurrent: () => void;
+  onSendStarted: (at: string) => void;
   specification: (did: string) => MijiaDeviceSpec;
   authenticationRejected: () => void;
 };
@@ -169,7 +170,10 @@ export class MijiaCommands {
             preflight.error = error;
             throw error;
           }
-          sentAt = startedAt;
+          if (sentAt === null) {
+            sentAt = startedAt;
+            context.onSendStarted(startedAt);
+          }
         });
         return {
           response,

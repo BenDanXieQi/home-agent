@@ -268,7 +268,10 @@ export function createAutomationService(deps: {
       };
       actions.schedule(
         current,
-        createAutomationExecution(row, input, result.evaluation, timing),
+        createAutomationExecution(row, input, result.evaluation, timing, {
+          devices: snapshot.projection.device,
+          specs: deps.household.specifications(),
+        }),
       );
     } catch (error) {
       onFailure(error);

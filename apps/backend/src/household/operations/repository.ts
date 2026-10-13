@@ -1,16 +1,19 @@
+import { agentContextPolicy } from "@home-agent/api/agent-context";
 import { recordPruneBatchSize } from "../records/retention";
 import { provenanceQueryHash } from "../records/query";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   commandRecordSchema,
-  commandSummarySchema,
   provenancePolicy,
   commandQueryResponseSchema,
-  type provenanceQuerySchema,
+  type commandQuerySchema,
 } from "@home-agent/api/action-provenance";
 import type { Database } from "../../db";
 import { deviceCommands } from "../../db/schema";
-import { createHouseholdBindingAccess } from "../binding-repository";
+import {
+  createHouseholdBindingAccess,
+  createHouseholdBindingRead,
+} from "../binding-repository";
 import type { accessHousehold } from "../access";
 import { jsonBytes } from "../config";
 import { HouseholdError } from "../errors";
@@ -21,81 +24,107 @@ type Scope = Pick<
 >;
 export function createCommandRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
+  const read = createHouseholdBindingRead(db);
   const table = deviceCommands;
-  const ownership = (scope: Scope) =>
-    and(
-      eq(table.accountId, scope.identity.accountId),
-      eq(table.homeId, scope.identity.homeId),
-      sql`${table.expiresAt} > now()`,
-    );
+  const listeners = new Set<() => void>();
   return {
-    async recordCommand(input: ReturnType<typeof commandRecordSchema.parse>) {
+    async recordCommand(
+      scope: Scope,
+      input: ReturnType<typeof commandRecordSchema.parse>,
+    ) {
       const data = commandRecordSchema.parse(input);
       if (jsonBytes(data) > provenancePolicy.recordBytes)
         throw new HouseholdError("capacity_exceeded");
-      // Binding ownership remains necessary after dispatch; epoch changes alone do not erase the snapshot.
-      await access(
-        { accountId: data.account_id, homeId: data.home_id },
-        () => {},
-        async (tx) => {
-          await tx
-            .insert(table)
-            .values({
-              id: data.id,
-              accountId: data.account_id,
-              homeId: data.home_id,
-              deviceId: data.target.device_id,
-              calledAt: new Date(data.called_at),
-              expiresAt: new Date(data.expires_at),
-              data,
-            })
-            .onConflictDoNothing();
-        },
-      );
+      await access(scope.identity, scope.assertCurrent, async (tx) => {
+        await tx
+          .insert(table)
+          .values({
+            id: data.id,
+            deviceId: data.target.device_id,
+            calledAt: new Date(data.called_at),
+            expiresAt: new Date(data.expires_at),
+            data,
+          })
+          .onConflictDoNothing();
+      });
+      for (const listener of listeners) {
+        try {
+          listener();
+        } catch (error) {
+          console.error("Command subscriber failed", error);
+        }
+      }
     },
-    async queryCommands(
-      scope: Scope,
-      input: ReturnType<typeof provenanceQuerySchema.parse>,
-    ) {
-      const queryHash = provenanceQueryHash("commands", scope, input);
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    async readRecentCommands(scope: Scope, asOf: Date) {
       return access(scope.identity, scope.assertCurrent, async (tx) => {
         const rows = await tx
-          .select({
-            data: sql<unknown>`(${table.data} - 'response' - 'output' - 'message' - 'error') || jsonb_build_object('target', (${table.data}->'target') - 'value' - 'inputs')`,
-          })
+          .select({ data: table.data })
           .from(table)
           .where(
             and(
-              ownership(scope),
-              sql`${table.calledAt} >= ${input.start}::timestamptz`,
-              sql`${table.calledAt} < ${input.end}::timestamptz`,
-              input.device_id ? eq(table.deviceId, input.device_id) : undefined,
-              input.source
-                ? sql`${table.data}->'source'->>'entrypoint' = ${input.source}`
-                : undefined,
-              input.cursor
-                ? sql`(${table.calledAt}, ${table.id}) > (${input.cursor.at}::timestamptz, ${input.cursor.id}::uuid)`
-                : undefined,
+              sql`${table.expiresAt} > ${asOf.toISOString()}::timestamptz`,
+              sql`${table.calledAt} > ${new Date(asOf.getTime() - agentContextPolicy.recentOperationMs).toISOString()}::timestamptz`,
+              sql`${table.calledAt} <= ${asOf.toISOString()}::timestamptz`,
             ),
           )
-          .orderBy(table.calledAt, table.id)
-          .limit(input.limit + 1);
-        const records: ReturnType<typeof commandSummarySchema.parse>[] = [];
+          .orderBy(desc(table.calledAt), desc(table.id))
+          .limit(agentContextPolicy.recentOperationLimit + 1);
+        return rows.map((row) => commandRecordSchema.parse(row.data));
+      });
+    },
+    async queryCommands(
+      scope: Scope,
+      input: ReturnType<typeof commandQuerySchema.parse>,
+    ) {
+      const queryHash = provenanceQueryHash("commands", scope, input);
+      return read(scope.identity, scope.assertCurrent, async (tx) => {
+        const query = tx`
+          select data from device_commands
+          where expires_at > now()
+            and called_at >= ${input.start}::timestamptz
+            and called_at < ${input.end}::timestamptz
+            ${input.device_id ? tx`and device_id = ${input.device_id}` : tx``}
+            ${input.source ? tx`and data->'source'->>'executor' = ${input.source}` : tx``}
+            ${input.cursor ? tx`and (called_at, id) > (${input.cursor.at}::timestamptz, ${input.cursor.id}::uuid)` : tx``}
+          order by called_at, id
+          limit ${input.limit + 1}
+        `;
+        const records: ReturnType<typeof commandRecordSchema.parse>[] = [];
         let bytes = 512;
-        for (const row of rows.slice(0, input.limit)) {
-          const record = commandSummarySchema.parse(row.data);
-          const size = jsonBytes(record) + 1;
-          if (bytes + size > provenancePolicy.responseBytes) break;
-          records.push(record);
-          bytes += size;
+        let more = false;
+        // Full command bodies can be 64 KiB each. Stop the native cursor as
+        // soon as the page is full instead of buffering up to 1001 bodies.
+        for await (const rows of query.cursor(16)) {
+          scope.assertCurrent();
+          for (const row of rows) {
+            if (records.length === input.limit) {
+              more = true;
+              break;
+            }
+            const record = commandRecordSchema.parse(row.data);
+            const size = jsonBytes(record) + 1;
+            if (bytes + size > provenancePolicy.responseBytes) {
+              if (!records.length)
+                throw new HouseholdError("capacity_exceeded");
+              more = true;
+              break;
+            }
+            records.push(record);
+            bytes += size;
+          }
+          if (more) break;
         }
-        if (rows.length && !records.length)
-          throw new HouseholdError("capacity_exceeded");
         const last = records.at(-1);
         return commandQueryResponseSchema.parse({
           records,
           next_cursor:
-            last && rows.length > records.length
+            last && more
               ? { at: last.called_at, id: last.id, query_hash: queryHash }
               : null,
           complete_audit: false,
@@ -107,7 +136,7 @@ export function createCommandRepository(db: Database) {
         const [row] = await tx
           .select()
           .from(table)
-          .where(and(ownership(scope), eq(table.id, id)))
+          .where(and(sql`${table.expiresAt} > now()`, eq(table.id, id)))
           .limit(1);
         return row ? commandRecordSchema.parse(row.data) : null;
       });

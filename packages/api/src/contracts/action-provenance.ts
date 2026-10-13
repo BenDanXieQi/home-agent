@@ -42,23 +42,24 @@ export const sourceMetadataSchema = z.object({
   completeness: z.enum(["received_fields", "omitted", "partial"]),
   limitations: z.array(z.string()),
 });
-export const commandSourceSchema = z
-  .object({
-    entrypoint: identity,
-    executor: z.enum(["automation", "agent", "human", "unknown"]),
-    initiator: z.enum(["human", "unknown"]).default("unknown"),
-    user_request_id: identity.nullable().default(null),
-    rule_id: z.uuid().nullable().default(null),
-    rule_revision: z.number().int().positive().nullable().default(null),
-    run_id: identity.nullable().default(null),
-    action_id: identity.nullable().default(null),
-    agent_run_id: identity.nullable().default(null),
-    tool_call_id: identity.nullable().default(null),
-  })
-  .refine(
-    (value) => value.initiator !== "human" || value.user_request_id !== null,
-    { message: "Human delegation requires an explicit request reference" },
-  );
+const businessText = z
+  .string()
+  .refine((value) => value.trim().length > 0, "Expected nonempty text");
+export const commandSourceSchema = z.discriminatedUnion("executor", [
+  z.strictObject({
+    executor: z.literal("human"),
+    request_text: businessText,
+  }),
+  z.strictObject({
+    executor: z.literal("automation"),
+    rule_name: businessText,
+    trigger_text: businessText.nullable(),
+  }),
+  z.strictObject({
+    executor: z.literal("agent"),
+    reason: businessText.nullable(),
+  }),
+]);
 export const commandTargetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("property"),
@@ -75,14 +76,7 @@ export const commandTargetSchema = z.discriminatedUnion("kind", [
     inputs: z.array(deviceValueSchema),
   }),
 ]);
-export const commandRecordSchema = z.object({
-  id: z.uuid(),
-  parent_request_id: identity,
-  account_id: identity,
-  home_id: identity,
-  source: commandSourceSchema,
-  target: commandTargetSchema,
-  called_at: z.iso.datetime(),
+export const deviceControlResultSchema = z.object({
   sent_at: z.iso.datetime().nullable(),
   received_at: z.iso.datetime().nullable(),
   outcome: z.enum([
@@ -93,19 +87,19 @@ export const commandRecordSchema = z.object({
     "preflight_failed",
   ]),
   provider_code: z.number().int().nullable(),
-  endpoint: z.string(),
   response_matches: z.number().int().nonnegative(),
-  device_snapshot: z.object({
-    name: z.string().nullable(),
-    model: z.string().nullable(),
-    specification: z.string().nullable(),
-    room_id: z.string().nullable(),
-  }),
   message: z.string().nullable(),
   output: z.unknown(),
   response: z.unknown(),
   error: z.unknown(),
   completeness: z.enum(["received_fields", "partial", "omitted"]),
+});
+export const commandRecordSchema = z.strictObject({
+  id: z.uuid(),
+  source: commandSourceSchema,
+  target: commandTargetSchema,
+  called_at: z.iso.datetime(),
+  sent_at: z.iso.datetime().nullable(),
   expires_at: z.iso.datetime(),
 });
 export const materialTopicSchema = z.enum([
@@ -279,16 +273,27 @@ export const materialQueryResponseSchema = z.object({
   time_basis: provenanceQuerySchema.shape.time_basis,
   complete_history: z.literal(false),
 });
-export const commandSummarySchema = commandRecordSchema
-  .omit({ response: true, output: true, message: true, error: true })
-  .extend({
-    target: z.discriminatedUnion("kind", [
-      commandTargetSchema.options[0].omit({ value: true }),
-      commandTargetSchema.options[1].omit({ inputs: true }),
-    ]),
+export const commandQuerySchema = z
+  .strictObject({
+    scope_epoch: provenanceQuerySchema.shape.scope_epoch,
+    start: provenanceQuerySchema.shape.start,
+    end: provenanceQuerySchema.shape.end,
+    device_id: provenanceQuerySchema.shape.device_id,
+    limit: provenanceQuerySchema.shape.limit,
+    cursor: provenanceQuerySchema.shape.cursor,
+    source: z
+      .enum(
+        commandSourceSchema.options.map(
+          (option) => option.shape.executor.value,
+        ),
+      )
+      .optional(),
+  })
+  .refine((input) => input.start < input.end, {
+    message: "start must precede end",
   });
 export const commandQueryResponseSchema = z.object({
-  records: z.array(commandSummarySchema),
-  next_cursor: provenanceQuerySchema.shape.cursor.unwrap().nullable(),
+  records: z.array(commandRecordSchema),
+  next_cursor: commandQuerySchema.shape.cursor.unwrap().nullable(),
   complete_audit: z.literal(false),
 });

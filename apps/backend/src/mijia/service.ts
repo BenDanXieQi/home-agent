@@ -674,11 +674,13 @@ export class MijiaService {
     properties: Parameters<MiCloud["writeProperties"]>[0],
     signal: AbortSignal,
     assertCurrent: () => void,
+    onSendStarted: (at: string) => void,
   ) {
     const context = this.commandContext(
       properties.map(({ did }) => did),
       signal,
       assertCurrent,
+      onSendStarted,
     );
     return this.commands.writeProperties(properties, context);
   }
@@ -687,10 +689,11 @@ export class MijiaService {
     action: Parameters<MiCloud["invokeAction"]>[0],
     signal: AbortSignal,
     assertCurrent: () => void,
+    onSendStarted: (at: string) => void,
   ) {
     return this.commands.invokeAction(
       action,
-      this.commandContext([action.did], signal, assertCurrent),
+      this.commandContext([action.did], signal, assertCurrent, onSendStarted),
     );
   }
 
@@ -698,6 +701,7 @@ export class MijiaService {
     deviceIds: readonly string[],
     signal: AbortSignal,
     assertCallerCurrent: () => void,
+    onSendStarted: (at: string) => void,
   ) {
     signal.throwIfAborted();
     assertCallerCurrent();
@@ -753,6 +757,7 @@ export class MijiaService {
     };
     assertCurrent();
     return {
+      onSendStarted,
       client,
       accountKey: this.accountKey(client),
       signal: combined,

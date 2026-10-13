@@ -232,6 +232,7 @@ const spatialService = createSpatialService(spatialRepository, (scope) => {
     : [];
 });
 const agentContext = createAgentContextService({
+  commands,
   household,
   members: memberRepository,
   spatial: spatialRepository,

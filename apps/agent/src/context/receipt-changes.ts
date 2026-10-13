@@ -162,6 +162,28 @@ export function receiptChanges(
         after: current,
       });
   }
+  const operations = input.message.data.parts.operations;
+  if (operations?.status === "ready") {
+    const old = before?.operations;
+    const records = new Map(
+      old?.status === "ready"
+        ? old.data.records.map((record) => [record.id, record])
+        : [],
+    );
+    for (const next of operations.data.records) {
+      const prior = records.get(next.id);
+      records.delete(next.id);
+      if (!isDeepStrictEqual(prior, next))
+        changes.push({
+          kind: "operation",
+          key: next.id,
+          before: prior ?? null,
+          after: next,
+        });
+    }
+    for (const [key, prior] of records)
+      changes.push({ kind: "operation", key, before: prior, after: null });
+  }
   const observations = input.message.data.parts.observations;
   if (observations?.status === "ready") {
     const old = before?.observations;
@@ -393,10 +415,16 @@ export function receiptChanges(
     "device_state",
     "members",
     "observations",
+    "operations",
   ] as const) {
     const next = input.message.data.parts[key];
     const old = before?.[key];
-    if (next && next.status !== "ready" && next.status !== "delta")
+    if (
+      next &&
+      next.status !== "delta" &&
+      (next.status !== "ready" ||
+        (key === "operations" && old?.status !== "ready"))
+    )
       changes.push({
         kind: "availability",
         key,

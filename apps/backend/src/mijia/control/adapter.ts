@@ -1,12 +1,9 @@
 import type { DeviceControl } from "../../household/operations/control";
 import type { MijiaService } from "../service";
-import { safeMijiaError } from "../errors";
 
 export function createMijiaDeviceControl(service: MijiaService) {
   return {
-    endpoint: (target) =>
-      target.kind === "property" ? "/miotspec/prop/set" : "/miotspec/action",
-    dispatch: async (target, signal, assertCurrent) => {
+    dispatch: async (target, signal, assertCurrent, onSendStarted) => {
       if (target.kind === "property") {
         const results = await service.writeProperties(
           [
@@ -19,6 +16,7 @@ export function createMijiaDeviceControl(service: MijiaService) {
           ],
           signal,
           assertCurrent,
+          onSendStarted,
         );
         return results[0]!;
       }
@@ -31,8 +29,8 @@ export function createMijiaDeviceControl(service: MijiaService) {
         },
         signal,
         assertCurrent,
+        onSendStarted,
       );
     },
-    failure: (error) => safeMijiaError(error).toPayload(),
   } satisfies DeviceControl;
 }

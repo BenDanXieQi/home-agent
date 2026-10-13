@@ -24,6 +24,7 @@
     "check-types": "turbo run check-types check-types:root",
     "check": "bun run format:check && bun run lint && bun run check-types",
     "test": "turbo run test",
+    "db:init": "bun scripts/services.ts initialize",
     "db:migrate": "bun scripts/services.ts migrate",
     "stop": "bun scripts/services.ts stop",
     "status": "bun scripts/services.ts status",

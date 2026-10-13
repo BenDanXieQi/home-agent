@@ -634,8 +634,6 @@ export const deviceCommands = pgTable(
   "device_commands",
   {
     id: uuid("id").primaryKey(),
-    accountId: text("account_id").notNull(),
-    homeId: text("home_id").notNull(),
     deviceId: text("device_id").notNull(),
     calledAt: timestamp("called_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -648,12 +646,7 @@ export const deviceCommands = pgTable(
       .notNull(),
   },
   (table) => [
-    index("device_commands_household_time_idx").on(
-      table.accountId,
-      table.homeId,
-      table.calledAt,
-      table.id,
-    ),
+    index("device_commands_time_idx").on(table.calledAt, table.id),
     index("device_commands_device_time_idx").on(
       table.deviceId,
       table.calledAt,
