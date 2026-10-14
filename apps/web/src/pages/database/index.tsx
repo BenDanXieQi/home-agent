@@ -71,7 +71,10 @@ function DataBrowser({ scope }: { scope: string }) {
     columns,
     getRowId: rowKey,
     getRowCanExpand: () => true,
-    state: { expanded: selectedKey ? { [selectedKey]: true } : {} },
+    state: {
+      columnVisibility: { sourceKey: false },
+      expanded: selectedKey ? { [selectedKey]: true } : {},
+    },
     getCoreRowModel: getCoreRowModel(),
   });
   // oxlint-disable-next-line react/incompatible-library -- Read TanStack Table state directly.
