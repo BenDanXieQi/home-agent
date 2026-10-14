@@ -1,10 +1,10 @@
 # Agent
 
-基于 pi-durable 的最简家庭助手服务，入口为 `src/assistant.ts`，应用内运行器位于 `src/runtime/`。Hono 定义内部 HTTP 路由，由 `Bun.serve()` 承载；backend 转发请求，Web `/agent` 提供单次问答。
+基于 pi-durable 的常驻家庭助手服务，入口为 `src/assistant.ts`，Harness、工具注册、委派和本地环境均在同一文件中装配。Hono 定义内部 HTTP 路由，由 `Bun.serve()` 承载；backend 转发请求，Web `/agent` 向同一个主会话提交消息。
 
 ## 运行
 
-根目录 `.env` 配置原生 `AGENT_PROVIDER`、`AGENT_MODEL`、`OPENAI_API_KEY`。`AGENT_PROVIDER` 默认 `openai`；MiMo 中国区套餐使用 `xiaomi-token-plan-cn`。模型必须支持工具调用；模型的容量、输入能力和协议取自 pi-ai 原生清单，清单外模型须明确提供元数据。端点覆盖和 `AGENT_THINKING` 见[共享配置](../../packages/configuration/README.md)，backend 的语音判断也读取这些配置。两个应用在启动入口直接调用 `@earendil-works/pi-ai` 的 `createModels()` 和 `createProvider()`，注册原生模型及服务提供者。
+根目录 `.env` 配置原生 `AGENT_PROVIDER`、`AGENT_MODEL`、`OPENAI_API_KEY`。`AGENT_PROVIDER` 默认 `openai`；MiMo 中国区套餐使用 `xiaomi-token-plan-cn`。模型必须支持工具调用；模型的容量、输入能力和协议取自 pi-ai 原生清单，清单外模型须明确提供元数据。端点覆盖和 `AGENT_THINKING` 见[模型配置](#模型配置)。Agent 在启动入口调用 `@earendil-works/pi-ai` 的 `createModels()` 和 `createProvider()`，注册模型及服务提供者；Backend 通过 workflow 请求语音判断，不直接读取模型配置。
 
 ```sh
 bun install
@@ -15,17 +15,19 @@ bun run --cwd apps/agent dev
 
 ## 接口
 
-`POST /api/workflows` 是 Backend 调用专项任务的统一内部入口，复用当前进程、本机访问校验和错误格式。当前支持 `workflow="automation-generation"`，请求为 `{ workflow, input: { text, definition?, capabilities } }`；`definition` 为可选的现有规则，`capabilities` 为调用方准备的设备能力。响应为 `{ workflow, result: { definition, behavior, clarifications } }`。存在歧义或生成内容未通过校验时，`definition` 为 null，调用方展示说明或澄清问题，不能当作已生成的有效规则。
+`POST /api/workflows` 是 Backend 调用专项任务的统一内部入口，复用当前进程、本机访问校验和错误格式。自动化生成使用 `workflow="automation-generation"`，请求为 `{ workflow, input: { text, definition?, capabilities } }`；`definition` 为可选的现有规则，`capabilities` 为调用方准备的设备能力。响应为 `{ workflow, result: { definition, behavior, clarifications } }`。存在歧义或生成内容未通过校验时，`definition` 为 null，调用方展示说明或澄清问题，不能当作已生成的有效规则。
 
-生成能力位于 `src/workflows/automation-generation/`，直接使用 pi-ai `Models.complete()` 执行一次严格工具输出请求；规则结构、设备引用、读写权限、枚举及动作参数按 `@home-agent/api/automations` 校验。输入中的能力用于约束草稿，不构成设备操作授权；保存或执行前仍需 Backend 核验当前家庭及设备能力。它不保存或启用规则、不操作设备、不使用聊天历史或 Agent 数据库。
+生成能力位于 `src/workflows/automation-generation.ts`，直接使用 pi-ai `Models.complete()` 执行一次严格工具输出请求；规则结构、设备引用、读写权限、枚举及动作参数按 `@home-agent/api/automations` 校验。输入中的能力用于约束草稿，不构成设备操作授权；保存或执行前仍需 Backend 核验当前家庭及设备能力。它不保存或启用规则、不操作设备、不使用聊天历史或 Agent 数据库。
 
-入口请求上限 256 KiB，响应上限 128 KiB，同时执行一项 workflow，繁忙返回 `workflow_busy`；运行期限取 `AGENT_RUN_TIMEOUT_MS` 与 90 秒的较小值，取消和超时传递到模型调用，结束后释放执行名额。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，接收 Hono 入口已校验的输入，负责并发名额、执行期限和结果边界；专项模块不另建 HTTP 或客户端层。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实家庭场景的规则生成质量尚未系统验证。
+入口请求上限 256 KiB，响应上限 128 KiB，同类 workflow 同时执行一项，繁忙返回 `workflow_busy`；运行期限取 `AGENT_RUN_TIMEOUT_MS` 与 90 秒的较小值，取消和超时传递到模型调用，结束后释放执行名额。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，接收 Hono 入口已校验的输入，负责并发名额、执行期限和结果边界；专项模块不另建 HTTP 或客户端层。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实家庭场景的规则生成质量尚未系统验证。
 
-进程复用 `@home-agent/observability` 初始化 OpenTelemetry。HTTP 入口通过共用的 Hono 追踪中间件接续 Backend 的 W3C 追踪上下文，生成调用记录 `automation.generate` span、耗时、草稿校验结果及供应商返回的输入／输出 token 用量。默认不采集正文；`OTEL_INCLUDE_CONTENT=true` 时才记录输入资料和生成结果，导出方式沿用[共享追踪配置](../../packages/observability/README.md)。供应商没有返回用量时不估算 token 数。聊天入口具有 HTTP span，pi-ai 模型调用和 pi-durable 工具执行也记录独立 span；直接导出使用 Langfuse。关闭时停止请求并关闭 exporter。
+进程复用 `@home-agent/observability` 初始化 OpenTelemetry。HTTP 入口通过共用的 Hono 追踪中间件接续 Backend 的 W3C 追踪上下文，生成调用记录 `automation.generate` span、耗时、草稿校验结果及供应商返回的输入／输出 token 用量。默认不采集正文；`OTEL_INCLUDE_CONTENT=true` 时才记录输入资料和生成结果，导出方式沿用[共享追踪配置](../../packages/observability/README.md)。供应商没有返回用量时不估算 token 数。聊天入口具有 HTTP 和等待 span；pi-ai 模型调用与 pi-durable 工具执行使用独立 trace，并按运行器唯一的 Langfuse Session 关联，避免排队任务继承旧请求上下文。直接导出使用 Langfuse。关闭时停止请求并关闭 exporter。
 
 `GET /health` 返回服务状态和 `modelConfigured`；配置存在不表示供应商调用成功。
 
 `POST /api/chat` 接受 `{ "message": "你好" }`，完成后返回 `{ "answer": "…" }`。Web 通过 backend 的同名接口访问。输入只接受 `message`，最多 16,000 字符、请求体最多 32 KiB；响应文字最多 65,536 字符。使用普通 JSON，不提供 SSE、thread ID 或历史接口。
+
+所有聊天请求复用当前进程内同一个主会话和工作目录。忙碌时由 pi-durable 默认 follow-up 收件箱排队，前端仍只展示本次回答。刷新页面不清空服务端会话；重启后清空。当前主会话没有按账号、家庭或浏览器隔离。
 
 独立接收模块自动订阅 Backend 当前家庭、空间关系、设备状态、成员和统一观察，并通过只读客户端查询实际保留的历史。家庭助手的模型尚未接入这些材料或家庭业务工具，不能安排提醒或控制设备；没有改变现有聊天输入及模型行为。数据来源、保留与验证限制见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。
 
@@ -35,13 +37,19 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 ## 运行器与工具
 
-`src/runtime/index.ts` 的 `createAgentRuntime(models, model, options)` 接收 pi-ai 原生 `Models`、`Model`、执行预算、指令和可选领域工具，供家庭助手与空间规划使用。返回实例的 `run(input, signal)` 接受文字或 pi-ai 原生文本／图像内容块，输出必须是完整、非空的最终文字回答；未完成的工具调用、截断、错误和取消结果不会作为成功回答返回。
+`assistant.ts` 按官方 [26-coding-agent](https://github.com/earendil-works/pi/blob/main/packages/durable/test/examples/26-coding-agent.ts) 与 [22-subagent-foreground](https://github.com/earendil-works/pi/blob/main/packages/durable/test/examples/22-subagent-foreground.ts) 的单文件组织方式，直接定义委派扩展、注册工具、创建 `NodeExecutionEnv`，调用 `Harness.open()` 并取得 `root`。没有自定义运行器类或目录。配置解析、HTTP 路由和家庭资料接收是本项目的服务代码，不是官方示例提供的目录结构。
 
-每次 `run` 独立打开 pi-durable `Harness`（负责模型回合、工具调用和会话状态的运行器），使用 `MemoryStorage` 保存本次会话状态，并用 Node `mkdtemp()` 创建临时工作目录，交给官方 `NodeExecutionEnv`。主助手与前台委派助手继承同一工作目录，结束后停止任务、关闭 Harness、清理环境中的子进程并删除自有工作目录。请求之间不共享对话或工作文件，不保留可重启恢复的会话状态。自动摘要使用框架默认策略。
+`createAssistant(models, model, options)` 返回原生 `root`、观测用的 `sessionId` 和资源关闭函数。`chat.ts` 直接执行 `root.submit()`、`submission.wait()` 和 `root.commit()`，从 `AssistantEntry` 读取回答。主助手与子助手共用本文件的最终文字校验，拒绝工具调用未完成、截断、错误或空白答案。
 
-`AGENT_RUN_TIMEOUT_MS` 默认 120,000；模型不自动重试，单次模型输出由 `AGENT_MAX_OUTPUT_TOKENS` 限制，默认 4096。每次运行默认最多发起 30 次模型请求，主助手、委派助手和自动摘要共用此预算。输出和请求次数限制通过 pi-ai 原生 Provider 的薄装饰传入，Harness 的 `settings.stream` 不提供这两个字段。外部取消或总超时后进入 `finally`；官方 `harness.close()` 停止并等待正在执行的任务，再释放本次内存会话。
+一个助手实例使用 `MemoryStorage`、一个主会话和临时工作目录。`main.ts` 在监听 HTTP 前创建实例；后续消息复用同一原生会话。退出时 `close()` 先关闭 Harness，再清理执行环境与工作目录；重复关闭复用同一 Promise，初始化失败也释放已创建资源。
 
-运行器提供以下工具；调用方传入的领域工具也可供委派助手使用。当前聊天没有注册家庭业务工具、专用子 agent 或技能。
+上下文自动压缩沿用框架默认策略；原始内存记录仍随历史增长，没有磁盘会话存储或重启恢复，长期资源占用与摘要质量尚未验证。现有家庭接收器独立运行，尚未接入模型事件唤醒或定期检查。
+
+`AGENT_RUN_TIMEOUT_MS` 默认 120,000，分别限制单次模型请求、每次工具执行和 HTTP 等待，不限制主会话寿命或整个多回合任务。工具执行通过 Chord Context 的 AbortSignal 接收期限；官方 `bash` 即使省略命令 timeout 也受该期限约束，模型提供更短的命令 timeout 时仍生效。前台委派超时会令工具失败，由框架取消其拥有的子会话工作。注入的领域工具必须响应取消信号；忽略信号的工具不能被强制中止。单次模型输出由 `AGENT_MAX_OUTPUT_TOKENS` 限制，默认 4096；模型请求不自动重试，应用不累计限制主会话的请求次数。
+
+按[官方会话与取消语义](https://github.com/earendil-works/pi/tree/main/packages/durable#busy-conversations)，取消或超时结束本次等待，并尝试用 `submission.abort()` 撤回仍排队的输入。已开始处理的输入继续运行，不调用整个主会话的 `abort()`；结果保留在会话中，当前没有历史接口供网页补取。`close()` 由实例所有者在退出时调用。
+
+家庭助手在 registry 中注册以下工具；子会话继承父会话启用的工具并移除委派扩展。当前聊天没有注册家庭业务工具、专用子 agent 或技能。
 
 | 工具       | 行为                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -53,34 +61,31 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 `read/write/edit/bash` 直接来自官方 `CodingTools`，参数、文件并发处理和输出截断均使用 SDK 实现。前台委派使用任务所有权索引复用子会话，并用 `requestId` 保证同一工具任务的提交幂等。相关接口见[官方工具与环境](https://github.com/earendil-works/pi/blob/v1.2.0/packages/durable/README.md#tools)和[前台 subagent 示例](https://github.com/earendil-works/pi/blob/main/packages/durable/test/examples/22-subagent-foreground.ts)。
 
-`NodeExecutionEnv` 访问宿主文件系统并执行宿主命令，临时工作目录不是沙箱，不限制绝对路径或 `../`。本服务只用于可信本机请求；需要隔离时应使用独立的执行环境。官方 `bash` 超限时生成的完整输出文件位于系统临时目录，不随本次工作目录删除，运行期间没有磁盘字节配额。
+`NodeExecutionEnv` 访问宿主文件系统并执行宿主命令，临时工作目录不是沙箱，不限制绝对路径或 `../`。本服务只用于可信本机请求；需要隔离时应使用独立的执行环境。官方 `bash` 超限时生成的完整输出文件位于系统临时目录，不随实例工作目录删除，运行期间没有磁盘字节配额。
 
 ## 代码职责
 
-- `assistant.ts`：家庭助手模型、专项指令与应用内 pi-durable 运行器的装配。
-- `runtime/index.ts`：家庭助手与空间规划的执行预算、运行及工具观测、运行器创建和关闭。
-- `runtime/answer.ts`：完整最终文字回答的校验。
-- `runtime/delegation.ts`：通用前台委派及子会话的任务所有权。
-- `config.ts`：服务配置。
-- `main.ts`：配置、共享 Backend RPC 客户端与应用装配，以及服务器、接收器和追踪的启动／关闭。
+- `assistant.ts`：单文件定义助手及子 Agent 委派，直接装配原生 Harness、工具、追踪与执行环境，负责主会话创建和资源关闭。
+- `config.ts`：服务与模型环境变量的解析、校验和默认值。
+- `models.ts`：根据模型 ID 查找能力、校验协议并生成 pi-ai provider 配置，不选择业务用途。
+- `main.ts`：按助手、workflow 和子 Agent 用途选择模型，传入执行预算，装配共享 Backend RPC 客户端与应用，以及常驻助手、服务器、接收器和追踪的启动／关闭。
 - `app.ts`：无启动副作用的 Hono 应用工厂，复用本机访问、JSON 校验、请求大小限制、错误处理及 HTTP 追踪中间件。
-- `chat.ts`：调用单次运行、校验 HTTP 回答并映射取消／超时错误；执行期限由运行器负责。
+- `chat.ts`：向原生主会话提交消息、等待并校验 HTTP 回答，处理等待期限与错误映射。
 - `context/receiver.ts`：Backend 专用 SSE 接收、六部分内存状态、连接和家庭资格。
 - `context/receipts.ts`：受接收器管理的有限内存接收记录与当时上下文；`context/receipt-changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
 - `context/reader.ts`：历史与引用材料读取；使用共享 Backend RPC 客户端，负责当前接收资格及响应与请求的匹配校验。
 - 家庭模型视图：转换、编码和解码由根目录共享包 `packages/api/` 提供，供 Agent 与 Web 使用；离线文件处理命令属于本应用的 `scripts/format-context.ts`。
-- `workflows/spatial-planning/index.ts`：空间规划专项 Agent 工厂，使用同一模型配置，由调用方注入共用的 backend 能力。
-- `workflows/spatial-planning/instructions.ts`：空间证据使用、记录匹配、配置写入与结果核对指令。
+- `workflows/speech-interpretation.ts`：语音请求完整性与回应需求的结构化模型判断。
 
 ## 专项能力
 
-专项能力按业务放在 `src/workflows/<业务名>/`。空间规划导出 `createSpatialPlanning(config, models, model, tools)`，模型未配置时返回 `undefined`；传入原生 pi-ai `Models` 和 `Model` 时返回应用内运行器实例，通过 `run(input, signal)` 返回完整回答。`tools` 接受 pi-durable `ToolRegistration`。家庭资料、已有空间关系和本次要求由调用方提供，`input` 接受文本或 pi-ai 原生文本／图像消息块；户型图可选。运行器组合调用方取消与配置期限，限制每次运行的模型请求总数。
+专项能力按业务放在 `src/workflows/<业务名>.ts`，每个文件包含其指令与实现。自动化生成和语音判断通过 pi-ai 执行一次结构化模型调用，不创建 Harness。
 
-空间规划只配置模型、专项指令和注入的能力，不实现 backend 查询或 HTTP 客户端。其工作目录随单次运行结束清理，实际空间资料由注入的 backend 能力读写。写入后的核对目前由专项指令要求模型执行，不是独立的程序校验保证。
+空间规划尚未接入 Agent 服务；当前不能从聊天或专项请求启动规划、自动保存空间配置。
 
-当前已提供空间规划模块入口，尚未接入服务请求、前端启动及可选上传、家庭数据通路或 backend 读写能力；现有 `/api/chat` 仍只调用家庭助手。因此还不能从页面启动规划或自动保存空间配置。视觉分析要求所配置模型支持图像输入。
+语音请求判断使用同一内部 `POST /api/workflows`，指定 `workflow="speech-interpretation"`，输入复用 `speechDialogueRequestSchema`，结果复用 `speechDialogueResponseSchema`（`id/observationId/decision`）。实现位于 `workflows/speech-interpretation.ts`，直接调用一次 pi-ai 结构化模型输出，不使用聊天主会话。
 
-语音请求判断由 backend 的 `conversation/interpret.ts` 负责，不调用此服务。
+Backend 负责转写片段的来源资格、45 秒有效期、限流和判断状态，经现有 Agent 客户端调用此 workflow；Agent 重新校验请求时效和前文关系。语音请求及响应预算分别为 96 KiB、24 KiB，执行期限不超过配置值、11 秒和材料到期时间；Backend 仍以最多 12 秒及片段原期限控制等待。语音与自动化生成各有一个并发名额，互不占用。缺模型、Agent 不可用或判断失败由 Backend 显示为 unavailable；本地转写仍可运行。此判断不执行聊天或设备动作。
 
 Agent 与 Backend 共用 Hono 的访问校验、输入校验和错误处理；共享 RPC 客户端使用 `hono/client`，服务调用通过 `tracedFetch` 传播追踪上下文。Agent 在读取请求体前保存 Bun 原始 Request；校验成功后仅对本次模型请求关闭连接空闲计时，模型执行期限仍由聊天或 workflow 管理。
 
@@ -167,3 +172,54 @@ bun --env-file=.env apps/agent/scripts/context-understanding.ts --context /path/
 题目文件包含 `input_sha256`（取自 CLI manifest）和 `questions` 数组，每题具有唯一 `id`、说明返回 JSON 结构的 `question` 和人工核对的 `expected`。标准答案应依据固定快照的设备、规格与事实核实，不能直接采用被测模型的回答。标准答案只用于本地判分，不发送给模型；按题比较 JSON 值、类型和结构，数组顺序也参与判分。题目及结果含家庭资料时只保存在本地数据位置。
 
 输出目录必须不存在。结果保存模型原文、逐题得分、请求用量、输入指纹和调用条件，需逐条检查失败是否来自模型理解、题目歧义或标准答案错误。网络与服务错误中断运行，不能算作模型理解失败。小样本结果只覆盖所选问题，不代表完整 Agent 的工具调用、长期理解准确率或实时场景判断。依据失败题修改格式后的同题重跑属于修复验证，不是独立泛化评估；泛化判断需要另外冻结未参与修改的新题和快照。缓存验证另看完整请求返回的缓存 token，不能以公共前缀长度或短请求耗时替代。
+
+## 模型配置
+
+主助手使用 `AGENT_MODEL`。以下可选配置使用同一个 `AGENT_PROVIDER`，共用凭据、端点覆盖和思考参数：
+
+| 配置                     | 用途                                                            |
+| ------------------------ | --------------------------------------------------------------- |
+| `AGENT_AUTOMATION_MODEL` | `automation-generation` 使用的模型，省略时用主模型              |
+| `AGENT_SPEECH_MODEL`     | `speech-interpretation` 使用的模型，省略时用主模型              |
+| `AGENT_SUBAGENT_MODELS`  | JSON 字符串数组，指定子 Agent 可选的额外模型 ID；主模型始终可选 |
+
+委派工具接受 `subagent({ task, model? })`。主助手可在每次委派时从上述可选模型中选择；省略 `model` 时子会话继承父会话模型。选择通过 pi-durable 原生 `configure(tx, child.id, { model: { provider, modelId } })` 保存到子会话，与主助手共用 Harness 和模型注册表。重复执行同一工具任务会复用原子会话和原模型选择。子 Agent 不再递归委派。
+
+workflow 在装配时分别接收模型，直接调用 pi-ai，不创建聊天会话。额外模型须存在于该 provider 的原生模型清单中；`AGENT_MODEL_METADATA` 仅覆盖主模型，不会把主模型能力套到其他模型。当前环境配置不支持为不同模型分别设置 provider 或凭据。
+
+参考 pi-durable 的[子 Agent 配置](https://github.com/earendil-works/pi/blob/main/packages/durable/README.md#abort-and-subagents)和[独立模型 reviewer 示例](https://github.com/earendil-works/pi/blob/main/packages/durable/test/examples/28-reviewer.ts)。
+
+`src/config.ts` 维护 Agent 环境配置；`src/models.ts` 使用其中的模型连接字段和调用方明确提供的模型 ID 装配 provider；Backend 通过 Agent workflow 获取语音判断，不直接加载模型配置。调用方直接从 `@earendil-works/pi-ai` 导入并使用 `createModels()`、`createProvider()` 和模型请求 API。
+
+`src/config.ts` 的 `loadConfig()` 通过 `modelEnvironment` 读取 `AGENT_PROVIDER`、`AGENT_MODEL`、`OPENAI_API_KEY`、可选 `OPENAI_BASE_URL`、`AGENT_THINKING` 和 `AGENT_MODEL_METADATA`。配置错误仅报告字段名，不输出凭据。
+
+`main.ts` 收集各用途模型 ID，交给 `modelProviderSettings(config, ids)` 生成 pi-ai 原生的服务提供者配置；缺少模型或凭据时返回 `undefined`。`AGENT_PROVIDER` 是 pi-ai 原生 provider ID，默认 `openai`。通过 pi-ai 内置模型集合按 provider 和模型 ID 查找，保留模型的 API、输入能力、容量、成本、图像限制及思考协议参数。应用注册主模型、两个 workflow 指定的模型及子 Agent 可选模型，模型清单只在进程装配时加载，不在每次请求中查询或联网刷新。
+
+当前支持 `openai-completions` 和 `openai-responses` 两种原生 API。OpenAI 模型使用清单中的 Responses API；MiMo 中国区套餐可配置：
+
+```dotenv
+AGENT_PROVIDER=xiaomi-token-plan-cn
+AGENT_MODEL=mimo-v2.6-flash
+OPENAI_API_KEY=你的项目密钥
+```
+
+未设置 `OPENAI_BASE_URL` 时使用所选模型的原生地址；覆盖地址时，调用方须确认该端点支持所选模型的协议及能力。`AGENT_THINKING` 合并进模型的原生采样参数，不改变模型是否具有思考能力。请求期限、重试和每次调用的输出预算由调用方通过 pi-ai 原生请求选项指定。
+
+### 自定义模型与已验证的能力覆盖
+
+模型不在所选 provider 清单中时，必须同时设置 `OPENAI_BASE_URL` 和 `AGENT_MODEL_METADATA`。后者是 JSON 对象，明确提供 `api`、`reasoning`、`input`、`contextWindow`、`maxTokens`、`cost` 和 `compat.supportsStrictMode`；不猜测图像支持、容量或严格工具支持。该对象也可覆盖清单中模型的这些字段，`compat` 按字段合并并保留未覆盖的原生协议参数。覆盖时 `api` 必须与清单一致；不同协议使用自定义 provider 和完整元数据，避免继承不适用的协议能力。
+
+以下字段格式示例使用演示值，部署时替换为端点的已验证能力：
+
+```dotenv
+AGENT_PROVIDER=your-provider
+AGENT_MODEL=your-model
+OPENAI_BASE_URL=https://your-provider.example/v1
+AGENT_MODEL_METADATA='{"api":"openai-completions","reasoning":false,"input":["text"],"contextWindow":32768,"maxTokens":4096,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0},"compat":{"supportsStrictMode":true}}'
+```
+
+`cost` 的单位是每百万 token 的美元价格；未获得价格时可明确填写零，表示 Pi 本地未配置费用估算，不会作为供应商实际费用导出到 Langfuse。Langfuse 根据实际用量和其项目中的模型价格推算费用。
+
+`compat` 还接受已验证的 `supportsDeveloperRole`、`supportsReasoningEffort`、`supportsStore`、`maxTokensField`、`requiresReasoningContentOnAssistantMessages` 和 `thinkingFormat`。其他协议差异使用 pi-ai 已支持的原生模型定义，不能仅凭“OpenAI 兼容”开启选项。自动化与语音判断要求严格工具输出；声明不支持严格工具的模型不能完成这两项能力。
+
+模型 ID、元数据或 API 不受支持时，启动报告配置错误。配置能力不等于供应商请求已成功，`/health` 的 `modelConfigured` 只反映本地装配状态。

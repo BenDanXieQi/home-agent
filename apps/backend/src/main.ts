@@ -21,12 +21,8 @@ import { createMemberAccess } from "./household/members/access";
 import { createIdentityReferences } from "./household/identity/references";
 import { createReferenceFiles } from "./household/identity/files";
 import { createSpeechInbox } from "./conversation/speech-inbox";
-import { createSpeechDialogueInterpreter } from "./conversation/interpret";
-import {
-  loadModelConfig,
-  modelProviderSettings,
-} from "@home-agent/configuration/models";
-import { createModels, createProvider } from "@earendil-works/pi-ai";
+import { createAgentClient } from "./agent-client";
+import { AppError } from "@home-agent/api/errors";
 import { createMemberRepository } from "./household/members/repository";
 import { createSpatialRepository } from "./household/spatial/repository";
 import { createSpatialService } from "./household/spatial/service";
@@ -35,10 +31,7 @@ import { createWindowHistoryRepository } from "./perception/history/repository";
 import { createPerceptionService } from "./perception/service";
 import { createPerceptionSources } from "./mijia/perception-source";
 import { join, resolve as resolvePath } from "node:path";
-import {
-  initializeTelemetry,
-  observeProvider,
-} from "@home-agent/observability";
+import { initializeTelemetry } from "@home-agent/observability";
 import { loadEnvironment } from "./environment";
 import { createDatabase } from "./db";
 import { createContextRepository } from "./household-context/repository";
@@ -68,6 +61,10 @@ try {
 
 const readAgentUrl = async () =>
   (await connectionStore.read()).services.agent.url;
+const agent = createAgentClient({
+  readAgentUrl,
+  timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+});
 
 const database = environment.DATABASE_URL
   ? createDatabase(environment.DATABASE_URL)
@@ -178,17 +175,17 @@ household.start();
 mijiaService.initialize().catch(() => {
   console.warn("米家初始化失败，请在页面重试恢复登录。");
 });
-const modelConfig = loadModelConfig();
-const settings = modelProviderSettings(modelConfig);
-const models = createModels();
-if (settings) models.setProvider(observeProvider(createProvider(settings)));
-const interpretSpeech = createSpeechDialogueInterpreter(
-  models,
-  settings?.models[0],
-);
 const speechInbox = createSpeechInbox({
   instanceId: crypto.randomUUID(),
-  ...(interpretSpeech ? { analyze: interpretSpeech } : {}),
+  analyze: async (input, signal) => {
+    const response = await agent.workflow(
+      { workflow: "speech-interpretation", input },
+      signal,
+    );
+    if (response.workflow !== "speech-interpretation")
+      throw new AppError("agent_execution_failed");
+    return response.result;
+  },
 });
 const perceptionSources = createPerceptionSources(household, mijiaService);
 const perception = createPerceptionService({
@@ -306,7 +303,7 @@ const app = createApp({
   household,
   mijiaService,
   shutdownSignal: shutdown.signal,
-  readAgentUrl,
+  agent,
 });
 const server = Bun.serve({
   hostname: environment.BACKEND_HOST,

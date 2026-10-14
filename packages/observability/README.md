@@ -1,6 +1,6 @@
 # Observability
 
-当前实现采用标准 OpenTelemetry JS SDK、`@hono/otel` 和 Langfuse `LangfuseSpanProcessor`。backend 与 Agent 分别创建 Provider，使用 AsyncLocalStorage 上下文管理和 W3C `traceparent` / `tracestate` 传播。默认不导出数据；开启后记录完整的追踪树，包括 HTTP、业务操作和模型调用。
+当前实现采用官方 `NodeSDK`、`@hono/otel` 和 Langfuse `LangfuseSpanProcessor`。backend 与 Agent 分别启动 NodeSDK，由 SDK 管理上下文和 W3C 追踪传播。Agent 等待、工具和模型观测直接使用 `@langfuse/tracing` 的 `startObservation`、`startActiveObservation` 与 `propagateAttributes`。默认不导出数据；开启后记录 HTTP、业务操作和模型调用。同步调用保留父子关系，pi-durable 调度执行以独立追踪记录并按会话关联。
 
 `@home-agent/observability` 提供 SDK 初始化、Hono 入口、`tracedFetch`、`withSpan`、原生 Request 入口及关闭与导出能力，由 backend 与 Agent 接入。应用直接通过 `@earendil-works/pi-ai` 创建模型和服务提供者；`observeProvider()` 在原生服务提供者上增加 Langfuse 模型观测，并保持原生 pi-ai 调用方式。
 
@@ -41,15 +41,15 @@ Backend 与 Agent 的 Hono HTTP 入口先执行 `httpTracing()`，接收上游 W
 
 workflow 调用链为 Backend SERVER → `tracedFetch` CLIENT → Agent `/api/workflows` SERVER → `automation.generate` 业务 span → `model.generate` 模型 span。业务 span 记录草稿校验结果、能力校验问题数和澄清数；模型 span 记录供应商返回的 token 用量，无用量时不填充估算值。正文仅在 `OTEL_INCLUDE_CONTENT=true` 时采集。
 
-backend 的语音模型解释器保留模型 span。模型调用使用 `generation` 观测类型，记录模型标识、供应商返回的 token 用量和执行状态；用量缺失时不估算。确认供应商返回合法用量后，复用 pi-ai 的归一化结果，把普通输入、缓存读取、缓存写入和推理输出分成互不重叠的 Langfuse `usage_details` 字段，避免把缓存命中按普通输入价格计算。成本由 Langfuse 的模型定义推算；自定义模型需在 Langfuse 配置对应价格，不把本地未知价格的零值当成实际成本。
+Agent 的语音判断 workflow 保留模型 span，并接续 Backend 客户端传播的追踪上下文。模型调用使用 `generation` 观测类型，记录供应商返回的实际模型标识、token 用量和执行状态；供应商未返回模型标识时使用请求模型，用量缺失时不估算。实际模型与请求模型不同时，metadata 的 `requested_model` 保留请求模型。确认供应商返回合法用量后，复用 pi-ai 的归一化结果，把普通输入、缓存读取、缓存写入和推理输出分成互不重叠的 Langfuse `usage_details` 字段，避免把缓存命中按普通输入价格计算。成本由 Langfuse 按观测的模型标识匹配模型定义推算；自定义模型需在 Langfuse 配置对应价格，不把本地未知价格的零值当成实际成本。
 
 模型参数只从 pi-ai 最终发送的 payload 中提取白名单字段，保留输出上限、temperature、采样和 thinking 设置；调用方的 `onPayload` 修改先完成，因此记录的是合并及覆盖后的实际参数，不包含凭据、请求头或完整 options。首个非空文本、思考或工具参数增量设置 `completionStartTime`，供 Langfuse 计算首 token 延迟（TTFT）；初始化事件、空增量和纯用量事件不计入。模型输入输出仅在内容采集开启时记录；输入使用 pi-ai 的消息记录，其中系统消息包含系统指令和工具定义。
 
 `observeProvider()` 只记录模型观测，不修改 pi-ai 的事件、工具参数或完成状态。Completions 与 Responses 均使用 pi-ai 原生解析；原生解析可能修补参数 JSON，因此不额外承诺原始 JSON 字节完整。pi-durable 按工具 schema 校验参数，自动化与语音判断另按业务 schema 校验结果。用量识别覆盖 Completions 的用量 chunk，以及 Responses 的 `response.completed` / `response.incomplete` 终态用量；缺失或为 `null` 的供应商用量不记录。
 
-单次聊天在模型执行结束后返回 JSON，Backend 代理与 Agent HTTP 入口分别产生 CLIENT 与 SERVER span；pi-durable 运行产生 `agent` 观测，其模型调用、原生 `CodingTools`、前台委派及调用方提供的领域工具接入同一追踪上下文。工具通过官方 `wrapTool()` 接入 `tool` 观测，正常返回的工具错误也记录失败状态；工具优先记录 `structuredOutput`，否则记录显式 `output`，流式工具没有这两个字段时读取 `api.retainedOutput()`；同一输出正文不重复写入元数据。开启内容采集后，`bash` 的结构化输出包含退出码；工具返回的诊断单独记录，错误诊断写入状态说明。工具抛出异常时，按同一正文采集开关记录 `api.retainedOutput()` 中已保留的输出，再原样抛出异常，由追踪边界记录失败或取消。关闭内容采集时不记录任意工具诊断正文。
+单次聊天在模型执行结束后返回 JSON，Backend 代理与 Agent HTTP 入口分别产生 CLIENT 与 SERVER span，Agent 下的 `household-assistant.wait` span 记录提交与等待。pi-durable 调度执行可以超过 HTTP 等待期；每次模型调用和工具执行从空的 OTel 上下文创建独立 trace，避免排队输入或子会话继承唤醒调度器的旧请求。主助手创建一个随机 UUID 作为 `langfuse.session.id`，通过官方 `propagateAttributes` 将等待、模型和工具观测归入同一个 Langfuse Session（跨轮追踪分组），重启后更换 ID。generation hook 从原生 `LiveDoc` 读取输入提交 ID，并以本次调用的 AbortSignal 将 conversationId、taskId、submissionIds 交给 provider 观测；工具从同一原生记录读取这些标识。等待观测记录 submissionId，委派工具另外记录 childConversationId，可据此关联跨 trace 的工作，不伪造 HTTP 与调度执行的父子关系。后台压缩模型调用不经过 generation hook，只有 Session 分组，不承诺 submission 关联。工具通过官方 `wrapTool()` 接入 `tool` 观测，正常返回的工具错误也记录失败状态；工具优先记录 `structuredOutput`，否则记录显式 `output`，流式工具没有这两个字段时读取 `api.retainedOutput()`；同一输出正文不重复写入元数据。开启内容采集后，`bash` 的结构化输出包含退出码；工具返回的诊断单独记录，错误诊断写入状态说明。工具抛出异常时，按同一正文采集开关记录 `api.retainedOutput()` 中已保留的输出，再原样抛出异常，由追踪边界记录失败或取消。关闭内容采集时不记录任意工具诊断正文。
 
-聊天与 workflow 将请求取消及执行期限通过 AbortSignal 传给模型，并在执行结束后复核取消。失败使用统一 HTTP JSON 错误：模型执行超时为 `run_timeout`，Backend 调用 Agent 超时为 `agent_timeout`，请求取消为 `request_cancelled`，模型执行失败为 `agent_execution_failed`。客户端已断开时不保证收到错误响应。当前上下文 SSE 的同步与断线语义见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。
+聊天取消或等待超时只结束本次等待，并尝试撤回仍排队的输入；已开始的执行继续运行。模型请求与每次工具执行另有独立期限，沿用 `AGENT_RUN_TIMEOUT_MS`；工具通过 Chord Context 的 AbortSignal 合作式取消，注入的领域工具必须响应这个信号，忽略信号的实现无法由此强制中止。workflow 将请求取消及执行期限传给模型，并在执行结束后复核取消。失败使用统一 HTTP JSON 错误：模型执行超时为 `run_timeout`，Backend 调用 Agent 超时为 `agent_timeout`，请求取消为 `request_cancelled`，模型执行失败为 `agent_execution_failed`。客户端已断开时不保证收到错误响应。当前上下文 SSE 的同步与断线语义见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。
 
 退出时先停止接收请求并等待在途请求：backend 使用 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），超时强制关闭连接；Agent 停止时立即关闭连接并取消请求。追踪模块随后最多等待 10 秒让已登记操作结束，再关闭 exporter。这 10 秒不是整个进程的停机期限；数据库关闭和 exporter 导出另需时间。强制终止进程无法保证导出。
 
@@ -60,15 +60,15 @@ backend 的语音模型解释器保留模型 span。模型调用使用 `generati
 - `apps/backend/src/workflows/routes.ts`：生成请求的设备能力准备、运行失效取消及结果复核。
 - `apps/backend/src/agent-client.ts`：聊天、workflow 与接收记录共用的 Agent 调用，使用 `tracedFetch` 传播追踪上下文并有界读取、校验响应。
 - `apps/agent/src/chat.ts`：单次聊天执行、取消及期限、完整回答校验。
-- `apps/agent/src/workflows/automation-generation/index.ts`：生成 workflow 的业务 span 与草稿校验属性。
+- `apps/agent/src/workflows/automation-generation.ts`：生成 workflow 的业务 span 与草稿校验属性。
 - `packages/observability/src/model.ts`：原生 pi-ai 服务提供者的 generation span、供应商实际用量与失败状态。
-- `apps/agent/src/runtime/index.ts`：Agent 应用内 pi-durable 运行与工具调用的观测。
+- `apps/agent/src/assistant.ts`、`apps/agent/src/chat.ts`：原生 pi-durable 模型与工具调用、聊天等待的观测。
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc，连接探测也会产生 HTTP span。
 - `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。
 - `apps/backend/src/mijia/media/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。
-- `apps/backend/src/conversation/interpret.ts`：结构化模型调用的 span。
+- `apps/agent/src/workflows/speech-interpretation.ts`：结构化模型调用的 span。
 
-业务操作通过 `withSpan` 显式埋点；聊天转发和连接探测使用 `tracedFetch` 并消费或取消响应体。米家专用协议在完成错误脱敏后记录 CLIENT span，不记录目标 URL、账号凭据、请求／响应正文或 SDP，也不向 go2rtc 传播追踪上下文；这些 span 描述 backend 发起的调用，尚不包含 go2rtc 内部执行或视频媒体链路。pi-durable 内部调度和供应商 SDK 内部重试不会自动生成独立 span。
+Backend 业务操作和 Agent workflow 通过 `withSpan` 显式埋点，保留通用 OTel 属性、错误脱敏和停机等待；模型及助手观测直接调用 Langfuse SDK。聊天转发和连接探测使用 `tracedFetch` 并消费或取消响应体。米家专用协议在完成错误脱敏后记录 CLIENT span，不记录目标 URL、账号凭据、请求／响应正文或 SDP，也不向 go2rtc 传播追踪上下文；这些 span 描述 backend 发起的调用，尚不包含 go2rtc 内部执行或视频媒体链路。pi-durable 内部调度和供应商 SDK 内部重试不会自动生成独立 span。
 
 `mijia.session.restore` 覆盖授权读取、恢复与设备校验；`mijia.credentials.read`、`mijia.credentials.save` 和 `mijia.credentials.remove` 分别记录授权读取、导出与持久化、删除。操作失败先经过 span 边界，再转换为页面状态；HTTP 202 仅表示受理，后台结果应查看业务 span。米家业务与下游协议的 `error.type` 只使用各自已定义的静态错误码，内容采集关闭时仍可区分超时、授权拒绝和服务不可达。普通 HTTP 调用记录错误响应的状态码分类；无响应的未知传输错误使用通用分类，不读取任意异常对象的 `code`。
 

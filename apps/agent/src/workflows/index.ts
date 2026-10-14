@@ -1,46 +1,72 @@
 import type { z } from "zod";
-import type { Models } from "@earendil-works/pi-ai";
-import type { ConfiguredModel } from "@home-agent/configuration/models";
+import type { Models, Model, Api } from "@earendil-works/pi-ai";
 import {
   type agentWorkflowInputSchema,
   agentWorkflowResultSchema,
   agentWorkflowLimits,
 } from "@home-agent/api/agent-workflows";
 import { AppError } from "@home-agent/api/errors";
-import type { Config } from "../config";
 import { createAutomationGeneration } from "./automation-generation";
+import { createSpeechDialogueInterpreter } from "./speech-interpretation";
+import { speechDialogueLimits } from "@home-agent/api/speech-dialogue";
 
 export function createWorkflows(
-  config: Config,
   models: Models,
-  model: ConfiguredModel | undefined,
+  selected: Record<
+    z.infer<typeof agentWorkflowInputSchema>["workflow"],
+    Model<Api> | undefined
+  >,
+  budget: Parameters<typeof createAutomationGeneration>[2],
 ) {
-  const generate = createAutomationGeneration(config, models, model);
-  let active = 0;
+  const generate = createAutomationGeneration(
+    models,
+    selected["automation-generation"],
+    budget,
+  );
+  const interpret = createSpeechDialogueInterpreter(
+    models,
+    selected["speech-interpretation"],
+  );
+  const active = { "automation-generation": 0, "speech-interpretation": 0 };
 
   return async (
     input: z.output<typeof agentWorkflowInputSchema>,
     requestSignal: AbortSignal,
   ) => {
     if (requestSignal.aborted) throw new AppError("request_cancelled");
-    if (!generate) throw new AppError("model_not_configured");
-    if (active >= agentWorkflowLimits.concurrent)
+    const limits =
+      input.workflow === "speech-interpretation"
+        ? {
+            ...agentWorkflowLimits,
+            requestBytes: speechDialogueLimits.requestBytes,
+            responseBytes: speechDialogueLimits.responseBytes,
+            timeoutMs: speechDialogueLimits.agentTimeoutMs,
+          }
+        : agentWorkflowLimits;
+    if (Buffer.byteLength(JSON.stringify(input)) > limits.requestBytes)
+      throw new AppError("request_too_large");
+    if (active[input.workflow] >= limits.concurrent)
       throw new AppError("workflow_busy");
     const timeout = AbortSignal.timeout(
-      Math.min(config.AGENT_RUN_TIMEOUT_MS, agentWorkflowLimits.timeoutMs),
+      Math.min(budget.timeoutMs, limits.timeoutMs),
     );
     const signal = AbortSignal.any([requestSignal, timeout]);
-    active++;
+    active[input.workflow]++;
     try {
-      const result = agentWorkflowResultSchema.parse({
-        workflow: input.workflow,
-        result: await generate(input.input, signal),
-      });
+      const output =
+        input.workflow === "automation-generation"
+          ? {
+              workflow: input.workflow,
+              result: await generate?.(input.input, signal),
+            }
+          : {
+              workflow: input.workflow,
+              result: await interpret?.(input.input, signal),
+            };
+      if (!output.result) throw new AppError("model_not_configured");
+      const result = agentWorkflowResultSchema.parse(output);
       signal.throwIfAborted();
-      if (
-        Buffer.byteLength(JSON.stringify(result)) >
-        agentWorkflowLimits.responseBytes
-      )
+      if (Buffer.byteLength(JSON.stringify(result)) > limits.responseBytes)
         throw new AppError("agent_execution_failed");
       return result;
     } catch (cause) {
@@ -50,7 +76,7 @@ export function createWorkflows(
       if (cause instanceof AppError) throw cause;
       throw new AppError("agent_execution_failed", { cause });
     } finally {
-      active--;
+      active[input.workflow]--;
     }
   };
 }

@@ -12,6 +12,7 @@ import {
   type automationSaveRequestSchema,
 } from "@home-agent/api/automations";
 import { requestEmpty, requestJson } from "../../api/client";
+import { RequestError } from "../../api/errors";
 
 const listSchema = z.object({ automations: z.array(automationSchema) });
 const runsSchema = z.object({ runs: z.array(automationRunSchema) });
@@ -119,5 +120,7 @@ export async function generateAutomation(
     agentWorkflowResultSchema,
     { timeoutMs: 120_000 },
   );
+  if (response.workflow !== "automation-generation")
+    throw new RequestError({ code: "invalid_response" });
   return response.result;
 }

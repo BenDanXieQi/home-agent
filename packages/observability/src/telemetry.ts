@@ -1,21 +1,12 @@
-import {
-  context,
-  propagation,
-  trace,
-  diag,
-  DiagConsoleLogger,
-  DiagLogLevel,
-} from "@opentelemetry/api";
-import { AsyncLocalStorageContextManager } from "@opentelemetry/context-async-hooks";
+import { diag, DiagConsoleLogger, DiagLogLevel } from "@opentelemetry/api";
+import { NodeSDK } from "@opentelemetry/sdk-node";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
   defaultResource,
   resourceFromAttributes,
 } from "@opentelemetry/resources";
 import {
-  BasicTracerProvider,
   BatchSpanProcessor,
   ConsoleSpanExporter,
   SimpleSpanProcessor,
@@ -113,22 +104,19 @@ export function initializeTelemetry(serviceName: string) {
       }),
     );
   }
-  const provider = new BasicTracerProvider({
+  const sdk = new NodeSDK({
+    autoDetectResources: false,
     resource: defaultResource().merge(
       resourceFromAttributes({ "service.name": serviceName }),
     ),
     spanProcessors,
   });
-  const manager = new AsyncLocalStorageContextManager().enable();
-  context.setGlobalContextManager(manager);
-  propagation.setGlobalPropagator(new W3CTraceContextPropagator());
-  trace.setGlobalTracerProvider(provider);
+  sdk.start();
   enabled = true;
   state = {
     shutdown: async () => {
       await drainOperations();
-      await provider.shutdown();
-      manager.disable();
+      await sdk.shutdown();
     },
   };
   return state;

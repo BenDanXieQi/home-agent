@@ -4,11 +4,19 @@ import {
   automationGenerationInputSchema,
   automationGenerationLimits,
 } from "./automations";
+import {
+  speechDialogueRequestSchema,
+  speechDialogueResponseSchema,
+} from "./speech-dialogue";
 
 export const agentWorkflowInputSchema = z.discriminatedUnion("workflow", [
   z.strictObject({
     workflow: z.literal("automation-generation"),
     input: automationGenerationInputSchema,
+  }),
+  z.strictObject({
+    workflow: z.literal("speech-interpretation"),
+    input: speechDialogueRequestSchema,
   }),
 ]);
 
@@ -23,6 +31,10 @@ export const agentWorkflowResultSchema = z.discriminatedUnion("workflow", [
   z.strictObject({
     workflow: z.literal("automation-generation"),
     result: automationDraftSchema,
+  }),
+  z.strictObject({
+    workflow: z.literal("speech-interpretation"),
+    result: speechDialogueResponseSchema,
   }),
 ]);
 

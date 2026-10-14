@@ -22,9 +22,9 @@
     "@home-agent/backend-client": "workspace:*",
     "hono": "catalog:",
     "@earendil-works/pi-ai": "catalog:",
-    "@home-agent/configuration": "workspace:*",
     "@earendil-works/chord": "catalog:",
-    "@earendil-works/pi-durable": "catalog:"
+    "@earendil-works/pi-durable": "catalog:",
+    "@langfuse/tracing": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",

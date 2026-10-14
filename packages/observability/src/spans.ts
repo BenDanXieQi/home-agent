@@ -85,23 +85,23 @@ export function withSpan<T>(
     onError?: (span: Span, error: unknown) => void;
   } = {},
 ) {
-  return trace
-    .getTracer("home-agent")
-    .startActiveSpan(
-      name,
-      { attributes, kind: options.kind ?? SpanKind.INTERNAL },
-      async (span) => {
-        const finish = beginOperation();
-        try {
-          return await run(span);
-        } catch (error) {
-          if (span.isRecording())
-            (options.onError ?? recordFailure)(span, error);
-          throw error;
-        } finally {
-          span.end();
-          finish();
-        }
-      },
-    );
+  return trace.getTracer("home-agent").startActiveSpan(
+    name,
+    {
+      attributes,
+      kind: options.kind ?? SpanKind.INTERNAL,
+    },
+    async (span) => {
+      const finish = beginOperation();
+      try {
+        return await run(span);
+      } catch (error) {
+        if (span.isRecording()) (options.onError ?? recordFailure)(span, error);
+        throw error;
+      } finally {
+        span.end();
+        finish();
+      }
+    },
+  );
 }
