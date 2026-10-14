@@ -172,6 +172,7 @@ src/
 │   ├── media/
 │   │   ├── session.ts     # 配置巡检、媒体绑定、运行标识与资源生命周期
 │   │   ├── camera-source-spec.ts    # 单路摄像头共享流规格
+│   │   ├── camera-address.ts        # 按摄像头 MAC 查询系统邻居表中的局域网地址
 │   │   ├── camera-source-manager.ts # 共享流注册、重试、离线保留与释放
 │   │   ├── audio-stream.ts          # 米家音轨 HTTP 接入与编码流边界转换
 │   │   ├── recording-file.ts        # 有界 SD 卡文件传输与元数据校验

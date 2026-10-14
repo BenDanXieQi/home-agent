@@ -10,6 +10,13 @@ export function useLogin() {
   const refresh = useSetAtom(reconnectHouseholdAtom);
   return {
     ...view,
+    materialError: material.isError,
+    materialFetching: material.isFetching,
+    retryMaterial: () => {
+      material.refetch().catch((backgroundError: unknown) => {
+        console.error("use-login: material.refetch failed", backgroundError);
+      });
+    },
     refresh: () => {
       if (material.isError)
         material.refetch().catch((backgroundError: unknown) => {

@@ -7,9 +7,15 @@ import { RetryTimer } from "../retry-timer";
 import type { CameraSourceSpec } from "./camera-source-spec";
 import { isCamera, cameraChannels } from "../devices/mapping";
 import { cameraChannelCount } from "../protocols/micloud/camera-capabilities";
+import {
+  isCameraAddress,
+  normalizeCameraMac,
+  resolveCameraAddress,
+} from "./camera-address";
 type CameraSourceEntry = {
   id: string;
   device: CameraSourceSpec;
+  inventory: MiCloudDevice;
   pending: Promise<void>;
   prepared: boolean;
   retiring: boolean;
@@ -24,6 +30,11 @@ export class CameraSourceManager {
   private devices = new Map<string, MiCloudDevice>();
   private closed = false;
   private paused = false;
+  private readonly addressController = new AbortController();
+  private readonly addressLookups = new WeakMap<
+    MiCloudDevice,
+    ReturnType<typeof resolveCameraAddress>
+  >();
 
   constructor(
     private readonly adapter: Go2RtcAdapter,
@@ -57,6 +68,7 @@ export class CameraSourceManager {
   /** Fence local work; the session owner closes the adapter and its remote streams. */
   dispose() {
     this.closed = true;
+    this.addressController.abort();
     this.pause();
     for (const stream of this.streams.values()) stream.controller.abort();
     this.streams.clear();
@@ -120,12 +132,34 @@ export class CameraSourceManager {
     requestedQuality?: CameraSourceSpec["videoQuality"],
   ) {
     const key = `${deviceId}:${channel}`;
+    const specification = this.validate(deviceId, channel);
+    const inventoryDevice = this.devices.get(deviceId)!;
+    const observedAddress = await this.resolveAddress(inventoryDevice);
+    if (this.closed || this.devices.get(deviceId) !== inventoryDevice)
+      throw new MijiaError("stale_session");
+    if (this.paused) throw new MijiaError("cancelled");
     let stream = this.streams.get(key);
+    // Losing a passive neighbor record does not invalidate a prepared source.
+    // Keep the address for the same device unless the cloud supplies a changed,
+    // usable hint or the neighbor table supplies a new address.
+    const retainAddress =
+      stream?.prepared &&
+      !stream.retiring &&
+      !stream.error &&
+      normalizeCameraMac(stream.inventory.mac) ===
+        normalizeCameraMac(inventoryDevice.mac) &&
+      stream.inventory.model === inventoryDevice.model &&
+      (stream.inventory.localip === inventoryDevice.localip ||
+        !isCameraAddress(specification.localIp));
+    const localIp =
+      observedAddress ??
+      (retainAddress && stream ? stream.device.localIp : specification.localIp);
     // Only an explicit preparation request changes the selected profile.
     // Ordinary preview and discovery reconciliation reuse the source's choice.
     const videoQuality = requestedQuality ?? stream?.device.videoQuality;
     const device = {
-      ...this.validate(deviceId, channel),
+      ...specification,
+      ...(localIp === undefined ? {} : { localIp }),
       ...(videoQuality === undefined ? {} : { videoQuality }),
     };
     if (
@@ -140,6 +174,7 @@ export class CameraSourceManager {
       const next: CameraSourceEntry = {
         id: crypto.randomUUID(),
         device,
+        inventory: inventoryDevice,
         pending: Promise.resolve(),
         prepared: false,
         retiring: false,
@@ -154,9 +189,27 @@ export class CameraSourceManager {
       this.retry(key, stream);
     }
     await stream.pending;
-    if (!this.current(key, stream)) throw new MijiaError("stale_session");
+    if (
+      !this.current(key, stream) ||
+      this.devices.get(deviceId) !== inventoryDevice
+    )
+      throw new MijiaError("stale_session");
     if (stream.error) throw stream.error;
+    stream.inventory = inventoryDevice;
     return stream.id;
+  }
+
+  private resolveAddress(device: MiCloudDevice) {
+    const pending = this.addressLookups.get(device);
+    if (pending) return pending;
+    const lookup = resolveCameraAddress(
+      device.mac,
+      this.addressController.signal,
+    ).finally(() => {
+      this.addressLookups.delete(device);
+    });
+    this.addressLookups.set(device, lookup);
+    return lookup;
   }
 
   private current(key: string, stream: CameraSourceEntry) {
@@ -247,18 +300,6 @@ export class CameraSourceManager {
       for (const channel of channels) {
         const key = `${device.did}:${channel}`;
         desired.add(key);
-        const stream = this.streams.get(key);
-        const localIp =
-          typeof device.localip === "string" ? device.localip : undefined;
-        if (
-          stream?.prepared &&
-          !stream.retiring &&
-          !stream.error &&
-          stream.device.model === device.model &&
-          stream.device.channelCount === cameraChannelCount(device.model) &&
-          stream.device.localIp === localIp
-        )
-          continue;
         pending.push(this.ensure(device.did, channel, retryFailed));
       }
     }
