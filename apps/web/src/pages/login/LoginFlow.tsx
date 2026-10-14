@@ -1,5 +1,5 @@
 import { formatTime } from "../../modules/presentation/time";
-import { QrCode, RefreshCw } from "lucide-react";
+import { QrCode } from "lucide-react";
 import { useEffect } from "react";
 import { AnimatePresence, m } from "motion/react";
 import { contentSwap, iconSwap } from "../../utils/motion";
@@ -16,7 +16,7 @@ import {
 
 export function LoginFlow() {
   const flow = useLogin();
-  const { login, account, working, busy, canInterrupt, activeLoginId } = flow;
+  const { login, account, working, busy } = flow;
 
   const shouldStartLogin = useAtomValue(mijiaCanStartLoginAutomaticallyAtom);
   const startAutomatically = useSetAtom(startMijiaLoginAutomaticallyAtom);
@@ -153,12 +153,24 @@ export function LoginFlow() {
                         ? "正在获取二维码…"
                         : "正在完成登录与授权…"
                       : login?.status === "expired"
-                        ? "二维码已过期，正在自动刷新…"
+                        ? flow.automaticLoginBlocked
+                          ? "二维码已过期，请重试获取。"
+                          : "二维码已过期，正在自动刷新…"
                         : login?.status === "pending"
-                          ? "打开米家 App 扫码，并在手机上确认。"
-                          : login?.status === "idle"
-                            ? "正在获取二维码…"
-                            : "扫码登录，无需输入账号密码。"}
+                          ? flow.materialError
+                            ? "二维码加载失败，请重试。"
+                            : login.qrImageUrl
+                              ? "打开米家 App 扫码，并在手机上确认。"
+                              : "正在加载二维码…"
+                          : login?.status === "security_required"
+                            ? flow.materialError
+                              ? "安全验证加载失败，请重试。"
+                              : "正在加载安全验证…"
+                            : login?.status === "idle"
+                              ? flow.automaticLoginBlocked
+                                ? "二维码获取失败，请重试。"
+                                : "正在获取二维码…"
+                              : "扫码登录，无需输入账号密码。"}
                 </m.p>
               </AnimatePresence>
               <p className="mb-5 mt-5 text-sm leading-7 text-muted">
@@ -166,42 +178,29 @@ export function LoginFlow() {
               </p>
             </>
           )}
+          {flow.materialError &&
+          (login?.status === "pending" ||
+            login?.status === "security_required") ? (
+            <Button
+              variant="primary"
+              disabled={busy || flow.materialFetching}
+              status={flow.materialFetching ? "pending" : "idle"}
+              onClick={flow.retryMaterial}
+            >
+              {login.status === "security_required"
+                ? "重试加载安全验证"
+                : "重试加载二维码"}
+            </Button>
+          ) : null}
           {login &&
-          (!["idle", "creating", "completing", "completed"].includes(
-            login.status,
-          ) ||
-            (!busy && !!flow.error)) ? (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                variant="primary"
-                disabled={!canInterrupt || !login}
-                status={
-                  busy && login?.status === "creating" ? "pending" : "idle"
-                }
-                icon={
-                  activeLoginId || login?.status === "expired" ? (
-                    <RefreshCw size={13} />
-                  ) : undefined
-                }
-                onClick={flow.startLogin}
-              >
-                {activeLoginId || login?.status === "expired"
-                  ? "刷新二维码"
-                  : busy
-                    ? "请稍候…"
-                    : "重试获取二维码"}
-              </Button>
-              {activeLoginId ? (
-                <Button
-                  variant="ghost"
-                  disabled={!canInterrupt}
-                  status={flow.cancellingLogin ? "pending" : "idle"}
-                  onClick={() => flow.cancelLogin(activeLoginId)}
-                >
-                  {flow.cancellingLogin ? "正在取消…" : "取消登录"}
-                </Button>
-              ) : null}
-            </div>
+          !busy &&
+          (login.status === "error" ||
+            login.status === "cancelled" ||
+            ((login.status === "idle" || login.status === "expired") &&
+              flow.automaticLoginBlocked)) ? (
+            <Button variant="primary" onClick={flow.startLogin}>
+              重试获取二维码
+            </Button>
           ) : null}
           {login?.expiresAt &&
           (login.status === "pending" ||

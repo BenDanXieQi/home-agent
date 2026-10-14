@@ -68,6 +68,7 @@ export const loginViewAtom = atom((get) => {
     working: command !== null,
     loggingOut: command === "logout",
     startingLogin: command === "startLogin",
+    automaticLoginBlocked: get(mijiaAutomaticLoginBlockedAtom),
     cancellingLogin: command === "cancelLogin",
     verifyingLogin: command === "verifyLogin",
     canInterrupt: command === null || command === "verifyLogin",
