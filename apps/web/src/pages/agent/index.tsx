@@ -45,7 +45,7 @@ export default function AgentPage() {
       <div>
         <h2 className="text-lg font-semibold">家庭助手</h2>
         <p className="mt-2 text-sm text-muted">
-          每次提问独立回答，暂不保存对话，也未接入家庭资料和设备。
+          消息交给同一个主会话，可以接着聊；重启后会话清空，当前未接入家庭资料和设备。
         </p>
       </div>
       <form
@@ -84,7 +84,7 @@ export default function AgentPage() {
                 pending.current?.abort();
               }}
             >
-              停止
+              停止等待
             </Button>
           ) : null}
         </div>

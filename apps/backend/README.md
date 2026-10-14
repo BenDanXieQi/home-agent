@@ -2,7 +2,7 @@
 
 命令由 `household/operations/` 保存到 `device_commands`，家庭层定义最小控制接口，`mijia/control/adapter.ts` 负责协议目标、发送开始通知和控制结果转换；材料由 `household/materials/` 保存到上下文表，该模块的 `collection.ts` 定义路由所需的采集和诊断接口，不暴露供应商采集器的生命周期。`mijia/materials/` 负责供应商采集，其中 `events.ts` 拥有事件订阅和恢复，`conversations.ts` 拥有单音箱分页、去重和材料接纳流程，`access.ts` 组合家庭与设备访问资格，`storage.ts` 统一材料脱敏和保存接纳，`service.ts` 协调轮询和诊断；`household/records/` 拥有综合查询路由、读取资格、有界写入和定期清理，清理调度不依赖供应商会话。`records/config.ts` 定义记录保留策略，`mijia/materials/config.ts` 定义采集频率和分页预算，`main.ts` 从同一 `config/provenance.json` 读取后分别校验和注入。材料的来源时间查询分别使用按主题和按家庭排序的索引，支持单主题及跨主题分页。接口位于 `/api/provenance/`，配置和限制见[家庭运行时](../../docs/household-runtime.md#命令与供应商材料)。场景与云端历史接口只提供读取诊断。
 
-基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、语音请求判断和聊天转发。语音模块直接调用模型；单次聊天由独立 [Agent](../agent/README.md) 执行。基础检测不依赖 Agent 在线。
+基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、语音请求判断和聊天转发。语音判断通过独立 [Agent](../agent/README.md) 的 workflow 执行，聊天也转发到该服务。基础检测不依赖 Agent 在线。
 
 当前支持原生属性持续采集、带有效性的当前值与房间事实查询、设备状态历史保存与只读查询，以及成员资料、参考身份关联与可修订的成员出现记录。已有数据通过[Agent 专用通路](#agent-当前数据与历史)持续交付，历史支持设备报告、成员出现和整体音视频窗口；当前位置、通用活动识别与可执行要求管理尚未实现。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
@@ -225,9 +225,9 @@ src/
 
 `main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据；应用入口独立创建语音收件箱和模型解释器，感知只接收证据交付与来源失效端口。
 
-语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 `src/conversation/interpret.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
+语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 Agent 的 `src/workflows/speech-interpretation.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
 
-`conversation/interpret.ts` 直接调用 pi-ai `Models.complete()` 请求严格工具输出，并校验完成状态、单工具结果及语音判定 schema。
+`main.ts` 将语音收件箱的 analyze 接到共享 Agent 客户端，以 `workflow="speech-interpretation"` 调用 Agent 的 `/api/workflows`。Backend 不加载模型或模型凭据；请求取消、片段到期和结果身份核对仍由语音收件箱负责。
 
 `src/http/sse-transport.ts` 通过原生 `WritableStream`、Hono `writeSSE` 与 `p-timeout` 提供家庭状态、设备历史和当前快照共用的串行写入、事件／队列容量、心跳、超时与取消。每条连接持有独立资源，领域适配器维护各自的协议、资格、通知和连接数。`snapshot-stream.ts` 合并感知与语音的快照通知；家庭状态流维护版本及实体变化，历史流读取已保存页并计算页增量，三者不合并数据语义。
 

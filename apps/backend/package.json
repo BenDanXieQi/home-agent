@@ -55,9 +55,7 @@
     "write-file-atomic": "catalog:",
     "xstate": "5.33.2",
     "yaml": "catalog:",
-    "zod": "catalog:",
-    "@earendil-works/pi-ai": "catalog:",
-    "@home-agent/configuration": "workspace:*"
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@home-agent/oxlint-config": "workspace:*",

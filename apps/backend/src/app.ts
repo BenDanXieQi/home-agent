@@ -1,5 +1,5 @@
 import { createProvenanceRoutes } from "./household/records/routes";
-import { createAgentClient } from "./agent-client";
+import type { createAgentClient } from "./agent-client";
 import { createAutomationRoutes } from "./household/automations/routes";
 import type { AutomationService } from "./household/automations/service";
 import { createAgentReceiverRoutes } from "./agent-context/receiver-routes";
@@ -72,7 +72,7 @@ type AppDependencies = {
   memberRepository: ReturnType<typeof createMemberRepository> | undefined;
   contextRepository: ReturnType<typeof createContextRepository> | undefined;
   shutdownSignal: AbortSignal;
-  readAgentUrl: () => Promise<string>;
+  agent: ReturnType<typeof createAgentClient>;
 };
 
 export function createApp({
@@ -96,12 +96,8 @@ export function createApp({
   contextRepository,
   memberRepository,
   shutdownSignal,
-  readAgentUrl,
+  agent,
 }: AppDependencies) {
-  const agent = createAgentClient({
-    readAgentUrl,
-    timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
-  });
   const recordingService = createRecordingService({
     ...recordings,
     household,

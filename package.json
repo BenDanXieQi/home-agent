@@ -82,7 +82,9 @@
       "@earendil-works/pi-ai": "1.2.0",
       "@earendil-works/pi-durable": "1.2.0",
       "@earendil-works/chord": "1.2.0",
-      "@langfuse/otel": "5.13.1"
+      "@langfuse/otel": "5.13.1",
+      "@langfuse/tracing": "5.13.1",
+      "@opentelemetry/sdk-node": "0.222.0"
     }
   },
   "patchedDependencies": {

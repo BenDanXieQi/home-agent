@@ -9,7 +9,9 @@ import {
   type SimpleStreamOptions,
   type StreamOptions,
 } from "@earendil-works/pi-ai";
-import { recordFailure, withSpan } from "./spans";
+import { startActiveObservation } from "@langfuse/tracing";
+import { beginOperation } from "./lifecycle";
+import { recordFailure } from "./spans";
 import { telemetryStatus } from "./telemetry";
 import { z } from "zod";
 
@@ -134,147 +136,168 @@ function observeModelStream(
   const output = createAssistantMessageEventStream();
   // Pi owns error normalization; the forwarding stream only keeps the active
   // generation span alive until every provider event has been observed.
-  withSpan(
+  const finish = beginOperation();
+  startActiveObservation(
     "model.generate",
-    {
-      "langfuse.observation.type": "generation",
-      "gen_ai.operation.name": "chat",
-      "gen_ai.request.model": model.id,
-      "gen_ai.system":
-        new URL(model.baseUrl).hostname === "api.openai.com"
-          ? "openai"
-          : "openai-compatible",
-    },
-    async (span) => {
+    async (generation) => {
+      const span = generation.otelSpan;
+      generation.update({ model: model.id });
       if (span.isRecording() && telemetryStatus().includeContent)
-        span.setAttribute(
-          "langfuse.observation.input",
-          JSON.stringify(context.messages),
-        );
-      let reportedUsage = false;
-      let completionStarted = false;
-      const stream = start({
-        onPayload: async (payload, requestModel) => {
-          const replacement = await options.onPayload?.(payload, requestModel);
-          if (span.isRecording()) {
-            // Inspect only allowlisted sampling fields after the caller's final
-            // payload transformation; headers, credentials and prompts stay out.
-            const parameters = modelParametersSchema.safeParse(
-              replacement === undefined ? payload : replacement,
+        // Pi normalizes system instructions and tool declarations into system messages.
+        generation.update({ input: context.messages });
+      try {
+        let reportedUsage = false;
+        let completionStarted = false;
+        const stream = start({
+          onPayload: async (payload, requestModel) => {
+            const replacement = await options.onPayload?.(
+              payload,
+              requestModel,
             );
-            if (parameters.success)
-              span.setAttribute(
-                "langfuse.observation.model.parameters",
-                JSON.stringify(parameters.data),
+            if (span.isRecording()) {
+              // Inspect only allowlisted sampling fields after the caller's final
+              // payload transformation; headers, credentials and prompts stay out.
+              const parameters = modelParametersSchema.safeParse(
+                replacement === undefined ? payload : replacement,
               );
-          }
-          return replacement;
-        },
-        onProviderStreamEvent: async (data, requestModel) => {
-          let chunkReportedUsage = false;
-          if (model.api === "openai-responses")
-            chunkReportedUsage =
-              responseUsageEventSchema.safeParse(data).success;
-          if (typeof data === "object" && data !== null) {
-            if ("usage" in data) {
-              const usage = usageSchema.safeParse(data.usage);
-              if (usage.success) chunkReportedUsage = true;
+              if (parameters.success)
+                generation.update({
+                  modelParameters: Object.fromEntries(
+                    Object.entries(parameters.data)
+                      .filter(([, value]) => value !== undefined)
+                      .map(([key, value]) => [
+                        key,
+                        typeof value === "number" || typeof value === "string"
+                          ? value
+                          : JSON.stringify(value),
+                      ]),
+                  ),
+                });
             }
-            if (
-              "choices" in data &&
-              Array.isArray(data.choices) &&
-              data.choices.length
-            ) {
-              const choice: unknown = data.choices[0];
-              if (
-                typeof choice === "object" &&
-                choice !== null &&
-                "usage" in choice &&
-                choice.usage != null
-              ) {
-                const usage = usageSchema.safeParse(choice.usage);
+            return replacement;
+          },
+          onProviderStreamEvent: async (data, requestModel) => {
+            let chunkReportedUsage = false;
+            if (model.api === "openai-responses")
+              chunkReportedUsage =
+                responseUsageEventSchema.safeParse(data).success;
+            if (typeof data === "object" && data !== null) {
+              if ("usage" in data) {
+                const usage = usageSchema.safeParse(data.usage);
                 if (usage.success) chunkReportedUsage = true;
               }
+              if (
+                "choices" in data &&
+                Array.isArray(data.choices) &&
+                data.choices.length
+              ) {
+                const choice: unknown = data.choices[0];
+                if (
+                  typeof choice === "object" &&
+                  choice !== null &&
+                  "usage" in choice &&
+                  choice.usage != null
+                ) {
+                  const usage = usageSchema.safeParse(choice.usage);
+                  if (usage.success) chunkReportedUsage = true;
+                }
+              }
             }
+            await options.onProviderStreamEvent?.(data, requestModel);
+            // A throwing caller observer prevents Pi from normalizing this chunk.
+            if (chunkReportedUsage) reportedUsage = true;
+          },
+        });
+        for await (const event of stream) {
+          if (
+            !completionStarted &&
+            (event.type === "text_delta" ||
+              event.type === "thinking_delta" ||
+              event.type === "toolcall_delta") &&
+            event.delta.length > 0
+          ) {
+            completionStarted = true;
+            generation.update({ completionStartTime: new Date() });
           }
-          await options.onProviderStreamEvent?.(data, requestModel);
-          // A throwing caller observer prevents Pi from normalizing this chunk.
-          if (chunkReportedUsage) reportedUsage = true;
-        },
-      });
-      for await (const event of stream) {
-        if (
-          !completionStarted &&
-          (event.type === "text_delta" ||
-            event.type === "thinking_delta" ||
-            event.type === "toolcall_delta") &&
-          event.delta.length > 0
-        ) {
-          completionStarted = true;
-          span.setAttribute(
-            "langfuse.observation.completion_start_time",
-            new Date().toISOString(),
-          );
-        }
-        if (event.type === "done" || event.type === "error") {
-          const response = event.type === "done" ? event.message : event.error;
-          if (reportedUsage && span.isRecording()) {
-            const usage = response.usage;
-            const reasoningTokens =
-              usage.reasoning !== undefined && usage.reasoning <= usage.output
-                ? usage.reasoning
-                : 0;
-            // Pi already separates cache reads/writes from input; reasoning is
-            // a subset of output. Langfuse flat usage uses exclusive buckets.
+          if (event.type === "done" || event.type === "error") {
+            const response =
+              event.type === "done" ? event.message : event.error;
+            if (reportedUsage && span.isRecording()) {
+              const usage = response.usage;
+              const reasoningTokens =
+                usage.reasoning !== undefined && usage.reasoning <= usage.output
+                  ? usage.reasoning
+                  : 0;
+              // Pi already separates cache reads/writes from input; reasoning is
+              // a subset of output. Langfuse flat usage uses exclusive buckets.
+              generation.update({
+                usageDetails: {
+                  input: usage.input,
+                  output: usage.output - reasoningTokens,
+                  ...(usage.cacheRead > 0
+                    ? { input_cached_tokens: usage.cacheRead }
+                    : {}),
+                  ...(usage.cacheWrite > 0
+                    ? { input_cache_creation: usage.cacheWrite }
+                    : {}),
+                  ...(reasoningTokens > 0
+                    ? { output_reasoning_tokens: reasoningTokens }
+                    : {}),
+                  total: usage.totalTokens,
+                },
+              });
+            }
             span.setAttribute(
-              "langfuse.observation.usage_details",
-              JSON.stringify({
-                input: usage.input,
-                output: usage.output - reasoningTokens,
-                ...(usage.cacheRead > 0
-                  ? { input_cached_tokens: usage.cacheRead }
-                  : {}),
-                ...(usage.cacheWrite > 0
-                  ? { input_cache_creation: usage.cacheWrite }
-                  : {}),
-                ...(reasoningTokens > 0
-                  ? { output_reasoning_tokens: reasoningTokens }
-                  : {}),
-                total: usage.totalTokens,
-              }),
+              "gen_ai.response.finish_reason",
+              response.stopReason,
             );
+            if (response.responseModel) {
+              generation.update({
+                model: response.responseModel,
+                ...(response.responseModel !== model.id
+                  ? { metadata: { requested_model: model.id } }
+                  : {}),
+              });
+              span.setAttribute(
+                "gen_ai.response.model",
+                response.responseModel,
+              );
+            }
+            if (span.isRecording() && telemetryStatus().includeContent)
+              generation.update({ output: response.content });
+            if (event.type === "error")
+              recordFailure(
+                span,
+                response.stopReason === "aborted"
+                  ? options.signal?.reason instanceof Error
+                    ? options.signal.reason
+                    : new DOMException("Model request aborted", "AbortError")
+                  : new Error(response.errorMessage ?? "Model request failed"),
+              );
+            else if (response.stopReason === "length")
+              recordFailure(
+                span,
+                new Error("Model output token limit reached"),
+              );
           }
-          span.setAttribute(
-            "gen_ai.response.finish_reason",
-            response.stopReason,
-          );
-          if (response.responseModel)
-            span.setAttribute("gen_ai.response.model", response.responseModel);
-          if (span.isRecording() && telemetryStatus().includeContent)
-            span.setAttribute(
-              "langfuse.observation.output",
-              JSON.stringify(response.content),
-            );
-          if (event.type === "error")
-            recordFailure(
-              span,
-              response.stopReason === "aborted"
-                ? options.signal?.reason instanceof Error
-                  ? options.signal.reason
-                  : new DOMException("Model request aborted", "AbortError")
-                : new Error(response.errorMessage ?? "Model request failed"),
-            );
-          else if (response.stopReason === "length")
-            recordFailure(span, new Error("Model output token limit reached"));
+          output.push(event);
         }
-        output.push(event);
+      } catch (error) {
+        recordFailure(span, error);
+        const failed = lazyStream(model, async () => {
+          throw error;
+        });
+        for await (const event of failed) output.push(event);
       }
     },
-  ).catch(async (error: unknown) => {
-    const failed = lazyStream(model, async () => {
-      throw error;
-    });
-    for await (const event of failed) output.push(event);
-  });
+    { asType: "generation" },
+  )
+    .catch(async (error: unknown) => {
+      const failed = lazyStream(model, async () => {
+        throw error;
+      });
+      for await (const event of failed) output.push(event);
+    })
+    .finally(finish);
   return output;
 }
