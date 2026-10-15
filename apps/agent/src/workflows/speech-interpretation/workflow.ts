@@ -12,9 +12,9 @@ import {
 } from "@home-agent/api/speech-dialogue";
 import { z } from "zod";
 import { AppError } from "@home-agent/api/errors";
-import { completeStructuredOutput } from "./structured-output";
-import type { WorkflowContext } from "./definition";
-import { optionalModelReferenceSchema } from "../models";
+import { completeStructuredOutput } from "../structured-output";
+import type { WorkflowContext } from "../definition";
+import { optionalModelReferenceSchema } from "../../models";
 
 export const modelConfiguration = {
   key: "AGENT_SPEECH_MODEL",

@@ -14,15 +14,15 @@ import {
 import {
   createWorkflow as createWorkflow0,
   modelConfiguration as modelConfiguration0,
-} from "./automation-generation";
+} from "./automation-generation/workflow";
 import {
   createWorkflow as createWorkflow1,
   modelConfiguration as modelConfiguration1,
-} from "./spatial-planning";
+} from "./spatial-planning/workflow";
 import {
   createWorkflow as createWorkflow2,
   modelConfiguration as modelConfiguration2,
-} from "./speech-interpretation";
+} from "./speech-interpretation/workflow";
 
 export const workflowConfigurationSchema = z.object({
   [modelConfiguration0.key]: modelConfiguration0.schema,

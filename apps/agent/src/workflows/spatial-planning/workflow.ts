@@ -52,9 +52,9 @@ import {
   withDurableModelTrace,
   withDurableToolTrace,
 } from "@home-agent/observability/durable";
-import { readFinalAnswer } from "../utils/final-answer";
-import type { WorkflowContext } from "./definition";
-import { optionalModelReferenceSchema } from "../models";
+import { readFinalAnswer } from "../../utils/final-answer";
+import type { WorkflowContext } from "../definition";
+import { optionalModelReferenceSchema } from "../../models";
 
 export const modelConfiguration = {
   key: "AGENT_SPATIAL_MODEL",

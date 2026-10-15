@@ -101,8 +101,8 @@ Agent 的语音判断 workflow 保留模型 span，并接续 Backend 客户端�
 - `apps/backend/src/workflows/routes.ts`：生成请求的设备能力准备、运行失效取消及结果复核。
 - `apps/backend/src/agent-client.ts`：聊天、workflow 与接收记录共用的 Agent 调用，使用 `tracedFetch` 传播追踪上下文并有界读取、校验响应。
 - `apps/agent/src/assistant/conversation.ts`：原生会话的单次聊天提交与等待、取消及期限、完整回答校验。
-- `apps/agent/src/workflows/automation-generation.ts`：生成 workflow 的业务 span 与草稿校验属性。
-- `apps/agent/src/workflows/spatial-planning.ts`：原生规划会话 ID、每轮问答、草稿工具及修订元信息的 Session 关联。
+- `apps/agent/src/workflows/automation-generation/workflow.ts`：生成 workflow 的业务 span 与草稿校验属性。
+- `apps/agent/src/workflows/spatial-planning/workflow.ts`：原生规划会话 ID、每轮问答、草稿工具及修订元信息的 Session 关联。
 - `packages/observability/src/model.ts`：原生 pi-ai 服务提供者的 GenAI `chat` span、供应商实际用量与失败状态。
 - `packages/observability/src/agent-trace.ts`：Agent 执行标记、本地与跨服务继承，以及 Langfuse 专用导出筛选。
 - `packages/observability/src/session.ts`：请求级 Session 绑定、内部传播、响应回填及请求关联对象释放。
@@ -115,7 +115,7 @@ Agent 的语音判断 workflow 保留模型 span，并接续 Backend 客户端�
 - `apps/backend/src/connections/status.ts`：使用 `tracedFetch` 检查 Agent 与 go2rtc；通用 OTel 保留连接探测，独立探测不进入 Langfuse。
 - `apps/backend/src/mijia/operation.ts`：米家业务操作的安全错误转换与 span，包括授权恢复、凭据保存和播放操作。
 - `apps/backend/src/mijia/media/go2rtc-adapter.ts`：专用协议的 CLIENT span，只记录固定操作名、HTTP 方法、响应状态码与白名单错误分类。
-- `apps/agent/src/workflows/speech-interpretation.ts`：结构化模型调用的 span。
+- `apps/agent/src/workflows/speech-interpretation/workflow.ts`：结构化模型调用的 span。
 
 Backend 业务操作、Agent workflow、HTTP 等待及模型通过 `withSpan` 显式埋点，保留通用 OTel 属性、错误脱敏和停机等待；`withGenAiContext` 负责调用间的关联属性。Durable 运行与工具由会话事件观察器采集，经 `TraceBackend` 转换为原生 span。聊天转发和连接探测使用 `tracedFetch` 并消费或取消响应体。米家专用协议在完成错误脱敏后记录 CLIENT span，不记录目标 URL、账号凭据、请求／响应正文或 SDP，也不向 go2rtc 传播追踪上下文；这些 span 描述 backend 发起的调用，尚不包含 go2rtc 内部执行或视频媒体链路。观察器记录 Durable 会话事件及运行状态，不为内部每次调度或供应商 SDK 内部重试生成独立 span。
 
