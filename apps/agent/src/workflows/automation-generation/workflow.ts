@@ -14,9 +14,9 @@ import {
   withEvaluation,
   recordEvaluationOutput,
 } from "@home-agent/observability";
-import { completeStructuredOutput } from "./structured-output";
-import type { WorkflowContext } from "./definition";
-import { optionalModelReferenceSchema } from "../models";
+import { completeStructuredOutput } from "../structured-output";
+import type { WorkflowContext } from "../definition";
+import { optionalModelReferenceSchema } from "../../models";
 
 export const modelConfiguration = {
   key: "AGENT_AUTOMATION_MODEL",
