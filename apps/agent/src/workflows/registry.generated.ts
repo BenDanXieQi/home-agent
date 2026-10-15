@@ -11,12 +11,18 @@ import {
   type WorkflowInstance,
   type WorkflowRegistry,
 } from "./definition";
-import { createWorkflow as createWorkflow0 } from "./automation-generation/workflow";
-import { modelConfiguration as modelConfiguration0 } from "./automation-generation/config";
-import { createWorkflow as createWorkflow1 } from "./spatial-planning/workflow";
-import { modelConfiguration as modelConfiguration1 } from "./spatial-planning/config";
-import { createWorkflow as createWorkflow2 } from "./speech-interpretation/workflow";
-import { modelConfiguration as modelConfiguration2 } from "./speech-interpretation/config";
+import {
+  createWorkflow as createWorkflow0,
+  modelConfiguration as modelConfiguration0,
+} from "./automation-generation";
+import {
+  createWorkflow as createWorkflow1,
+  modelConfiguration as modelConfiguration1,
+} from "./spatial-planning";
+import {
+  createWorkflow as createWorkflow2,
+  modelConfiguration as modelConfiguration2,
+} from "./speech-interpretation";
 
 export const workflowConfigurationSchema = z.object({
   [modelConfiguration0.key]: modelConfiguration0.schema,

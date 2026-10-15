@@ -14,8 +14,14 @@ import {
   withEvaluation,
   recordEvaluationOutput,
 } from "@home-agent/observability";
-import { completeStructuredOutput } from "../structured-output";
-import type { WorkflowContext } from "../definition";
+import { completeStructuredOutput } from "./structured-output";
+import type { WorkflowContext } from "./definition";
+import { optionalModelReferenceSchema } from "../models";
+
+export const modelConfiguration = {
+  key: "AGENT_AUTOMATION_MODEL",
+  schema: optionalModelReferenceSchema,
+} as const;
 
 const automationGenerationInstructions = `你为家庭自动化生成或修改可审阅的规则树草稿，所有面向用户的解释用简洁中文。
 只调用 draft_automation 提交结构化结果，不输出普通文本。这个函数只提交草稿，不保存、不启用、不执行设备操作。

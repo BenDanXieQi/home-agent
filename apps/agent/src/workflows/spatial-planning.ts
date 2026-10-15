@@ -52,8 +52,14 @@ import {
   withDurableModelTrace,
   withDurableToolTrace,
 } from "@home-agent/observability/durable";
-import { readFinalAnswer } from "../../utils/final-answer";
-import type { WorkflowContext } from "../definition";
+import { readFinalAnswer } from "../utils/final-answer";
+import type { WorkflowContext } from "./definition";
+import { optionalModelReferenceSchema } from "../models";
+
+export const modelConfiguration = {
+  key: "AGENT_SPATIAL_MODEL",
+  schema: optionalModelReferenceSchema,
+} as const;
 
 const instructions = `你负责与用户持续协作建立空间和通道关系。结合同一会话的已有对话、当前草稿及本次图片，回答、澄清并调整草稿。
 需要建立或调整草稿及待澄清问题时，调用 update_spatial_draft，提交 reply、questions 和完整 draft；调用后本轮结束，会话继续保留。纯讨论或解释可以直接回答，保留当前草稿及待澄清问题。只有工具成功提交后才能声称草稿已更新。
