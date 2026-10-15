@@ -2,6 +2,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
+import { sum } from "radash";
 import { agentCurrentContextSchema } from "@home-agent/api/agent-receipts";
 import {
   attentionSchema,
@@ -29,7 +30,8 @@ async function main() {
     return;
   }
   if (!values.input) throw new Error("--input is required");
-  const inputText = await Bun.file(values.input).text();
+  const inputPath = values.input;
+  const inputText = await Bun.file(inputPath).text();
   const input: unknown = JSON.parse(inputText);
   const [command = "overview", deviceId, ...keys] = positionals;
   if (values.remember && command !== "spec" && command !== "state")
@@ -42,9 +44,12 @@ async function main() {
     throw new Error("--output requires overview");
   if (values.attention && command === "decode")
     throw new Error("decode does not use --attention");
-  const inputStat = await stat(values.input);
-  async function checkOutputs(paths: string[], protectAttention = false) {
-    const seenPaths = new Set([resolve(values.input!)]);
+  const inputStat = await stat(inputPath);
+  async function assertOutputPathsSafe(
+    paths: string[],
+    protectAttention = false,
+  ) {
+    const seenPaths = new Set([resolve(inputPath)]);
     const seenFiles = new Set([`${inputStat.dev}:${inputStat.ino}`]);
     if (protectAttention && values.attention) {
       seenPaths.add(resolve(values.attention));
@@ -88,8 +93,8 @@ async function main() {
   const view = createHouseholdModelView(context, attention);
   if (command === "overview") {
     if (!values.output) throw new Error("overview requires --output");
-    const directory = resolve(values.output);
-    await mkdir(directory, { recursive: true });
+    const outputDirectory = resolve(values.output);
+    await mkdir(outputDirectory, { recursive: true });
     const encoded = encodeHouseholdContext(view.semantic);
     const decoded = decodeHouseholdContext(encoded);
     if (!isDeepStrictEqual(decoded, view.semantic))
@@ -101,14 +106,9 @@ async function main() {
       context_sha256: createHash("sha256").update(text).digest("hex"),
       semantic_bytes: Buffer.byteLength(JSON.stringify(view.semantic)),
       devices: encoded.D.length,
-      capabilities: encoded.D.reduce(
-        (sum, d) => sum + (encoded.S[d[4]]?.length ?? 0),
-        0,
-      ),
-      reports: encoded.states.reduce(
-        (sum, r) =>
-          sum + r.reports.reduce((count, group) => count + group[1].length, 0),
-        0,
+      capabilities: sum(encoded.D, (d) => encoded.S[d[4]]?.length ?? 0),
+      reports: sum(encoded.states, (r) =>
+        sum(r.reports, (group) => group[1].length),
       ),
       characters: Array.from(text).length,
       bytes: Buffer.byteLength(text),
@@ -123,13 +123,13 @@ async function main() {
       "capability-audit.json": `${JSON.stringify(view.audit, null, 2)}\n`,
       "manifest.json": `${JSON.stringify(manifest, null, 2)}\n`,
     };
-    await checkOutputs(
-      Object.keys(outputs).map((name) => resolve(directory, name)),
+    await assertOutputPathsSafe(
+      Object.keys(outputs).map((name) => resolve(outputDirectory, name)),
       true,
     );
     await Promise.all(
       Object.entries(outputs).map(([name, contents]) =>
-        Bun.write(resolve(directory, name), contents),
+        Bun.write(resolve(outputDirectory, name), contents),
       ),
     );
     console.log(JSON.stringify(manifest, null, 2));
@@ -152,7 +152,7 @@ async function main() {
   if (values.remember) {
     if (!values.attention || !keys.length)
       throw new Error("--remember requires --attention and explicit keys");
-    await checkOutputs([values.attention]);
+    await assertOutputPathsSafe([values.attention]);
     attention[deviceId] = [
       ...new Set([...keys, ...(attention[deviceId] ?? [])]),
     ];

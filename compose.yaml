@@ -1,4 +1,6 @@
 name: home-agent
+include:
+  - docker/langfuse/compose.yaml
 services:
   go2rtc:
     image: home-agent/go2rtc:1.9.14

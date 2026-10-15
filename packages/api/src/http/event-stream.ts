@@ -19,7 +19,7 @@ export async function consumeEventStream(
     silenceMs: number;
     onResponse?: (response: StreamResponse) => void;
   },
-  receive: (event: EventSourceMessage) => void,
+  receive: (event: EventSourceMessage) => void | Promise<void>,
 ) {
   const controller = new AbortController();
   const signal = AbortSignal.any([options.signal, controller.signal]);
@@ -58,7 +58,7 @@ export async function consumeEventStream(
       )
       .pipeTo(
         new WritableStream<EventSourceMessage>({
-          write(event) {
+          async write(event) {
             signal.throwIfAborted();
             if (
               options.maxEventBytes !== undefined &&
@@ -66,7 +66,7 @@ export async function consumeEventStream(
                 options.maxEventBytes
             )
               throw new Error("Oversized event");
-            receive(event);
+            await receive(event);
             arm(options.silenceMs);
           },
         }),

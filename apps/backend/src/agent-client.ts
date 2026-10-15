@@ -3,18 +3,15 @@ import { chatInputSchema, chatResponseSchema } from "@home-agent/api/contracts";
 import {
   agentWorkflowInputSchema,
   agentWorkflowResultSchema,
-  agentWorkflowLimits,
 } from "@home-agent/api/agent-workflows";
 import {
   agentReceiptIndexSchema,
   agentReceiptDetailSchema,
   agentCurrentContextSchema,
-  agentReceiptPolicy,
   agentReceiptQuerySchema,
 } from "@home-agent/api/agent-receipts";
 import { requestJson } from "@home-agent/api/http/request-json";
-import { tracedFetch } from "@home-agent/observability";
-import { AppError } from "@home-agent/api/errors";
+import { tracedFetch, withAgentTrace } from "@home-agent/observability";
 
 /** The address is resolved for every request so saved connection changes apply. */
 export function createAgentClient(options: {
@@ -24,7 +21,6 @@ export function createAgentClient(options: {
   function request<T>(
     path: string,
     schema: z.ZodType<T>,
-    maxBytes: number,
     signal: AbortSignal,
     init: Pick<RequestInit, "method" | "body" | "headers"> = {},
   ) {
@@ -32,7 +28,7 @@ export function createAgentClient(options: {
       async (requestSignal) => {
         const url = new URL(path, await options.readAgentUrl());
         requestSignal.throwIfAborted();
-        return tracedFetch(url, {
+        return tracedFetch({ from: "backend", to: "agent" }, url, {
           ...init,
           redirect: "error",
           signal: requestSignal,
@@ -42,7 +38,6 @@ export function createAgentClient(options: {
       {
         signal,
         timeoutMs: options.timeoutMs,
-        maxBytes,
         unavailableCode: "agent_unavailable",
       },
     );
@@ -50,29 +45,25 @@ export function createAgentClient(options: {
 
   return {
     chat(input: z.output<typeof chatInputSchema>, signal: AbortSignal) {
-      return request("/api/chat", chatResponseSchema, 512 * 1024, signal, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
+      return withAgentTrace(() =>
+        request("/api/chat", chatResponseSchema, signal, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        }),
+      );
     },
     workflow(
       input: z.output<typeof agentWorkflowInputSchema>,
       signal: AbortSignal,
     ) {
       const body = JSON.stringify(input);
-      if (Buffer.byteLength(body) > agentWorkflowLimits.requestBytes)
-        throw new AppError("request_too_large");
-      return request(
-        "/api/workflows",
-        agentWorkflowResultSchema,
-        agentWorkflowLimits.responseBytes,
-        signal,
-        {
+      return withAgentTrace(() =>
+        request("/api/workflows", agentWorkflowResultSchema, signal, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body,
-        },
+        }),
       );
     },
     receipts(
@@ -90,7 +81,6 @@ export function createAgentClient(options: {
       return request(
         `/api/context-receipts?${params.toString()}`,
         agentReceiptIndexSchema,
-        agentReceiptPolicy.responseBytes,
         signal,
       );
     },
@@ -98,7 +88,6 @@ export function createAgentClient(options: {
       return request(
         "/api/context-receipts/current",
         agentCurrentContextSchema,
-        agentReceiptPolicy.responseBytes,
         signal,
       );
     },
@@ -106,7 +95,6 @@ export function createAgentClient(options: {
       return request(
         `/api/context-receipts/${encodeURIComponent(id)}`,
         agentReceiptDetailSchema,
-        agentReceiptPolicy.responseBytes,
         signal,
       );
     },

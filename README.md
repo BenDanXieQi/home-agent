@@ -49,7 +49,7 @@ bun install --frozen-lockfile
 bun run setup
 ```
 
-编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_PROVIDER`、`AGENT_MODEL`、`OPENAI_API_KEY`，端点与自定义模型说明见[Agent 模型配置](apps/agent/README.md#模型配置)。
+编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_MODEL`（`provider/modelId`）和所选提供商的认证，原生凭据与模型清单说明见[Agent 模型配置](apps/agent/README.md#模型配置)。
 
 ```sh
 bun run dev

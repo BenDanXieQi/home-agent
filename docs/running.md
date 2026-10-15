@@ -30,6 +30,37 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库结构需事先准备；本机数据库准备可直接运行 `bun run db:init`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，执行 `bun run --cwd apps/backend db:migrate`，再运行 `bun run --cwd apps/backend db:check`，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
 
+## 可选的本地 Langfuse
+
+Langfuse 是模型与工具调用的追踪展示服务。它和 PostgreSQL、ClickHouse（追踪分析数据库）、Redis（任务队列）及 MinIO（对象存储）一起属于根目录的 `home-agent` Compose 项目，在 Docker Desktop 中显示于同一服务组。默认不启用，不下载或启动这些可选服务；内部各服务仍使用独立容器。需要 Docker Compose 2.20+ 的 `include` 能力。
+
+在根目录 `.env` 填写以下配置：
+
+```dotenv
+COMPOSE_PROFILES=langfuse
+LANGFUSE_LOCAL_SECRET=填入openssl生成的64位十六进制值
+LANGFUSE_PUBLIC_KEY=pk-lf-填入一个随机UUID
+LANGFUSE_SECRET_KEY=sk-lf-填入另一个随机UUID
+LANGFUSE_INIT_USER_EMAIL=你的登录邮箱
+LANGFUSE_INIT_USER_PASSWORD=你的登录密码
+# 查看提示词、回答和工具正文时开启；默认不采集。
+OTEL_INCLUDE_CONTENT=true
+```
+
+`COMPOSE_PROFILES` 是 Docker Compose 的可选服务组开关；多个 profile 用逗号分隔。运行 `openssl rand -hex 32` 生成本地部署密钥，运行 `uuidgen` 分别生成两个项目密钥后缀。不要把示例占位文本作为实际值。`LANGFUSE_LOCAL_SECRET` 用于此本机实例的数据库、队列、对象存储、登录和加密配置，已有数据后须保持不变。启用 profile 时启动命令会检查密钥格式和必填项；配置保存在 Git 忽略的 `.env`，不要提交。
+
+执行 `bun run dev` 会启动可选服务并等待展示服务健康检查通过，首次下载与数据库初始化可能需要较长时间。打开 `http://localhost:${LANGFUSE_PORT}`（默认 3001），本地入口会使用配置的固定账号自动建立会话并进入 Home Agent 项目，无需填写登录表单。入口运行在同一个 Docker 组中，HTTP 转发使用 `httpxy`；账号密码只在入口容器与 Langfuse 之间传递，不写入网页。`LANGFUSE_AUTO_LOGIN` 默认 `true`，设置为 `false` 后使用普通登录页面。此模式面向可信本机，访问入口的本机用户均以同一个配置账号进入项目。
+
+自动登录使用 Langfuse 当前的 NextAuth 登录接口（先取得防止跨站请求伪造的 CSRF 令牌，再提交固定账号），不修改 Langfuse 本身的认证。Langfuse 使用官方启动初始化能力创建 Home Agent 组织、项目和项目密钥；仅创建缺失资源，修改初始化字段不会重置已有账号、密码或项目密钥。自动登录要求配置与已有账号一致，不一致时入口明确返回错误，须在 Langfuse 管理已有账号后更新配置。
+
+填写两个项目密钥且省略 `OTEL_TRACES_EXPORTER` 时，Backend 与 Agent 自动启用 Langfuse 导出；本地 profile 将默认接收地址设为 `http://localhost:3001`。显式 `LANGFUSE_BASE_URL` 优先于本地默认地址；通用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 或 `OTEL_EXPORTER_OTLP_ENDPOINT` 用于独立 Collector，可与 Langfuse 同时启用。Langfuse 只接收 Agent 执行相关记录，通用导出保留 SDK 采样留下的常规追踪。`LANGFUSE_TRACING_ENABLED=false` 单独关闭 Langfuse 导出，`OTEL_TRACES_EXPORTER=none` 关闭全部导出；两者不关闭展示容器。配置及转发边界见[追踪说明](../packages/observability/README.md#配置)。修改配置后重启应用；已运行的应用不会因再次执行 `bun run dev` 自动重启。
+
+可通过 `LANGFUSE_PORT` 更改页面端口，通过 `LANGFUSE_MEDIA_PORT` 更改媒体存储端口（默认 9090）；自动接收地址及 Compose 的页面和媒体地址随之更新。只有自动登录入口及媒体端口绑定本机回环地址，Langfuse Web、内部数据库和队列不直接发布宿主端口，Langfuse 数据库与家庭上下文数据库独立。Langfuse 追踪不替代摄像头检测框和筛选片段展示，采集边界见[追踪说明](../packages/observability/README.md)。
+
+`bun run status` 显示所有依赖容器；`bun run stop` 包括已启用的 Langfuse，即使已清空 profile 也会停止其容器，并保留数据卷。关闭本地展示时先停止服务，再清空 `COMPOSE_PROFILES` 并设置 `OTEL_TRACES_EXPORTER=none`，然后重新启动。不要使用 `docker compose down -v`，它会删除数据库和追踪数据卷。
+
+单独准备本机部署依赖时，用 `docker compose up -d --build --wait langfuse-entry langfuse-worker` 启动已配置的 Langfuse，再按生产运行说明启动应用；`bun run start` 不管理 Docker 依赖。此配置依据 [Langfuse 官方 Compose](https://langfuse.com/self-hosting/deployment/docker-compose) 与[启动初始化](https://langfuse.com/self-hosting/administration/headless-initialization)，容器启动、健康检查、初始化账号登录及项目页面已在本机验证；普通聊天及工具失败追踪已通过本机 Observations API（观测记录查询接口）核验，其余验证范围见[追踪链路](../packages/observability/README.md#追踪链路)。
+
 ## HTTPS 与 HTTP/2 入口
 
 本机需安装 [Caddy](https://caddyserver.com/docs/install)；macOS 使用 `brew install caddy`。开发与生产浏览器统一访问 <https://localhost:8443/>，避免多个 SSE（服务端持续推送事件的连接）占满 HTTP/1.1 浏览器连接。内部 Vite、backend 与 Agent 端口仍用于服务间通信和排障。
@@ -57,7 +88,7 @@ Agent 的 `BACKEND_URL` 默认 `http://127.0.0.1:3000`，用于后台上下文�
 
 backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
 
-统一启动是开发便利，不表示 backend 依赖 Agent 在线。当前摄像头预览与本地检测不调用 Agent，也不要求 `AGENT_MODEL` 或 `OPENAI_API_KEY`；Agent 不在线时聊天不可用、服务检查显示该项不可达，不阻止已配置的本地检测。
+统一启动是开发便利，不表示 backend 依赖 Agent 在线。当前摄像头预览与本地检测不调用 Agent，也不要求 模型或提供商凭据；Agent 不在线时聊天不可用、服务检查显示该项不可达，不阻止已配置的本地检测。
 
 backend 首次启动在仓库根目录创建 `config/config.yaml` 与相邻的 `config.schema.json`，已有 YAML 不覆盖。默认路径不受启动工作目录影响，源码与构建入口使用同一文件；整个 `/config/` 忽略 Git。
 

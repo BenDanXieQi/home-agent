@@ -48,6 +48,7 @@ async function checkServiceConnection(
   let params: MessageParams | undefined;
   try {
     const response = await tracedFetch(
+      { from: "backend", to: serviceName },
       new URL(serviceName === "agent" ? "/health" : "/api", url),
       { signal, redirect: "error", headers: { Accept: "application/json" } },
     );

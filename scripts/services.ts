@@ -40,6 +40,42 @@ const env = {
   // oxlint-disable-next-line turbo/no-undeclared-env-vars
   PATH: `${dirname(docker)}${delimiter}${process.env.PATH ?? ""}`,
 };
+// oxlint-disable-next-line turbo/no-undeclared-env-vars
+const localLangfuse = process.env.COMPOSE_PROFILES?.split(",").some(
+  (profile) => profile.trim() === "langfuse",
+);
+async function prepareLangfuse() {
+  if (!localLangfuse) return;
+  // oxlint-disable-next-line turbo/no-undeclared-env-vars
+  const secret = process.env["LANGFUSE_LOCAL_SECRET"];
+  if (!secret || !/^[a-fA-F0-9]{64}$/.test(secret))
+    throw new Error(
+      "启用本地 Langfuse 需要 LANGFUSE_LOCAL_SECRET（openssl rand -hex 32）。",
+    );
+  const required = [
+    "LANGFUSE_PUBLIC_KEY",
+    "LANGFUSE_SECRET_KEY",
+    "LANGFUSE_INIT_USER_EMAIL",
+    "LANGFUSE_INIT_USER_PASSWORD",
+  ];
+  const missing = required.filter((name) => !process.env[name]?.trim());
+  if (missing.length)
+    throw new Error(`启用本地 Langfuse 需要填写：${missing.join(", ")}`);
+  await runDocker([
+    "compose",
+    "up",
+    "-d",
+    "--wait",
+    "--wait-timeout",
+    "300",
+    "--build",
+    "langfuse-entry",
+    "langfuse-worker",
+  ]);
+  console.info(
+    `Langfuse：http://localhost:${process.env["LANGFUSE_PORT"] || "3001"}`,
+  );
+}
 async function runDocker(arguments_: string[]) {
   const child = Bun.spawn([docker!, ...arguments_], {
     cwd: root,
@@ -121,7 +157,7 @@ if (action === "status") {
     `HTTPS 入口：https://localhost:8443 · ${(await webEntryRunning()) ? "运行中" : "未运行"}`,
   );
   console.info(`原生 go2rtc：${(await nativeRunning()) ? "运行中" : "未运行"}`);
-  await runDocker(["compose", "ps", "-a"]);
+  await runDocker(["compose", "--profile", "langfuse", "ps", "-a"]);
   console.info("服务状态不代表摄像头已出帧。");
   process.exit(0);
 }
@@ -141,8 +177,8 @@ try {
     await stopDev();
     await stopWebEntry();
     await stopNative();
-    await runDocker(["compose", "stop"]);
-    console.info("本项目管理的开发应用、go2rtc 和数据库已停止，数据保留。");
+    await runDocker(["compose", "--profile", "langfuse", "stop"]);
+    console.info("本项目管理的开发应用及 Docker 依赖已停止，数据保留。");
   } else if (action === "initialize" || action === "migrate") {
     await runBun(["scripts/setup-local.ts"]);
     await prepareDatabase();
@@ -208,6 +244,7 @@ try {
         );
     }
     await prepareDatabase();
+    await prepareLangfuse();
     await writeFile(modeFile, mode + "\n", { mode: 0o600 });
     console.info(
       `go2rtc: ${mode} · http://127.0.0.1:1984（接口就绪不代表摄像头出帧）`,

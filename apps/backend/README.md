@@ -106,7 +106,7 @@ SD 卡回放由 `mijia/recordings/` 拥有申请规则、来源授权、录像�
 
 `POST /api/agent/context/history` 按 `kind` 返回 `device_reports`、`member_sightings` 或 `perception_windows`。成员分支从身份仓库读取数据库当前归因，音视频分支从 `perception_windows` 读取当前仍有访问资格的完整观察记录，并合并尚在内存的最新窗口，保留视觉、音频、转写与现有媒体状态。记录保留 365 天，视频缓存仍为 30 分钟；数据库不保存媒体字节。 `perception/history/` 分别拥有归档写入与清理、索引查询、历史读取投影；原始窗口接纳由 `perception/window/` 负责。两者支持时间和来源筛选，成员另可按成员 ID 筛选；它们独立于推送中的有界最近集合查询。协议、区间边界、分页与保留限制见[Agent 数据交付](../../docs/household-runtime.md#agent-当前数据与材料历史)，字段定义见[共享契约](../../packages/api/README.md#agent-数据交付契约)。
 
-`agent-client.ts` 集中聊天、专项任务及接收记录的 Agent 调用，每次请求解析当前连接配置中的 Agent 地址，配置更新影响后续请求。请求使用原生 RequestInit、`tracedFetch` 及共享有界 JSON 读取，保留公共错误码和字段说明，不自动重试。发送参数使用入口已校验的值，不再次校验同一份输入；响应仍在接收边界校验。调用方保留各自容量与期限，workflow 的能力准备、运行失效取消和结果复核仍由 workflow 路由拥有。
+`agent-client.ts` 集中聊天、专项任务及接收记录的 Agent 调用，每次请求解析当前连接配置中的 Agent 地址，配置更新影响后续请求。请求使用原生 RequestInit、`tracedFetch` 及共享 JSON 读取，保留公共错误码和字段说明，不自动重试。聊天与 workflow 通过 `withAgentTrace()` 标记 Agent 执行；Langfuse 只接收带执行标记的记录，通用 OTel 保留常规请求与业务操作。接收记录读取、健康检查及普通设备请求不因目标为 Agent 而进入 Langfuse；执行中回查 Backend 数据时延续标记与上游追踪，配置和导出边界见[可观测性](../../packages/observability/README.md)。发送参数使用入口已校验的值，不再次校验同一份输入；响应仍在接收边界校验。调用方保留各自执行期限，workflow 的能力准备、运行失效取消和结果复核仍由 workflow 路由拥有。
 
 `GET /api/agent/receipts`、`/api/agent/receipts/:id` 与 `/api/agent/receipts/current` 将 Web 只读请求转发到配置的 Agent 服务，校验响应并限制大小与超时，沿用可信本机 Web 访问限制，不用 Backend 发布缓存替代接收结果。
 
@@ -225,7 +225,7 @@ src/
 
 `main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据；应用入口独立创建语音收件箱和模型解释器，感知只接收证据交付与来源失效端口。
 
-语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 Agent 的 `src/workflows/speech-interpretation.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
+语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 Agent 的 `src/workflows/speech-interpretation/workflow.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
 
 `main.ts` 将语音收件箱的 analyze 接到共享 Agent 客户端，以 `workflow="speech-interpretation"` 调用 Agent 的 `/api/workflows`。Backend 不加载模型或模型凭据；请求取消、片段到期和结果身份核对仍由语音收件箱负责。
 
@@ -361,8 +361,10 @@ JSON 输入使用 `@home-agent/api/errors/hono` 的 `validateJson(schema)` middl
 
 `POST /api/workflows` 复用本机访问限制，接受 `{ scope_epoch, workflow: "automation-generation", input: { text, definition? } }`，返回 `{ workflow, result: { definition, behavior, clarifications } }`。Backend 从当前家庭的已加载规格生成设备能力，不接受调用方提供的 capabilities，通过已配置的 Agent 地址调用公共任务入口。请求取消和服务关闭会取消在途调用；返回前再次校验家庭资格及草稿引用的当前设备能力，失效结果不作为可用草稿交付。
 
-该 workflow 只生成草稿，不保存、启用或执行规则。自动化页面已接入；固定动作支持米家属性写入、设备动作和执行记录中的网页通知。家庭事件生产者尚未接入，事件类型为空；通知能力为 true。AI 复核与动作选择尚未启用，含这些配置的规则不能启用。容量沿用共享 workflow 契约，调用期限不超过 Backend 请求期限与 workflow 期限。调用链通过现有 `tracedFetch` 传播追踪上下文；配置见[可观测性](../../packages/observability/README.md)。真实家庭与模型的完整生成链路尚未验收。
+该 workflow 只生成草稿，不保存、启用或执行规则。自动化页面已接入；固定动作支持米家属性写入、设备动作及执行记录中的网页通知。家庭事件生产者尚未接入，事件类型为空；通知能力为 true。AI 复核与动作选择尚未启用，含这些配置的规则不能启用。输入与结果沿用共享 workflow 契约，调用期限由 Backend 请求配置和 Agent 执行配置控制。调用链通过现有 `tracedFetch` 传播追踪上下文；配置见[可观测性](../../packages/observability/README.md)。真实家庭与模型的完整生成链路尚未验收。
 
 ## 家庭自动化
+
+同一 `POST /api/workflows` 也接受 `{ scope_epoch, workflow: "spatial-planning", input }`，转发 `start/message/read/close` 到 Agent。Backend 将当前账号、家庭和运行代次作为可信 `scope` 传入 Agent，返回前再次核对范围；浏览器只提交 `scope_epoch`。Agent 拥有会话范围与资源，在家庭范围撤销或变化时关闭旧会话。等待使用服务配置的预算，沿用取消检查，只返回待核对草稿，不写入空间数据库，也不采集摄像头画面。会话协议见[共享会话契约](../../packages/api/README.md#空间规划会话契约)。
 
 `household/automations/` 提供规则管理、内存条件求值、固定动作调度及执行记录；`mijia/control/` 负责设备控制边界。规则 API 挂载于 `/api/household/automations`，生成沿用 `/api/workflows`。启动需要已初始化的数据库，不启动 AI 复核、动作选择或模型任务 worker。条件语义、动作资格、容量和验收边界统一见[家庭自动化](../../docs/automations.md)。

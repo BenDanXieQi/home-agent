@@ -1,3 +1,4 @@
+import { unique } from "radash";
 import type {
   agentContextDataSchemas,
   agentObservationSourceSchema,
@@ -24,39 +25,37 @@ function observationSourceState(
 }
 
 /** Capture structured differences while both accepted contexts are available. */
-export function receiptChanges(
+export function collectReceiptChanges(
   input: Pick<z.infer<typeof agentReceiptSchema>, "message" | "context">,
   previous: z.infer<typeof agentReceiptSchema>["context"] | null,
 ) {
   const changes: z.infer<typeof agentReceiptChangeSchema>[] = [];
   const before = previous?.parts;
   const after = input.context.parts;
-  const oldDevice = before?.device_state;
-  const newDevice = after.device_state;
+  const previousDeviceState = before?.device_state;
+  const currentDeviceState = after.device_state;
   const publication = input.message.data.parts.device_state;
-  if (publication && newDevice?.status === "ready") {
+  if (publication && currentDeviceState?.status === "ready") {
     const oldMetadata = createAgentDeviceMetadata(before?.household);
     const newMetadata = createAgentDeviceMetadata(after.household);
     const oldLatest =
-      oldDevice?.status === "ready" ? oldDevice.data.latest : {};
+      previousDeviceState?.status === "ready"
+        ? previousDeviceState.data.latest
+        : {};
     const keys =
       publication.status === "delta"
-        ? [
-            ...new Set(
-              publication.data.changes
-                .filter((c) => c.entity === "latest")
-                .map((c) => c.key),
-            ),
-          ]
-        : [
-            ...new Set([
-              ...Object.keys(oldLatest),
-              ...Object.keys(newDevice.data.latest),
-            ]),
-          ];
+        ? unique(
+            publication.data.changes
+              .filter((change) => change.entity === "latest")
+              .map((change) => change.key),
+          )
+        : unique([
+            ...Object.keys(oldLatest),
+            ...Object.keys(currentDeviceState.data.latest),
+          ]);
     for (const key of keys) {
       const old = oldLatest[key];
-      const next = newDevice.data.latest[key];
+      const next = currentDeviceState.data.latest[key];
       if (isDeepStrictEqual(old, next)) continue;
       const identity = next ?? old;
       if (!identity) continue;
@@ -69,14 +68,14 @@ export function receiptChanges(
       });
     }
     const oldOnline = new Map(
-      oldDevice?.status === "ready"
-        ? oldDevice.data.online.map((d) => [
+      previousDeviceState?.status === "ready"
+        ? previousDeviceState.data.online.map((d) => [
             JSON.stringify([d.account_id, d.device_id]),
             d,
           ])
         : [],
     );
-    for (const next of newDevice.data.online) {
+    for (const next of currentDeviceState.data.online) {
       const key = JSON.stringify([next.account_id, next.device_id]);
       const old = oldOnline.get(key);
       oldOnline.delete(key);
@@ -98,13 +97,15 @@ export function receiptChanges(
         after: null,
       });
     const oldHealth =
-      oldDevice?.status === "ready" ? oldDevice.data.source_health : {};
+      previousDeviceState?.status === "ready"
+        ? previousDeviceState.data.source_health
+        : {};
     for (const key of new Set([
       ...Object.keys(oldHealth),
-      ...Object.keys(newDevice.data.source_health),
+      ...Object.keys(currentDeviceState.data.source_health),
     ])) {
       const old = oldHealth[key];
-      const next = newDevice.data.source_health[key];
+      const next = currentDeviceState.data.source_health[key];
       const prior = old
         ? {
             source_id: old.source_id,
@@ -130,13 +131,15 @@ export function receiptChanges(
         });
     }
     const oldCoverage =
-      oldDevice?.status === "ready" ? oldDevice.data.device_coverage : {};
+      previousDeviceState?.status === "ready"
+        ? previousDeviceState.data.device_coverage
+        : {};
     for (const key of new Set([
       ...Object.keys(oldCoverage),
-      ...Object.keys(newDevice.data.device_coverage),
+      ...Object.keys(currentDeviceState.data.device_coverage),
     ])) {
       const old = oldCoverage[key];
-      const next = newDevice.data.device_coverage[key];
+      const next = currentDeviceState.data.device_coverage[key];
       const identity = next ?? old;
       if (!identity || isDeepStrictEqual(old, next)) continue;
       changes.push({
@@ -148,10 +151,10 @@ export function receiptChanges(
       });
     }
     const old =
-      oldDevice?.status === "ready"
-        ? oldDevice.data.collection.collection
+      previousDeviceState?.status === "ready"
+        ? previousDeviceState.data.collection.collection
         : undefined;
-    const next = newDevice.data.collection.collection;
+    const next = currentDeviceState.data.collection.collection;
     const prior = old ? collectionState(old) : null;
     const current = collectionState(next);
     if (!isDeepStrictEqual(prior, current))
@@ -264,7 +267,7 @@ export function receiptChanges(
   const spatial = input.message.data.parts.spatial;
   if (spatial?.status === "ready") {
     const old = before?.spatial;
-    function compare(
+    function appendSpatialChanges(
       kind: "space" | "passage",
       prior: { id: string }[],
       current: { id: string }[],
@@ -293,17 +296,17 @@ export function receiptChanges(
           }),
         );
     }
-    compare(
+    appendSpatialChanges(
       "space",
       old?.status === "ready" ? old.data.spaces : [],
       spatial.data.spaces,
     );
-    compare(
+    appendSpatialChanges(
       "passage",
       old?.status === "ready" ? old.data.passages : [],
       spatial.data.passages,
     );
-    function bindingNames(context: typeof before) {
+    function createBindingNameResolver(context: typeof before) {
       const spatialPart = context?.spatial;
       const householdPart = context?.household;
       const devices = new Map(
@@ -341,8 +344,8 @@ export function receiptChanges(
             }
           : null;
     }
-    const oldNames = bindingNames(before);
-    const newNames = bindingNames(after);
+    const resolvePreviousBindingNames = createBindingNameResolver(before);
+    const resolveCurrentBindingNames = createBindingNameResolver(after);
     const bindings = new Map(
       old?.status === "ready"
         ? old.data.observation_bindings.map((binding) => [binding.id, binding])
@@ -357,7 +360,10 @@ export function receiptChanges(
           key: next.id,
           before: prior,
           after: next,
-          metadata: { before: oldNames(prior), after: newNames(next) },
+          metadata: {
+            before: resolvePreviousBindingNames(prior),
+            after: resolveCurrentBindingNames(next),
+          },
         });
     }
     for (const [key, prior] of bindings)
@@ -366,7 +372,7 @@ export function receiptChanges(
         key,
         before: prior,
         after: null,
-        metadata: { before: oldNames(prior), after: null },
+        metadata: { before: resolvePreviousBindingNames(prior), after: null },
       });
   }
   const household = input.message.data.parts.household;

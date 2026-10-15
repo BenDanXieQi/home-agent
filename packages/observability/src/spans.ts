@@ -5,11 +5,13 @@ import {
   ROOT_CONTEXT,
   SpanKind,
   SpanStatusCode,
+  isSpanContextValid,
   type Span,
   type Attributes,
 } from "@opentelemetry/api";
 import { beginOperation } from "./lifecycle";
 import { telemetryStatus } from "./telemetry";
+import { genAiContextAttributes } from "./gen-ai";
 
 export {
   context,
@@ -20,8 +22,8 @@ export {
 } from "@opentelemetry/api";
 
 export function currentTraceId() {
-  const id = trace.getActiveSpan()?.spanContext().traceId;
-  return id && id !== "00000000000000000000000000000000" ? id : undefined;
+  const span = trace.getActiveSpan()?.spanContext();
+  return span && isSpanContextValid(span) ? span.traceId : undefined;
 }
 
 /** Call only after access to the internal endpoint has been checked. */
@@ -32,6 +34,7 @@ export function withRequestSpan(
   const parent = propagation.extract(ROOT_CONTEXT, {
     traceparent: request.headers.get("traceparent") ?? undefined,
     tracestate: request.headers.get("tracestate") ?? undefined,
+    baggage: request.headers.get("baggage") ?? undefined,
   });
   const path = new URL(request.url).pathname;
   return context.with(parent, () =>
@@ -88,7 +91,7 @@ export function withSpan<T>(
   return trace.getTracer("home-agent").startActiveSpan(
     name,
     {
-      attributes,
+      attributes: { ...genAiContextAttributes(), ...attributes },
       kind: options.kind ?? SpanKind.INTERNAL,
     },
     async (span) => {

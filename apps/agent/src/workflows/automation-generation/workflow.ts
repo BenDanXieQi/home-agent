@@ -1,16 +1,21 @@
+import { partial } from "radash";
 import { automationDefinitionSchema } from "@home-agent/api/automations";
 
 import {
   automationDraftSchema,
   type automationGenerationInputSchema,
-  automationGenerationLimits,
   validateAutomationCapabilities,
   type AutomationCapabilities,
 } from "@home-agent/api/automations";
 import { AppError } from "@home-agent/api/errors";
-import type { Models, Model, Api } from "@earendil-works/pi-ai";
 import { z } from "zod";
-import { withSpan, telemetryStatus } from "@home-agent/observability";
+import {
+  withSpan,
+  withEvaluation,
+  recordEvaluationOutput,
+} from "@home-agent/observability";
+import { completeStructuredOutput } from "../structured-output";
+import type { WorkflowContext } from "../definition";
 
 const automationGenerationInstructions = `你为家庭自动化生成或修改可审阅的规则树草稿，所有面向用户的解释用简洁中文。
 只调用 draft_automation 提交结构化结果，不输出普通文本。这个函数只提交草稿，不保存、不启用、不执行设备操作。
@@ -27,7 +32,7 @@ trigger 节点必须有 trigger：enter 表示条件从不满足变为满足；e
 用户描述整个房间有人或进入房间时，优先使用该房间传感器的整体有人无人状态；同一传感器同时提供 A-1、B-1 等子区域属性不构成歧义，不要求用户选择区域。只有用户明确指定子区域而无法确定对应属性，或有多个无法区分的房间级传感器时才就此澄清。若只有子区域能力而没有整体状态，不能自行把任一子区域当作整个房间。
 退出模式的有效条件是原 predicate 的反面，例如温度大于二十八的 exit 表示从高于二十八退回阈值以内；不要再加一层 not 抵消。and 不要求多个状态型触发同时发生；or 的动作必须来自已满足分支的本次触发，不能借另一分支成立执行。
 时间窗口用 start/end 的 HH:mm、IANA time_zone、ISO weekdays（周一=1，周日=7）；结束时刻不包含。跨午夜窗口归开始日。缺少时区且现有草稿没有可沿用的时区时，先澄清。只有时间窗口的进入、退出或持续满足，不支持随意生成 cron 或代码。
-阈值、持续时间、具体设备或动作有影响结果的歧义时，definition_json=null 并在 clarifications 提出至多五个简短问题。能力缺失时说明需要哪项能力，不能把未满足需求改成别的动作。用户只说“光线暗”等却没有明确阈值或已定义枚举时不得自定照度阈值。
+阈值、持续时间、具体设备或动作有影响结果的歧义时，definition_json=null 并在 clarifications 提出必要的简短问题。能力缺失时说明需要哪项能力，不能把未满足需求改成别的动作。用户只说“光线暗”等却没有明确阈值或已定义枚举时不得自定照度阈值。
 输出 definition_json 有值时必须完整可校验，clarifications 应为空；有未解决的重要歧义时 definition_json=null。behavior 解释哪些变化触发、哪些只检查状态、满足后执行什么；指出用户需要核对的默认假设，不声称已经保存或执行。
 未指定冷却时 cooldown_seconds=0，action_ttl_seconds=60；说明有效触发后仍需条件成立且动作未过期。保留用户已有的冷却、期限和未要求修改的条件及动作。
 规则对象的 JSON Schema：${JSON.stringify(z.toJSONSchema(automationDefinitionSchema))}`;
@@ -39,17 +44,16 @@ const modelDraftSchema = automationDraftSchema
   .extend({
     definition_json: z
       .string()
-      .max(64 * 1024)
       .nullable()
       .describe("符合所提供规则 schema 的完整 JSON 字符串；有歧义时为 null"),
   });
-const invalidDraft = automationDraftSchema.parse({
+const generationFailureDraft = automationDraftSchema.parse({
   definition: null,
   behavior: "本次未能生成有效的规则草稿，已有配置没有修改。请重试生成。",
   clarifications: [],
 });
 
-function modelCapabilities(capabilities: AutomationCapabilities) {
+function formatCapabilitiesForModel(capabilities: AutomationCapabilities) {
   const propertyColumns = [
     "property_key",
     "description",
@@ -92,124 +96,126 @@ function modelCapabilities(capabilities: AutomationCapabilities) {
   };
 }
 
-export function createAutomationGeneration(
-  models: Models,
-  model: Model<Api> | undefined,
-  budget: { timeoutMs: number; maxTokens: number },
-) {
-  if (!model) return undefined;
-  return async (
+export function createWorkflow({
+  modelCatalog,
+  modelRef,
+  budget,
+}: WorkflowContext) {
+  const models = modelCatalog.models;
+  const model = modelCatalog.resolve(modelRef);
+  if (!model) return { run: undefined };
+  const generateDraft = async (
     input: z.infer<typeof automationGenerationInputSchema>,
+    signal: AbortSignal,
+    modelInput: string,
+    span: Parameters<typeof withEvaluation>[0],
+  ) => {
+    span.setAttribute("automation.draft.valid", false);
+    const finishDraft = (draft: z.infer<typeof automationDraftSchema>) => {
+      span.setAttribute("automation.draft.valid", draft.definition !== null);
+      span.setAttribute(
+        "automation.clarification.count",
+        draft.clarifications.length,
+      );
+      recordEvaluationOutput(draft);
+      return draft;
+    };
+    const response = await completeStructuredOutput(
+      models,
+      model,
+      {
+        systemPrompt: automationGenerationInstructions,
+        messages: [
+          { role: "user", content: modelInput, timestamp: Date.now() },
+        ],
+        tools: [
+          {
+            name: "draft_automation",
+            description: "提交家庭自动化规则草稿及需要澄清的信息",
+            parameters: z.toJSONSchema(modelDraftSchema),
+            constrainedSampling: {
+              type: "json_schema",
+              strict: "require",
+            },
+          },
+        ],
+      },
+      {
+        ...budget,
+        signal,
+      },
+    );
+    signal.throwIfAborted();
+    const calls = response.content.filter((block) => block.type === "toolCall");
+    const call = calls[0];
+    if (
+      !["stop", "toolUse"].includes(response.stopReason) ||
+      calls.length !== 1 ||
+      call?.name !== "draft_automation"
+    )
+      throw new AppError("agent_execution_failed");
+    const envelope = modelDraftSchema.safeParse(call.arguments);
+    if (!envelope.success) return finishDraft(generationFailureDraft);
+    let definition: unknown = null;
+    if (envelope.data.definition_json !== null) {
+      try {
+        definition = JSON.parse(envelope.data.definition_json);
+      } catch {
+        return finishDraft(generationFailureDraft);
+      }
+    }
+    const parsed = automationDraftSchema.safeParse({
+      definition,
+      behavior: envelope.data.behavior,
+      clarifications: envelope.data.clarifications,
+    });
+    if (!parsed.success) return finishDraft(generationFailureDraft);
+    const draft = parsed.data;
+    const problems = draft.definition
+      ? validateAutomationCapabilities(draft.definition, input.capabilities)
+      : [];
+    let result = draft;
+    if (problems.length) {
+      result = {
+        definition: null,
+        behavior: "生成的规则与当前设备能力不一致，尚未形成可保存的草稿。",
+        clarifications: problems,
+      };
+    } else if (draft.clarifications.length) {
+      result = { ...draft, definition: null };
+    } else if (!draft.definition) {
+      result = {
+        ...draft,
+        clarifications: ["请补充需要触发的条件和要执行的动作。"],
+      };
+    }
+    result = automationDraftSchema.parse(result);
+    span.setAttribute("automation.validation.problem_count", problems.length);
+    return finishDraft(result);
+  };
+
+  const run = async (
+    input: Parameters<typeof generateDraft>[0],
     signal: AbortSignal,
   ) => {
     signal.throwIfAborted();
-    const context = JSON.stringify({
+    const modelInput = JSON.stringify({
       ...input,
-      capabilities: modelCapabilities(input.capabilities),
+      capabilities: formatCapabilitiesForModel(input.capabilities),
     });
-    if (Buffer.byteLength(context) > automationGenerationLimits.requestBytes)
-      throw new AppError("request_too_large");
     return withSpan(
-      "automation.generate",
+      "automation-generation.run",
       {
+        "gen_ai.agent.name": "automation-generation",
         "automation.model": model.id,
       },
-      async (span) => {
-        span.setAttribute("automation.draft.valid", false);
-        if (telemetryStatus().includeContent)
-          span.setAttribute("langfuse.observation.input", context);
-        const response = await models.complete(
-          model,
-          {
-            systemPrompt: automationGenerationInstructions,
-            messages: [
-              { role: "user", content: context, timestamp: Date.now() },
-            ],
-            tools: [
-              {
-                name: "draft_automation",
-                description: "提交家庭自动化规则草稿及需要澄清的信息",
-                parameters: z.toJSONSchema(modelDraftSchema),
-                constrainedSampling: { type: "json_schema", strict: "require" },
-              },
-            ],
-          },
-          {
-            toolChoice: "required",
-            samplingParams: { parallel_tool_calls: false },
-            maxRetries: 0,
-            timeoutMs: Math.min(
-              budget.timeoutMs,
-              automationGenerationLimits.timeoutMs,
-            ),
-            maxTokens: Math.min(budget.maxTokens, model.maxTokens, 6144),
-            signal,
-          },
-        );
-        signal.throwIfAborted();
-        const calls = response.content.filter(
-          (block) => block.type === "toolCall",
-        );
-        const call = calls[0];
-        if (
-          !["stop", "toolUse"].includes(response.stopReason) ||
-          calls.length !== 1 ||
-          call?.name !== "draft_automation"
-        )
-          throw new AppError("agent_execution_failed");
-        const envelope = modelDraftSchema.safeParse(call.arguments);
-        if (!envelope.success) return invalidDraft;
-        let definition: unknown = null;
-        if (envelope.data.definition_json !== null) {
-          try {
-            definition = JSON.parse(envelope.data.definition_json);
-          } catch {
-            return invalidDraft;
-          }
-        }
-        const parsed = automationDraftSchema.safeParse({
-          definition,
-          behavior: envelope.data.behavior,
-          clarifications: envelope.data.clarifications,
-        });
-        if (!parsed.success) return invalidDraft;
-        const draft = parsed.data;
-        const problems = draft.definition
-          ? validateAutomationCapabilities(draft.definition, input.capabilities)
-          : [];
-        const result = automationDraftSchema.parse(
-          problems.length
-            ? {
-                definition: null,
-                behavior:
-                  "生成的规则与当前设备能力不一致，尚未形成可保存的草稿。",
-                clarifications: problems.slice(0, 5),
-              }
-            : draft.clarifications.length
-              ? { ...draft, definition: null }
-              : draft.definition
-                ? draft
-                : {
-                    ...draft,
-                    clarifications: ["请补充需要触发的条件和要执行的动作。"],
-                  },
-        );
-        span.setAttribute("automation.draft.valid", result.definition !== null);
-        span.setAttribute(
-          "automation.validation.problem_count",
-          problems.length,
-        );
-        span.setAttribute(
-          "automation.clarification.count",
-          result.clarifications.length,
-        );
-        if (telemetryStatus().includeContent)
-          span.setAttribute(
-            "langfuse.observation.output",
-            JSON.stringify(result),
-          );
-        return result;
-      },
+      (span) =>
+        withEvaluation(
+          span,
+          input,
+          partial(generateDraft, input, signal, modelInput, span),
+        ),
     );
   };
+  return { run };
 }

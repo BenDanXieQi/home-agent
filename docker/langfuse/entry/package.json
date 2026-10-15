@@ -1,0 +1,8 @@
+{
+  "name": "home-agent-langfuse-entry",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "httpxy": "0.5.5"
+  }
+}

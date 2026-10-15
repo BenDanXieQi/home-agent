@@ -26,8 +26,8 @@ export function sameSpatialScope(
 const scope = { scope: spatialScopeSchema };
 const spaceFields = {
   id: z.uuid(),
-  name: z.string().trim().min(1).max(100),
-  description: z.string().max(2000),
+  name: z.string().trim().min(1),
+  description: z.string(),
 };
 const saveOperation = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create") }),
@@ -64,9 +64,36 @@ export const passageSaveSchema = saveCommand(passageFields).refine(
   },
 );
 export const passageSchema = passageRecordSchema.refine(differentEndpoints);
+export const spatialDraftSchema = z
+  .strictObject({
+    spaces: z.array(z.strictObject(spaceFields)),
+    passages: z.array(z.strictObject(passageFields).refine(differentEndpoints)),
+  })
+  .superRefine((draft, ctx) => {
+    const spaces = new Set(draft.spaces.map((space) => space.id));
+    const passages = new Set(draft.passages.map((passage) => passage.id));
+    if (
+      spaces.size !== draft.spaces.length ||
+      passages.size !== draft.passages.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Draft record IDs must be unique.",
+      });
+    draft.passages.forEach((passage, index) => {
+      for (const endpoint of ["space_a_id", "space_b_id"] as const) {
+        if (!spaces.has(passage[endpoint]))
+          ctx.addIssue({
+            code: "custom",
+            path: ["passages", index, endpoint],
+            message: "Passage endpoints must refer to draft spaces.",
+          });
+      }
+    });
+  });
 const bindingFields = {
   id: z.uuid(),
-  device_id: inventoryDeviceSchema.shape.id.min(1).max(512),
+  device_id: inventoryDeviceSchema.shape.id.min(1),
   channel: inventoryDeviceSchema.shape.channels.element.nullable(),
   space_id: z.uuid().nullable(),
   passage_id: z.uuid().nullable(),
