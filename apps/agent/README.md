@@ -35,9 +35,9 @@ bun run --cwd apps/agent dev
 
 `POST /api/workflows` 是 Backend 调用专项任务的统一内部入口，复用当前进程、本机访问校验和错误格式。自动化生成使用 `workflow="automation-generation"`，请求为 `{ workflow, input: { text, definition?, capabilities } }`；`definition` 为可选的现有规则，`capabilities` 为调用方准备的设备能力。响应为 `{ workflow, result: { definition, behavior, clarifications } }`。存在歧义或生成内容未通过校验时，`definition` 为 null，调用方展示说明或澄清问题，不能当作已生成的有效规则。
 
-生成能力位于 `src/workflows/automation-generation/workflow.ts`，直接使用 pi-ai `Models.complete()` 执行一次严格工具输出请求；规则结构、设备引用、读写权限、枚举及动作参数按 `@home-agent/api/automations` 校验。输入中的能力用于约束草稿，不构成设备操作授权；保存或执行前仍需 Backend 核验当前家庭及设备能力。它不保存或启用规则、不操作设备、不使用聊天历史或 Agent 数据库。
+生成能力位于 `src/workflows/automation-generation.ts`，直接使用 pi-ai `Models.complete()` 执行一次严格工具输出请求；规则结构、设备引用、读写权限、枚举及动作参数按 `@home-agent/api/automations` 校验。输入中的能力用于约束草稿，不构成设备操作授权；保存或执行前仍需 Backend 核验当前家庭及设备能力。它不保存或启用规则、不操作设备、不使用聊天历史或 Agent 数据库。
 
-自动化调用使用配置的执行期限与输出预算，取消和超时传递到模型调用。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，接收 Hono 入口已校验的输入，负责执行期限和结果校验；专项模块不另建 HTTP 或客户端层。workflow 模块通过 `workflows/*/workflow.ts` 声明创建入口，注册与分发由构建前生成，见下方注册约定。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实家庭场景的规则生成质量尚未系统验证。
+自动化调用使用配置的执行期限与输出预算，取消和超时传递到模型调用。未配置模型返回 `model_not_configured`。公共分发位于 `src/workflows/index.ts`，接收 Hono 入口已校验的输入，负责执行期限和结果校验；专项模块不另建 HTTP 或客户端层。workflow 模块通过 `workflows/*.ts` 声明创建入口，注册与分发由构建前生成，见下方注册约定。Backend 已通过公共 `/api/workflows` 入口调用本服务，从当前家庭规格准备能力，返回前重新校验家庭资格与设备能力。自动化页面已通过 Backend 公共入口调用生成；生成器和共享校验拒绝交付含 AI 条件或动作选择的可用草稿，这两项能力尚未启用。真实家庭场景的规则生成质量尚未系统验证。
 
 进程复用 `@home-agent/observability` 初始化 OpenTelemetry（OTel）。聊天与 workflow 执行入口、GenAI 记录标记为 Agent 执行，Langfuse 按标记独立筛选；健康检查、接收记录读取与上下文同步保留在通用 OTel，执行中的 Backend 数据读取通过 W3C baggage 传播执行标记并延续已有追踪。HTTP 入口接续 Backend 的 W3C 追踪上下文；业务 `.run` span（一次任务的追踪记录）记录提交、等待与结果校验，Durable 运行、模型和工具显式接到对应父级。模型、Agent 运行与工具按 OTel GenAI 语义约定分别记录 `chat`、`invoke_agent`、`execute_tool`；这套约定当前处于 Development（尚未稳定）阶段。供应商实际 token 用量、费用与首 token 时间只记录在模型观测，缺失用量时不估算。Durable 已提交状态由工作区 [`@home-agent/pi-langfuse`](../../packages/pi-langfuse/README.md) 观察器采集，模型记录不重复导出。长期会话只归入 Session，不持有导出的长期根 span。默认不采集正文；`OTEL_INCLUDE_CONTENT=true` 时逻辑评测根才记录任务、结果及 `metadata.evaluation_context` 中的实际模型消息与工具轨迹。评测器须显式映射这些材料，本服务不自动生成评分或管理评测器。配置、内容边界及 Langfuse 尚未实机验证的接收与界面行为见[共享追踪说明](../../packages/observability/README.md)。
 
@@ -55,11 +55,11 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 ## 模块组织与自动注册
 
-`workflows/` 按业务划分 `automation-generation/`、`speech-interpretation/` 和 `spatial-planning/` 子目录。每个子目录的 `workflow.ts` 直接包含模型解析、指令与执行实现，`config.ts` 导出 `modelConfiguration`，声明专项模型的环境变量键和校验 Schema（配置校验规则），并统一导出 `createWorkflow(context)`；工厂接收模型清单、本 workflow 的模型引用 `modelRef` 和执行预算，同步返回带 `run` 的实例。`run` 接收该 workflow 的输入与取消信号，未配置模型时为 `undefined`；需要资源清理的实例还可提供 `retainScope(scope)` 和 `close()`。`definition.ts` 定义装配边界及从共享 Schema 推导的注册契约，`structured-output.ts` 供专项任务共用，`index.ts` 负责执行期限、结果校验及错误映射。
+`workflows/` 按业务划分 `automation-generation.ts`、`speech-interpretation.ts` 和 `spatial-planning.ts`。每个业务文件直接包含模型配置、模型解析、指令与执行实现，导出 `modelConfiguration` 声明专项模型的环境变量键和校验 Schema（配置校验规则），并导出 `createWorkflow(context)`；工厂接收模型清单、本 workflow 的模型引用 `modelRef` 和执行预算，同步返回带 `run` 的实例。`run` 接收该 workflow 的输入与取消信号，未配置模型时为 `undefined`；需要资源清理的实例还可提供 `retainScope(scope)` 和 `close()`。`definition.ts` 定义装配边界及从共享 Schema 推导的注册契约，`structured-output.ts` 供专项任务共用，`index.ts` 负责执行期限、结果校验及错误映射。
 
-`scripts/codegen/workflows.ts` 扫描 `workflows/*/workflow.ts`，用小写字母、数字和连字符组成的子目录名称作为 workflow 名称，生成静态导入、实例注册和穷尽分发。`WorkflowRegistry` 从 `@home-agent/api/agent-workflows` 的输入输出 Schema 推导：缺少实现、多出未声明名称、创建入口缺失、输入或结果类型不匹配都会令类型检查失败。运行入口仍用共享 Schema 校验实际输出。
+`scripts/codegen/workflows.ts` 扫描 `workflows/*.ts`，排除 `index.ts`、`definition.ts`、`structured-output.ts` 和 `registry.generated.ts` 等基础设施文件，用小写字母、数字和连字符组成的文件名（不含 `.ts`）作为 workflow 名称，生成静态导入、实例注册和穷尽分发。`WorkflowRegistry` 从 `@home-agent/api/agent-workflows` 的输入输出 Schema 推导：缺少实现、多出未声明名称、创建入口缺失、输入或结果类型不匹配都会令类型检查失败。运行入口仍用共享 Schema 校验实际输出。
 
-新增 workflow 时，在共享 API 声明输入输出契约，并添加同名子目录下的 `workflow.ts` 与 `config.ts`；无需修改中央配置、导入或分发列表。生成器从发现的模块装配 `workflowConfigurationSchema`，由 `config.ts` 与通用配置一起校验环境变量。`configureWorkflows(config)` 统一解析专项模型引用，省略时使用主模型引用，返回供 `initializeModels()` 使用的引用数组和 `create(context)` 工厂；两者共用本次解析的模型选择。业务工厂只接收所选的 `modelRef`、模型清单与预算，不读取环境配置。配置解析及实例装配同步完成，工厂创建阶段不分配 Harness 或提供方会话资源；模型调用与会话执行仍异步进行。空间规划在 `run` 处理 `action="start"` 时创建独立会话，该次创建失败时释放已分配资源。关闭服务和家庭范围变化时，等待所有已注册的清理钩子完成，并汇总清理错误。
+新增 workflow 时，在共享 API 声明输入输出契约，并添加同名 `.ts` 文件，导出 `createWorkflow` 与 `modelConfiguration`；无需修改中央配置、导入或分发列表。生成器从发现的模块装配 `workflowConfigurationSchema`，由 `config.ts` 与通用配置一起校验环境变量。`configureWorkflows(config)` 统一解析专项模型引用，省略时使用主模型引用，返回供 `initializeModels()` 使用的引用数组和 `create(context)` 工厂；两者共用本次解析的模型选择。业务工厂只接收所选的 `modelRef`、模型清单与预算，不读取环境配置。配置解析及实例装配同步完成，工厂创建阶段不分配 Harness 或提供方会话资源；模型调用与会话执行仍异步进行。空间规划在 `run` 处理 `action="start"` 时创建独立会话，该次创建失败时释放已分配资源。关闭服务和家庭范围变化时，等待所有已注册的清理钩子完成，并汇总清理错误。
 
 `scripts/codegen/routes.ts` 扫描 `routes/*/route.ts`，校验业务子目录名称并按目录名稳定排序，生成静态导入和链式 `.route()` 挂载，保留 Hono 的客户端类型推断。`routes/` 按业务划分 `chat/`、`context/` 和 `workflows/` 子目录，名称使用小写字母、数字和连字符；每个子目录的 `route.ts` 导出 `createRoutes(context)`，只接收 `RouteContext` 中自己使用的依赖，并定义相对于 `/api` 的路径。路由模块不得依赖跨模块注册顺序；必须依赖顺序的路由和中间件留在同一模块中，通过链式定义显式组织。新增路由模块无需修改中央导入或挂载列表；全局中间件、健康检查、访问限制及执行追踪标记由 `routes/index.ts` 显式维护，新增模型执行入口时需同步追踪标记的路径规则。自动发现不校验模块内部的重复 HTTP 路径，路径冲突仍须在路由定义中核对。
 
@@ -113,14 +113,14 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 - `context/journal/index.ts`：受接收器管理的当前连接接收记录与当时上下文；`context/journal/changes.ts` 在接收时比较前后状态并提取诊断变化摘要。
 - `context/reader.ts`：历史与引用材料读取；使用共享 Backend RPC 客户端，负责当前接收资格及响应与请求的匹配校验。
 - 家庭模型视图：转换、编码和解码由根目录共享包 `packages/api/` 提供，供 Agent 与 Web 使用；离线文件处理命令属于本应用的 `scripts/format-context.ts`。
-- `workflows/automation-generation/workflow.ts`：自动化生成的模型选择、指令、结构化调用与草稿校验。
-- `workflows/speech-interpretation/workflow.ts`：语音请求完整性与回应需求的结构化模型判断。
-- `workflows/spatial-planning/workflow.ts`：独立空间规划会话、图片输入、反复问答和空间通道草稿；会话关闭、家庭撤销或服务关闭时释放各自的 Harness、存储及提供方会话资源。
+- `workflows/automation-generation.ts`：自动化生成的模型选择、指令、结构化调用与草稿校验。
+- `workflows/speech-interpretation.ts`：语音请求完整性与回应需求的结构化模型判断。
+- `workflows/spatial-planning.ts`：独立空间规划会话、图片输入、反复问答和空间通道草稿；会话关闭、家庭撤销或服务关闭时释放各自的 Harness、存储及提供方会话资源。
 - `workflows/structured-output.ts`：按 Pi 的当前协议构造原生工具选择选项，供一次性结构化调用共用。
 
 ## 专项能力
 
-专项能力按业务放在 `src/workflows/<业务名>/workflow.ts`，与 `routes/<业务名>/route.ts` 一样，由单个业务文件同时定义创建入口与实现。自动化生成和语音判断通过 pi-ai 执行一次结构化模型调用，不创建 Harness。共享 `structured-output.ts` 按当前十种 Pi 协议提交原生工具选择选项；两个业务模块校验结果恰好包含一次目标工具调用，再校验参数。Provider 是否真正强制工具调用取决于其服务实现：[MiMo 文档](https://mimo.mi.com/docs/zh-CN/api/chat/openai-api)说明非 `auto` 的 `tool_choice` 会被服务端移除；未调用或多次调用目标工具时，本项目返回执行失败。
+专项能力按业务放在 `src/workflows/<业务名>.ts`，与 `routes/<业务名>/route.ts` 一样，由单个业务文件同时定义创建入口与实现。自动化生成和语音判断通过 pi-ai 执行一次结构化模型调用，不创建 Harness。共享 `structured-output.ts` 按当前十种 Pi 协议提交原生工具选择选项；两个业务模块校验结果恰好包含一次目标工具调用，再校验参数。Provider 是否真正强制工具调用取决于其服务实现：[MiMo 文档](https://mimo.mi.com/docs/zh-CN/api/chat/openai-api)说明非 `auto` 的 `tool_choice` 会被服务端移除；未调用或多次调用目标工具时，本项目返回执行失败。
 
 ### 空间规划会话
 
@@ -156,7 +156,7 @@ HTTP 复用本机访问限制和统一错误契约。仅限可信本机使用，
 
 ### 语音请求判断
 
-语音请求判断使用同一内部 `POST /api/workflows`，指定 `workflow="speech-interpretation"`，输入复用 `speechDialogueRequestSchema`，结果复用 `speechDialogueResponseSchema`（`id/observationId/decision`）。实现位于 `workflows/speech-interpretation/workflow.ts`，直接调用一次 pi-ai 结构化模型输出，不使用聊天主会话。
+语音请求判断使用同一内部 `POST /api/workflows`，指定 `workflow="speech-interpretation"`，输入复用 `speechDialogueRequestSchema`，结果复用 `speechDialogueResponseSchema`（`id/observationId/decision`）。实现位于 `workflows/speech-interpretation.ts`，直接调用一次 pi-ai 结构化模型输出，不使用聊天主会话。
 
 Backend 负责转写片段的来源资格、45 秒有效期、限流和判断状态，经现有 Agent 客户端调用此 workflow；Agent 重新校验请求时效和前文关系。执行期限取配置的预算与材料到期时间；Backend 仍以最多 12 秒及片段原期限控制等待。缺模型、Agent 不可用或判断失败由 Backend 显示为 unavailable；本地转写仍可运行。此判断不执行聊天或设备动作。
 

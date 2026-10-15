@@ -225,7 +225,7 @@ src/
 
 `main.ts` 是应用级依赖的装配入口：读取环境、创建配置仓库、数据库、凭据仓库、米家服务、家庭运行时和本地感知服务，并负责启动与关闭。`createApp` 接收这些实例、`shutdownSignal`、Agent 地址读取函数、静态资源位置和录像缓存／编码配置，组装 HTTP 应用及其录像回放资源管理器；缓存目录在首次准备录像时创建。应用暴露 `closeRecordings`，由 `main.ts` 在关闭时等待录像准备、读取与文件清理。路由工厂调用注入模块的业务方法，不负责应用级初始化与关闭；`createApp` 不读取环境，本地感知服务不接收 Agent 客户端或模型凭据；应用入口独立创建语音收件箱和模型解释器，感知只接收证据交付与来源失效端口。
 
-语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 Agent 的 `src/workflows/speech-interpretation/workflow.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
+语音片段的短时交付、期限和判断状态归 `src/conversation/`；原生音频与转写仍归 `src/perception/`，语音语义模型解释器归 Agent 的 `src/workflows/speech-interpretation.ts`。配置及边界见[语音片段交付与对话判断](../../docs/perception.md#语音片段交付与对话判断)。
 
 `main.ts` 将语音收件箱的 analyze 接到共享 Agent 客户端，以 `workflow="speech-interpretation"` 调用 Agent 的 `/api/workflows`。Backend 不加载模型或模型凭据；请求取消、片段到期和结果身份核对仍由语音收件箱负责。
 
