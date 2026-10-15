@@ -19,6 +19,10 @@ export function errorResponse(
   return c.json(errorPayload(error, currentTraceId()), status);
 }
 
+export function handleNotFound(c: Context) {
+  return errorResponse(c, new AppError("not_found"));
+}
+
 export function handleHttpError(error: Error, c: Context) {
   const applicationError =
     error instanceof AppError

@@ -7,24 +7,26 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
-    "dev": "bun --env-file=../../.env --watch src/main.ts",
-    "build": "bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
+    "dev": "bun --env-file=../../.env --watch scripts/dev.ts",
+    "build": "bun run check-types && bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
     "start": "bun --env-file=../../.env dist/main.js",
     "context:format": "bun scripts/format-context.ts",
-    "lint": "oxlint --type-aware --max-warnings 0 .",
-    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
-    "check-types": "tsc --noEmit"
+    "lint": "bun run generate && oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "bun run generate && oxlint --type-aware --max-warnings 0 --fix .",
+    "check-types": "bun run generate && tsc --noEmit",
+    "generate": "bun scripts/codegen/index.ts"
   },
   "dependencies": {
-    "zod": "catalog:",
-    "@home-agent/api": "workspace:*",
-    "@home-agent/observability": "workspace:*",
-    "@home-agent/backend-client": "workspace:*",
-    "hono": "catalog:",
-    "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/chord": "catalog:",
+    "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-durable": "catalog:",
-    "@langfuse/tracing": "catalog:"
+    "@home-agent/api": "workspace:*",
+    "@home-agent/backend-client": "workspace:*",
+    "@home-agent/observability": "workspace:*",
+    "hono": "catalog:",
+    "radash": "12.1.1",
+    "typebox": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
@@ -32,6 +34,7 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
-    "@home-agent/oxlint-config": "workspace:*"
+    "@home-agent/oxlint-config": "workspace:*",
+    "oxfmt": "catalog:"
   }
 }

@@ -53,7 +53,7 @@ const errorMessages = {
   connection_config_save_failed: "配置保存失败，请检查磁盘空间和文件权限。",
   agent_timeout: "请求超时，请稍后重试。",
   agent_unavailable: "无法连接 Agent，请检查地址和服务进程。",
-  model_not_configured: "请配置 AGENT_MODEL 和 OPENAI_API_KEY。",
+  model_not_configured: "请配置当前任务使用的 Agent 模型和对应提供商的认证。",
   request_cancelled: "请求已取消。",
   run_timeout: "Agent 执行超时。",
   agent_execution_failed: "Agent 执行失败，请查看运行记录。",

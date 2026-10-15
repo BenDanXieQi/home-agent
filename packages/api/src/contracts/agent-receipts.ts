@@ -3,7 +3,6 @@ import { z } from "zod";
 import {
   agentContextEventSchema,
   agentContextPartsSchema,
-  agentContextPolicy,
   agentContextSnapshotSchema,
   agentDevicePropertySchema,
   agentObservationSchema,
@@ -11,15 +10,6 @@ import {
   agentObservationSourceSchema,
   agentContextDataSchemas,
 } from "./agent-context";
-
-const retainedBytes = 64 * 1024 * 1024;
-export const agentReceiptPolicy = {
-  records: 1000,
-  retainedBytes,
-  // A retained receipt includes its changes as well as the message and context.
-  responseBytes:
-    Math.max(retainedBytes, agentContextPolicy.maxSnapshotBytes) + 1024 * 1024,
-} as const;
 
 export const agentReceiptQuerySchema = z
   .strictObject({
@@ -170,9 +160,6 @@ export const agentReceiptIndexSchema = z.object({
   received_at: z.iso.datetime().nullable(),
   heartbeat_at: z.iso.datetime().nullable(),
   total_received: z.number().int().nonnegative(),
-  first_retained_sequence: z.number().int().positive(),
-  evicted: z.number().int().nonnegative(),
-  retained_bytes: z.number().int().nonnegative(),
   receipts: z.array(agentReceiptSummarySchema),
 });
 export const agentReceiptDetailSchema = z.object({

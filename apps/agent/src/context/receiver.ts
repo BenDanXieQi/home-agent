@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { createReceiptJournal } from "./receipts";
+import { createReceiptJournal } from "./journal";
 import { z } from "zod";
 import type { BackendClient } from "@home-agent/backend-client";
 import { mergeAgentContextSnapshot } from "@home-agent/api/agent-context/merge";
@@ -13,11 +13,17 @@ import {
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
 
 /** The transport owns connection and household qualification; the shared reducer applies updates. */
-export function createContextReceiver(options: { client: BackendClient }) {
+export function createContextReceiver(options: {
+  client: BackendClient;
+  onScopeChange?: (
+    scope: z.infer<typeof agentContextScopeSchema> | null,
+  ) => Promise<void>;
+}) {
   const receipts = createReceiptJournal();
   let heartbeatAt: string | null = null;
   const partNames = Object.keys(agentContextPartsSchema.shape);
   let scope: z.infer<typeof agentContextScopeSchema> | null = null;
+  let acceptedScope: z.infer<typeof agentContextScopeSchema> | null | undefined;
   let parts: z.infer<typeof agentContextSnapshotSchema>["parts"] = {};
   let status: "stopped" | "connecting" | "connected" | "disconnected" =
     "stopped";
@@ -28,7 +34,18 @@ export function createContextReceiver(options: { client: BackendClient }) {
   let connectionGeneration = 0;
   let qualificationGeneration = 0;
   let controller: AbortController | undefined;
-  let running: Promise<void> | undefined;
+  let subscriptionPromise: Promise<void> | undefined;
+
+  function resetConnection(nextStatus: typeof status) {
+    qualificationGeneration++;
+    receipts.clear();
+    heartbeatAt = null;
+    scope = null;
+    parts = {};
+    receivedAt = null;
+    synchronized = false;
+    status = nextStatus;
+  }
 
   function qualification() {
     return status === "connected" && synchronized && scope
@@ -36,18 +53,69 @@ export function createContextReceiver(options: { client: BackendClient }) {
       : null;
   }
 
-  async function run(signal: AbortSignal) {
+  async function receiveEvent(
+    event: Parameters<Parameters<typeof consumeEventStream>[1]>[0],
+    signal: AbortSignal,
+    generation: number,
+  ) {
+    if (signal.aborted || generation !== connectionGeneration) return false;
+    const message = agentContextEventSchema.parse({
+      event: event.event,
+      data: JSON.parse(event.data) as unknown,
+    });
+    status = "connected";
+    lastError = null;
+    const now = new Date().toISOString();
+    if (message.event === "heartbeat") {
+      heartbeatAt = now;
+      return false;
+    }
+    receivedAt = now;
+    const next = message.data.scope;
+    if (
+      scope?.scope_epoch !== next?.scope_epoch ||
+      scope?.account_id !== next?.account_id ||
+      scope?.home_id !== next?.home_id
+    ) {
+      qualificationGeneration++;
+      receipts.clear();
+      parts = {};
+      synchronized = false;
+    }
+    if (
+      acceptedScope === undefined ||
+      acceptedScope?.scope_epoch !== next?.scope_epoch ||
+      acceptedScope?.account_id !== next?.account_id ||
+      acceptedScope?.home_id !== next?.home_id
+    ) {
+      await options.onScopeChange?.(next);
+      acceptedScope = next;
+    }
+    if (signal.aborted || generation !== connectionGeneration) return false;
+    const previous = { scope, parts };
+    parts = mergeAgentContextSnapshot(previous, message.data).parts;
+    scope = next;
+    synchronized =
+      Object.keys(parts).length === partNames.length &&
+      Object.values(parts).every((part) => part !== undefined);
+    receipts.append(
+      {
+        message,
+        context: { scope, parts },
+        received_at: now,
+        synchronized,
+      },
+      Buffer.byteLength(event.data),
+      previous,
+    );
+    return synchronized;
+  }
+
+  async function subscribeContext(signal: AbortSignal) {
     let retryMs: number = agentContextPolicy.reconnectInitialMs;
     while (!signal.aborted) {
       const generation = ++connectionGeneration;
-      qualificationGeneration++;
-      receipts.clear();
-      heartbeatAt = null;
-      scope = null;
-      parts = {};
-      receivedAt = null;
-      synchronized = false;
-      status = "connecting";
+      resetConnection("connecting");
       let failureReason = "request_failed";
       try {
         await consumeEventStream(
@@ -68,61 +136,22 @@ export function createContextReceiver(options: { client: BackendClient }) {
             firstEventTimeoutMs: agentContextPolicy.heartbeatTimeoutMs,
             silenceMs: agentContextPolicy.heartbeatTimeoutMs,
             onResponse(response) {
-              failureReason = !response.ok
-                ? `http_${response.status}`
-                : !response.body ||
-                    !response.headers
-                      .get("content-type")
-                      ?.includes("text/event-stream")
-                  ? "invalid_event_stream"
-                  : "stream_failed";
+              if (!response.ok) {
+                failureReason = `http_${response.status}`;
+                return;
+              }
+              const isEventStream = response.headers
+                .get("content-type")
+                ?.includes("text/event-stream");
+              failureReason =
+                response.body && isEventStream
+                  ? "stream_failed"
+                  : "invalid_event_stream";
             },
           },
-          (event) => {
-            if (signal.aborted || generation !== connectionGeneration) return;
-            const message = agentContextEventSchema.parse({
-              event: event.event,
-              data: JSON.parse(event.data) as unknown,
-            });
-            status = "connected";
-            lastError = null;
-            const now = new Date().toISOString();
-            if (message.event === "heartbeat") {
-              heartbeatAt = now;
-              return;
-            }
-            receivedAt = now;
-            const next = message.data.scope;
-            if (
-              scope?.scope_epoch !== next?.scope_epoch ||
-              scope?.account_id !== next?.account_id ||
-              scope?.home_id !== next?.home_id
-            ) {
-              qualificationGeneration++;
-              receipts.clear();
-              parts = {};
-              synchronized = false;
-            }
-            const previous = { scope, parts };
-            parts = mergeAgentContextSnapshot(
-              { scope, parts },
-              message.data,
-            ).parts;
-            scope = next;
-            synchronized =
-              Object.keys(parts).length === partNames.length &&
-              Object.values(parts).every((part) => part !== undefined);
-            receipts.append(
-              {
-                message,
-                context: { scope, parts },
-                received_at: now,
-                synchronized,
-              },
-              Buffer.byteLength(event.data),
-              previous,
-            );
-            if (synchronized) retryMs = agentContextPolicy.reconnectInitialMs;
+          async (event) => {
+            if (await receiveEvent(event, signal, generation))
+              retryMs = agentContextPolicy.reconnectInitialMs;
           },
         );
         failureReason = "stream_ended";
@@ -134,14 +163,7 @@ export function createContextReceiver(options: { client: BackendClient }) {
         else if (error instanceof SyntaxError) failureReason = "invalid_json";
       }
       if (signal.aborted || generation !== connectionGeneration) return;
-      receipts.clear();
-      scope = null;
-      parts = {};
-      receivedAt = null;
-      heartbeatAt = null;
-      status = "disconnected";
-      synchronized = false;
-      qualificationGeneration++;
+      resetConnection("disconnected");
       const now = Date.now();
       lastError = { reason: failureReason, at: new Date(now).toISOString() };
       if (now >= nextErrorLogAt) {
@@ -161,6 +183,16 @@ export function createContextReceiver(options: { client: BackendClient }) {
     }
   }
 
+  async function stop() {
+    connectionGeneration++;
+    resetConnection("stopped");
+    controller?.abort();
+    await subscriptionPromise;
+    subscriptionPromise = undefined;
+    controller = undefined;
+    acceptedScope = undefined;
+  }
+
   return {
     qualification,
     receiptIndex(query?: Parameters<typeof receipts.index>[0]) {
@@ -172,15 +204,9 @@ export function createContextReceiver(options: { client: BackendClient }) {
         heartbeat_at: heartbeatAt,
       };
     },
-    receipt(id: string) {
-      return receipts.detail(id);
-    },
-    journalId() {
-      return receipts.id();
-    },
-    currentScope() {
-      return qualification()?.scope ?? null;
-    },
+    receipt: receipts.detail,
+    journalId: receipts.id,
+    currentScope: () => qualification()?.scope ?? null,
     snapshot() {
       return {
         context_bytes: Buffer.byteLength(JSON.stringify({ scope, parts })),
@@ -191,34 +217,14 @@ export function createContextReceiver(options: { client: BackendClient }) {
       };
     },
     start() {
-      if (running) return;
+      if (subscriptionPromise) return;
       controller = new AbortController();
-      running = run(controller.signal).catch(() => {
-        receipts.clear();
-        scope = null;
-        parts = {};
-        receivedAt = null;
-        heartbeatAt = null;
-        synchronized = false;
-        status = "disconnected";
-        qualificationGeneration++;
+      subscriptionPromise = subscribeContext(controller.signal).catch(() => {
+        resetConnection("disconnected");
         console.error("Household context receiver stopped unexpectedly");
       });
     },
-    async stop() {
-      connectionGeneration++;
-      qualificationGeneration++;
-      synchronized = false;
-      receipts.clear();
-      scope = null;
-      parts = {};
-      receivedAt = null;
-      heartbeatAt = null;
-      status = "stopped";
-      controller?.abort();
-      await running;
-      running = undefined;
-      controller = undefined;
-    },
+    stop,
+    [Symbol.asyncDispose]: stop,
   };
 }

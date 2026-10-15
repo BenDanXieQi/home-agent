@@ -7,32 +7,55 @@ import {
   SpanStatusCode,
 } from "@opentelemetry/api";
 import { createMiddleware } from "hono/factory";
+import type { HonoRequest } from "hono";
+import { routePath } from "hono/route";
 import { telemetryStatus } from "./telemetry";
 import { beginOperation } from "./lifecycle";
 import { currentTraceId, recordFailure } from "./spans";
+import { agentTraceContext, withAgentTrace } from "./agent-trace";
+import {
+  currentTraceSessionId,
+  requestSession,
+  sessionBaggageContext,
+  sessionResponseHeader,
+  traceSessionId,
+  withRequestSession,
+} from "./session";
 
-export function httpTracing() {
+export function httpTracing(
+  service: string,
+  isAgentExecution: (
+    request: Pick<HonoRequest, "method" | "path">,
+  ) => boolean = () => false,
+) {
   const instrument = httpInstrumentationMiddleware({
     captureActiveRequests: false,
+    spanNameFactory: (c) => `${service} 接收: ${c.req.method} ${routePath(c)}`,
   });
   return createMiddleware(async (c, next) => {
     let originalError: Error | undefined;
     try {
       await instrument(c, async () => {
-        const url = new URL(c.req.url);
-        trace
-          .getActiveSpan()
-          ?.setAttribute("url.full", `${url.origin}${url.pathname}`);
-        const traceId = currentTraceId();
-        await next();
-        if (traceId) c.header("x-trace-id", traceId);
-        originalError = c.error;
-        // @hono/otel records c.error after next(), including its stack.
-        if (c.error && !telemetryStatus().includeContent) {
-          const safeError = new Error("Request failed");
-          delete safeError.stack;
-          c.error = safeError;
-        }
+        const execution = isAgentExecution(c.req);
+        await withRequestSession(!execution, async (session) => {
+          const url = new URL(c.req.url);
+          trace
+            .getActiveSpan()
+            ?.setAttribute("url.full", `${url.origin}${url.pathname}`);
+          const traceId = currentTraceId();
+          if (execution) await withAgentTrace(next);
+          else await next();
+          if (traceId) c.header("x-trace-id", traceId);
+          if (service === "agent" && session.id)
+            c.header(sessionResponseHeader, session.id);
+          originalError = c.error;
+          // @hono/otel records c.error after next(), including its stack.
+          if (c.error && !telemetryStatus().includeContent) {
+            const safeError = new Error("Request failed");
+            delete safeError.stack;
+            c.error = safeError;
+          }
+        });
       });
     } finally {
       if (originalError) c.error = originalError;
@@ -42,8 +65,9 @@ export function httpTracing() {
 
 /** CLIENT span covers headers AND body consumption, including SSE and cancellation. */
 export function tracedFetch(
+  direction: { from: string; to: string },
   input: Parameters<typeof fetch>[0],
-  init: RequestInit = {},
+  init?: RequestInit,
 ) {
   const request =
     input instanceof Request
@@ -51,8 +75,13 @@ export function tracedFetch(
       : new Request(input.toString(), init);
   const url = new URL(request.url);
   const method = request.method;
+  const caller = context.active();
+  const session = requestSession(caller);
+  const internal =
+    (direction.from === "agent" && direction.to === "backend") ||
+    (direction.from === "backend" && direction.to === "agent");
   return trace.getTracer("home-agent.http").startActiveSpan(
-    `${method} ${url.pathname}`,
+    `${direction.from} → ${direction.to}: ${method} ${url.pathname}`,
     {
       kind: SpanKind.CLIENT,
       attributes: {
@@ -85,12 +114,29 @@ export function tracedFetch(
       else request.signal.addEventListener("abort", onAbort, { once: true });
       try {
         const carrier: Record<string, string> = {};
-        propagation.inject(context.active(), carrier);
+        propagation.inject(
+          sessionBaggageContext(
+            agentTraceContext(context.active()),
+            internal ? currentTraceSessionId() : undefined,
+          ),
+          carrier,
+        );
         const headers = new Headers(request.headers);
+        headers.delete("baggage");
         for (const [key, value] of Object.entries(carrier))
           headers.set(key, value);
         const response = await fetch(request, { headers });
         if (!ended) {
+          if (internal && direction.to === "agent") {
+            const id = traceSessionId(
+              response.headers.get(sessionResponseHeader),
+            );
+            const known = currentTraceSessionId(caller);
+            if (id && (known === undefined || known === id)) {
+              span.setAttribute("session.id", id);
+              session?.bind(id);
+            }
+          }
           span.setAttribute("http.response.status_code", response.status);
           if (response.status >= 400) {
             span.setAttribute("error.type", String(response.status));

@@ -25,8 +25,7 @@ import type { createPerceptionService } from "./perception/service";
 import { healthSchema } from "@home-agent/api/contracts";
 import { currentTraceId, httpTracing } from "@home-agent/observability";
 import { Hono } from "hono";
-import { AppError } from "@home-agent/api/errors";
-import { errorResponse, handleHttpError } from "@home-agent/api/errors/hono";
+import { handleHttpError, handleNotFound } from "@home-agent/api/errors/hono";
 import { createWebRoutes } from "./web/routes";
 import { secureHeaders } from "hono/secure-headers";
 import { createChatRoutes } from "./chat/routes";
@@ -108,7 +107,14 @@ export function createApp({
       ((id, signal) => perception.readWindow(id, signal)),
   });
   const app = new Hono();
-  app.use(httpTracing());
+  app.use(
+    httpTracing(
+      "backend",
+      (request) =>
+        request.method === "POST" &&
+        ["/api/chat", "/api/workflows"].includes(request.path),
+    ),
+  );
   app.use(async (c, next) => {
     const startedAt = performance.now();
     await next();
@@ -253,9 +259,9 @@ export function createApp({
       ),
     );
   // Unknown API routes must not fall through to the web application's HTML.
-  app.all("/api/*", (c) => errorResponse(c, new AppError("not_found")));
+  app.all("/api/*", handleNotFound);
   if (staticRoot) app.route("/", createWebRoutes(staticRoot));
-  app.notFound((c) => errorResponse(c, new AppError("not_found")));
+  app.notFound(handleNotFound);
   app.onError(handleHttpError);
   return Object.assign(routes, { closeRecordings: recordingService.close });
 }

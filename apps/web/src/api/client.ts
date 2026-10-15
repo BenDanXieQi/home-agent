@@ -24,7 +24,7 @@ export type RequestOptions = {
   acceptedStatuses?: readonly number[];
   signal?: AbortSignal | undefined;
   // Per-attempt limit. The caller's signal bounds the whole operation, including retries.
-  timeoutMs?: number;
+  timeoutMs?: number | null;
   keepalive?: boolean;
   retry?: RetryPolicy;
 };
@@ -61,7 +61,9 @@ export function createApiClient(
     for (let attempt = 0; ; attempt++) {
       const signal = AbortSignal.any([
         ...(options.signal ? [options.signal] : []),
-        AbortSignal.timeout(options.timeoutMs ?? 12_000),
+        ...(options.timeoutMs === null
+          ? []
+          : [AbortSignal.timeout(options.timeoutMs ?? 12_000)]),
       ]);
       try {
         signal.throwIfAborted();

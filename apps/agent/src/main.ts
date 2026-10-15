@@ -1,96 +1,85 @@
-import { createBackendClient } from "@home-agent/backend-client";
-import {
-  initializeTelemetry,
-  tracedFetch,
-  observeProvider,
-} from "@home-agent/observability";
-import { createModels, createProvider } from "@earendil-works/pi-ai";
-import { modelProviderSettings } from "./models";
-import { createAssistant } from "./assistant";
-import { createChat } from "./chat";
-import { createAgentApp } from "./app";
+import { serve } from "bun";
+import { once as onceEvent } from "node:events";
+import { memo as once, tryit } from "radash";
+import { initializeTelemetry } from "@home-agent/observability";
+import { cleanupSessionResources } from "@earendil-works/pi-ai";
 import { loadConfig } from "./config";
-import { createContextReceiver } from "./context/receiver";
-import { createWorkflows } from "./workflows";
+import { createApp } from "./app";
 
-const telemetry = initializeTelemetry("home-agent-agent");
-const config = loadConfig();
-const workflowModelIds = {
-  "automation-generation": config.AGENT_AUTOMATION_MODEL ?? config.AGENT_MODEL,
-  "speech-interpretation": config.AGENT_SPEECH_MODEL ?? config.AGENT_MODEL,
-};
-const subagentModelIds = [
-  config.AGENT_MODEL,
-  ...(config.AGENT_SUBAGENT_MODELS ?? []),
-];
-const settings = modelProviderSettings(
-  config,
-  [...Object.values(workflowModelIds), ...subagentModelIds].filter(
-    (id) => id !== undefined,
-  ),
-);
-const models = createModels();
-if (settings) models.setProvider(observeProvider(createProvider(settings)));
-const model = settings?.models.find((item) => item.id === config.AGENT_MODEL);
-const client = createBackendClient(config.BACKEND_URL, { fetch: tracedFetch });
-const receiver = createContextReceiver({ client });
-const budget = {
-  timeoutMs: config.AGENT_RUN_TIMEOUT_MS,
-  maxTokens: config.AGENT_MAX_OUTPUT_TOKENS,
-};
-const assistant = await createAssistant(models, model, {
-  ...budget,
-  subagentModels: models
-    .getModels(config.AGENT_PROVIDER)
-    .filter((item) => subagentModelIds.includes(item.id)),
-});
-const app = createAgentApp({
-  port: config.AGENT_PORT,
-  receiver,
-  chat: createChat(assistant, budget.timeoutMs),
-  runWorkflow: createWorkflows(
-    models,
-    {
-      "automation-generation": settings?.models.find(
-        (item) => item.id === workflowModelIds["automation-generation"],
-      ),
-      "speech-interpretation": settings?.models.find(
-        (item) => item.id === workflowModelIds["speech-interpretation"],
-      ),
-    },
-    budget,
-  ),
-});
-const server = await startServer();
-async function startServer() {
-  try {
-    return Bun.serve({
+async function main() {
+  const config = loadConfig();
+  await using lifecycle = createProcessLifecycle(
+    config.AGENT_SHUTDOWN_TIMEOUT_MS,
+  );
+  const { processResources, signal } = lifecycle;
+
+  processResources.adopt(
+    initializeTelemetry("home-agent-assistant"),
+    (telemetry) => telemetry.shutdown(),
+  );
+  processResources.defer(cleanupSessionResources);
+
+  const [error, app] = await tryit(createApp)(config, signal);
+  if (error) {
+    if (signal.aborted && error === signal.reason) return;
+    throw error;
+  }
+  processResources.use(app);
+  if (signal.aborted) return;
+
+  const server = processResources.adopt(
+    serve({
       hostname: config.AGENT_HOST,
       port: config.AGENT_PORT,
       fetch: app.fetch,
-    });
-  } catch (error) {
-    try {
-      await assistant?.close();
-    } finally {
-      await telemetry.shutdown();
-    }
-    throw error;
-  }
+    }),
+    (instance) => instance.stop(),
+  );
+  console.info(`Home Agent listening on ${server.url.toString()}`);
+  await lifecycle.waitForShutdown();
 }
-receiver.start();
-console.info(`Home Agent listening on ${server.url.toString()}`);
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => {
-    Promise.allSettled([receiver.stop(), server.stop(true), assistant?.close()])
-      .then((results) => {
-        if (results.some((result) => result.status === "rejected"))
-          throw new Error("Failed to stop Home Agent resources");
-      })
-      .finally(() => telemetry.shutdown())
-      .catch(() => {
-        console.error("Failed to stop Home Agent");
-        process.exitCode = 1;
-      });
+
+function createProcessLifecycle(timeoutMs: number) {
+  const processResources = new AsyncDisposableStack();
+  const stopping = new AbortController();
+  const signals = ["SIGINT", "SIGTERM"] as const;
+  let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const startShutdownDeadline = once(() => {
+    shutdownTimer = setTimeout(() => {
+      console.error(
+        `Home Agent shutdown exceeded ${timeoutMs}ms; forcing exit`,
+      );
+      process.exit(1);
+    }, timeoutMs);
   });
+
+  function requestShutdown() {
+    startShutdownDeadline();
+    stopping.abort();
+  }
+
+  for (const signal of signals) process.on(signal, requestShutdown);
+
+  return {
+    processResources,
+    signal: stopping.signal,
+    async waitForShutdown() {
+      if (!stopping.signal.aborted) await onceEvent(stopping.signal, "abort");
+    },
+    async [Symbol.asyncDispose]() {
+      startShutdownDeadline();
+      try {
+        await processResources.disposeAsync();
+      } finally {
+        clearTimeout(shutdownTimer);
+        for (const signal of signals) process.off(signal, requestShutdown);
+      }
+    },
+  };
 }
+
+await main().catch((error) => {
+  console.error("Failed to run Home Agent", error);
+  process.exitCode = 1;
+});

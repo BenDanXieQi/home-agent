@@ -9,10 +9,10 @@ import {
   type SimpleStreamOptions,
   type StreamOptions,
 } from "@earendil-works/pi-ai";
-import { startActiveObservation } from "@langfuse/tracing";
-import { beginOperation } from "./lifecycle";
-import { recordFailure } from "./spans";
+import { recordFailure, SpanKind, withSpan } from "./spans";
+import { genAiMessages, genAiToolDefinitions } from "./messages";
 import { telemetryStatus } from "./telemetry";
+import { recordEvaluationModel } from "./evaluation";
 import { z } from "zod";
 
 const tokenCount = z.number().int().nonnegative();
@@ -21,11 +21,73 @@ const usageSchema = z.object({
   completion_tokens: tokenCount,
 });
 const responseUsageEventSchema = z.object({
-  type: z.enum(["response.completed", "response.incomplete"]),
+  type: z.enum(["response.done", "response.completed", "response.incomplete"]),
   response: z.object({
     usage: z.object({ input_tokens: tokenCount, output_tokens: tokenCount }),
   }),
 });
+const completionUsageEventSchema = z.union([
+  z.object({ usage: usageSchema }),
+  z.object({
+    choices: z.tuple([z.object({ usage: usageSchema })]).rest(z.unknown()),
+  }),
+]);
+const anthropicUsageSchema = z
+  .object({
+    input_tokens: tokenCount.nullish(),
+    output_tokens: tokenCount.nullish(),
+  })
+  .refine((usage) => Object.values(usage).some((count) => count != null));
+const anthropicUsageEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("message_start"),
+    message: z.object({ usage: anthropicUsageSchema }),
+  }),
+  z.object({ type: z.literal("message_delta"), usage: anthropicUsageSchema }),
+]);
+const googleUsageEventSchema = z.object({
+  usageMetadata: z
+    .object({
+      promptTokenCount: tokenCount.nullish(),
+      candidatesTokenCount: tokenCount.nullish(),
+      thoughtsTokenCount: tokenCount.nullish(),
+      cachedContentTokenCount: tokenCount.nullish(),
+    })
+    .refine((usage) => Object.values(usage).some((count) => count != null)),
+});
+const bedrockUsageEventSchema = z.object({
+  metadata: z.object({
+    usage: z.object({ inputTokens: tokenCount, outputTokens: tokenCount }),
+  }),
+});
+const piUsageEventSchema = z.object({
+  type: z.enum(["done", "error"]),
+  usage: z.object({ input: tokenCount, output: tokenCount }),
+});
+
+/** Detect reported usage; Pi remains the sole owner of token normalization. */
+function reportsUsage(api: Api, event: unknown) {
+  switch (api) {
+    case "openai-completions":
+    case "mistral-conversations":
+      return completionUsageEventSchema.safeParse(event).success;
+    case "openai-responses":
+    case "azure-openai-responses":
+    case "openai-codex-responses":
+      return responseUsageEventSchema.safeParse(event).success;
+    case "anthropic-messages":
+      return anthropicUsageEventSchema.safeParse(event).success;
+    case "google-generative-ai":
+    case "google-vertex":
+      return googleUsageEventSchema.safeParse(event).success;
+    case "bedrock-converse-stream":
+      return bedrockUsageEventSchema.safeParse(event).success;
+    case "pi-messages":
+      return piUsageEventSchema.safeParse(event).success;
+    default:
+      return false;
+  }
+}
 const reasoningEffort = z.enum([
   "none",
   "minimal",
@@ -136,18 +198,32 @@ function observeModelStream(
   const output = createAssistantMessageEventStream();
   // Pi owns error normalization; the forwarding stream only keeps the active
   // generation span alive until every provider event has been observed.
-  const finish = beginOperation();
-  startActiveObservation(
-    "model.generate",
-    async (generation) => {
-      const span = generation.otelSpan;
-      generation.update({ model: model.id });
-      if (span.isRecording() && telemetryStatus().includeContent)
+  withSpan(
+    `chat ${model.id}`,
+    {
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": model.provider,
+      "gen_ai.request.model": model.id,
+      "gen_ai.request.stream": true,
+    },
+    async (span) => {
+      recordEvaluationModel(context, span);
+      if (span.isRecording() && telemetryStatus().includeContent) {
         // Pi normalizes system instructions and tool declarations into system messages.
-        generation.update({ input: context.messages });
+        span.setAttributes({
+          "gen_ai.input.messages": JSON.stringify(
+            genAiMessages(context.messages),
+          ),
+          "gen_ai.tool.definitions": JSON.stringify(
+            genAiToolDefinitions(context.messages),
+          ),
+        });
+      }
       try {
         let reportedUsage = false;
         let completionStarted = false;
+        let firstChunkReceived = false;
+        const startedAt = performance.now();
         const stream = start({
           onPayload: async (payload, requestModel) => {
             const replacement = await options.onPayload?.(
@@ -160,49 +236,56 @@ function observeModelStream(
               const parameters = modelParametersSchema.safeParse(
                 replacement === undefined ? payload : replacement,
               );
-              if (parameters.success)
-                generation.update({
-                  modelParameters: Object.fromEntries(
-                    Object.entries(parameters.data)
+              if (parameters.success) {
+                const {
+                  max_tokens,
+                  max_completion_tokens,
+                  max_output_tokens,
+                  reasoning_effort,
+                  ...sampling
+                } = parameters.data;
+                span.setAttributes({
+                  "gen_ai.request.max_tokens":
+                    max_completion_tokens ?? max_output_tokens ?? max_tokens,
+                  "gen_ai.request.reasoning.level":
+                    reasoning_effort ??
+                    sampling.reasoning?.effort ??
+                    (typeof sampling.thinking === "string"
+                      ? sampling.thinking
+                      : undefined),
+                  ...Object.fromEntries(
+                    Object.entries(sampling)
                       .filter(([, value]) => value !== undefined)
                       .map(([key, value]) => [
-                        key,
-                        typeof value === "number" || typeof value === "string"
-                          ? value
-                          : JSON.stringify(value),
+                        [
+                          "temperature",
+                          "top_p",
+                          "top_k",
+                          "frequency_penalty",
+                          "presence_penalty",
+                          "seed",
+                        ].includes(key)
+                          ? `gen_ai.request.${key}`
+                          : `home_agent.request.${key}`,
+                        typeof value === "object"
+                          ? JSON.stringify(value)
+                          : value,
                       ]),
                   ),
                 });
+              }
             }
             return replacement;
           },
           onProviderStreamEvent: async (data, requestModel) => {
-            let chunkReportedUsage = false;
-            if (model.api === "openai-responses")
-              chunkReportedUsage =
-                responseUsageEventSchema.safeParse(data).success;
-            if (typeof data === "object" && data !== null) {
-              if ("usage" in data) {
-                const usage = usageSchema.safeParse(data.usage);
-                if (usage.success) chunkReportedUsage = true;
-              }
-              if (
-                "choices" in data &&
-                Array.isArray(data.choices) &&
-                data.choices.length
-              ) {
-                const choice: unknown = data.choices[0];
-                if (
-                  typeof choice === "object" &&
-                  choice !== null &&
-                  "usage" in choice &&
-                  choice.usage != null
-                ) {
-                  const usage = usageSchema.safeParse(choice.usage);
-                  if (usage.success) chunkReportedUsage = true;
-                }
-              }
+            if (!firstChunkReceived) {
+              firstChunkReceived = true;
+              span.setAttribute(
+                "gen_ai.response.time_to_first_chunk",
+                (performance.now() - startedAt) / 1_000,
+              );
             }
+            const chunkReportedUsage = reportsUsage(model.api, data);
             await options.onProviderStreamEvent?.(data, requestModel);
             // A throwing caller observer prevents Pi from normalizing this chunk.
             if (chunkReportedUsage) reportedUsage = true;
@@ -217,7 +300,11 @@ function observeModelStream(
             event.delta.length > 0
           ) {
             completionStarted = true;
-            generation.update({ completionStartTime: new Date() });
+            // Langfuse currently uses this extension to display first-token latency.
+            span.setAttribute(
+              "langfuse.observation.completion_start_time",
+              new Date().toISOString(),
+            );
           }
           if (event.type === "done" || event.type === "error") {
             const response =
@@ -228,43 +315,50 @@ function observeModelStream(
                 usage.reasoning !== undefined && usage.reasoning <= usage.output
                   ? usage.reasoning
                   : 0;
-              // Pi already separates cache reads/writes from input; reasoning is
-              // a subset of output. Langfuse flat usage uses exclusive buckets.
-              generation.update({
-                usageDetails: {
-                  input: usage.input,
-                  output: usage.output - reasoningTokens,
-                  ...(usage.cacheRead > 0
-                    ? { input_cached_tokens: usage.cacheRead }
-                    : {}),
-                  ...(usage.cacheWrite > 0
-                    ? { input_cache_creation: usage.cacheWrite }
-                    : {}),
-                  ...(reasoningTokens > 0
-                    ? { output_reasoning_tokens: reasoningTokens }
-                    : {}),
-                  total: usage.totalTokens,
-                },
-              });
-            }
-            span.setAttribute(
-              "gen_ai.response.finish_reason",
-              response.stopReason,
-            );
-            if (response.responseModel) {
-              generation.update({
-                model: response.responseModel,
-                ...(response.responseModel !== model.id
-                  ? { metadata: { requested_model: model.id } }
+              // OTel counts cache tokens in input and reasoning tokens in output.
+              // Pi's cache buckets are separate; its output already includes reasoning.
+              span.setAttributes({
+                "gen_ai.usage.input_tokens":
+                  usage.input + usage.cacheRead + usage.cacheWrite,
+                "gen_ai.usage.output_tokens": usage.output,
+                ...(usage.cacheRead > 0
+                  ? { "gen_ai.usage.cache_read.input_tokens": usage.cacheRead }
+                  : {}),
+                ...(usage.cacheWrite > 0
+                  ? {
+                      "gen_ai.usage.cache_write.input_tokens": usage.cacheWrite,
+                    }
+                  : {}),
+                ...(reasoningTokens > 0
+                  ? { "gen_ai.usage.reasoning.output_tokens": reasoningTokens }
                   : {}),
               });
+            }
+            span.setAttribute("gen_ai.response.finish_reasons", [
+              event.type === "error"
+                ? "error"
+                : (response.rawStopReason ??
+                  (response.stopReason === "toolUse"
+                    ? "tool_call"
+                    : response.stopReason)),
+            ]);
+            if (response.responseModel) {
               span.setAttribute(
                 "gen_ai.response.model",
                 response.responseModel,
               );
             }
-            if (span.isRecording() && telemetryStatus().includeContent)
-              generation.update({ output: response.content });
+            if (response.responseId)
+              span.setAttribute("gen_ai.response.id", response.responseId);
+            if (
+              span.isRecording() &&
+              telemetryStatus().includeContent &&
+              (event.type === "done" || response.content.length > 0)
+            )
+              span.setAttribute(
+                "gen_ai.output.messages",
+                JSON.stringify(genAiMessages([response])),
+              );
             if (event.type === "error")
               recordFailure(
                 span,
@@ -283,6 +377,7 @@ function observeModelStream(
           output.push(event);
         }
       } catch (error) {
+        span.setAttribute("gen_ai.response.finish_reasons", ["error"]);
         recordFailure(span, error);
         const failed = lazyStream(model, async () => {
           throw error;
@@ -290,14 +385,12 @@ function observeModelStream(
         for await (const event of failed) output.push(event);
       }
     },
-    { asType: "generation" },
-  )
-    .catch(async (error: unknown) => {
-      const failed = lazyStream(model, async () => {
-        throw error;
-      });
-      for await (const event of failed) output.push(event);
-    })
-    .finally(finish);
+    { kind: SpanKind.CLIENT },
+  ).catch(async (error: unknown) => {
+    const failed = lazyStream(model, async () => {
+      throw error;
+    });
+    for await (const event of failed) output.push(event);
+  });
   return output;
 }

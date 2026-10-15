@@ -7,9 +7,6 @@ export const speechDialogueLimits = Object.freeze({
   contextSegments: 3,
   lifetimeMs: 45000,
   timeoutMs: 12000,
-  agentTimeoutMs: 11000,
-  requestBytes: 98304,
-  responseBytes: 24576,
 });
 const assistantNamesSchema = z
   .array(z.string().trim().min(1).max(32))
@@ -30,8 +27,8 @@ export const speechDecisionSchema = z
       "media",
       "uncertain",
     ]),
-    requestText: z.string().trim().min(1).max(4096).nullable(),
-    reason: z.string().min(1).max(512),
+    requestText: z.string().trim().min(1).nullable(),
+    reason: z.string().min(1),
   })
   .refine(
     (decision) =>

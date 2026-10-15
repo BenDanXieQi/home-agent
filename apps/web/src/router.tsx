@@ -170,6 +170,11 @@ const spacesRoute = createRoute({
   path: "/spaces",
   component: lazyRouteComponent(() => import("./pages/spaces/index")),
 });
+const manualSpacesRoute = createRoute({
+  getParentRoute: () => publicWorkspaceRoute,
+  path: "/spaces/manual",
+  component: lazyRouteComponent(() => import("./pages/spaces/ManualPage")),
+});
 export const router = createRouter({
   routeTree: rootRoute.addChildren([
     accountRoute.addChildren([
@@ -192,6 +197,7 @@ export const router = createRouter({
     publicWorkspaceRoute.addChildren([
       imageAnalysisRoute,
       spacesRoute,
+      manualSpacesRoute,
       agentContextRoute,
     ]),
   ]),

@@ -118,7 +118,7 @@ export async function generateAutomation(
         options,
       ),
     agentWorkflowResultSchema,
-    { timeoutMs: 120_000 },
+    { timeoutMs: null },
   );
   if (response.workflow !== "automation-generation")
     throw new RequestError({ code: "invalid_response" });

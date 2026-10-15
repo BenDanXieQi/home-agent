@@ -3,14 +3,14 @@ import { apiErrorSchema, type ErrorCode } from "../contracts/errors";
 import { AppError } from "../errors";
 import { readLimitedJson } from "./read-body";
 
-/** One bounded service request. The caller owns endpoint policy; never retries. */
+/** One service request. The caller owns endpoint policy; never retries. */
 export async function requestJson<T>(
   send: (signal: AbortSignal) => Promise<Pick<Response, "body" | "ok">>,
   schema: z.ZodType<T>,
   options: {
     signal: AbortSignal;
     timeoutMs: number;
-    maxBytes: number;
+    maxBytes?: number;
     unavailableCode: ErrorCode;
   },
 ) {
@@ -19,7 +19,10 @@ export async function requestJson<T>(
   try {
     signal.throwIfAborted();
     const response = await send(signal);
-    const body = await readLimitedJson(response, options.maxBytes, signal);
+    const body: unknown =
+      options.maxBytes === undefined
+        ? await new Response(response.body).json()
+        : await readLimitedJson(response, options.maxBytes, signal);
     if (!response.ok) {
       const error = apiErrorSchema.safeParse(body);
       if (error.success)

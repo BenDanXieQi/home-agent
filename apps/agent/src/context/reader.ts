@@ -25,7 +25,7 @@ export function createContextReader(options: {
     ReturnType<typeof options.receiver.qualification>
   >["scope"];
 
-  async function withinContext<T>(
+  async function readWithinScope<T>(
     signal: AbortSignal,
     read: (scope: Scope) => Promise<T>,
   ) {
@@ -56,7 +56,7 @@ export function createContextReader(options: {
       query: WithoutScope<z.input<typeof agentHistoryQuerySchema>>,
       signal: AbortSignal,
     ) {
-      return withinContext(signal, async (scope) => {
+      return readWithinScope(signal, async (scope) => {
         const input = agentHistoryQuerySchema.parse({
           ...query,
           account_id: scope.account_id,
@@ -86,7 +86,7 @@ export function createContextReader(options: {
       reference: Omit<z.input<typeof agentMaterialQuerySchema>, "scope">,
       signal: AbortSignal,
     ) {
-      return withinContext(signal, async (scope) => {
+      return readWithinScope(signal, async (scope) => {
         const input = agentMaterialQuerySchema.parse({ ...reference, scope });
         const result = await requestJson(
           (requestSignal) =>

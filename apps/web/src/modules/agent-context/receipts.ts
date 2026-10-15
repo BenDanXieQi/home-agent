@@ -36,13 +36,7 @@ export function useReceiptIndex() {
         receipts:
           previous?.journal_id === update.journal_id &&
           previous.total_received <= update.total_received
-            ? [
-                ...update.receipts,
-                ...previous.receipts.filter(
-                  (receipt) =>
-                    receipt.sequence >= update.first_retained_sequence,
-                ),
-              ]
+            ? [...update.receipts, ...previous.receipts]
             : update.receipts,
       };
     },

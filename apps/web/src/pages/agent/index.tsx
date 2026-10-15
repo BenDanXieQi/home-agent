@@ -29,7 +29,7 @@ export default function AgentPage() {
         (client, options) =>
           client.api.chat.$post({ json: { message } }, options),
         chatResponseSchema,
-        { signal: controller.signal, timeoutMs: 140000 },
+        { signal: controller.signal, timeoutMs: null },
       );
       if (!controller.signal.aborted) setAnswer(result.answer);
     } catch {
@@ -64,7 +64,6 @@ export default function AgentPage() {
           id="agent-message"
           className="min-h-28 rounded-xl border border-line bg-paper p-3 text-sm"
           rows={4}
-          maxLength={16000}
           value={message}
           onChange={(event) => setMessage(event.target.value)}
           disabled={busy}

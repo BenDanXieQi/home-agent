@@ -399,23 +399,17 @@ export const automationEvaluateRequestSchema = automationScopeSchema.extend({
   definition: automationDefinitionSchema,
 });
 export const automationGenerateRequestSchema = automationScopeSchema.extend({
-  text: z.string().trim().min(1).max(4000),
+  text: z.string().trim().min(1),
   definition: automationDefinitionSchema.optional(),
 });
 export const automationDraftSchema = z.object({
   definition: automationDefinitionSchema.nullable(),
-  behavior: z.string().max(4000),
-  clarifications: z.array(z.string().max(1000)).max(5),
+  behavior: z.string(),
+  clarifications: z.array(z.string()),
 });
-export const automationGenerationLimits = {
-  requestBytes: 256 * 1024,
-  responseBytes: 128 * 1024,
-  timeoutMs: 90_000,
-  concurrent: 1,
-} as const;
 /** Input supplied by the caller; generation has no device side effects. */
 export const automationGenerationInputSchema = z.strictObject({
-  text: z.string().trim().min(1).max(4000),
+  text: z.string().trim().min(1),
   definition: automationDefinitionSchema.optional(),
   capabilities: automationCapabilitiesSchema,
 });

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, House, DoorOpen, ScanEye } from "lucide-react";
@@ -26,6 +27,7 @@ import { ReferenceConflict } from "./ReferenceConflict";
 import { DeleteDialog } from "./DeleteDialog";
 import { createSpatialLabels } from "./labels";
 import type { Editor, Deletion } from "./types";
+import { SpatialPlanning } from "./SpatialPlanning";
 
 const areas = [
   {
@@ -47,12 +49,14 @@ const areas = [
     description: "关联设备和观察目标，说明覆盖范围、方向与限制。",
   },
 ] as const;
-export default function SpacesPage() {
+export default function SpacesPage({ manual = false }: { manual?: boolean }) {
   const epoch = useAtomValue(householdScopeEpochAtom) ?? "local";
-  return <SpacesQuery key={epoch} scope={epoch} />;
+  return <SpacesQuery key={epoch} scope={epoch} manual={manual} />;
 }
-function SpacesQuery({ scope }: { scope: string }) {
+function SpacesQuery({ scope, manual }: { scope: string; manual: boolean }) {
   const query = useQuery(spatialQueryOptions(scope));
+  const household = useAtomValue(householdSnapshotAtom);
+  const reliable = useAtomValue(householdReliableAtom);
   async function refresh() {
     await query.refetch({ throwOnError: true });
   }
@@ -76,12 +80,34 @@ function SpacesQuery({ scope }: { scope: string }) {
         </Notice>
       ) : null}
       {query.data ? (
-        <SpatialWorkspace
-          key={JSON.stringify(query.data.scope)}
-          scope={scope}
-          snapshot={query.data}
-          refresh={refresh}
-        />
+        manual ? (
+          <SpatialWorkspace
+            key={JSON.stringify(query.data.scope)}
+            scope={scope}
+            snapshot={query.data}
+            refresh={refresh}
+          />
+        ) : (
+          <>
+            <PageHeaderContent slot="actions">
+              <Link
+                to="/spaces/manual"
+                className="rounded-lg px-3 py-2 text-xs text-muted hover:bg-surface hover:text-ink"
+              >
+                手动维护
+              </Link>
+            </PageHeaderContent>
+            <SpatialPlanning
+              key={JSON.stringify(query.data.scope)}
+              scope={scope}
+              snapshot={query.data}
+              available={
+                reliable &&
+                household?.projection.household.household.status === "running"
+              }
+            />
+          </>
+        )
       ) : null}
     </>
   );

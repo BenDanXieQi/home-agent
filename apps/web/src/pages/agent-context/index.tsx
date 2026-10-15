@@ -6,10 +6,7 @@ import {
   ChevronRight,
   RefreshCw,
 } from "lucide-react";
-import {
-  agentReceiptPolicy,
-  type agentReceiptIndexSchema,
-} from "@home-agent/api/agent-receipts";
+import type { agentReceiptIndexSchema } from "@home-agent/api/agent-receipts";
 import type { z } from "zod";
 import { Button } from "../../components/Button";
 import { PageHeaderContent } from "../../components/PageHeaderContent";
@@ -79,7 +76,6 @@ function ReceiptTimeline({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-xs text-muted">
           已接收 {data.total_received} 条 · 保留 {data.receipts.length} 条
-          {data.evicted ? ` · 已淘汰 ${data.evicted} 条` : ""}
         </span>
         <SearchField
           label="筛选接收记录"
@@ -330,9 +326,7 @@ export default function AgentContextPage() {
                 大小不变不表示内容未变。
               </p>
               <p>
-                最多保留 {agentReceiptPolicy.records} 条，内存预算{" "}
-                {agentReceiptPolicy.retainedBytes / 1024 / 1024}{" "}
-                MiB，超限淘汰最早记录。 重连、切换家庭或 Agent
+                接收记录保留到当前连接结束。重连、切换家庭或 Agent
                 重启会清空，不代表完整历史。
               </p>
               <p>

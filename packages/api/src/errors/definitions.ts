@@ -98,7 +98,8 @@ export const errorDefinitions = {
   },
   model_not_configured: {
     status: 503,
-    message: "Configure AGENT_MODEL and OPENAI_API_KEY.",
+    message:
+      "Configure the requested Agent model and its provider authentication.",
   },
   request_cancelled: { status: 408, message: "The request was cancelled." },
   run_timeout: { status: 504, message: "The Agent run timed out." },

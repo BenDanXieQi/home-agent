@@ -63,13 +63,32 @@ backend 与 Agent 共用一套错误契约，Web 按错误码显示中文。HTTP
 
 其他错误沿用通用格式：`spatial_record_exists`、`spatial_record_changed`、`spatial_scope_changed` 返回 `409`，分别表示 ID 已存在、记录版本变化、家庭绑定变化；`spatial_reference_invalid`、`spatial_source_invalid` 返回 `400`；`spatial_storage_unavailable` 返回 `503`。客户端不自动重试写入，响应丢失时应先读取并确认实际结果。
 
+## 空间规划会话契约
+
+`@home-agent/api/agent-workflows` 导出 `spatialPlanningInputSchema`、`spatialPlanningResultSchema`、`spatialPlanningTurnSchema`、`spatialPlanningStateSchema`；字段定义位于 [spatial-planning.ts](src/contracts/spatial-planning.ts)。Agent 内部请求为 `{ workflow: "spatial-planning", input }`，响应为 `{ workflow: "spatial-planning", result }`。Backend 面向家庭的 `POST /api/workflows` 同时接受空间规划，浏览器请求携带当前 `scope_epoch`；Backend 校验家庭资格后转发，返回前再次核对运行范围。
+
+| `input.action` | 输入                                | 行为                                                      |
+| -------------- | ----------------------------------- | --------------------------------------------------------- |
+| `start`        | 可选 `draft`                        | 创建独立会话，立即返回初始草稿和 `session_id`，不调用模型 |
+| `message`      | `session_id`、`text`、可选 `images` | 结合已有会话和本轮材料回答、澄清并调整草稿                |
+| `read`         | `session_id`                        | 读取当前已提交草稿及运行状态                              |
+| `close`        | `session_id`                        | 中止当前运行，返回最后草稿及 closed 状态，撤销 ID 访问    |
+
+`text` 可以为空，但文字和图片不能同时为空。`images` 中每张为 `{ type: "image", mime_type: "image/jpeg" | "image/png" | "image/webp", data }`。`data` 是原始 base64 字符串，不含 data URL 前缀。不接受视频、媒体 URL 或本机文件路径；模型必须声明支持图片输入。
+
+`result` 包含 `session_id`、`status: idle | running | closed`、`revision`、`reply`、`questions` 和 `draft`。`revision` 从 0 开始，每次草稿工具成功提交后递增；普通问答只更新 `reply`，保留草稿、待澄清问题和修订号。`running` 的读取可能仍是上轮草稿。`questions` 表示继续问答所需的信息，草稿不因存在问题而清空；首轮只有问题、修订号仍为零时也可以继续提交文字。`idle` 仅表示当前没有运行，不表示规划已完成或获用户确认。
+
+`draft` 复用 [spatial.ts](src/contracts/spatial.ts) 的 `spatialDraftSchema` 与现有领域字段：`spaces` 中每项为 `id/name/description`；`passages` 额外包含 `space_a_id/space_b_id`。各类 ID 不重复，通道端点必须引用草稿内两个不同的空间；没有数据库时间戳、观测绑定或保存授权。它用于继续问答和人工核对，不是空间数据库快照，也不直接调用空间写入接口。
+
+会话 ID 来自 PiDurable 原生 `ProviderDoc.sessionId`（UUID），同时用于 Langfuse 多轮追踪分组，只在当前 Agent 进程内可用于继续规划。Backend 将当前 `account_id/home_id/scope_epoch` 作为可信 `scope` 注入 `spatialPlanningRequestSchema`；每项操作核对会话所属范围。未知或关闭后的 ID 返回 `not_found`；关闭撤销访问、中止当前运行并释放该会话独有的 Harness、存储及提供方资源。家庭范围撤销或变化时关闭旧范围会话。请求取消、超时和模型缺配置复用公共错误；等待使用服务配置的预算。
+
 ## 实现约定
 
 - `src/contracts/errors.ts`：前后端共享的错误码、字段错误及 SSE 失败事件 schema，不包含服务端处理逻辑。
 - `src/contracts/mijia-errors.ts`：米家公开错误码、HTTP 状态与安全文案。backend 在 `mijia/errors.ts` 将 MiCloud 和 go2rtc 的错误转换到该契约，保留 `cloud_invalid_response` 与下游 `invalid_response` 的来源区别。
 - `src/errors/definitions.ts`：服务端错误码到 HTTP 状态和安全默认文案的映射，类型检查确保覆盖全部错误码。
 - `src/errors/index.ts`：与 Hono 无关的 `AppError` 和错误载荷构造。业务模块提供错误码、必要参数、字段错误及内部 `cause`，可通过 `operation` 标识失败操作；`cause` 和 `operation` 不进入 API 响应。
-- `src/errors/hono.ts`：共享 `onError`、错误响应和 JSON 请求解析。404、请求体超限等直接响应也使用同一格式；未知异常返回通用 500。
+- `src/errors/hono.ts`：提供共享的 `handleHttpError`、`handleNotFound`、错误响应和 JSON 请求解析。应用分别通过 `onError` 和 `notFound` 注册处理器，未知 API 路由的兜底也复用 `handleNotFound`。404、请求体超限等直接响应使用同一格式；未知异常返回通用 500。
 - `src/errors/diagnostics.ts`：提取内部诊断信息，包括受限的错误标识、系统错误码、操作名、系统调用名和项目源码位置。最多记录四层原因链、每层五个源码位置，省略原始消息、绝对路径、函数名和完整堆栈。
 - `src/errors/validation.ts`：将 Zod 校验结果转换为公开的字段错误结构。
 - [`apps/web/src/messages/zh-CN.ts`](../../apps/web/src/messages/zh-CN.ts)：集中管理中文错误、字段校验、网络错误和连接状态文案。新增错误必须补齐文案，类型检查会检查遗漏；当前仅提供中文。
@@ -135,7 +154,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 该契约交付已有来源材料，不包含凭据、参考照片、特征向量或媒体字节，不定义模型调查、默认模型输入、生活事件推断或语义回写。
 
-接收观察契约位于 `@home-agent/api/agent-receipts`：索引、记录详情和当前上下文均带 `journal_id`，连接或家庭资格改变后失效。记录内容包括校验后的 snapshot 消息和当时合并结果；索引中的 `payload_bytes` 是 SSE 数据正文字节数，`context_bytes` 是当时完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，当前快照同样携带 `context_bytes`。`context_delta_bytes` 是同一接收会话内相对上一条消息的字节差，初始消息以零为基准；历史记录淘汰不改变该差值。索引和详情的 `changes` 保存全部结构化变化，以 `kind/key/before/after` 区分变化类型、对象标识和前后值；设备相关变化附带当时的名称与属性规格，删除项使用接收前的设备清单解析。Web 从 `changes` 派生前三项预览和变化数量，搜索覆盖全部变化；中文文案、值类型显示和本地时间格式由 Web 生成。摘要在接收时比较前后状态，设备名称、属性定义、单位和枚举说明来自当时收到的设备清单，解析共用 `@home-agent/api/agent-context/devices`。`member_sighting` 变化单独比较成员出现投影，覆盖最后出现时间、身份归属及最新记录替换，不依赖关联窗口是否变化。摘要忽略采集的累计接收计数与观察来源的读取时间更新，完整消息仍保留这些字段；统一观察提取线索、时间、引用、成员出现归因修订号及轻量窗口材料摘要变化（内容修订号、原始输入保留状态、片段生成状态／选项／有效期／失败原因、语音启用状态与段数、猫狗声分析状态／结果有效性与检测结果数量），不读取外部材料或推断房间、设备身份。猫狗声分析缺失、未就绪或结果无效时，`pet_sound_count` 为 null；仅 ready 且 valid 的分析提供检测结果数量，零表示该有效结果未命中，不证明没有叫声。`sampledMedia=null` 表示无媒体引用，不等同于 `not_generated`。接收索引查询使用 `agentReceiptQuerySchema`：`journal_id/after_sequence` 同时提供时请求该位置后的新增摘要；返回的 `first_retained_sequence` 用于清理已淘汰记录，会话不匹配时重新读取全部保留摘要。响应预算覆盖 `agentReceiptPolicy.retainedBytes` 和响应信封，包含完整 `changes`。保留策略由 `agentReceiptPolicy` 定义。接口与生命周期见 [Agent 接收说明](../../apps/agent/README.md#当前数据接收与只读历史客户端)。
+接收观察契约位于 `@home-agent/api/agent-receipts`：索引、记录详情和当前上下文均带 `journal_id`，连接或家庭资格改变后失效。记录内容包括校验后的 snapshot 消息和当时合并结果；索引中的 `payload_bytes` 是 SSE 数据正文字节数，`context_bytes` 是当时完整 `{ scope, parts }` 紧凑 JSON 的 UTF-8 字节数，当前快照同样携带 `context_bytes`。`context_delta_bytes` 是同一接收会话内相对上一条消息的字节差，初始消息以零为基准。索引和详情的 `changes` 保存全部结构化变化，以 `kind/key/before/after` 区分变化类型、对象标识和前后值；设备相关变化附带当时的名称与属性规格，删除项使用接收前的设备清单解析。Web 从 `changes` 派生前三项预览和变化数量，搜索覆盖全部变化；中文文案、值类型显示和本地时间格式由 Web 生成。摘要在接收时比较前后状态，设备名称、属性定义、单位和枚举说明来自当时收到的设备清单，解析共用 `@home-agent/api/agent-context/devices`。`member_sighting` 变化单独比较成员出现投影，覆盖最后出现时间、身份归属及最新记录替换，不依赖关联窗口是否变化。摘要忽略采集的累计接收计数与观察来源的读取时间更新，完整消息仍保留这些字段；统一观察提取线索、时间、引用、成员出现归因修订号及轻量窗口材料摘要变化（内容修订号、原始输入保留状态、片段生成状态／选项／有效期／失败原因、语音启用状态与段数、猫狗声分析状态／结果有效性与检测结果数量），不读取外部材料或推断房间、设备身份。猫狗声分析缺失、未就绪或结果无效时，`pet_sound_count` 为 null；仅 ready 且 valid 的分析提供检测结果数量，零表示该有效结果未命中，不证明没有叫声。`sampledMedia=null` 表示无媒体引用，不等同于 `not_generated`。接收索引查询使用 `agentReceiptQuerySchema`：`journal_id/after_sequence` 同时提供时请求该位置后的新增摘要；会话不匹配时重新读取全部摘要。记录在当前连接与家庭资格存续期间完整保留，断线、家庭范围变化或停止后清空。接口与生命周期见 [Agent 接收说明](../../apps/agent/README.md#当前数据接收与只读历史客户端)。
 
 窗口材料的轻量投影由 `@home-agent/api/perception/window-observations` 的 `projectWindowMaterial` 提供，供 Backend 和 Web 共用。来源窗口与目标的判断由 Backend `perception/window/observation.ts` 负责，成员记录与窗口的选择、关联和组装由 Backend `agent-context/observations.ts` 负责。未知目标按逐帧、媒体代次和观察时间核对，未建立轨迹的检测目标保留未归因线索。
 
