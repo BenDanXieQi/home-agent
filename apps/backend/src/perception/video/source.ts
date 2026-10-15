@@ -27,7 +27,6 @@ export function createVideoSource(options: {
   const metrics = createVideoMetrics();
   const machine = setup({
     types: {
-      // XState setup declares actor context and input event boundaries.
       // oxlint-disable-next-line typescript/no-unsafe-type-assertion
       context: {} as {
         sequence: number;

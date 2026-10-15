@@ -67,9 +67,9 @@
 
 决定评测设计的源码入口：
 
-- [assistant.ts](../../apps/agent/src/assistant/assistant.ts) 明确家庭聊天的能力边界；[app.ts](../../apps/agent/src/app.ts) 分别创建接收器与助手，没有向助手注入接收材料。
+- [assistant.ts](../../apps/agent/src/assistant/assistant.ts) 明确家庭聊天的能力边界；[app.ts](../../apps/agent-host/src/app.ts) 分别创建接收器与助手，没有向助手注入接收材料。
 - [context/reader.ts](../../apps/agent/src/context/reader.ts#L19) 是实际只读客户端，尚不是聊天模型已经注册的工具。
-- [household-model-view/observations.ts](../../packages/api/src/domain/household-model-view/observations.ts#L27) 要求唯一启用绑定且绑定更新时间不晚于首次观察，才输出观测区域。这是现有视图的保守显示规则；当前配置不提供完整历史绑定版本，不能拿新绑定倒推旧观察。
+- [household-model-view/observations.ts](../../apps/agent/src/context/model-view/observations.ts#L27) 要求唯一启用绑定且绑定更新时间不晚于首次观察，才输出观测区域。这是现有视图的保守显示规则；当前配置不提供完整历史绑定版本，不能拿新绑定倒推旧观察。
 - [agent-context/history.ts](../../apps/backend/src/agent-context/history.ts#L165) 的成员历史游标使用首次观察时间；求最后出现不能把分页位置误当最后观察排序。
 - [action-provenance.ts](../../packages/api/src/contracts/action-provenance.ts#L48) 明确操作来源字段，不包含执行者的家庭成员身份。
 - [设备事实](../contracts/device-facts.md)和[自动化](../automations.md)维护缓存、未知、恢复、accepted、日志缺口等业务边界。

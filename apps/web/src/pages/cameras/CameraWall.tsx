@@ -45,7 +45,6 @@ const CameraTile = memo(function CameraTile({
   onEnabledChange: (key: string, enabled: boolean) => void;
 }) {
   const tile = useRef<HTMLElement>(null);
-  // Prepare the next row before it enters view without retaining distant viewers.
   const nearViewport = useInView(tile, { margin: "240px 0px" });
   const label =
     device.channels.length > 1
@@ -122,7 +121,6 @@ export default function CameraWall({
   const pageActive = useAtomValue(playbackPageActiveAtom);
   const paused = useAtomValue(pausedPlaybackKeysAtom);
   const changeEnabled = useSetAtom(setPlaybackEnabledAtom);
-  // Display order belongs to the camera wall, not the cloud response order.
   const cameras = useMemo(
     () =>
       devices.items

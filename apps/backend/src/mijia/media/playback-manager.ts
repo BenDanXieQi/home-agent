@@ -46,7 +46,6 @@ type PrepareCamera = (
   signal: AbortSignal,
 ) => Promise<CameraTarget>;
 
-/** Owns viewers only. Releasing a viewer never stops a resident camera source. */
 export class PlaybackManager {
   private readonly entries = new Map<string, Playback>();
   private readonly releases = new Map<
@@ -90,7 +89,6 @@ export class PlaybackManager {
       .map((entry) => entry.id);
   }
 
-  /** IDs were captured before the heartbeat, so it cannot retire a newer offer. */
   forgetEnded(adapter: Go2RtcAdapter, ids: readonly string[]) {
     for (const id of ids) {
       const entry = this.entries.get(id);
@@ -102,14 +100,12 @@ export class PlaybackManager {
     }
   }
 
-  /** A confirmed session deletion also retires its outstanding viewer cleanup. */
   forgetAdapter(adapter: Go2RtcAdapter) {
     for (const [id, release] of this.releases) {
       if (release.target.adapter === adapter) this.releases.delete(id);
     }
   }
 
-  /** A successful heartbeat supplies the next opportunity to retry revoked viewers. */
   retryReleases(adapter: Go2RtcAdapter) {
     for (const [id, release] of this.releases) {
       if (release.target.adapter === adapter) this.releaseInBackground(id);
@@ -159,8 +155,6 @@ export class PlaybackManager {
       return entry.result;
     }
     clearTimeout(entry.timer);
-    // DELETE and this deadline own cancellation. A transport disconnect permits
-    // another request to recover the accepted offer with the same SDP.
     const timer = context.with(ROOT_CONTEXT, () =>
       setTimeout(() => {
         this.releaseInBackground(id);
@@ -244,7 +238,6 @@ export class PlaybackManager {
   async release(id: string) {
     const entry = this.entries.get(id);
     if (entry) {
-      // Revoke access immediately, retaining remote ownership until DELETE succeeds.
       this.entries.delete(id);
       clearTimeout(entry.timer);
       if (entry.phase !== "reserved") {

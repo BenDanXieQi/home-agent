@@ -2,7 +2,6 @@ import { cameraTileClassName, cameraGridClassName } from "./camera-styles";
 import { CameraHeader } from "./CameraHeader";
 import { Skeleton } from "../../components/Skeleton";
 
-/** One camera tile's frame: heading, 16:9 surface and status row, like a live tile. */
 export function CameraTileSkeleton() {
   return (
     <article className={cameraTileClassName} aria-hidden="true">

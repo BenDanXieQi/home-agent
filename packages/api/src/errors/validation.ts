@@ -1,7 +1,6 @@
 import type { z } from "zod";
 import type { ValidationIssue } from "../contracts";
 
-// Expose field locations and safe constraints, never input values or library prose.
 export function validationIssues(error: z.ZodError, rootPath = "request") {
   return error.issues.map((issue) => {
     const path = issue.path.map(String).join(".") || rootPath;

@@ -1,11 +1,9 @@
 import { availableParallelism } from "node:os";
 import { z } from "zod";
 
-// Capture the host once per application process, including retries after failed initialization.
 const startupAvailableCpus = availableParallelism();
 
 export const cpuRatioSchema = z.number().positive().max(1).default(0.5);
-// Per-worker native concurrency stays fixed; CPU share controls worker count.
 export const detectionComputeBudget = {
   processes: 1,
   pendingTasks: 1,

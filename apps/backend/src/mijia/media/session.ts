@@ -24,7 +24,6 @@ type MediaDependencies = {
   canReconfigure: () => boolean;
 };
 
-/** Owns media binding, cleanup order, configuration polling, sources and viewers. */
 export class MediaSession {
   private currentState: MijiaState["binding"] = { status: "unbound" };
   get state() {
@@ -67,7 +66,6 @@ export class MediaSession {
 
   private serial<T>(run: () => Promise<T>) {
     const result = this.queue.then(run);
-    // The original result belongs to the caller; settlement only advances ordering.
     this.queue = result.then(
       () => ({ status: "fulfilled" as const }),
       (reason: unknown) => ({ status: "rejected" as const, reason }),
@@ -115,8 +113,6 @@ export class MediaSession {
   }
 
   pauseForLogout() {
-    // Ending the current household run revokes viewers even if credential
-    // deletion fails. Keep resident sources available for a confirmed recovery.
     this.revision = crypto.randomUUID();
     this.invalidateRecordingReads();
     this.playback.invalidate();
@@ -251,7 +247,6 @@ export class MediaSession {
   }
 
   private queueCleanup(adapter: Go2RtcAdapter) {
-    // Cleanup stays ordered with media installation without holding account writes.
     if (
       this.closing ||
       this.dependencies.stopped() ||
@@ -288,11 +283,9 @@ export class MediaSession {
   private async releaseAdapter() {
     const adapter = this.mediaAdapter;
     if (!adapter) return;
-    // Index requests own their physical reads until their bounded cleanup finishes.
     await Promise.allSettled(
       [...this.recordingReads.values()].map((read) => read.promise),
     );
-    // Retain the previous instance until cleanup succeeds, even if YAML changed.
     try {
       await mijiaOperation("cleanup", "go2rtc_cleanup", () => adapter.close());
     } catch (error) {
@@ -578,8 +571,6 @@ export class MediaSession {
       this.recordingReads.set(key, read);
       pending = read;
     }
-    // A caller may stop waiting without cancelling the unnumbered device reply.
-    // Only the source/scope owner can revoke the shared, bounded physical read.
     const result =
       pending.query.afterMs === query.afterMs &&
       pending.query.limit === query.limit
@@ -618,8 +609,6 @@ export class MediaSession {
   ) {
     if (signal.aborted) throw new MijiaError("cancelled");
     const { adapter, cameras } = this.requireReady(revision);
-    // Both operations belong to the resident session and can run independently.
-    // No viewer is offered until renewal and source preparation both succeed.
     const [, camera] = await Promise.all([
       mijiaOperation("session.renew_lease", "go2rtc_lost", () =>
         adapter.renewSessionLease(signal),

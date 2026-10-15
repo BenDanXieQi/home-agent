@@ -8,7 +8,6 @@ import { householdSnapshotAtom } from "../household/state";
 import { playbackPageActiveAtom } from "./page-activity";
 import { devicesAtom } from "../devices/state";
 
-/** The video route owns connections; atoms still hold only UI state and eligibility. */
 export function PlaybackProvider({
   children,
   analysisActive,
@@ -19,7 +18,6 @@ export function PlaybackProvider({
   const [sessions] = useState(createPlaybackSessions);
   const store = useStore();
   useLayoutEffect(() => {
-    // Preserve the wall before outgoing viewers release their passive effects.
     sessions.setAnalysisActive(analysisActive);
   }, [sessions, analysisActive]);
   useEffect(() => {

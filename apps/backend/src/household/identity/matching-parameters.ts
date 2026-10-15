@@ -1,5 +1,4 @@
 import { identityCapacity } from "@home-agent/api/contracts";
-// Fixed matching parameters; feature similarity is not an identity probability.
 export const identityMatchingParameters = {
   classes: {
     human: {

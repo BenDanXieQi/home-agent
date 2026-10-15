@@ -1,4 +1,3 @@
-/** Failures of household invariants; adapters choose wire codes and messages. */
 export class HouseholdError extends Error {
   constructor(
     readonly reason:

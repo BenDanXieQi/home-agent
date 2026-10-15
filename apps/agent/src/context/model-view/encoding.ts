@@ -22,7 +22,6 @@ function numericAccess(value: string) {
   return access;
 }
 
-/** Encode a semantic view in memory; file and model I/O belong to the caller. */
 export function encodeHouseholdContext(semantic: Semantic) {
   const all = semantic.设备组.flatMap((group) => group.能力);
   const capabilityKey = (c: (typeof all)[number]) =>
@@ -119,7 +118,6 @@ export function encodeHouseholdContext(semantic: Semantic) {
       reports: reports.get(id) ?? [],
     }),
   );
-  // Keep the serialized prefix independent of reports, timestamps and online state.
   return {
     schema: structuredClone(format),
     instructions: structuredClone(semantic.说明),

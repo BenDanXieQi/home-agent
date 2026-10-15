@@ -8,7 +8,6 @@ type StreamResponse = Pick<
   "body" | "bodyUsed" | "ok" | "headers" | "status"
 >;
 
-/** One HTTP stream; callers own reconnection and domain state. */
 export async function consumeEventStream(
   options: {
     request: (signal: AbortSignal) => Promise<StreamResponse>;

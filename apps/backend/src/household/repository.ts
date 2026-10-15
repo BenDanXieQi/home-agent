@@ -41,14 +41,12 @@ function directoryIdentity(accountId: string, homeId: string) {
     eq(householdDirectories.homeId, homeId),
   );
 }
-/** Stores the current complete directory; removed entries are not a history store. */
 export function createHouseholdRepository(db: Database) {
   const bindingTransaction = createLockedTransactions(
     db,
     householdLimits.transactionMs,
     "shared",
   );
-  // Serializing the inventory must not block independent household history reads.
   const transaction = <T>(key: string, run: (tx: Transaction) => Promise<T>) =>
     bindingTransaction(householdBindingLock, async (tx) => {
       await lockTransaction(tx, key, "exclusive");

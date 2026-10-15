@@ -12,8 +12,6 @@ import { StorageOutcomeUnknownError } from "../db/transaction-outcome";
 import { Go2RtcError } from "./media/go2rtc-adapter";
 import type { MessageParams } from "@home-agent/api/contracts";
 
-// Translate provider vocabulary at the integration boundary. The public API
-// uses snake_case and distinguishes cloud responses from camera-service responses.
 const miCloudReasons = {
   "spec-unavailable": "spec_unavailable",
   "spec-invalid-response": "spec_invalid_response",
@@ -52,7 +50,6 @@ export class MijiaError extends AppError {
   }
 }
 
-// Never forward upstream messages, causes, URLs, cookies or device payloads.
 export function safeMijiaError(
   error: unknown,
   fallback: MijiaFailureReason = "internal_error",
@@ -95,8 +92,6 @@ const recoverableReasons = new Set<MijiaFailureReason>([
 ]);
 
 export function isRecoverableMijiaError(error: unknown) {
-  // Configuration, storage, protocol and unknown failures need a corrected input
-  // or an explicit user retry. Classify before applying a display fallback.
   if (
     !(error instanceof MijiaError) &&
     !(error instanceof MiCloudError) &&
@@ -106,7 +101,6 @@ export function isRecoverableMijiaError(error: unknown) {
   return recoverableReasons.has(safeMijiaError(error).reason);
 }
 
-/** Preserve the transport's sanitized deadline across the shared AppError boundary. */
 export function mijiaRetryAfter(error: MijiaError) {
   const value = error.toPayload().params?.retry_after_at;
   const deadline = typeof value === "string" ? Date.parse(value) : NaN;

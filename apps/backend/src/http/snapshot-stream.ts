@@ -16,7 +16,6 @@ export function createSnapshotStream(
     if (Buffer.byteLength(data) > 2 * 1024 * 1024)
       throw new Error("Snapshot exceeds transport budget");
     cached = data;
-    // Share this delivery batch, not a time-dependent view with future joiners.
     queueMicrotask(() => {
       cached = undefined;
     });

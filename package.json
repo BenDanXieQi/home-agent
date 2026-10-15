@@ -16,7 +16,7 @@
     "setup": "bun scripts/setup-local.ts",
     "dev": "bun scripts/services.ts dev",
     "build": "turbo run build",
-    "start": "bun run build && bun --env-file=.env scripts/web-entry.ts production && turbo run start --filter=@home-agent/backend --filter=@home-agent/agent",
+    "start": "bun run build && bun --env-file=.env scripts/web-entry.ts production && turbo run start --filter=@home-agent/backend --filter=@home-agent/agent-host",
     "lint": "turbo run lint lint:root",
     "lint:fix": "turbo run lint:fix lint:root:fix",
     "format": "oxfmt --write .",

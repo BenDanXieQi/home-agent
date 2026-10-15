@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// Timing belongs to one viewer and never acquires session or camera ownership
-// locks. Durations use time.Time's monotonic clock within this process.
 type homeAgentPlaybackTiming struct {
 	mu        sync.Mutex
 	attemptID string
@@ -77,8 +75,6 @@ func (t *homeAgentPlaybackTiming) observe(stage string, elapsed time.Duration, e
 	}
 }
 
-// Early offer validation can fail before any timed source operation completes.
-// Freeze those failures before writing an HTTP response or emitting diagnostics.
 func (t *homeAgentPlaybackTiming) finish() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -87,8 +83,6 @@ func (t *homeAgentPlaybackTiming) finish() {
 	}
 }
 
-// attempt_id is a SHA-256 digest prefix shared with the backend. It correlates
-// viewer measurements without exposing the resource ID, camera or credentials.
 func (t *homeAgentPlaybackTiming) report(code string) {
 	body, _ := json.Marshal(struct {
 		Event     string                     `json:"event"`

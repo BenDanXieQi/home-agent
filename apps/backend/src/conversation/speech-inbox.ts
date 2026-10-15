@@ -1,21 +1,23 @@
+import {
+  speechDialogueLimits,
+  validSpeechDialogueRequest,
+  type speechDialogueRequestSchema,
+  type speechDialogueResponseSchema,
+} from "@home-agent/agent/workflows/speech-interpretation";
 import pTimeout from "p-timeout";
 import { AppError, errorPayload } from "@home-agent/api/errors";
 import {
-  speechDialogueLimits,
+  speechInboxLimits,
   speechDialogueConfigSchema,
   type speechInboxEntrySchema,
   speechInboxSchema,
-  type speechDialogueResponseSchema,
-  validSpeechDialogueRequest,
-  type speechDialogueRequestSchema,
-} from "@home-agent/api/speech-dialogue";
+} from "./contracts";
 import type {
   audioRunSchema,
   speechObservationSchema,
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
 
-// Owns short-lived speech handoff and interpretation. Never executes an action.
 export function createSpeechInbox(options: {
   instanceId: string;
   analyze?: (
@@ -108,7 +110,7 @@ export function createSpeechInbox(options: {
         Math.max(
           1,
           Math.min(
-            speechDialogueLimits.timeoutMs,
+            speechInboxLimits.timeoutMs,
             Math.floor(entry.expiresAt - Date.now()),
           ),
         ),
@@ -121,7 +123,7 @@ export function createSpeechInbox(options: {
       const response = await pTimeout(
         options.analyze(structuredClone(request), signal),
         {
-          milliseconds: speechDialogueLimits.timeoutMs,
+          milliseconds: speechInboxLimits.timeoutMs,
           signal,
         },
       );
@@ -224,7 +226,7 @@ export function createSpeechInbox(options: {
         return false;
       }
       source.lastEndSample = observation.endSample;
-      if (entries.size >= speechDialogueLimits.entries) {
+      if (entries.size >= speechInboxLimits.entries) {
         rejected++;
         notify();
         return false;

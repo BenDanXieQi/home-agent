@@ -1,0 +1,33 @@
+{
+  "name": "@home-agent/agent-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "scripts": {
+    "dev": "bun --env-file=../../.env --watch scripts/dev.ts",
+    "build": "bun run check-types && bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
+    "start": "bun --env-file=../../.env dist/main.js",
+    "check-types": "tsc --noEmit",
+    "lint": "oxlint --type-aware --max-warnings 0 .",
+    "lint:fix": "oxlint --type-aware --max-warnings 0 --fix ."
+  },
+  "dependencies": {
+    "@home-agent/agent": "workspace:*",
+    "@home-agent/backend-client": "workspace:*",
+    "@home-agent/observability": "workspace:*",
+    "@earendil-works/pi-ai": "catalog:",
+    "radash": "12.1.1",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@home-agent/typescript-config": "workspace:*",
+    "@types/bun": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript": "catalog:",
+    "@home-agent/oxlint-config": "workspace:*"
+  }
+}

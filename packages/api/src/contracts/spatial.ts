@@ -44,17 +44,16 @@ function saveCommand<T extends z.ZodRawShape>(fields: T) {
   ]);
 }
 export const spaceSaveSchema = saveCommand(spaceFields);
-export const spaceSchema = z.object({ ...spaceFields, ...timestamps }).strict();
+export const spaceDefinitionSchema = z.strictObject(spaceFields);
+export const spaceSchema = spaceDefinitionSchema.extend(timestamps);
 const passageFields = {
   ...spaceFields,
   space_a_id: z.uuid(),
   space_b_id: z.uuid(),
 };
-const passageRecordSchema = z
-  .object({ ...passageFields, ...timestamps })
-  .strict();
+const passageFieldsSchema = z.strictObject(passageFields);
 const differentEndpoints = (
-  value: Pick<z.infer<typeof passageRecordSchema>, "space_a_id" | "space_b_id">,
+  value: Pick<z.infer<typeof passageFieldsSchema>, "space_a_id" | "space_b_id">,
 ) => value.space_a_id !== value.space_b_id;
 export const passageSaveSchema = saveCommand(passageFields).refine(
   differentEndpoints,
@@ -63,34 +62,9 @@ export const passageSaveSchema = saveCommand(passageFields).refine(
     message: "Passage endpoints must differ.",
   },
 );
-export const passageSchema = passageRecordSchema.refine(differentEndpoints);
-export const spatialDraftSchema = z
-  .strictObject({
-    spaces: z.array(z.strictObject(spaceFields)),
-    passages: z.array(z.strictObject(passageFields).refine(differentEndpoints)),
-  })
-  .superRefine((draft, ctx) => {
-    const spaces = new Set(draft.spaces.map((space) => space.id));
-    const passages = new Set(draft.passages.map((passage) => passage.id));
-    if (
-      spaces.size !== draft.spaces.length ||
-      passages.size !== draft.passages.length
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "Draft record IDs must be unique.",
-      });
-    draft.passages.forEach((passage, index) => {
-      for (const endpoint of ["space_a_id", "space_b_id"] as const) {
-        if (!spaces.has(passage[endpoint]))
-          ctx.addIssue({
-            code: "custom",
-            path: ["passages", index, endpoint],
-            message: "Passage endpoints must refer to draft spaces.",
-          });
-      }
-    });
-  });
+export const passageDefinitionSchema =
+  passageFieldsSchema.refine(differentEndpoints);
+export const passageSchema = passageDefinitionSchema.safeExtend(timestamps);
 const bindingFields = {
   id: z.uuid(),
   device_id: inventoryDeviceSchema.shape.id.min(1),

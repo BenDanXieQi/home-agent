@@ -145,7 +145,6 @@ def infer(args):
         manifest = read(args.baseline / 'manifest.json')
         selected = {r['file']: r for r in manifest if r['split'] == args.split}
         samples, timings = [], []
-        # Official NormalizeImage uses default np.array dtype and in-place float32 writes.
         mean = np.array(expected[1]['mean'])[None, None, :]
         std = np.array(expected[1]['std'])[None, None, :]
         total_start = time.perf_counter()
@@ -170,7 +169,6 @@ def infer(args):
                 end = time.perf_counter()
                 if len(scores) != 26 or not np.isfinite(scores).all():
                     raise ValueError('Invalid attribute output')
-                # Age/gender are discarded immediately, never saved or used.
                 samples.append({'file': file, 'sha256': row['sha256'], 'scores': {str(i): float(scores[i]) for i in visible}})
                 timings.append({'decodeMs': (decoded-start)*1000, 'preprocessMs': (prepared-decoded)*1000, 'inferenceMs': (end-prepared)*1000, 'totalMs': (end-start)*1000})
                 if len(samples) % 200 == 0:
@@ -208,5 +206,4 @@ if args.stage == 'freeze':
 elif args.stage == 'infer':
     infer(args)
 else:
-    # JSON object keys hold original model output indices.
     compare(args)

@@ -28,7 +28,6 @@ export function filterLogEntries(
   });
 }
 
-/** Entries are newest first; the first signal for each property is its displayed value. */
 export function latestLogValues(entries: LogEntry[]) {
   const values = new Map<string, LogEntry>();
   for (const row of entries) {

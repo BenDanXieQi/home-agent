@@ -4,8 +4,6 @@ import { CredentialStoreError } from "./store";
 
 export async function readCredentialKey(path: string) {
   try {
-    // Validate and read the same opened file; paths and symlinks cannot replace
-    // the checked key between the permission check and the bounded read.
     const file = await open(
       path,
       constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,

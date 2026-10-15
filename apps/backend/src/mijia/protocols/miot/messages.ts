@@ -58,8 +58,6 @@ export function subscribableDevice(did: string) {
   );
 }
 function decodeMessage(topic: string, raw: unknown) {
-  // Directory notifications are invalidations, not authoritative field updates.
-  // Their undocumented payload is neither retained nor used to mutate the catalog.
   const directory =
     /^(?:user\/([^/]+)\/g_op\/(bind|unbind)|device\/([^/]+)\/g_op\/(rename|hr_change))$/.exec(
       topic,
@@ -143,8 +141,6 @@ function decodeMessage(topic: string, raw: unknown) {
       changes[0]!.value.piid !== Number(address[3]))
   )
     return [];
-  // Each report owns only its source row. Repeating params for every property
-  // makes one packet quadratic in both the live queue and history storage.
   const fields = raw && typeof raw === "object" ? raw : {};
   return changes.map((item) => ({
     observation: {
@@ -165,7 +161,6 @@ function parsePushPayload(payload: Buffer) {
   try {
     return parseProviderJson(payload.toString("utf8"));
   } catch {
-    // State topics can carry opaque payloads; data topics still require valid JSON.
     return null;
   }
 }

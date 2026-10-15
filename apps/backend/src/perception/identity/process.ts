@@ -12,7 +12,6 @@ import {
 
 export class IdentityProcessExitError extends Error {}
 
-// One native process, one in-flight frame, no waiting queue. A timeout retires it.
 export async function createIdentityProcess(
   config: z.infer<typeof identityConfigSchema>,
   signal: AbortSignal,

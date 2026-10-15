@@ -85,8 +85,6 @@ test("a device revocation commits before cancellation, preserves peers and canno
   if (!readProperties) throw new Error("Expected a property transport fixture");
   let intercepted = false;
   h.properties.mockImplementation((batch, signal, onStarted) => {
-    // Initial reads for other devices share the transport budget. Wait for the
-    // device being revoked rather than whichever camera happens to read first.
     if (
       !intercepted &&
       batch.every((property) => property.did === "device-a")

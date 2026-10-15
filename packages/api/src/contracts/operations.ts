@@ -7,7 +7,6 @@ const operationIdentity = {
   updatedAt: z.iso.datetime(),
 };
 
-/** An observable asynchronous operation with explicit terminal outcomes. */
 export const operationSchema = z.discriminatedUnion("status", [
   z.object({
     ...operationIdentity,

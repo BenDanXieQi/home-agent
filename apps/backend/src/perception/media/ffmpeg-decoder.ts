@@ -45,7 +45,6 @@ export function createFfmpegDecoder(options: {
       );
       controller.signal.throwIfAborted();
       options.onMedia(media);
-      // No new process group: the compute supervisor owns this entire process tree.
       child = spawn(
         options.executable,
         [
@@ -79,7 +78,6 @@ export function createFfmpegDecoder(options: {
           "1",
           "-filter_threads",
           "1",
-          // Select actual input frames before RGB conversion; never manufacture repeats.
           "-vf",
           `select='isnan(prev_selected_t)+lt(t,prev_selected_t)+gte(t-prev_selected_t,${1 / options.sampleFps})'`,
           "-fps_mode",

@@ -4,7 +4,6 @@ const VirtualJson = lazy(() =>
   import("./VirtualJson").then((module) => ({ default: module.VirtualJson })),
 );
 
-/** Pages own the data lifetime; this component only owns disclosure state. */
 export const JsonData = memo(function JsonData({
   value,
   label = "完整原始字段 JSON",

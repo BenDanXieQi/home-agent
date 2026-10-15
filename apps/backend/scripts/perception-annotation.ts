@@ -4,7 +4,6 @@ import sharp from "sharp";
 import writeFileAtomic from "write-file-atomic";
 import { loadImage, type detectImage } from "../src/perception/detection/image";
 
-// Runs only in the standalone debug command, never in the shared inference worker.
 export async function saveAnnotatedImage(
   result: Awaited<ReturnType<typeof detectImage>>,
   outputPath: string,

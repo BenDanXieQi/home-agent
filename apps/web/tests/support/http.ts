@@ -13,7 +13,6 @@ export function untilAborted(signal: AbortSignal | null | undefined) {
   });
 }
 
-/** Native AbortSignal.timeout uses a runtime clock outside Vitest fake timers. */
 export function useRequestClock() {
   vi.useFakeTimers();
   vi.spyOn(AbortSignal, "timeout").mockImplementation((duration) => {
@@ -44,7 +43,6 @@ export function requestAt(index: number) {
   };
 }
 
-/** A real byte stream: cancellation behaves like fetch aborting its response body. */
 export function eventStream(signal: AbortSignal | null | undefined) {
   if (!signal) throw new Error("An SSE connection must carry an AbortSignal");
   let controller: ReadableStreamDefaultController<Uint8Array>;

@@ -2,25 +2,15 @@ import { z } from "zod";
 import {
   automationDraftSchema,
   automationGenerationInputSchema,
-} from "./automations";
+} from "./automation-generation/contracts";
 import {
   speechDialogueRequestSchema,
   speechDialogueResponseSchema,
-} from "./speech-dialogue";
+} from "./speech-interpretation/contracts";
 import {
-  spatialPlanningInputSchema,
   spatialPlanningRequestSchema,
   spatialPlanningResultSchema,
-} from "./spatial-planning";
-export {
-  spatialPlanningInputSchema,
-  spatialPlanningResultSchema,
-  spatialPlanningRequestSchema,
-  spatialPlanningScopeSchema,
-  spatialPlanningStateSchema,
-  spatialPlanningTurnSchema,
-} from "./spatial-planning";
-
+} from "./spatial-planning/contracts";
 export const agentWorkflowInputSchema = z.discriminatedUnion("workflow", [
   z.strictObject({
     workflow: z.literal("automation-generation"),
@@ -33,20 +23,6 @@ export const agentWorkflowInputSchema = z.discriminatedUnion("workflow", [
   z.strictObject({
     workflow: z.literal("spatial-planning"),
     input: spatialPlanningRequestSchema,
-  }),
-]);
-
-/** Backend resolves capabilities from the active household, never from the caller. */
-export const householdWorkflowInputSchema = z.discriminatedUnion("workflow", [
-  z.strictObject({
-    scope_epoch: z.uuid(),
-    workflow: z.literal("automation-generation"),
-    input: automationGenerationInputSchema.omit({ capabilities: true }),
-  }),
-  z.strictObject({
-    scope_epoch: z.uuid(),
-    workflow: z.literal("spatial-planning"),
-    input: spatialPlanningInputSchema,
   }),
 ]);
 

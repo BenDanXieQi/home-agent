@@ -28,7 +28,6 @@ function merge(
   return [...records.values()];
 }
 
-/** Owns durable observations; media leases and their expiry remain in the live store. */
 export function createWindowHistory(options: {
   repository: ReturnType<typeof createWindowHistoryRepository>;
   household: HouseholdRuntime;
@@ -88,7 +87,6 @@ export function createWindowHistory(options: {
     return saving;
   }
   const timer = setInterval(() => {
-    // flush records failures and retains pending writes for the next attempt.
     // oxlint-disable-next-line typescript/no-floating-promises
     flush();
   }, 1000);

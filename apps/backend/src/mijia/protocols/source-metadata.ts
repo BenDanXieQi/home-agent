@@ -1,6 +1,5 @@
 import { sourceMetadataSchema } from "@home-agent/api/action-provenance";
 
-/** Retain business fields only; network/session envelopes never reach storage. */
 export function providerPayload(value: unknown, maxBytes = 48 * 1024) {
   let redacted = false;
   const serialized = JSON.stringify(value, (key, item: unknown) => {

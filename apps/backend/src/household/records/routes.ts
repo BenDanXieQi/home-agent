@@ -15,7 +15,7 @@ import {
   deviceHistoryCollectionSchema,
 } from "@home-agent/api/action-provenance";
 import { HouseholdError } from "../errors";
-import { safeMijiaError } from "../../mijia/errors";
+import { householdPublicError } from "../public-errors";
 import type { createDeviceOperations } from "../operations/service";
 import type { createCommandRepository } from "../operations/repository";
 import type { createMaterialRepository } from "../materials/repository";
@@ -56,7 +56,7 @@ export function createProvenanceRoutes(
   });
   app.onError((error, c) =>
     handleHttpError(
-      error instanceof HouseholdError ? safeMijiaError(error) : error,
+      error instanceof HouseholdError ? householdPublicError(error) : error,
       c,
     ),
   );

@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate, useRouter, useSearch } from "@tanstack/react-router";
 
-/** Restore the originating camera link after the router commits the list. */
 export function useCameraReturnFocus() {
   const router = useRouter();
   useEffect(() => {

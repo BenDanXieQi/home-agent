@@ -7,7 +7,6 @@ export class ResponseBodyError extends Error {
   }
 }
 
-/** Bounded Web Streams consumption; transport/abort errors retain their identity. */
 export async function readLimitedBytes(
   response: Pick<Response, "body">,
   maxBytes: number,
@@ -26,7 +25,6 @@ export async function readLimitedBytes(
     }),
     signal ? { signal } : undefined,
   );
-  // Native stream cancellation also interrupts a stalled read when the signal aborts.
   const bytes = await new Response(limited).arrayBuffer();
   signal?.throwIfAborted();
   return new Uint8Array(bytes);

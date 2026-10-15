@@ -1,9 +1,10 @@
 import type { z } from "zod";
-import type { agentContextSnapshotSchema } from "../contracts/agent-context";
-import type { agentContextPublicationSchema } from "../contracts/agent-context";
-import { produce, freeze } from "../immutable";
+import type {
+  agentContextSnapshotSchema,
+  agentContextPublicationSchema,
+} from "@home-agent/api/agent-context";
+import { produce, freeze } from "@home-agent/api/immutable";
 
-/** Device deltas require a ready baseline in the same scope. */
 export function mergeAgentContextSnapshot(
   previous: z.infer<typeof agentContextSnapshotSchema> | null,
   next: z.infer<typeof agentContextPublicationSchema>,

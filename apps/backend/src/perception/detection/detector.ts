@@ -9,7 +9,6 @@ import { detectionModelPath } from "./model";
 
 export async function createDetector(minimumConfidence = 0.5) {
   const threshold = z.number().min(0.1).max(1).parse(minimumConfidence);
-  // libvips has process-wide configuration; every detector uses the same budget.
   sharp.concurrency(detectionComputeBudget.sharpThreads);
   const session = await InferenceSession.create(detectionModelPath, {
     executionProviders: ["cpu"],
@@ -63,11 +62,9 @@ export async function createDetector(minimumConfidence = 0.5) {
       sharpConcurrency: sharp.concurrency(),
       intraOpNumThreads: detectionComputeBudget.ortIntraOpThreads,
     };
-    // Internal frames come from the validated IPC request or bounded image decoder.
     const detect = async (frame: z.infer<typeof frameSchema>) => {
       const started = performance.now();
       const scale = Math.min(width / frame.width, height / frame.height);
-      // A valid thin image still occupies one raster pixel after downscaling.
       const resizedWidth = Math.max(1, Math.trunc(frame.width * scale));
       const resizedHeight = Math.max(1, Math.trunc(frame.height * scale));
       const padX = Math.floor((width - resizedWidth) / 2);
@@ -215,8 +212,6 @@ function decodeDetections(
       continue;
     kept.push(candidate);
   }
-  // NMS uses continuous edges; outward rounding is only the output pixel
-  // representation, so it cannot turn distinct small boxes into duplicates.
   return kept.map((box) => {
     const x = Math.floor(box.left);
     const y = Math.floor(box.top);

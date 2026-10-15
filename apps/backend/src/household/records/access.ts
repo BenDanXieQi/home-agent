@@ -4,7 +4,6 @@ import { mijiaHomeSelections } from "../../db/schema";
 import type { HouseholdRuntime } from "../runtime";
 import { HouseholdError } from "../errors";
 
-/** Local retained records remain readable when the vendor session is unavailable. */
 export function createStoredRecordAccess(
   db: Database,
   household: HouseholdRuntime,
@@ -25,7 +24,6 @@ export function createStoredRecordAccess(
     const binding = bindings[0];
     if (bindings.length !== 1 || !binding?.homeId)
       throw new HouseholdError("not_bound");
-    // Every repository rechecks this identity under the shared binding lock.
     return {
       identity: { accountId: binding.accountKey, homeId: binding.homeId },
       assertCurrent,

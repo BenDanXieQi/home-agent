@@ -2,7 +2,6 @@ import { twMerge } from "tailwind-merge";
 import type { ComponentProps } from "react";
 import { m, useIsPresent, useReducedMotion } from "motion/react";
 
-/** Render inside the selected item; Motion owns measurement and shared layout. */
 export function SelectionIndicator({
   layoutId,
   className = "",

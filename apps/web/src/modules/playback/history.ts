@@ -22,14 +22,11 @@ let generation = 0;
 let stopEnvironment: (() => void) | undefined;
 
 function persist(key: string, samples?: readonly PlaybackHistorySample[]) {
-  // Retry on each success: storage may recover without a group being evicted.
   try {
     if (samples?.length)
       localStorage.setItem(prefix + key, JSON.stringify(samples));
     else localStorage.removeItem(prefix + key);
-  } catch {
-    // History remains available in memory, independently of browser storage.
-  }
+  } catch {}
 }
 
 function removeGroup(key: string) {
@@ -63,8 +60,6 @@ function initialize() {
   if (initialized) return;
   initialized = true;
   try {
-    // Load a browser-local snapshot once. Each success updates only its camera
-    // group; approximate history does not require live cross-tab coordination.
     const keys = Object.keys(localStorage).filter((key) =>
       key.startsWith(prefix),
     );
@@ -98,9 +93,7 @@ function initialize() {
       }
     }
     prune(now);
-  } catch {
-    // A later successful playback can retry storage without reloading the page.
-  }
+  } catch {}
   stopEnvironment = observePlaybackEnvironment(() => {
     generation++;
     for (const key of groups.keys()) removeGroup(key);
@@ -140,7 +133,6 @@ export function recordPlaybackHistory(
   if (groups.has(key)) persist(key, samples);
 }
 
-/** A failed startup makes that camera's old successful waits unreliable. */
 export function invalidatePlaybackHistory(
   context: ReturnType<typeof beginPlaybackHistory>,
   sourceRecentlyActive: boolean | null,

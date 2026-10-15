@@ -15,7 +15,6 @@ import {
 } from "../../modules/mijia/account";
 
 const LoginPage = lazy(() => import("../login/index"));
-/** Shared route UI gate. Preserve the requested URL throughout account recovery. */
 export function AccountGate() {
   const navigate = useNavigate();
   const path = useRouterState({ select: (state) => state.location.pathname });

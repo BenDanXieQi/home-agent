@@ -19,7 +19,6 @@ pageActiveAtom.onMount = (setActive) => {
     }
   };
   document.addEventListener("visibilitychange", updateVisibility);
-  // Refresh the value when the video route subscribes again.
   setActive(document.visibilityState === "visible");
   return () => {
     document.removeEventListener("visibilitychange", updateVisibility);
@@ -27,5 +26,4 @@ pageActiveAtom.onMount = (setActive) => {
   };
 };
 
-/** Playback stays active through brief page visibility interruptions. */
 export const playbackPageActiveAtom = atom((get) => get(pageActiveAtom));

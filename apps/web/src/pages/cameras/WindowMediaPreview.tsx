@@ -67,7 +67,6 @@ export function WindowMediaPreview({
           <Button
             disabled={!active}
             onClick={() => {
-              // refetch owns request failures and exposes them through query.error.
               // oxlint-disable-next-line typescript/no-floating-promises
               query.refetch();
             }}
@@ -99,7 +98,6 @@ export function WindowMediaPreview({
           onError={() => setFailed(true)}
         />
       ) : selection.representation === "audio" ? (
-        // Raw camera audio has no transcript; the window summary describes detection only.
         // oxlint-disable-next-line jsx-a11y/media-has-caption
         <audio
           ref={attachMedia}
@@ -109,7 +107,6 @@ export function WindowMediaPreview({
           onError={() => setFailed(true)}
         />
       ) : (
-        // Sampled evidence has no generated captions; do not fabricate a transcript.
         // oxlint-disable-next-line jsx-a11y/media-has-caption
         <video
           ref={attachMedia}

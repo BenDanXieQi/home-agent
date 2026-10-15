@@ -1,4 +1,3 @@
 [run]
-# Honor CLI shebangs: Vitest runs on Node; backend scripts explicitly invoke Bun.
 bun = false
 shell = "bun"

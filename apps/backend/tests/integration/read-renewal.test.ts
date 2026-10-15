@@ -30,8 +30,6 @@ async function renew(h: Awaited<ReturnType<typeof runningHousehold>>) {
   h.renewal.mockResolvedValueOnce(
     accountClient({ serviceToken: "renewed-service-token" }),
   );
-  // A directory authentication failure enters the public maintenance path.
-  // The replacement has the same account and unchanged device membership.
   h.catalog.mockRejectedValueOnce(new MiCloudError("authentication"));
   await h.service.loadDevices();
   expect(h.service.snapshot().account.status).toBe("authenticated");
@@ -75,7 +73,6 @@ describe("property reads across successful same-account renewal", () => {
     expect(await queued).toEqual({ accepted: false });
     const current = read(h);
     await nextTurn();
-    // Cancellation cannot release the shared transport budget early.
     expect(h.properties).toHaveBeenCalledTimes(2);
     release();
     const [after] = await current;

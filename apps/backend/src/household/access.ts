@@ -1,7 +1,6 @@
 import type { HouseholdRuntime } from "./runtime";
 import { HouseholdError } from "./errors";
 
-/** Capture the active household once and reject results after access changes. */
 export function accessHousehold(household: HouseholdRuntime, scope: string) {
   const snapshot = household.snapshot();
   const current = snapshot.projection.household.household;

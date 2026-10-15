@@ -1,4 +1,3 @@
-// Only readiness order lives here; pixels remain in each source's single slot.
 export function createVideoScheduler(
   available: () => boolean,
   dispatch: (id: string) => void,

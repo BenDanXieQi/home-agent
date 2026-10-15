@@ -33,7 +33,6 @@ export function isCameraAddress(value: unknown) {
   );
 }
 
-/** Resolve this camera's address from the host's existing neighbor table. */
 export async function resolveCameraAddress(
   deviceMac: unknown,
   signal: AbortSignal,
@@ -73,7 +72,6 @@ export async function resolveCameraAddress(
         )
         .map((neighbor) => neighbor.dst),
     );
-    // Conflicting entries do not establish one camera address.
     return addresses.size === 1 ? [...addresses][0] : undefined;
   } catch {
     signal.throwIfAborted();

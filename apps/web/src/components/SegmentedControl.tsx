@@ -18,11 +18,6 @@ const variants = {
   },
 };
 
-/**
- * Single-choice switcher with a shared layout indicator. Arrow keys move focus and
- * select at once, so keyboard and pointer drive the same indicator motion.
- * An ancestor's `--segmented-accent` recolors the underline variant.
- */
 export function SegmentedControl<Value extends string>({
   value,
   onValueChange,

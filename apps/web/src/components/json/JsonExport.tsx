@@ -75,7 +75,7 @@ export function JsonExport({
       worker.addEventListener("messageerror", () => finish(true), {
         once: true,
       });
-      // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Dedicated worker messaging has no targetOrigin.
+      // oxlint-disable-next-line unicorn/require-post-message-target-origin
       worker.postMessage(source.value);
     } catch {
       active.current?.terminate();

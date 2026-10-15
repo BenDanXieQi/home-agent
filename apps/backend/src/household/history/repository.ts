@@ -67,7 +67,6 @@ export function createDeviceHistoryRepository(db: Database) {
         const deviceId = candidates[0]!.device_id;
         if (candidates.some((report) => report.device_id !== deviceId))
           throw new HouseholdError("invalid_state");
-        // One device's ordered batch cannot block writes for another device.
         await lockTransaction(
           tx,
           JSON.stringify(["device_history_changes", deviceId]),
@@ -167,7 +166,6 @@ export function createDeviceHistoryRepository(db: Database) {
         const saved = accepted
           .map((observation) => observation.report)
           .filter((report) => insertedIds.has(report.observation_id));
-        // Roll back both the comparison state and history if this device was revoked during I/O.
         if (!context.currentDeviceIds().has(deviceId))
           throw new HouseholdError("stale_session");
         return { saved, suppressed };

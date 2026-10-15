@@ -8,7 +8,6 @@ import { fingerprintModel } from "../detection/model";
 
 const asset = await fingerprintModel();
 const detector = await createDetector();
-// Requests are validated by the IPC receiver before thread dispatch.
 export default async function run(task: z.infer<typeof taskSchema>) {
   const started = performance.now();
   switch (task.kind) {
@@ -43,7 +42,6 @@ export default async function run(task: z.infer<typeof taskSchema>) {
         };
       } catch (error) {
         if (!(error instanceof ImageProcessingError)) throw error;
-        // Error structured-cloning omits custom properties such as code.
         return {
           kind: "image_failed" as const,
           ...errorDetails(error),

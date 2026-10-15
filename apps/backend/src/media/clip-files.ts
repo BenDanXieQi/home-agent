@@ -1,8 +1,6 @@
 import { chmod, lstat, mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-// This is a disposable cache owned by one backend instance, never a media library.
-// Only our generated names are removed after an interrupted previous session.
 export async function prepareClipDirectory(directory: string) {
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (!(await lstat(directory)).isDirectory())

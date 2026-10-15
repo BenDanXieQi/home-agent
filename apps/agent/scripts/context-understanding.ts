@@ -5,7 +5,7 @@ import { isDeepStrictEqual, parseArgs } from "node:util";
 import { z } from "zod";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { loadConfig } from "../src/config";
-import { decodeHouseholdContext } from "@home-agent/api/household-model-view/decoding";
+import { decodeHouseholdContext } from "../src/context/model-view/decoding";
 
 const { values } = parseArgs({
   args: Bun.argv.slice(2),
@@ -81,7 +81,6 @@ if (
   )
 )
   throw new Error("Both formats must contain exactly the same semantic view");
-// A new directory prevents accidental overwrite of inputs or previous evidence.
 await mkdir(values.output);
 const questions = cases.questions.map(({ id, question }) => ({ id, question }));
 const systemPrompt =
@@ -109,7 +108,6 @@ const responseSchema = z.object({
     .min(1),
   usage: z.record(z.string(), z.unknown()),
 });
-// Counterbalance presentation order; each request has an independent history.
 const trials = ["semantic", "encoded", "encoded", "semantic"] as const;
 for (const [index, format] of trials.entries()) {
   const context =
@@ -145,7 +143,6 @@ for (const [index, format] of trials.entries()) {
       .record(z.string(), z.json())
       .parse(JSON.parse(choice.message.content));
   } catch {
-    // Preserve the raw response and explicitly score invalid output below.
     answers = undefined;
   }
   const scores = cases.questions.map(({ id, expected }) => ({

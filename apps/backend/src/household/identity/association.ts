@@ -6,7 +6,6 @@ import {
   type identityObservationSchema,
 } from "@home-agent/api/contracts";
 
-// Project live, accepted evidence without maintaining another confirmation state.
 export function associateMembers(
   reference: z.infer<typeof identityReferenceSnapshotSchema> | null,
   names: ReadonlyMap<string, string>,
@@ -44,8 +43,6 @@ export function associateMembers(
     );
   }
   return observation.tracks.flatMap((track) => {
-    // Pet inference follows the strongest still-valid sample in this track.
-    // A weaker new view must not replace a better identity observation.
     const petEvidence = track.evidence.filter((evidence) => {
       const candidate = evidence.bestMemberId
         ? members.get(evidence.bestMemberId)
@@ -101,8 +98,6 @@ export function associateMembers(
         : [];
     const keys = new Set<string>();
     let previousSequence = 0;
-    // Analysis owns pruning and confirmation. An older support expiring
-    // between publications must not revoke a still-live latest support.
     const latestSupport = supporting.at(-1);
     const supported =
       member &&

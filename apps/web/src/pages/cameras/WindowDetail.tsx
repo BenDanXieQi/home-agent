@@ -38,7 +38,6 @@ export function WindowDetail({
         <Button
           disabled={!active}
           onClick={() => {
-            // Refetch reports failures through query.error.
             // oxlint-disable-next-line typescript/no-floating-promises
             query.refetch();
           }}
@@ -130,7 +129,6 @@ export function WindowDetail({
           <Button
             disabled={!active}
             onClick={() => {
-              // Refetch exposes any failure through query.error.
               // oxlint-disable-next-line typescript/no-floating-promises
               query.refetch();
             }}

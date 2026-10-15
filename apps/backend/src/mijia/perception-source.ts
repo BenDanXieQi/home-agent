@@ -9,7 +9,6 @@ function cameraAccess(
   ready: boolean,
 ) {
   const { scope_epoch, sequence, projection } = snapshot;
-  // Discovery health does not revoke the committed household or its devices.
   const authorized =
     ready && projection.account.account.status === "authenticated";
   const householdVersion = { scope_epoch, sequence };
@@ -45,7 +44,6 @@ function cameraAccess(
   };
 }
 
-// Authorization is projected from the committed household, never from a raw cloud catalog.
 export function createPerceptionSources(
   household: HouseholdRuntime,
   mijia: MijiaService,
@@ -54,8 +52,6 @@ export function createPerceptionSources(
   function accessSnapshot() {
     const snapshot = household.snapshot();
     const ready = household.ready;
-    // The committed projection is immutable. All windows for a source reuse its
-    // grant while the projection is current; every access still checks the current state.
     if (
       snapshot.projection !== current.snapshot.projection ||
       snapshot.scope_epoch !== current.snapshot.scope_epoch ||
@@ -93,8 +89,6 @@ export function createPerceptionSources(
     ) {
       const granted = eligibility(source);
       if (!granted) throw new Error("Camera access unavailable");
-      // A media connection owns only the live capture lease. Restarting it must
-      // not revoke clips that still belong to the current household and device.
       const media = mijia.sourceSnapshot();
       if (media.binding.status !== "ready")
         throw new Error("Camera media connection unavailable");

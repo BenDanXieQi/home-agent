@@ -27,7 +27,6 @@ export function recordAudioStatus(
   value: AudioWindow,
   track: z.infer<typeof audioTrackSchema>,
 ) {
-  // A later failure must not rewrite a fully covered window waiting for closure.
   const last = value.audio.at(-1);
   if (last && last.endedAt >= value.endedAt - 1 / 16) return;
   if (track.status === "failed" || track.status === "unavailable")
@@ -60,8 +59,6 @@ export function appendWindowAudio(
   if (previous && at - previous.endedAt > 1) value.gaps.add("audio_gap");
   value.audioTrack = track;
   value.audio.push({
-    // Full IPC-owned blocks can be shared by both camera channels. Split views
-    // need compact storage so retained-byte accounting includes their backing buffer.
     pcm:
       offset === 0 &&
       end === pcm.length &&
@@ -94,13 +91,10 @@ export function summarizeWindowAudio(
   const speechBlocks = vad.filter((block) => block.aboveThreshold).length;
   const first = value.audio[0],
     last = value.audio.at(-1);
-  // A sample can straddle the window edge; tolerate at most one sample.
   if (first && first.startedAt - value.startedAt > 1 / 16)
     value.gaps.add("audio_head_gap");
   if (last && value.endedAt - last.endedAt > 1 / 16)
     value.gaps.add("audio_tail_gap");
-  // Preceding context is copied from a rolling buffer, so recheck its internal
-  // coverage rather than inheriting historical gap flags after they age out.
   for (let index = 1; index < value.audio.length; index++) {
     const difference =
       value.audio[index]!.startedAt - value.audio[index - 1]!.endedAt;

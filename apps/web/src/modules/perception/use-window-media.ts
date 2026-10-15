@@ -51,8 +51,6 @@ export function useWindowMedia(
           )
         )
           throw cause;
-        // A lost response does not undo server-side encoding. Reconcile by reading,
-        // never by automatically issuing another generation request.
         const current = await client.fetchQuery(options);
         pending.signal.throwIfAborted();
         if (current.state === "not_generated" || current.state === "failed")
@@ -69,8 +67,6 @@ export function useWindowMedia(
   });
   const query = useQuery({
     ...options,
-    // A completed product is now owned by the preview. Server expiry must not
-    // replace its metadata and unmount the locally downloaded media.
     enabled: (cached) =>
       active &&
       !mutation.isPending &&

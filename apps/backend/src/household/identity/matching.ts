@@ -26,7 +26,6 @@ import { householdLimits } from "../config";
 import { HouseholdError } from "../errors";
 import { lockIdentityMembers } from "./repository";
 
-/** Household-owned matching parameters and eligibility. No model execution or HTTP here. */
 export function createIdentityMatching(db: Database) {
   const binding = createHouseholdBindingAccess(db);
   const transaction = createLockedTransactions(
@@ -56,7 +55,6 @@ export function createIdentityMatching(db: Database) {
     pets = nextPets;
     for (const listener of listeners) listener();
   }
-  // One backend owns live evidence. A revoked snapshot never regains its revision.
   function invalidate() {
     revision = crypto.randomUUID();
     install(null);
@@ -174,8 +172,6 @@ export function createIdentityMatching(db: Database) {
     try {
       await refresh();
     } catch (error) {
-      // refresh already revoked matching. Preserve the transaction's outcome:
-      // a failed read must not turn a committed write into a reported failure.
       console.error(
         "Identity matching revoked after reference refresh failed",
         error,

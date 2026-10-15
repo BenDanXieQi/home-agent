@@ -118,8 +118,6 @@ export function createRecordingRoutes(
           headers.set("Content-Length", "0");
           return new Response(null, { status: 416, headers });
         }
-        // Only single byte ranges are served; other range units or multipart
-        // requests use the complete representation as HTTP permits.
         if (parsed.type === "bytes" && parsed.length === 1) {
           start = parsed[0]!.start;
           end = parsed[0]!.end;

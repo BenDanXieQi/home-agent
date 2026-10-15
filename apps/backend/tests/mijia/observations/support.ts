@@ -6,7 +6,6 @@ import { oauthSession } from "../../support/account-fixtures";
 
 export const oauth = oauthSession();
 
-/** Only the vendor SDK boundary is replaced; both observation owners remain real. */
 export function mqttTransport() {
   const client = new mqtt.MqttClient(() => new PassThrough(), {
     manualConnect: true,
@@ -127,6 +126,5 @@ export function interceptMqtt() {
 }
 
 export async function flushMicrotasks() {
-  // Ownership transitions use nested operation spans and finally continuations.
   for (let step = 0; step < 20; step++) await Promise.resolve();
 }

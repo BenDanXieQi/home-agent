@@ -63,8 +63,6 @@ export async function createFaceModel(directory: string) {
       }
     }
   }
-  // The upstream JS build exports this class, but its npm declarations omit it.
-  // Validate the actual native boundary rather than inventing a second CV API.
   const detectorConstructor: unknown = Reflect.get(cv, "FaceDetectorYN");
   if (typeof detectorConstructor !== "function")
     throw new Error("OpenCV.js FaceDetectorYN is unavailable");
@@ -168,8 +166,6 @@ export async function createFaceModel(directory: string) {
       const sharpness = deviation.data64F[0]! ** 2;
       if (!Number.isFinite(sharpness) || sharpness < minimumSharpness)
         return { face: null, reason: "人脸模糊，请使用更清晰的画面" };
-      // SFace's ONNX graph owns normalization; OpenCV's official feature API
-      // supplies unscaled RGB float32 NCHW pixels, not values in [0, 1].
       blob = cv.blobFromImage(
         aligned,
         1,
@@ -304,7 +300,6 @@ export async function createFaceModel(directory: string) {
           samples.push({
             trackId,
             className: "human" as const,
-            // Local model diagnostics; the identity IPC schema strips this box.
             faceBox: { x: face[0]!, y: face[1]!, w: face[2]!, h: face[3]! },
             ...result.face,
           });

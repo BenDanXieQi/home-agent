@@ -1,9 +1,9 @@
 import type { z } from "zod";
+import type { agentContextScopeSchema } from "@home-agent/api/agent-context";
 import type {
   agentWorkflowInputSchema,
   agentWorkflowResultSchema,
-  spatialPlanningScopeSchema,
-} from "@home-agent/api/agent-workflows";
+} from "./contracts";
 import type { initializeModels } from "../models";
 import type { completeStructuredOutput } from "./structured-output";
 
@@ -20,7 +20,7 @@ export type WorkflowInstance = {
   run: unknown;
   retainScope?:
     | ((
-        scope: z.output<typeof spatialPlanningScopeSchema> | null,
+        scope: z.output<typeof agentContextScopeSchema> | null,
       ) => Promise<void>)
     | undefined;
   close?: (() => Promise<void>) | undefined;

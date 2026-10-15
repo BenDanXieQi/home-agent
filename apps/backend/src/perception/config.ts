@@ -4,7 +4,7 @@ import {
   cameraVideoQualitySchema,
 } from "@home-agent/api/contracts";
 import { identityConfigSchema } from "./identity/config";
-import { speechDialogueConfigSchema } from "@home-agent/api/speech-dialogue";
+import { speechDialogueConfigSchema } from "../conversation/contracts";
 import { speechConfigSchema } from "@home-agent/api/contracts";
 import { cpuRatioSchema } from "./compute/budget";
 import { z } from "zod";

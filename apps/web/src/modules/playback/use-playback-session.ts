@@ -13,7 +13,6 @@ import { createPlaybackStatusAtom, registerPlaybackAtom } from "./state";
 const subscribeInitial = () => () => {};
 const getInitialSnapshot = () => initialPlaybackSnapshot;
 
-/** Both video and canvas viewers register the same lightweight playback status. */
 export function usePlaybackSession({
   surface,
   target,
@@ -91,7 +90,7 @@ export function usePlaybackSession({
     statusAtom,
     setPhase,
     registerPlayback,
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- An explicit retry owns a fresh viewer with the same target.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
     attempt,
   ]);
 

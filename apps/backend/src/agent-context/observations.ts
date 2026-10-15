@@ -14,7 +14,6 @@ export function sightingStateKey(
     : JSON.stringify(["unknown", record.data.deviceId, record.data.channel]);
 }
 
-/** Equal-time alternatives remain visible instead of inventing a single location. */
 export function latestMemberObservations(
   records: z.infer<typeof memberObservationSchema>[],
 ) {
@@ -29,7 +28,6 @@ export function latestMemberObservations(
   );
 }
 
-/** Windows own scene and sound clues; member records are shared references, never speakers. */
 export function assembleAgentObservations(
   sightings: z.infer<typeof memberObservationSchema>[],
   windows: ReturnType<typeof projectWindowObservation>[],

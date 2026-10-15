@@ -39,7 +39,6 @@ function read(h: Awaited<ReturnType<typeof household>>, did: string) {
   );
 }
 
-// DIR-04/09, RUN-10, SC-09: admission failure cannot undo an authoritative removal.
 test.each(["device count", "UTF-8 bytes"] as const)(
   "%s overflow rejects additions but revokes the removed device and its late read",
   async (limit) => {
@@ -76,7 +75,6 @@ test.each(["device count", "UTF-8 bytes"] as const)(
       "stable",
       ...additions.map((device) => device.did),
     ];
-    // This byte-overflow input is below 4 MiB in characters, above it in UTF-8.
     if (limit === "UTF-8 bytes") {
       expect(JSON.stringify(catalog).length).toBeLessThan(4 * 1024 * 1024);
       expect(Buffer.byteLength(JSON.stringify(catalog))).toBeGreaterThan(
@@ -120,7 +118,6 @@ test.each(["device count", "UTF-8 bytes"] as const)(
   },
 );
 
-// REF-03/04/05/06: accepted commands may still be waiting for both external jobs.
 test("refresh bursts retain both targets, bound cloud work, and finish without a page subscription", async () => {
   const h = await household();
   const app = createHouseholdRoutes(h.runtime);
@@ -269,7 +266,6 @@ function stateFrames(response: Response) {
   };
 }
 
-// DIR-03, PUB-01/02, WEB-01, SC-16: a subscription starts while the save is held.
 test("a subscriber joining a room move receives one coherent inventory batch and stable committed values", async () => {
   const h = await household(roomCatalog());
   const app = createHouseholdRoutes(h.runtime);
@@ -348,7 +344,6 @@ test("a subscriber joining a room move receives one coherent inventory batch and
   }
 });
 
-// WEB-08, SC-18: exceeding one consumer's byte budget cannot hold up another.
 test("a stalled page is reclaimed while a healthy page follows inventory changes and reconnects get current state", async () => {
   const h = await household();
   const app = createHouseholdRoutes(h.runtime);
@@ -377,7 +372,6 @@ test("a stalled page is reclaimed while a healthy page follows inventory changes
         return;
     }
   })();
-  // Attach a handler immediately; cleanup still awaits the actual consumer result.
   consume.catch(() => {});
   try {
     for (let index = 0; index < 40; index++) {
@@ -396,7 +390,6 @@ test("a stalled page is reclaimed while a healthy page follows inventory changes
     expect(h.runtime.ready).toBe(true);
     expect(await read(h, "stable")).toMatchObject([{ status: "success" }]);
     const requests = h.catalog.mock.calls.length;
-    // A healthy stream plus fifteen new ones proves the stalled slot was released.
     for (let index = 0; index < 15; index++)
       extra.push(await app.request("/events"));
     expect(extra.every((response) => response.status === 200)).toBe(true);

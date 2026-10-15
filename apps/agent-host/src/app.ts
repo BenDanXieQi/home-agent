@@ -1,12 +1,11 @@
-import { createBackendClient } from "@home-agent/backend-client";
-import { tracedFetch } from "@home-agent/observability";
-import { memo as once, partial, sift } from "radash";
-import { createAssistant } from "./assistant/assistant";
-import { createAgentRoutes } from "./routes";
+import { createContextSource } from "./context-source";
+import { memo as once, sift } from "radash";
+import { createAssistant } from "@home-agent/agent/assistant";
+import { createAgentRoutes } from "@home-agent/agent/routes";
 import type { loadConfig } from "./config";
-import { createContextReceiver } from "./context/receiver";
-import { configureWorkflows } from "./workflows";
-import { initializeModels } from "./models";
+import { createContextReceiver } from "@home-agent/agent/context/receiver";
+import { configureWorkflows } from "@home-agent/agent/workflows/runtime";
+import { initializeModels } from "@home-agent/agent/models";
 
 export async function createApp(
   config: ReturnType<typeof loadConfig>,
@@ -32,9 +31,7 @@ export async function createApp(
   });
   signal.throwIfAborted();
 
-  const backendClient = createBackendClient(config.BACKEND_URL, {
-    fetch: partial(tracedFetch, { from: "agent", to: "backend" }),
-  });
+  const contextSource = createContextSource(config.BACKEND_URL);
   const assistant = appResources.use(
     await createAssistant({
       modelCatalog,
@@ -51,7 +48,7 @@ export async function createApp(
   );
   const receiver = appResources.use(
     createContextReceiver({
-      client: backendClient,
+      client: contextSource,
       onScopeChange: workflows.retainScope,
     }),
   );

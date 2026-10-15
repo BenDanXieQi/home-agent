@@ -2,7 +2,6 @@ import { twMerge } from "tailwind-merge";
 import type { ComponentProps } from "react";
 import { agentHousePath } from "../../components/agent-mark";
 
-/** The mascot's outline carries a moving highlight, without duplicating its face. */
 export function PlaybackLoader({
   active,
   className = "",

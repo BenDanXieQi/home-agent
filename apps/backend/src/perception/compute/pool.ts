@@ -55,7 +55,6 @@ export class DetectionPoolError extends Error {
   }
 }
 
-// A deadline bounds the caller's wait. Native termination is confirmed separately.
 function within<T>(
   operation: Promise<T>,
   milliseconds: number,
@@ -63,11 +62,9 @@ function within<T>(
   signal?: AbortSignal,
 ) {
   if (signal?.aborted) {
-    // The operation has already started, so its later rejection still needs an observer.
     return Promise.race([Promise.reject<T>(signal.reason), operation]);
   }
   return pTimeout(operation, {
-    // Like setTimeout(0), an exhausted budget expires on the next timer turn.
     milliseconds: Math.max(1, milliseconds),
     message: new DetectionPoolError(
       "timeout",
@@ -145,8 +142,6 @@ export async function createDetectionPool(
       recoveryTimer !== undefined
     )
       return;
-    // A cooldown opens a new bounded recovery cycle; retry still confirms
-    // the retired process has exited before creating its replacement.
     recoveryTimer = setTimeout(() => {
       recoveryTimer = undefined;
       retry().catch((error: unknown) => {
@@ -193,7 +188,6 @@ export async function createDetectionPool(
       return result.metadata;
     } catch (error) {
       generation.abort(error);
-      // Never overlap a replacement with a process whose termination is unconfirmed.
       await retire(generation);
       throw error;
     }
@@ -237,8 +231,6 @@ export async function createDetectionPool(
           return;
         } catch (error) {
           lastError = error instanceof Error ? error : new Error(String(error));
-          // initialize() leaves the generation in current, including failed startup.
-          // Confirm cleanup before retrying; an unconfirmed process exit stops recovery.
           if (current) await retire(current);
         }
       }
@@ -386,7 +378,6 @@ export async function createDetectionPool(
 
   async function detect(inputFrame: z.infer<typeof frameSchema>) {
     const submitted = performance.now();
-    // Caller validation precedes admission and never consumes recovery budget.
     const frame = frameSchema.parse(inputFrame);
     const result = await submitDetection({ kind: "detect", frame }, submitted);
     if (result.kind !== "detected")
@@ -422,7 +413,6 @@ export async function createDetectionPool(
       let shutdownError: unknown;
       let terminated = true;
       try {
-        // Reserve half the total deadline for forced termination if draining stalls.
         await within(
           (async () => {
             await Promise.allSettled(active);

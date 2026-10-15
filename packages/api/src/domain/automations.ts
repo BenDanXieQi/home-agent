@@ -32,7 +32,6 @@ const operators = {
   text: ["eq", "neq", "contains", "not_contains"],
 } as const satisfies Record<string, readonly Operator[]>;
 
-/** Device value semantics belong to devices; rules add their supported operators. */
 export function deriveAutomationProperty(capability: DeviceCapability) {
   const value = deriveDeviceValue(capability);
   if (!value) return null;
@@ -47,15 +46,6 @@ export function deriveAutomationProperty(capability: DeviceCapability) {
 
 export function automationPropertyKey(deviceId: string, propertyKey: string) {
   return JSON.stringify([deviceId, propertyKey]);
-}
-
-export function automationPropertyAddress(propertyKey: string) {
-  const match = /^prop\.([1-9]\d*)\.([1-9]\d*)$/.exec(propertyKey);
-  if (!match) return null;
-  const siid = Number(match[1]);
-  const piid = Number(match[2]);
-  if (!Number.isSafeInteger(siid) || !Number.isSafeInteger(piid)) return null;
-  return { siid, piid };
 }
 
 export function collectAutomationConditions(tree: AutomationNode) {
@@ -139,7 +129,6 @@ const isoWeekdays = new Map([
   ["Sun", 7],
 ]);
 
-/** Midnight-crossing windows use the weekday of the start, with an exclusive end. */
 export function evaluateAutomationTimeWindow(
   predicate: Extract<AutomationPredicate, { kind: "time_window" }>,
   now: Date,
@@ -169,7 +158,6 @@ export function evaluateAutomationTimeWindow(
   return false;
 }
 
-/** Event input is one accepted occurrence, never a cached "latest event" value. */
 export function evaluateAutomationPredicate(
   predicate: AutomationPredicate,
   input: {
@@ -237,7 +225,6 @@ export function evaluateAutomationPredicate(
   };
 }
 
-/** Trigger provenance follows the branches proving the current result. */
 export function evaluateAutomationTree(
   tree: AutomationNode,
   values: Readonly<Record<string, Pick<NodeResult, "truth" | "reason">>>,
@@ -334,7 +321,6 @@ function validateCapabilityValue(
   return null;
 }
 
-/** Independent backend validation; UI field restrictions are not an authorization boundary. */
 export function validateAutomationCapabilities(
   definition: AutomationDefinition,
   capabilities: AutomationCapabilities,

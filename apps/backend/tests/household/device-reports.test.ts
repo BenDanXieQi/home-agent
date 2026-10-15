@@ -19,7 +19,6 @@ afterEach(() => {
   clock = undefined;
 });
 
-// The vendor boundary supplies reports; the real household actor owns their state.
 function household({ configured = true, knownSpec = true } = {}) {
   tick = 0;
   clock = spyOn(performance, "now").mockImplementation(() => tick);

@@ -63,7 +63,6 @@ export type CollectionSource = {
   >;
 };
 
-/** Owns subscriptions, bounded input work and reads; current facts belong to the actor. */
 export class HouseholdCollection {
   private scope = "";
   private devices: Projection["device"] | undefined;
@@ -112,7 +111,6 @@ export class HouseholdCollection {
       this.scope === snapshot.scope_epoch &&
       this.observedDevices !== devices
     ) {
-      // Capture every committed recovery before sync microtasks can coalesce it.
       for (const [key, device] of Object.entries(devices))
         if (this.observedDevices?.[key]?.online === false && device.online)
           this.seeded.delete(device.id);
@@ -165,9 +163,7 @@ export class HouseholdCollection {
                 this.definition(device, address.data.siid, address.data.piid),
               );
             }
-          } catch {
-            /* Unavailable specifications do not stop observations. */
-          }
+          } catch {}
         }
         for (const [id, binding] of this.watches) {
           const device = Object.values(devices).find((item) => item.id === id);
@@ -210,7 +206,6 @@ export class HouseholdCollection {
             this.sample("observe", "observe_failed"),
           );
         }
-        // Specifications can finish after the initial subscription confirmation.
         for (const id of this.watches.keys()) this.seedRead(id);
       }
       this.armExpiry();
@@ -231,9 +226,7 @@ export class HouseholdCollection {
       capability = this.runtime.specification(device.id).spec[
         `prop.${siid}.${piid}`
       ];
-    } catch {
-      /* Raw observations remain visible without a specification. */
-    }
+    } catch {}
     return {
       device,
       siid,
@@ -756,7 +749,6 @@ export class HouseholdCollection {
         active.map((task) => task.property),
         controller.signal,
       );
-      // Commit pushes received during the read before considering any cloud cache.
       while (this.queue.length) {
         await new Promise<void>((done) => setImmediate(done));
         controller.signal.throwIfAborted();
@@ -808,8 +800,6 @@ export class HouseholdCollection {
       this.reading < collectionLimits.readConcurrent &&
       this.readQueue.length
     ) {
-      // A vendor request has one revocation scope. Never let another device's
-      // cancellation discard a surviving device's independently owned read.
       const first = this.readQueue.shift()!;
       const tasks = [first];
       this.readQueue = this.readQueue.filter((task) => {

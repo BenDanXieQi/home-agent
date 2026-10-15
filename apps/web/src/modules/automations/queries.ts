@@ -1,4 +1,6 @@
-import { agentWorkflowResultSchema } from "@home-agent/api/agent-workflows";
+import type { InferRequestType } from "hono/client";
+import type { BackendClient } from "@home-agent/backend-client";
+import { agentWorkflowResultSchema } from "@home-agent/agent/workflows";
 import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -8,11 +10,15 @@ import {
   automationSchema,
   type automationDeleteRequestSchema,
   type automationEvaluateRequestSchema,
-  type automationGenerateRequestSchema,
   type automationSaveRequestSchema,
 } from "@home-agent/api/automations";
 import { requestEmpty, requestJson } from "../../api/client";
 import { RequestError } from "../../api/errors";
+
+type AutomationGenerationRequest = Extract<
+  InferRequestType<BackendClient["api"]["workflows"]["$post"]>["json"],
+  { workflow: "automation-generation" }
+>;
 
 const listSchema = z.object({ automations: z.array(automationSchema) });
 const runsSchema = z.object({ runs: z.array(automationRunSchema) });
@@ -102,7 +108,8 @@ export function evaluateAutomation(
 }
 
 export async function generateAutomation(
-  input: ReturnType<typeof automationGenerateRequestSchema.parse>,
+  input: Pick<AutomationGenerationRequest, "scope_epoch"> &
+    AutomationGenerationRequest["input"],
 ) {
   const { scope_epoch, ...request } = input;
   const response = await requestJson(

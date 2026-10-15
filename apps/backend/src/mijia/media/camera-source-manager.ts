@@ -24,7 +24,6 @@ type CameraSourceEntry = {
   error?: MijiaError;
 };
 
-/** Owns camera sources; actual media connectivity determines playback availability. */
 export class CameraSourceManager {
   private readonly streams = new Map<string, CameraSourceEntry>();
   private devices = new Map<string, MiCloudDevice>();
@@ -65,7 +64,6 @@ export class CameraSourceManager {
     });
   }
 
-  /** Fence local work; the session owner closes the adapter and its remote streams. */
   dispose() {
     this.closed = true;
     this.addressController.abort();
@@ -139,9 +137,6 @@ export class CameraSourceManager {
       throw new MijiaError("stale_session");
     if (this.paused) throw new MijiaError("cancelled");
     let stream = this.streams.get(key);
-    // Losing a passive neighbor record does not invalidate a prepared source.
-    // Keep the address for the same device unless the cloud supplies a changed,
-    // usable hint or the neighbor table supplies a new address.
     const retainAddress =
       stream?.prepared &&
       !stream.retiring &&
@@ -154,8 +149,6 @@ export class CameraSourceManager {
     const localIp =
       observedAddress ??
       (retainAddress && stream ? stream.device.localIp : specification.localIp);
-    // Only an explicit preparation request changes the selected profile.
-    // Ordinary preview and discovery reconciliation reuse the source's choice.
     const videoQuality = requestedQuality ?? stream?.device.videoQuality;
     const device = {
       ...specification,
@@ -218,7 +211,6 @@ export class CameraSourceManager {
 
   private retry(key: string, stream: CameraSourceEntry) {
     if (this.paused || !this.current(key, stream)) return;
-    // DELETE retires the previous ID even when the failed PUT response was lost.
     stream.controller.abort();
     stream.id = crypto.randomUUID();
     stream.controller = new AbortController();
@@ -283,7 +275,6 @@ export class CameraSourceManager {
     this.playback.releaseForSource(this.adapter, stream.id);
     const prepared = stream.pending;
     stream.pending = (async () => {
-      // Preparation records its failure on this source; retirement still owns deletion.
       await Promise.allSettled([prepared]);
       if (!stream.error) await this.remove(stream.id);
       if (this.streams.get(key) === stream) this.streams.delete(key);
@@ -306,7 +297,6 @@ export class CameraSourceManager {
     for (const [key, stream] of this.streams) {
       if (!desired.has(key)) pending.push(this.retire(key, stream));
     }
-    // Failures are owned and reported by each source, without stopping its peers.
     await Promise.allSettled(pending);
   }
 }

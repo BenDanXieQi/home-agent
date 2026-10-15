@@ -49,7 +49,6 @@ describe("设备在线信息的接纳与使用", () => {
     );
     const topic = "device/device-a/state/online";
     const payload = Buffer.from("{}");
-    // A valid report can arrive before the subscription acknowledgement.
     wire.client.emit("message", topic, payload, {
       cmd: "publish",
       topic,

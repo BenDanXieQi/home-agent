@@ -4,7 +4,6 @@ import { identityEnrollmentLimits } from "@home-agent/api/contracts";
 import { runFfmpeg } from "../../media/ffmpeg";
 import profile from "./profile.json";
 
-// Files remain under the bounded upload's temporary directory and share its lifetime.
 export async function extractReferenceFrames(
   executable: string,
   path: string,

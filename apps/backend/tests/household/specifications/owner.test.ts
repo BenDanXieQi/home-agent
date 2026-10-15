@@ -423,7 +423,7 @@ describe("specification refresh ownership", () => {
     expect(read.mock.calls.length).toBe(reads + 1);
     expect(owner.snapshot().references.get(current.id)).toMatchObject({
       spec_status: "error",
-      spec_error: { code: "mijia_capacity_exceeded" },
+      spec_error: { code: "household_capacity_exceeded" },
     });
     expect(owner.snapshot().specs[specUrn]).toBe(accepted);
     expect(owner.isApplicable(current.id, current.model)).toBe(true);
@@ -474,8 +474,6 @@ describe("specification refresh ownership", () => {
     expect(owner.snapshot().specs[specUrn]).toBe(accepted);
     expect(owner.isApplicable("a", "new-model")).toBe(false);
 
-    // The new model now resolves to the retained URN. Its refresh may fail,
-    // but the retained metadata has been verified against the new definition.
     lookupAllowed = true;
     await owner.refresh();
     expect(owner.snapshot().references.get("a")?.spec_status).toBe("error");

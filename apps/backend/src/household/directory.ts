@@ -9,7 +9,6 @@ import {
 } from "@home-agent/api/household";
 import { inventoryDeviceSchema } from "@home-agent/api/devices";
 
-/** Complete directory boundary; vendor transport fields are discarded here. */
 export const directoryCandidateSchema = z.object({
   accountId: z.string(),
   homeId: z.string().nullable(),

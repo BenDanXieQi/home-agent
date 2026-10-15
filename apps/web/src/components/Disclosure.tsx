@@ -43,7 +43,7 @@ export function Disclosure({
       <AnimatePresence initial={false}>
         {open ? (
           <Collapsible.Content forceMount asChild>
-            {/* Height and content fade share one element but not one timeline. */}
+            {}
             <m.div
               className="overflow-hidden text-sm leading-7 text-ink *:first:mt-4"
               initial={{ height: 0, opacity: 0 }}

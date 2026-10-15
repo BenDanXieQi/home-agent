@@ -86,8 +86,6 @@ export function CameraWindows({
   });
   useEffect(() => {
     if (active) return;
-    // A lost subscription pauses requests without releasing the selected local media.
-    // TanStack owns cancellation failures and always resolves this Promise.
     // oxlint-disable-next-line typescript/no-floating-promises
     client.cancelQueries({ queryKey: windowQueryScope(scope) });
   }, [active, client, scope]);
@@ -127,7 +125,6 @@ export function CameraWindows({
     selection ??
     activityWindow;
   const visibleWindows = windows.slice(0, visibleCount);
-  // Keep an activity target visible without rendering every newer cache entry.
   const selectedOutsideList =
     selected && windows.indexOf(selected) >= visibleCount
       ? selected
@@ -216,7 +213,6 @@ export function CameraWindows({
                 <Button
                   disabled={!active}
                   onClick={() => {
-                    // Refetch exposes request failures through query.error.
                     // oxlint-disable-next-line typescript/no-floating-promises
                     query.refetch();
                   }}

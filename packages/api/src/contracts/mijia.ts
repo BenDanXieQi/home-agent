@@ -1,10 +1,13 @@
 import { inventoryDeviceSchema } from "../domain/devices";
+import { homeSelectionSchema } from "../domain/home-selection";
+import { accountSessionStateSchema } from "../domain/account-session";
 import { sourceMediaSchema } from "./media";
 export { mijiaDeviceSpecSchema, type MijiaDeviceSpec } from "./mijia-spec";
 import { z } from "zod";
 import {
   playbackConnectionSummarySchema,
   playbackTargetSchema,
+  playbackBindingSchema,
 } from "../domain/playback";
 import { operationSchema } from "./operations";
 import { apiErrorSchema } from "./errors";
@@ -22,7 +25,6 @@ export const mijiaErrorSchema = apiErrorSchema.extend({
 });
 export type MijiaErrorDetails = z.infer<typeof mijiaErrorSchema>;
 
-// Outer deadlines leave room for upstream work, error propagation and cleanup.
 export const mijiaTimeouts = {
   control: 15_000,
   devices: 20_000,
@@ -38,21 +40,9 @@ export const mijiaTimeouts = {
 } as const;
 
 export const mijiaAccountSchema = z.discriminatedUnion("status", [
-  z.object({ status: z.enum(["idle", "restoring"]) }),
-  z.object({
-    status: z.literal("authenticated"),
-    id: z.uuid(),
-    profile: z
-      .object({
-        name: z.string().nullable(),
-        avatarUrl: z.url({ protocol: /^https$/ }).nullable(),
-      })
-      .nullable(),
-  }),
-  z.object({
-    status: z.enum(["restore_error", "reauth_required"]),
-    error: mijiaErrorSchema,
-  }),
+  accountSessionStateSchema.options[0],
+  accountSessionStateSchema.options[1],
+  accountSessionStateSchema.options[2].extend({ error: mijiaErrorSchema }),
 ]);
 export const mijiaLoginAttemptSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("idle") }),
@@ -93,23 +83,15 @@ export function isMijiaLoginAttemptActive(
   );
 }
 
-export const mijiaHomeSelectionSchema = z.object({
-  selectedHomeId: z.string().nullable(),
-  status: z.enum(["unselected", "selected", "unavailable"]),
-  items: z.array(
-    z.object({ id: z.string(), name: z.string(), shared: z.boolean() }),
-  ),
-});
-
 export const mijiaStateSchema = z.object({
-  homes: mijiaHomeSelectionSchema,
+  homes: homeSelectionSchema,
   revision: z.uuid(),
   connectionOperation: operationSchema.nullable(),
   account: mijiaAccountSchema,
   loginAttempt: mijiaLoginAttemptSchema,
   binding: z.discriminatedUnion("status", [
-    z.object({ status: z.enum(["unbound", "installing", "ready"]) }),
-    z.object({ status: z.literal("error"), error: mijiaErrorSchema }),
+    playbackBindingSchema.options[0],
+    playbackBindingSchema.options[1].extend({ error: mijiaErrorSchema }),
   ]),
   devices: z.discriminatedUnion("status", [
     z.object({
@@ -133,9 +115,6 @@ export const mijiaPlaybackReservationInputSchema =
   playbackTargetSchema.safeExtend({
     scope_epoch: z.uuid(),
   });
-export const mijiaPlaybackReservationResponseSchema = z.object({
-  id: z.string().uuid(),
-});
 export const mijiaPlaybackResponseSchema = z.object({
   id: z.string().uuid(),
   sdp: z.string(),

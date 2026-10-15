@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { chatResponseSchema } from "@home-agent/api/contracts";
+import { chatResponseSchema } from "@home-agent/agent/assistant/contracts";
 import { requestJson } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";

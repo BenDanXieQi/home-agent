@@ -1,7 +1,6 @@
 import { Notice } from "./Notice";
 import { Button } from "./Button";
 
-/** Synchronization progress and rejected actions have distinct semantics. */
 export function RequestFeedback({
   syncMessage,
   error,

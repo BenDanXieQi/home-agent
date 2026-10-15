@@ -85,7 +85,6 @@ function numberFormat(format: string) {
   };
 }
 
-/** Checks device command values, including discrete numeric steps. Null means valid. */
 export function validateDeviceValue(
   capability: Pick<
     z.infer<typeof deviceCapabilitySchema>,

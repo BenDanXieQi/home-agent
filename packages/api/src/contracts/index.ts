@@ -16,8 +16,6 @@ const serviceRootUrl = z
   .regex(/^https?:\/\/[^/?#@\\\s]+\/?$/i)
   .describe("HTTP(S) 服务根地址，不含凭据、路径前缀、query 或 fragment");
 
-// One definition owns the fields and defaults. Only first-time creation applies
-// defaults; both YAML and HTTP input must supply every field explicitly.
 export const serviceConfigurationWithDefaults = z.strictObject({
   services: z.strictObject({
     agent: z.strictObject({
@@ -83,8 +81,6 @@ export type ServicesStatus = z.infer<typeof servicesStatusSchema>;
 export * from "./errors";
 
 export * from "./operations";
-
-export * from "./chat";
 
 export {
   perceptionSnapshotSchema,

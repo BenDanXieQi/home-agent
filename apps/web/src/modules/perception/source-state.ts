@@ -11,7 +11,6 @@ import { canStartPlaybackAtom } from "../playback/access";
 import { mediaStateAtom } from "../playback/state";
 import type { PlaybackSession } from "../playback/session";
 
-/** Each detail owns one source; high-frequency results never enter page render state. */
 export function createPerceptionSourceState({
   deviceId,
   channel,
@@ -59,8 +58,6 @@ export function createPerceptionSourceState({
     const snapshot = get(perceptionSnapshotAtom);
     const access = get(perceptionSourceAccessAtom);
     const removed = access.removed.get(`${target.deviceId}:${target.channel}`);
-    // Audio owns its run independently of video compute. The synchronized
-    // snapshot confirms household access; a pre-removal snapshot cannot restore it.
     if (
       !get(connectedAtom) ||
       !get(accessibleAtom) ||

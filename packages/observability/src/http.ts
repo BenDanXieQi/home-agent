@@ -49,7 +49,6 @@ export function httpTracing(
           if (service === "agent" && session.id)
             c.header(sessionResponseHeader, session.id);
           originalError = c.error;
-          // @hono/otel records c.error after next(), including its stack.
           if (c.error && !telemetryStatus().includeContent) {
             const safeError = new Error("Request failed");
             delete safeError.stack;
@@ -63,7 +62,6 @@ export function httpTracing(
   });
 }
 
-/** CLIENT span covers headers AND body consumption, including SSE and cancellation. */
 export function tracedFetch(
   direction: { from: string; to: string },
   input: Parameters<typeof fetch>[0],

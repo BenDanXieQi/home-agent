@@ -79,8 +79,6 @@ export async function encodeWindow(
     }
     if (representation !== "audio") {
       const crop = parameters.cropPixels;
-      // Raw frames carry no timestamps. Map each actual frame to its recorded time;
-      // passthrough output never manufactures frames to fill the intervals.
       const timestamps = parameters.frames.map((frame) => frame.offsetMs);
       const pts = timestamps.reduceRight(
         (rest, at, index) =>

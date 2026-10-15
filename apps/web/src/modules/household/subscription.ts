@@ -19,7 +19,6 @@ import {
   householdSnapshotReceivedAtom,
 } from "./state";
 
-/** One subscription per app/ tab. Commands never write public state. */
 export function subscribeHousehold(store: ReturnType<typeof createStore>) {
   let stopped = false;
   let controller: AbortController | undefined;
@@ -42,7 +41,6 @@ export function subscribeHousehold(store: ReturnType<typeof createStore>) {
     clearTimeout(timer);
     const wait = nextAllowedAt - Date.now();
     if (wait > 0) {
-      // Longer server deadlines need multiple waits within the browser timer limit.
       timer = setTimeout(
         () => {
           connect().catch((backgroundError: unknown) => {

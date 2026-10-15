@@ -14,7 +14,6 @@ function attachRef<T>(ref: Ref<T> | undefined, node: T | null) {
   };
 }
 
-/** Shares one DOM node with internal measurement and the caller's React ref. */
 export function useComposedRef<T>(
   localRef: RefObject<T | null>,
   ref: Ref<T> | undefined,

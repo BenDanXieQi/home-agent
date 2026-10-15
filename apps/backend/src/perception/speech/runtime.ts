@@ -10,7 +10,6 @@ import { createUtterances } from "./utterance";
 import { createSpeechProcess } from "./process";
 import { senseVoiceModel, speechLimits } from "./limits";
 
-// Lives exclusively in audio/process-entry; only small validated views leave that process.
 export function createSpeechRuntime(options: {
   config: z.infer<typeof speechConfigSchema>;
   update: (runId: string, view: z.infer<typeof speechTrackSchema>) => void;
@@ -273,7 +272,6 @@ export function createSpeechRuntime(options: {
         status = "recognizing";
         publish(job.run.trackRunId);
         const result = await worker.evaluate(job);
-        // Delivery no longer owns a native inference that source revocation must interrupt.
         inFlight = undefined;
         status = "ready";
         const track = tracks.get(job.run.trackRunId);

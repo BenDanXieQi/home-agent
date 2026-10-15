@@ -1,19 +1,21 @@
 import type { z } from "zod";
-import { chatInputSchema, chatResponseSchema } from "@home-agent/api/contracts";
+import {
+  chatInputSchema,
+  chatResponseSchema,
+} from "@home-agent/agent/assistant/contracts";
 import {
   agentWorkflowInputSchema,
   agentWorkflowResultSchema,
-} from "@home-agent/api/agent-workflows";
+} from "@home-agent/agent/workflows";
 import {
   agentReceiptIndexSchema,
   agentReceiptDetailSchema,
   agentCurrentContextSchema,
   agentReceiptQuerySchema,
-} from "@home-agent/api/agent-receipts";
+} from "@home-agent/agent/context/contracts";
 import { requestJson } from "@home-agent/api/http/request-json";
 import { tracedFetch, withAgentTrace } from "@home-agent/observability";
 
-/** The address is resolved for every request so saved connection changes apply. */
 export function createAgentClient(options: {
   readAgentUrl: () => Promise<string>;
   timeoutMs: number;

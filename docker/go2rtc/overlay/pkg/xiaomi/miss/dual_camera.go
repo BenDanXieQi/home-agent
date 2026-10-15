@@ -18,16 +18,13 @@ import (
 	"github.com/pion/rtp"
 )
 
-// DualCamera owns one physical MISS connection for a declared two-lens camera
-// in one account session. Lens inventory is supplied by Xiaomi camera metadata.
-// Each channel exposes its own producer, codecs and viewer lifetime.
 type DualCamera struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
 	resolveURL func() (string, error)
 	mu         sync.Mutex
 	current    atomic.Pointer[dualSession]
-	qualities  [2]string // guarded by mu; empty retains the existing model default
+	qualities  [2]string
 }
 
 func NewDualCamera(resolveURL func() (string, error)) *DualCamera {
@@ -46,12 +43,8 @@ func (c *DualCamera) Open(ctx context.Context, channel int, quality string) (cor
 	if channel < 1 || channel > 2 || (quality != "" && quality != "1" && quality != "2" && quality != "3") {
 		return nil, errors.New("xiaomi: invalid channel or quality")
 	}
-	// Serialize initialization, including cloud key exchange. Parallel channels
-	// must never open competing camera connections before choosing a winner.
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	// A retired logical source may have waited behind a newer source here.
-	// Check its ownership before it can change the shared session profile.
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -61,8 +54,6 @@ func (c *DualCamera) Open(ctx context.Context, channel int, quality string) (cor
 	session := c.current.Load()
 	if quality != "" && c.qualities[channel-1] != quality {
 		c.qualities[channel-1] = quality
-		// A profile belongs to the shared physical session. Its replacement
-		// ends both old readers before either lens can publish the new profile.
 		if session != nil {
 			session.close()
 		}
@@ -126,7 +117,6 @@ func (s *dualSession) closed() bool {
 func (s *dualSession) close() {
 	s.closeOnce.Do(func() {
 		s.stopping.Store(true)
-		// Closing the transport wakes command/media readers even during a probe.
 		_ = s.client.Close()
 		close(s.done)
 	})
@@ -176,7 +166,6 @@ func (s *dualSession) prepare(qualities [2]string) error {
 			if s.audio != nil {
 				break
 			}
-			// A probe deadline is not a transport timeout: the video reader must remain alive.
 			audioDeadline = time.Now().Add(time.Second)
 		}
 	}
@@ -212,9 +201,6 @@ func (s *dualSession) run() {
 		if !audio && packet.CodecID != codecH264 && packet.CodecID != codecH265 {
 			continue
 		}
-		// MISS encodes the lens index in the flags high byte. This was verified
-		// on the local dual camera and independently documented for another
-		// Xiaomi dual-lens device in go2rtc PR #2027; do not infer from resolution.
 		channel := int(packet.Flags >> 24)
 		if !audio && channel > 1 {
 			diagnostic.Report("dual_camera_channel", errors.New("invalid channel"))
@@ -228,7 +214,6 @@ func (s *dualSession) run() {
 			select {
 			case reader.packets <- packet:
 			default:
-				// A slow viewer must not stall the other lens or accumulate frames.
 				reader.finish()
 				delete(s.readers, reader)
 			}
@@ -248,7 +233,6 @@ type dualProducer struct {
 
 func (p *dualProducer) finish() { p.once.Do(func() { close(p.done) }) }
 
-// The SD index and file commands use the same storage channel, not live flags.
 func (p *dualProducer) recordingChannel() uint32 {
 	return uint32(p.channel) * 10
 }
@@ -285,8 +269,6 @@ func (p *dualProducer) Start() error {
 				}
 				samples, err := audioSamples(packet)
 				if err != nil {
-					// Drop only invalid audio. The sequence gap resets continuous
-					// audio readers without reconnecting either video lens.
 					continue
 				}
 				audioTS += samples

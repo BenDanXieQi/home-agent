@@ -77,7 +77,6 @@ function WaitingPlaybackStatus({
   );
 }
 
-/** Only visible viewers waiting for their first frame need a clock. */
 export function PlaybackStatus({
   snapshot,
 }: {

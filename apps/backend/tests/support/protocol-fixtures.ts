@@ -65,7 +65,6 @@ export function preparedSpec(did = "device-1") {
 export const specUrn =
   "urn:miot-spec-v2:device:sensor:0000A001:test-contract:1";
 
-/** A small protocol document with independent read, notify, action and event semantics. */
 export function specInstance() {
   return {
     type: specUrn,

@@ -24,7 +24,6 @@ import { extractReferenceFrames } from "../../perception/identity/recording";
 import { identityProcessingVersions } from "../../perception/identity/processing-version";
 import { ReferenceEnrollmentError } from "./errors";
 
-// Owns temporary candidates and the single confirmation that turns them into references.
 export function createReferenceEnrollment(
   references: ReturnType<typeof createIdentityReferences>,
   perception: ReturnType<typeof createPerceptionService>,

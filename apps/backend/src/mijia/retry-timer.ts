@@ -1,6 +1,5 @@
 import { context, ROOT_CONTEXT } from "@home-agent/observability";
 
-/** One retry owned by one failed operation or camera source. */
 export class RetryTimer {
   private timer: ReturnType<typeof setTimeout> | undefined;
   private run: (() => void) | undefined;
@@ -10,8 +9,6 @@ export class RetryTimer {
   schedule(run: () => void, notBefore = 0) {
     this.run = run;
     if (this.timer) {
-      // A concurrent manual attempt may extend the supplier's deadline while
-      // an earlier retry is waiting. Its wake-up re-arms for the later time.
       this.deadline = Math.max(this.deadline, notBefore);
       return;
     }
@@ -21,7 +18,6 @@ export class RetryTimer {
       Date.now() + delayMs + Math.random() * 1_000,
       notBefore,
     );
-    // Long Retry-After values are re-armed instead of overflowing setTimeout.
     const arm = () => {
       this.timer = setTimeout(
         () => {
@@ -38,7 +34,6 @@ export class RetryTimer {
       );
       this.timer.unref();
     };
-    // Retries must not retain the triggering request's trace context.
     context.with(ROOT_CONTEXT, arm);
   }
 

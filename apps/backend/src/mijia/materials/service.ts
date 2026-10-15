@@ -290,8 +290,6 @@ export function createMijiaMaterials(deps: {
         );
         scope.assertCurrent();
         session.assertCurrent();
-        // The available endpoint exposes scene identity, not execution identity.
-        // Never turn repeated snapshots into new occurrences or deduplicate by content.
         success(diagnostic, response.history.length, [
           "execution_identity_unverified",
           "target_semantics_and_pagination_unverified",
@@ -316,8 +314,6 @@ export function createMijiaMaterials(deps: {
     const owner = JSON.stringify([input.device_id, input.api]);
     const previousDiagnostic = state("mijia_device_history", owner, device.did);
     const { scope_epoch: _epoch, ...query } = input;
-    // Explicit requests recheck local capability restrictions. They do not
-    // replay failed I/O or reopen an unverified record-identity suspension.
     if (
       JSON.stringify(previousDiagnostic.query) !== JSON.stringify(query) ||
       (previousDiagnostic.suspended &&
@@ -395,7 +391,6 @@ export function createMijiaMaterials(deps: {
               ]
             : [],
         );
-        // Repeated records cannot yet be distinguished from independent same-second reports.
         diagnostic.suspended = rows.length > 0;
       },
       false,

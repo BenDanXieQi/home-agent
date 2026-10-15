@@ -8,7 +8,6 @@ import {
 import { mijiaCommandOutcomeAtom, performMijiaAtom } from "./commands";
 import { mediaBindingAtom } from "../playback/state";
 
-/** Every connection retry entry shares admission rules and operation feedback. */
 export function RetryConnectionButton({
   disabled,
   children = "重新连接",
@@ -19,7 +18,6 @@ export function RetryConnectionButton({
   const perform = useSetAtom(performMijiaAtom);
   const outcome = useAtomValue(mijiaCommandOutcomeAtom);
   const binding = useAtomValue(mediaBindingAtom);
-  // The command only starts the connection; its end is the binding settling.
   const status = busy
     ? "pending"
     : outcome.type !== "retryConnection"

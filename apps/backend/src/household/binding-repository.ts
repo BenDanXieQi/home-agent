@@ -32,7 +32,6 @@ export function assertHouseholdBinding(
     throw new HouseholdError("stale_session");
 }
 
-/** Hold shared binding access while operating on the current household's data. */
 export function createHouseholdBindingAccess(db: Database) {
   const transaction = createLockedTransactions(
     db,
@@ -54,7 +53,6 @@ export function createHouseholdBindingAccess(db: Database) {
     });
 }
 
-/** Native read transactions allow callers to consume Postgres.js cursors under the binding lock. */
 export function createHouseholdBindingRead(db: Database) {
   const dialect = new PgDialect();
   return <T>(

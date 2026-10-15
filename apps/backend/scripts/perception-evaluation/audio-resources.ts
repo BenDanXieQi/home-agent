@@ -44,7 +44,6 @@ export function createAudioResourceSampler() {
     );
     const rows = stdout.trim().split("\n").map(parseProcess);
     const owned = new Set([process.pid]);
-    // Reparenting preserves identity; a reused PID or process group is not enough.
     for (const row of rows) if (observed.has(identity(row))) owned.add(row.pid);
     for (let size = 0; size !== owned.size;) {
       size = owned.size;
@@ -66,7 +65,6 @@ export function createAudioResourceSampler() {
     }
     return {
       rssMiB: processes.reduce((sum, row) => sum + row.rssMiB, 0),
-      // Keep the last observed CPU use after exit; the unsampled tail remains unknown.
       cpuMs: [...observed.values()].reduce((sum, row) => sum + row.cpuMs, 0),
       processes: processes.length,
       members: processes,

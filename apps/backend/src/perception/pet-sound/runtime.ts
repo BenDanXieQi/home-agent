@@ -74,7 +74,6 @@ export function createPetSoundRuntime(options: {
           drop();
           return;
         }
-        // One replaceable pending context per authorized source, plus one in flight.
         if (queue.has(run.trackRunId)) drop();
         queue.set(run.trackRunId, {
           ...segment,

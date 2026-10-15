@@ -9,7 +9,6 @@ import {
 } from "@home-agent/api/http/read-body";
 import { DetectionPoolError } from "../perception/compute/pool";
 
-// The upload owner holds temporary bytes until admitted processing has settled.
 export function createBoundedMediaUpload<T>(
   process: (path: string, signal: AbortSignal, request: Request) => Promise<T>,
   shutdown: AbortSignal,

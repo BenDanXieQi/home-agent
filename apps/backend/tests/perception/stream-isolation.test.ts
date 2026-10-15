@@ -4,7 +4,6 @@ import { EventSourceParserStream } from "eventsource-parser/stream";
 import { setTimeout as delay } from "node:timers/promises";
 import { createSnapshotStream } from "../../src/http/snapshot-stream";
 
-// A stopped browser must not hold up another observer or make it replay stale facts.
 test("a slow subscriber does not delay a healthy subscriber and both can release their slots", async () => {
   const listeners = new Set<() => void>();
   let sequence = 0;
@@ -103,7 +102,6 @@ test("an observer joining after a fact expires sees its current validity without
     expect(JSON.parse((await initial.read()).value!.data).validity).toBe(
       "valid",
     );
-    // Time advances; the camera does not publish another packet or event.
     elapsedMs = 2500;
     const joined = await fetch(server.url, { signal: requests.signal });
     const latest = joined

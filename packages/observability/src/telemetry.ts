@@ -104,7 +104,6 @@ export function initializeTelemetry(serviceName: string) {
       new BatchSpanProcessor(
         new OTLPTraceExporter({
           url: customEndpoint,
-          // Custom collectors use standard OTEL_EXPORTER_OTLP_*_HEADERS.
           timeoutMillis: 10_000,
         }),
         { scheduledDelayMillis: 1_000 },

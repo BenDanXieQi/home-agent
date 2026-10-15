@@ -3,13 +3,13 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
 import { sum } from "radash";
-import { agentCurrentContextSchema } from "@home-agent/api/agent-receipts";
+import { agentCurrentContextSchema } from "../src/context/contracts";
 import {
   attentionSchema,
   createHouseholdModelView,
   encodeHouseholdContext,
-} from "@home-agent/api/household-model-view";
-import { decodeHouseholdContext } from "@home-agent/api/household-model-view/decoding";
+} from "../src/context/model-view";
+import { decodeHouseholdContext } from "../src/context/model-view/decoding";
 
 async function main() {
   const { values, positionals } = parseArgs({

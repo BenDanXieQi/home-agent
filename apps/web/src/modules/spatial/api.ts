@@ -129,7 +129,6 @@ export async function executeSpatialCommand(command: SpatialCommand) {
   }
 }
 
-/** Compare actual persisted values after a response was lost; never replay a write. */
 export function confirmSpatialCommand(
   command: SpatialCommand,
   snapshot: SpatialSnapshot,

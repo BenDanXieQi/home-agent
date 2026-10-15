@@ -27,7 +27,6 @@ const matches = (key: ReturnType<typeof householdEventIdentitySchema.parse>) =>
         eq(householdEvents.sourceEventId, key.source_event_id),
       );
 
-/** Owns event identity and acceptance; consumers are notified after commit. */
 export function createHouseholdEventRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
   const within = (identity: Parameters<typeof access>[0]) =>
@@ -48,7 +47,6 @@ export function createHouseholdEventRepository(db: Database) {
     submission = householdEventSubmissionSchema.parse(submission);
     if (Buffer.byteLength(JSON.stringify(submission)) > 64 * 1024)
       throw new HouseholdEventError("capacity_exceeded");
-    // Capacity and source-identity admission have one household owner.
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["household-events", identity.accountId, identity.homeId])}, 0))`,
     );
@@ -100,7 +98,6 @@ export function createHouseholdEventRepository(db: Database) {
       })
       .onConflictDoNothing()
       .returning();
-    // The UUID can also conflict with a row in a different household.
     if (!inserted) throw new HouseholdEventError("conflict");
     await validate?.(tx, submission.event);
     assertCurrent();

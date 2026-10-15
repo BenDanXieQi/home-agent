@@ -1,4 +1,5 @@
 import { freeze } from "@home-agent/api/immutable";
+import type { z } from "zod";
 import {
   provenancePolicy,
   commandSourceSchema,
@@ -6,7 +7,7 @@ import {
   commandTargetSchema,
   deviceControlResultSchema,
 } from "@home-agent/api/action-provenance";
-import type { DeviceControl } from "./control";
+import { deviceOperationSchema, type DeviceControl } from "./control";
 import type { createRecordWriter } from "../records/writer";
 import type { createCommandRepository } from "./repository";
 import type { accessHousehold } from "../access";
@@ -58,16 +59,17 @@ export function createDeviceOperations(
   async function execute(
     scope: Scope,
     source: Source,
-    target: ReturnType<typeof commandTargetSchema.parse>,
-    id: string,
+    command: z.infer<typeof deviceOperationSchema>,
     signal: AbortSignal,
     assertCurrent: () => void,
+    commandId: string = crypto.randomUUID(),
   ) {
     const calledAt = new Date();
+    const prepared = control.prepare(deviceOperationSchema.parse(command));
     const base = freeze({
-      id,
+      id: commandId,
       source: commandSourceSchema.parse(source),
-      target: commandTargetSchema.parse(target),
+      target: commandTargetSchema.parse(prepared.target),
       called_at: calledAt.toISOString(),
       expires_at: new Date(
         calledAt.getTime() + retentionDays * 86400_000,
@@ -77,7 +79,7 @@ export function createDeviceOperations(
     let result;
     try {
       result = deviceControlResultSchema.parse(
-        await control.dispatch(base.target, signal, assertCurrent, (at) => {
+        await prepared.dispatch(signal, assertCurrent, (at) => {
           sending.at ??= at;
         }),
       );
@@ -106,67 +108,10 @@ export function createDeviceOperations(
         : result.outcome === "rejected"
           ? ("rejected" as const)
           : ("unknown" as const);
-    return { command_id: id, result: { ...result, status } };
+    return { command_id: commandId, result: { ...result, status } };
   }
   return {
-    executePropertyWrite(
-      scope: Scope,
-      source: Source,
-      request: Omit<
-        Extract<
-          ReturnType<typeof commandTargetSchema.parse>,
-          { kind: "property" }
-        >,
-        "kind"
-      >,
-      signal: AbortSignal,
-      assertCurrent: () => void,
-      commandId: string = crypto.randomUUID(),
-    ) {
-      return execute(
-        scope,
-        source,
-        {
-          kind: "property",
-          device_id: request.device_id,
-          siid: request.siid,
-          piid: request.piid,
-          value: request.value,
-        },
-        commandId,
-        signal,
-        assertCurrent,
-      );
-    },
-    executeDeviceAction(
-      scope: Scope,
-      source: Source,
-      request: Omit<
-        Extract<
-          ReturnType<typeof commandTargetSchema.parse>,
-          { kind: "action" }
-        >,
-        "kind"
-      >,
-      signal: AbortSignal,
-      assertCurrent: () => void,
-      commandId: string = crypto.randomUUID(),
-    ) {
-      return execute(
-        scope,
-        source,
-        {
-          kind: "action",
-          device_id: request.device_id,
-          siid: request.siid,
-          aiid: request.aiid,
-          inputs: request.inputs,
-        },
-        commandId,
-        signal,
-        assertCurrent,
-      );
-    },
+    execute,
     diagnostics: () => ({ ...diagnostics }),
   };
 }

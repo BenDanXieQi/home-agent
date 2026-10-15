@@ -1,5 +1,3 @@
-# Adapted from https://github.com/langfuse/langfuse/blob/main/docker-compose.yml
-# All services belong to the root home-agent project; enabled by COMPOSE_PROFILES.
 x-langfuse-service: &langfuse-service
   profiles: [langfuse]
   restart: unless-stopped

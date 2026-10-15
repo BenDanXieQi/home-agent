@@ -15,7 +15,7 @@ import {
 } from "@home-agent/api/household-members";
 import type { HouseholdRuntime } from "../runtime";
 import { HouseholdError } from "../errors";
-import { safeMijiaError } from "../../mijia/errors";
+import { householdPublicError } from "../public-errors";
 import type { createMemberRepository } from "./repository";
 
 export function createMemberRoutes(
@@ -37,7 +37,7 @@ export function createMemberRoutes(
   });
   app.onError((error, c) =>
     handleHttpError(
-      error instanceof HouseholdError ? safeMijiaError(error) : error,
+      error instanceof HouseholdError ? householdPublicError(error) : error,
       c,
     ),
   );

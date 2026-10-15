@@ -13,7 +13,6 @@ import {
 
 const CONCURRENCY = 16;
 const ACK_TIMEOUT = 10_000;
-// MQTT 5 SUBACK: unspecified/internal error, packet ID in use, or quota exceeded.
 const RETRYABLE_SUBACK_CODES = new Set([0x80, 0x83, 0x91, 0x97]);
 export function isMqttAuthenticationFailure(reason: string | null) {
   return [
@@ -39,7 +38,6 @@ function entry(topic: string, rejectedCode: number | undefined) {
   };
 }
 
-/** One disposable MQTT generation. AccountObservations owns reconnection orchestration. */
 export class MiotMqtt {
   readonly generation = crypto.randomUUID();
   private readonly client;
@@ -86,7 +84,6 @@ export class MiotMqtt {
       );
       this.reconcile();
     });
-    // Register before CONNECT/SUBSCRIBE; early valid messages are not buffered.
     this.client.on("message", (topic, payload, packet) => {
       if (this.status !== "connected") return;
       this.stats.received++;
@@ -120,7 +117,7 @@ export class MiotMqtt {
           this.stats.discarded++;
           continue;
         }
-        // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks may mutate listeners
+        // oxlint-disable-next-line unicorn/no-useless-spread
         for (const listener of [...subscription.listeners]) {
           if (this.closed || !subscription.listeners.has(listener)) continue;
           this.emit(listener, event);
@@ -187,7 +184,7 @@ export class MiotMqtt {
     }
   }
   private broadcast(event: MiotObservation) {
-    // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks may mutate listeners
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const listener of [...this.observers])
       if (this.observers.has(listener)) this.emit(listener, event);
   }
@@ -205,7 +202,7 @@ export class MiotMqtt {
       reason,
       code,
     );
-    // oxlint-disable-next-line unicorn/no-useless-spread -- callbacks may mutate listeners
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const listener of [...item.listeners])
       if (item.listeners.has(listener)) this.emit(listener, event);
   }
@@ -352,7 +349,6 @@ export class MiotMqtt {
       if (reason) {
         item.failure = { reason, code };
         this.report(item, "failed", reason, code);
-        // MQTT.js retains unanswered requests until their ACK or connection shutdown.
         if (!subscribe || reason === "ack_timeout") {
           this.close(reason).catch((backgroundError: unknown) => {
             console.error("mqtt: close failed", backgroundError);
@@ -378,7 +374,6 @@ export class MiotMqtt {
           item.topic,
           { qos: 2 },
           (error, _grants, packet) => {
-            // MQTT.js leaves grants at the requested QoS when SUBACK rejects it.
             const code =
               packet?.granted.length === 1 ? packet.granted[0] : undefined;
             if (typeof code !== "number") {
@@ -425,7 +420,7 @@ export class MiotMqtt {
     this.broadcast(
       connectionObservation(this.sourceId, this.generation, "closed", reason),
     );
-    // oxlint-disable-next-line unicorn/no-useless-spread -- detach removes itself
+    // oxlint-disable-next-line unicorn/no-useless-spread
     for (const detach of [...this.detachObservers]) detach();
     this.observers.clear();
     this.topics.clear();

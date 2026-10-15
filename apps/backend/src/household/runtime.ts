@@ -93,7 +93,6 @@ export class HouseholdRuntime {
     let published = this.version();
     this.actor.subscribe(({ context }) => {
       if (context.input_sequence === this.handled) return;
-      // Mark the commit before calling subscribers, including reentrant consumers.
       this.handled = context.input_sequence;
       if (
         context.scope_epoch !== published.scope_epoch ||
@@ -281,7 +280,6 @@ export class HouseholdRuntime {
   }
   snapshot() {
     const { scope_epoch, sequence, projection } = this.context;
-    // Every record is already white-listed and identity-checked by the commit.
     return { scope_epoch, sequence, projection };
   }
   changes() {
@@ -328,7 +326,6 @@ export class HouseholdRuntime {
     } finally {
       subscription.unsubscribe();
     }
-    // Effects may queue further inputs; only this command's commit is its receipt.
     const context = receipt.context;
     if (!context?.accepted) throw new HouseholdError("invalid_state");
     return {
@@ -484,13 +481,10 @@ export class HouseholdRuntime {
         .map(([, value]) => value.id),
     );
     const candidateProjection = () => {
-      // Specification tasks can finish while persistence is awaiting I/O.
-      // Rebase inventory fields on the latest summaries instead of rolling them back.
       const current =
         this.projection.device === previousDevices
           ? directory
           : publicDirectory(candidate, this.projection);
-      // A live notification accepted after preparation is newer than this inventory.
       const device = produce(current.device, (draft) => {
         for (const [key, sequence] of Object.entries(
           this.context.fact_state.online_updates,
@@ -552,9 +546,6 @@ export class HouseholdRuntime {
       assert();
       if (!this.context.accepted) throw new HouseholdError("capacity_exceeded");
       if (this.ready && this.factListeners.size > 0) {
-        // Record the received inventory, even when a newer live report wins the current value.
-        // The directory state commit was already published by the actor above.
-        // This delivery contains only historical reports, not another state change.
         this.publishFacts(
           freeze({
             state_version: this.version(),
@@ -577,7 +568,6 @@ export class HouseholdRuntime {
           }),
         );
       }
-      // Specification preparation cannot block an already accepted directory.
       this.specs.update(candidate.devices);
       this.publishSpecifications(changedDevices);
     };

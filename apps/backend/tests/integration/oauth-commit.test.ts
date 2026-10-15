@@ -18,7 +18,6 @@ afterEach(async () => {
   jest.useRealTimers();
 });
 
-/** Leave the real local media peer untouched; gate only the OAuth HTTP boundary. */
 function oauthBoundary() {
   const original = globalThis.fetch;
   const replies: ReturnType<typeof deferred<Response>>[] = [];
@@ -82,8 +81,6 @@ async function rejectDuringCommit() {
   releaseBarriers.push(write.release);
   jest.useFakeTimers();
 
-  // A MiCloud property authentication failure starts ordinary complete-session
-  // renewal. MQTT remains active until its separate rejection below.
   household.properties.mockRejectedValueOnce(
     new MiCloudError("authentication", { httpStatus: 401 }),
   );
@@ -102,7 +99,6 @@ async function rejectDuringCommit() {
   expect(oauth.requests).toHaveLength(0);
   expect(watch.snapshot().status).toBe("connected");
 
-  // This is the vendor SDK event consumed by the real MQTT/account owners.
   wire.client.emit("disconnect", { cmd: "disconnect", reasonCode: 135 });
   expect(watch.snapshot()).toMatchObject({
     authentication_failed: true,
@@ -115,7 +111,6 @@ async function rejectDuringCommit() {
   write.release();
   await write.committed;
   await nextTurn();
-  // Committing ordinary renewal must carry the rejection to its new account owner.
   expect(oauth.requests).toHaveLength(1);
   expect(oauth.requests[0]?.pathname).toBe("/app/v2/mico/oauth/get_token");
   expect(watch.snapshot().authentication_failed).toBe(true);

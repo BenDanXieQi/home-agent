@@ -17,7 +17,6 @@ export async function drainOperations() {
   try {
     await Promise.race([
       (async () => {
-        // Cancellation can still be waiting for a child model call to settle.
         while (pending.size) await Promise.allSettled(pending);
       })(),
       new Promise<void>((resolve) => {

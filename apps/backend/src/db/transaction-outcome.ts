@@ -21,7 +21,6 @@ export function lockTransaction(
   return tx.execute(transactionLock(key, mode));
 }
 
-/** The database has not yet established whether a previous write committed. */
 export class StorageOutcomeUnknownError extends Error {
   constructor() {
     super("Storage write outcome is unconfirmed");
@@ -29,7 +28,6 @@ export class StorageOutcomeUnknownError extends Error {
   }
 }
 
-/** Acquiring the same transaction lock also proves the previous transaction ended. */
 export function createLockedTransactions(
   db: Database,
   timeoutMs: number,
@@ -43,7 +41,6 @@ export function createLockedTransactions(
     });
 }
 
-/** Called through an owner's serial write entry; retains only an unconfirmed commit. */
 export function createConfirmedWriter<TTransaction>(
   transaction: <T>(
     key: string,
@@ -83,7 +80,6 @@ export function createConfirmedWriter<TTransaction>(
         return result;
       });
     } catch (error) {
-      // A rejected callback never reaches COMMIT; the transaction rolls it back.
       if (!attempted || !callbackCompleted) throw error;
       pending = async () => {
         const result = await recover();

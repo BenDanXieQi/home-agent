@@ -2,7 +2,6 @@ import type { MijiaService } from "../service";
 import { MijiaError } from "../errors";
 import type { accessHousehold } from "../../household/access";
 
-/** Capture device permission before I/O and retain it through queued storage. */
 export function accessMaterialDevice(
   mijia: MijiaService,
   scope: ReturnType<typeof accessHousehold>,

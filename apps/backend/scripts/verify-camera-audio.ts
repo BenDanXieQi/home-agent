@@ -35,7 +35,6 @@ const binary = z.string().min(1).parse(values.binary);
 const key = z.string().min(1).parse(values.key);
 const seconds = z.coerce.number().int().min(30).max(3600).parse(values.seconds);
 const databaseUrl = z.string().min(1).parse(process.env.DATABASE_URL);
-// Refuse an occupied API port instead of adopting another instance's session.
 const probe = createServer();
 const listening = once(probe, "listening");
 probe.listen(1986, "127.0.0.1");

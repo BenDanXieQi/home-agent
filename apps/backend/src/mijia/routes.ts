@@ -101,7 +101,6 @@ export function createMijiaRoutes(
     })
     .put("/playback/:id", validateJson(mijiaPlaybackInputSchema), async (c) => {
       const input = c.req.valid("json");
-      // The request signal rejects pre-aborted work; accepted offers belong to the viewer resource.
       const result = await service.offer(
         input.revision,
         c.req.param("id"),

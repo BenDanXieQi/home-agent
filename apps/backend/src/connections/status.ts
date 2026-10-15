@@ -22,8 +22,6 @@ const healthResponseSchemas = {
     service: z.literal("home-agent"),
     runtime: z.literal("bun"),
   }),
-  // go2rtc v1.9.14: internal/api/api.go returns internal/app app.Info.
-  // Other modules may add fields; do not reject them or pin the version value.
   go2rtc: z.object({
     version: z.string().min(1),
     revision: z.string(),

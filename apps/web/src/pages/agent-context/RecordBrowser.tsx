@@ -81,7 +81,7 @@ export function RecordBrowser<T>({
     ],
     [suppliedColumns, identify, title, describe],
   );
-  // oxlint-disable-next-line react/incompatible-library -- TanStack Table owns mutable table state; this component is not compiler-memoized.
+  // oxlint-disable-next-line react/incompatible-library
   const table = useReactTable({
     data: rows,
     columns,

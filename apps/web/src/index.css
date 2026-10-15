@@ -46,7 +46,6 @@
 }
 
 @theme {
-  /* Skeletons stay invisible for fast loads and only fade in when loading is slow. */
   --animate-skeleton:
     skeleton-in 160ms ease-out 200ms both,
     pulse 2s cubic-bezier(0.4, 0, 0.6, 1) 360ms infinite;
@@ -93,12 +92,9 @@
   body {
     @apply m-0 min-w-0 bg-paper font-sans text-[13px] text-ink;
   }
-  /* The root gutter already reserves scrollbar space. Radix's scroll lock
-     must not reserve it again through react-remove-scroll's body margin. */
   body[data-scroll-locked] {
     margin-right: 0 !important;
   }
-  /* Quiet, native scrollbars shared by pages, panels and popover lists. */
   * {
     scrollbar-width: thin;
     scrollbar-color: #b8b8b8 transparent;
@@ -107,7 +103,6 @@
   *:focus-within {
     scrollbar-color: #707070 transparent;
   }
-  /* Controls are handled, not read: no text selection or native drag ghosts. */
   button,
   summary {
     @apply cursor-pointer select-none;

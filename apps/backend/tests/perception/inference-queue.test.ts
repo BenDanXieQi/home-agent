@@ -7,7 +7,6 @@ const clock = spyOn(performance, "now").mockImplementation(() => now);
 afterEach(() => {
   now = 0;
 });
-// Restore at file teardown so other perception tests retain their real clocks.
 afterAll(() => clock.mockRestore());
 
 test("directly dispatched tasks have no queue residence", () => {

@@ -34,7 +34,6 @@ for (const [source, destination] of [
   }
 }
 
-// Never replace an existing key: encrypted database records depend on it.
 try {
   await writeFile(
     resolve(root, "config/credentials.key"),

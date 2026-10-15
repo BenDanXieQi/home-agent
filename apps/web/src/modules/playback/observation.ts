@@ -14,8 +14,6 @@ export function memberObservationPlaybackSource(
   data: z.infer<typeof memberActivityDataSchema>,
 ) {
   const current = data.attribution.current;
-  // A revocation can originate from a different camera. Replay the target's
-  // previous attribution evidence, not the remote revocation timestamp.
   const evidence =
     current.kind === "known"
       ? current
@@ -31,7 +29,6 @@ export function memberObservationPlaybackSource(
   });
 }
 
-// Sort once per query update and share the run index across all activity rows.
 export function indexPlayableObservationWindows(windows: WindowListEntry[]) {
   const runs = new Map<string, WindowListEntry[]>();
   for (const entry of windows.toSorted((a, b) => b.startedAt - a.startedAt)) {

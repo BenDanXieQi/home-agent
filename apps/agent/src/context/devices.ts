@@ -2,9 +2,8 @@ import type { z } from "zod";
 import type {
   agentContextPartsSchema,
   agentDevicePropertySchema,
-} from "../contracts/agent-context";
+} from "@home-agent/api/agent-context";
 
-/** Resolve only metadata actually present in this received inventory. */
 export function createAgentDeviceMetadata(
   household: z.infer<typeof agentContextPartsSchema>["household"] | undefined,
 ) {

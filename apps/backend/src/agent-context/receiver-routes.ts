@@ -6,9 +6,8 @@ import type { createAgentClient } from "../agent-client";
 import {
   agentReceiptDetailSchema,
   agentReceiptQuerySchema,
-} from "@home-agent/api/agent-receipts";
+} from "@home-agent/agent/context/contracts";
 
-/** Reads the Agent process. Never substitutes a Backend publication for a receipt. */
 export function createAgentReceiverRoutes({
   port,
   agent,

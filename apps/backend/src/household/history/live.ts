@@ -8,7 +8,6 @@ import { jsonBytes } from "../config";
 import type { createDeviceHistoryReader } from "./read";
 import type { createDeviceHistoryService } from "./service";
 
-/** The first displayed record to leave the rolling retention interval. */
 export function historyPageExpiresAt(
   page: ReturnType<typeof deviceHistoryResponseSchema.parse>,
 ) {
@@ -24,7 +23,6 @@ export function historyPageExpiresAt(
   );
 }
 
-/** Active identical queries share their committed revision and in-flight read. */
 export function createDeviceHistoryLiveReader(
   read: ReturnType<typeof createDeviceHistoryReader>,
   history:

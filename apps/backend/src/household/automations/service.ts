@@ -1,6 +1,6 @@
 import { createAutomationExecution } from "./execution";
 import { queryAutomationCapabilities, queryAutomations } from "./queries";
-import { automationConditions, leaves, referencedFacts } from "./facts";
+import { automationConditions, createAutomationFacts } from "./facts";
 import PQueue from "p-queue";
 import { z } from "zod";
 import {
@@ -14,7 +14,6 @@ import {
   type AutomationEvent,
   type automationSaveRequestSchema,
 } from "@home-agent/api/automations";
-import { propertyKey } from "@home-agent/api/observations";
 import { AppError } from "@home-agent/api/errors";
 import type { Database } from "../../db";
 import { automations } from "../../db/schema";
@@ -26,6 +25,7 @@ import { createAutomationRepository } from "./repository";
 import { advanceAutomation } from "./evaluation";
 import type { automationInputSchema } from "./state";
 import { readAutomationCapabilities } from "./capabilities";
+import type { AutomationProperties } from "./properties";
 
 type StoredAutomation = typeof automations.$inferSelect;
 
@@ -33,9 +33,11 @@ export function createAutomationService(deps: {
   db: Database;
   household: HouseholdRuntime;
   operations: ReturnType<typeof createDeviceOperations>;
+  properties: AutomationProperties;
   signal: AbortSignal;
   readEventTypes: () => string[];
 }) {
+  const { leaves, referencedFacts } = createAutomationFacts(deps.properties);
   const repository = createAutomationRepository(deps.db);
   const writes = new PQueue({ concurrency: 1 });
   const definitions = new Map<string, StoredAutomation>();
@@ -156,18 +158,18 @@ export function createAutomationService(deps: {
             : condition.predicate.kind === "ai"
               ? condition.predicate.property_refs
               : [];
-        for (const { device_id, property_key } of refs) {
-          const [, siid, piid] = property_key.split(".");
-          const key = propertyKey(
+        for (const reference of refs) {
+          const { device_id } = reference;
+          const key = deps.properties.key(
             deps.household.snapshot().projection.household.household
               .account_id ?? "",
-            device_id,
-            Number(siid),
-            Number(piid),
+            reference,
           );
-          const properties = propertyIndex.get(key) ?? new Set<string>();
-          properties.add(row.id);
-          propertyIndex.set(key, properties);
+          if (key !== undefined) {
+            const properties = propertyIndex.get(key) ?? new Set<string>();
+            properties.add(row.id);
+            propertyIndex.set(key, properties);
+          }
           const devices = deviceIndex.get(device_id) ?? new Set<string>();
           devices.add(row.id);
           deviceIndex.set(device_id, devices);
@@ -248,7 +250,6 @@ export function createAutomationService(deps: {
       const input = capture(row, kind, snapshot, event, report);
       const startedAt = new Date().toISOString();
       const started = performance.now();
-      // No await here: each input observes the state left by the previous input.
       const result = advanceAutomation(
         row.definition,
         row.revision,
@@ -271,6 +272,7 @@ export function createAutomationService(deps: {
         createAutomationExecution(row, input, result.evaluation, timing, {
           devices: snapshot.projection.device,
           specs: deps.household.specifications(),
+          propertyReference: deps.properties.reference,
         }),
       );
     } catch (error) {
@@ -289,7 +291,6 @@ export function createAutomationService(deps: {
     if (!deps.household.ready || stopped) return;
     const current = scope();
     const reset = epoch !== current.snapshot.scope_epoch;
-    // Drain execution writes before rebuilding a household's in-memory baseline.
     acceptingInputs = false;
     await writes.onIdle();
     current.assertCurrent();
@@ -358,23 +359,13 @@ export function createAutomationService(deps: {
     const event = observation?.event;
     const reported =
       event?.kind === "property" && event.delivery_kind === "live"
-        ? snapshot.projection.latest[
-            propertyKey(
-              snapshot.projection.household.household.account_id ?? "",
-              event.did,
-              event.siid,
-              event.piid,
-            )
-          ]
+        ? deps.properties.reported(snapshot, event)
         : undefined;
     const report =
       reported &&
       commit.result?.receipt.outcome === "applied" &&
       reported.evidence?.observation_id === observation?.observation_id
-        ? {
-            device_id: reported.device_id,
-            property_key: `prop.${reported.siid}.${reported.piid}`,
-          }
+        ? deps.properties.reference(reported)
         : null;
     const ids = new Set<string>();
     for (const change of commit.changes) {
@@ -402,7 +393,6 @@ export function createAutomationService(deps: {
     db: deps.db,
     operations: deps.operations,
     signal: deps.signal,
-    snapshot: () => deps.household.snapshot(),
     isCurrent: (id, revision) =>
       !refreshing &&
       !stopped &&
@@ -468,7 +458,6 @@ export function createAutomationService(deps: {
   }
   return {
     async start() {
-      // Establish current conditions before accepting rule triggers.
       requestRefresh();
       await refreshTask?.catch(onFailure);
       cleanupTimer = setInterval(() => {
@@ -528,7 +517,6 @@ export function createAutomationService(deps: {
         current.assertCurrent();
         definitions.set(row.id, row);
         reindex();
-        // A failed write stays paused. Only the latest confirmed save restores it.
         if (invalidated.get(row.id) === operation) {
           invalidated.delete(row.id);
           clearRuleState(row.id);

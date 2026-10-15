@@ -7,9 +7,6 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
-    "dev": "bun --env-file=../../.env --watch scripts/dev.ts",
-    "build": "bun run check-types && bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
-    "start": "bun --env-file=../../.env dist/main.js",
     "context:format": "bun scripts/format-context.ts",
     "lint": "bun run generate && oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "bun run generate && oxlint --type-aware --max-warnings 0 --fix .",
@@ -21,8 +18,8 @@
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/pi-durable": "catalog:",
     "@home-agent/api": "workspace:*",
-    "@home-agent/backend-client": "workspace:*",
     "@home-agent/observability": "workspace:*",
+    "es-toolkit": "^1.52.0",
     "hono": "catalog:",
     "radash": "12.1.1",
     "typebox": "catalog:",
@@ -36,5 +33,26 @@
     "typescript": "catalog:",
     "@home-agent/oxlint-config": "workspace:*",
     "oxfmt": "catalog:"
+  },
+  "exports": {
+    "./workflows": "./src/workflows/contracts.ts",
+    "./workflows/automation-generation": "./src/workflows/automation-generation/contracts.ts",
+    "./workflows/spatial-planning": "./src/workflows/spatial-planning/contracts.ts",
+    "./workflows/speech-interpretation": "./src/workflows/speech-interpretation/contracts.ts",
+    "./assistant": "./src/assistant/assistant.ts",
+    "./assistant/contracts": "./src/assistant/contracts.ts",
+    "./config": "./src/config.ts",
+    "./models": "./src/models.ts",
+    "./routes": "./src/routes/index.ts",
+    "./workflows/runtime": "./src/workflows/index.ts",
+    "./context/receiver": "./src/context/receiver.ts",
+    "./context/reader": "./src/context/reader.ts",
+    "./context/source": "./src/context/source.ts",
+    "./context/contracts": "./src/context/contracts.ts",
+    "./context/devices": "./src/context/devices.ts",
+    "./context/model-view": "./src/context/model-view/index.ts",
+    "./context/model-view/format": "./src/context/model-view/format.ts",
+    "./context/model-view/decoding": "./src/context/model-view/decoding.ts",
+    "./development": "./scripts/watch.ts"
   }
 }

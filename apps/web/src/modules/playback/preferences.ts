@@ -8,7 +8,6 @@ function createPlaybackChoices(scope_epoch: string | undefined) {
 const playbackChoicesAtom = atom(createPlaybackChoices(undefined));
 const unpaused = new Set<string>();
 
-/** List and expanded viewers share choices for the current household runtime. */
 export const pausedPlaybackKeysAtom = atom((get) => {
   const choices = get(playbackChoicesAtom);
   return choices.scope_epoch === get(householdScopeEpochAtom)

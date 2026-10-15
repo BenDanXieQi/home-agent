@@ -13,8 +13,6 @@ function describeEntry(row: LogEntry) {
   };
 }
 
-// Reuse immutable history records across scrolling and comparison changes
-// without retaining rows after the query releases them.
 const presentations = new WeakMap<LogEntry, ReturnType<typeof describeEntry>>();
 export function presentLogEntry(row: LogEntry) {
   const previous = presentations.get(row);

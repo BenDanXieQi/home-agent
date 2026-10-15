@@ -3,8 +3,6 @@ import { fork } from "node:child_process";
 import pTimeout from "p-timeout";
 import type { z } from "zod";
 
-// One native inference child and one in-flight request. Model protocols and
-// recovery policy belong to adapters/runtimes; process ownership lives here.
 export function createInferenceProcess<
   Input extends object,
   Ready,

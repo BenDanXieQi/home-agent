@@ -25,7 +25,6 @@ export class ComputeBusyError extends Error {
   readonly code = "busy" as const;
 }
 
-// These schemas validate the real parent/child IPC boundary, not just TS types.
 export const taskSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("initialize") }),
   z.object({ kind: z.literal("detect"), frame: frameSchema }),

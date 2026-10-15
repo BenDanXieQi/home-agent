@@ -27,7 +27,6 @@ function pageIdentity(key: string, cursor: string | undefined) {
   return JSON.stringify([key, cursor]);
 }
 
-/** Owns one current history stream, its live head, and its appended history continuation. */
 export function useDeviceHistory(
   scope: string,
   input: HistoryQuery,
@@ -35,7 +34,6 @@ export function useDeviceHistory(
   live: boolean,
 ) {
   const key = historyKey(scope, input);
-  // The frozen interval survives device/kind changes; only an explicit range or scope change resets it.
   const rangeKey = JSON.stringify([scope, input.start, input.end]);
   const [savedRange, setSavedRange] = useState({
     key: rangeKey,
@@ -92,7 +90,7 @@ export function useDeviceHistory(
           connected: false,
         };
 
-  // oxlint-disable react/exhaustive-effect-dependencies -- Revision explicitly restarts the owned stream for retry.
+  // oxlint-disable react/exhaustive-effect-dependencies
   useEffect(() => {
     if (!ready) return undefined;
     let stopped = false;
@@ -251,8 +249,6 @@ export function useDeviceHistory(
 
   // oxlint-enable react/exhaustive-effect-dependencies
 
-  // Keep a completed result and its query together while only the kind changes.
-  // Other display-scope changes clear it.
   const display =
     displayed?.displayScopeKey === displayScopeKey ? displayed : undefined;
   const displayInput = display

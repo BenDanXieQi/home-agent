@@ -2,7 +2,6 @@ import type { CollectionSource } from "../household/collection";
 import type { MijiaService } from "./service";
 import { subscribableDevice } from "./protocols/miot/messages";
 
-/** All topic decoding and vendor read outcomes stay at the integration boundary. */
 export function createMijiaCollectionSource(service: MijiaService) {
   return {
     supports: subscribableDevice,

@@ -56,7 +56,6 @@ export function createMaterialRepository(db: Database) {
             : data.topic === "mijia_device_history"
               ? [data.device_id, data.source.endpoint, data.record_id]
               : null;
-      // A local packet ID is not a provider event identity. Unverified event IDs are not deduplicated.
       const sourceKey = providerIdentity
         ? JSON.stringify([
             data.account_id,
@@ -271,7 +270,6 @@ export function createMaterialRepository(db: Database) {
         const events = expired
           .filter((row) => row.sourceKey === null)
           .map((row) => row.id);
-        // Keep admission identity after body expiry, without retaining its content or relations.
         if (identities.length) {
           await tx
             .update(table)

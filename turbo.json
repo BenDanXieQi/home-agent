@@ -108,20 +108,28 @@
       "cache": false
     },
     "@home-agent/agent#build": {
-      "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "dependsOn": ["check-types"],
+      "outputs": []
     },
     "@home-agent/agent#check-types": {
-      "dependsOn": ["^check-types", "@home-agent/backend-client#build"]
+      "dependsOn": ["^check-types"]
     },
     "@home-agent/agent#lint": {
-      "dependsOn": ["^lint", "@home-agent/backend-client#build"]
+      "dependsOn": ["^lint"]
     },
     "@home-agent/agent#lint:fix": {
-      "cache": false,
-      "dependsOn": ["@home-agent/backend-client#build"]
+      "cache": false
     },
-    "@home-agent/agent#start": {
+    "@home-agent/backend-client#build": {
+      "dependsOn": ["@home-agent/backend#build:rpc"],
+      "outputs": ["dist/**"]
+    },
+    "@home-agent/backend-client#dev:types": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
+    },
+    "@home-agent/agent-host#start": {
       "dependsOn": ["build"],
       "cache": false,
       "persistent": true,
@@ -139,7 +147,7 @@
         "GITHUB_TOKEN"
       ]
     },
-    "@home-agent/agent#dev": {
+    "@home-agent/agent-host#dev": {
       "passThroughEnv": [
         "*_API_KEY",
         "ANTHROPIC_*",
@@ -155,20 +163,24 @@
       ],
       "cache": false,
       "persistent": true,
-      "dependsOn": ["@home-agent/backend-client#build"],
+      "dependsOn": [
+        "@home-agent/agent#build",
+        "@home-agent/backend-client#build"
+      ],
       "with": [
         "@home-agent/backend#dev:rpc",
         "@home-agent/backend-client#dev:types"
       ]
     },
-    "@home-agent/backend-client#build": {
-      "dependsOn": ["@home-agent/backend#build:rpc"],
-      "outputs": ["dist/**"]
+    "@home-agent/agent-host#check-types": {
+      "dependsOn": ["^check-types", "@home-agent/backend-client#build"]
     },
-    "@home-agent/backend-client#dev:types": {
-      "dependsOn": ["build"],
-      "cache": false,
-      "persistent": true
+    "@home-agent/agent-host#lint": {
+      "dependsOn": ["^lint", "@home-agent/backend-client#build"]
+    },
+    "@home-agent/agent-host#lint:fix": {
+      "dependsOn": ["@home-agent/backend-client#build"],
+      "cache": false
     }
   },
   "globalPassThroughEnv": [

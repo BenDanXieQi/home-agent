@@ -197,7 +197,6 @@ try {
           "本机部署统一使用 http://127.0.0.1:1984，请先在服务设置中更新 go2rtc 地址。",
         );
     }
-    // Stop only this project's other mode. Unknown port owners are never killed.
     if (mode === "native") {
       if (await dockerRunning("go2rtc"))
         await runDocker(["compose", "stop", "go2rtc"]);
@@ -221,7 +220,6 @@ try {
         await requireFreePorts();
         await runDocker([...up, "--build", "--no-deps", "go2rtc"]);
       }
-      // Container health alone cannot prove Desktop host networking is enabled.
       let reachable = false;
       for (let attempt = 0; attempt < 10; attempt++) {
         try {
@@ -233,9 +231,7 @@ try {
             reachable = true;
             break;
           }
-        } catch {
-          /* Wait for host-network listeners to become reachable. */
-        }
+        } catch {}
         await Bun.sleep(500);
       }
       if (!reachable)

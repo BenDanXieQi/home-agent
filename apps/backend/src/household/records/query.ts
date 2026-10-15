@@ -6,7 +6,6 @@ import type {
 } from "@home-agent/api/action-provenance";
 import type { accessHousehold } from "../access";
 
-/** A continuation belongs to one exact selection and household, not a relevance search. */
 export function provenanceQueryHash(
   ...[kind, scope, input]:
     | [

@@ -11,7 +11,7 @@ import { contextBrowseQuerySchema } from "@home-agent/api/household-context";
 import { accessHousehold } from "../household/access";
 import type { HouseholdRuntime } from "../household/runtime";
 import { HouseholdError } from "../household/errors";
-import { safeMijiaError } from "../mijia/errors";
+import { householdPublicError } from "../household/public-errors";
 import type { createContextRepository } from "./repository";
 
 export function createContextRoutes(
@@ -33,7 +33,7 @@ export function createContextRoutes(
   });
   app.onError((error, c) =>
     handleHttpError(
-      error instanceof HouseholdError ? safeMijiaError(error) : error,
+      error instanceof HouseholdError ? householdPublicError(error) : error,
       c,
     ),
   );

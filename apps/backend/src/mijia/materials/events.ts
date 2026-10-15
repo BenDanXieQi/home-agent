@@ -7,7 +7,6 @@ import { accessMaterialDevice } from "./access";
 import { failure, success, type CollectorDiagnostic } from "./diagnostics";
 
 type Scope = ReturnType<typeof accessHousehold>;
-/** Own event subscription handles, recovery and cancellation together. */
 export function createMaterialEventSubscriptions(deps: {
   mijia: MijiaService;
   signal: AbortSignal;
@@ -140,9 +139,7 @@ export function createMaterialEventSubscriptions(deps: {
                 | undefined;
               try {
                 specification = deps.mijia.getDeviceSpec(event.did, signal);
-              } catch {
-                /* Unknown specifications do not discard events. */
-              }
+              } catch {}
               const capability =
                 specification?.spec[`event.${event.siid}.${event.eiid}`];
               const generation = event.collection_generation;

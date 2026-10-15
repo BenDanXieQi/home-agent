@@ -17,7 +17,6 @@ import {
   perceptionSnapshotAtom,
 } from "./state";
 
-/** One perception subscription for the video parent route, independent of backend capture. */
 export function usePerceptionSubscription() {
   const store = useStore();
   useEffect(() => {

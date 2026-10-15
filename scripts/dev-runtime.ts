@@ -23,7 +23,7 @@ const applications = [
   // oxlint-disable-next-line turbo/no-undeclared-env-vars
   {
     name: "Agent",
-    package: "agent",
+    package: "agent-host",
     host: process.env.AGENT_HOST || "127.0.0.1",
     port: Number(process.env.AGENT_PORT || 1811),
   },
@@ -80,7 +80,11 @@ async function requireApplicationListener(app: (typeof applications)[number]) {
   const entry = await realpath(
     resolvePath(
       directory,
-      app.package === "web" ? "node_modules/.bin/vite" : "src/main.ts",
+      app.package === "web"
+        ? "node_modules/.bin/vite"
+        : app.package === "agent-host"
+          ? "scripts/dev.ts"
+          : "src/main.ts",
     ),
   );
   for (const pid of pids) {
@@ -255,8 +259,6 @@ export async function startDev(
     });
     const owner = { pid: child.pid!, identity: "" };
     const deadline = performance.now() + 2000;
-    // Process creation can precede the shebang launcher's final command line.
-    // Record only the verified identity, never an intermediate process image.
     for (;;) {
       owner.identity = await identity(owner.pid);
       if (child.exitCode !== null || child.signalCode !== null)

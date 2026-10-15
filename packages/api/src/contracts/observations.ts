@@ -135,7 +135,6 @@ export const propertyReadItemSchema = propertyAddressSchema.extend({
   observation_id: z.uuid().nullable(),
 });
 
-/** Vendor adapters translate into this boundary; domain code never parses MQTT topics. */
 const sourceEnvelope = z.object({
   source_id: z.string().min(1).max(128),
   collection_generation: z.string().min(1).max(128),

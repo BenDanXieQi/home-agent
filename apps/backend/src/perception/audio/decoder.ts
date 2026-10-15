@@ -55,7 +55,6 @@ export function createAudioDecoder(options: {
         anchorReceivedAt,
         decodedStartOffsetMs,
       } = await options.open(controller.signal);
-      // Use the source anchor and sample position, never the time a buffered packet is dequeued.
       const anchorMonotonic =
         performance.now() - (Date.now() - anchorReceivedAt);
       options.onMedia({ generation, anchorReceivedAt, decodedStartOffsetMs });

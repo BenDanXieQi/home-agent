@@ -1,15 +1,12 @@
 import { z } from "zod";
 import { produce, freeze } from "../immutable";
-import {
-  mijiaAccountSchema,
-  mijiaHomeSelectionSchema,
-  mijiaStateSchema,
-  mijiaErrorSchema,
-} from "./mijia";
+import { accountSessionStateSchema } from "../domain/account-session";
+import { playbackBindingSchema } from "../domain/playback";
 import {
   inventoryDeviceSchema,
   deviceCapabilitySchema,
 } from "../domain/devices";
+import { homeSelectionSchema } from "../domain/home-selection";
 import {
   latestPropertySchema,
   sourceHealthSchema,
@@ -47,14 +44,12 @@ export const householdSpecificationPolicy = {
 } as const;
 
 const encoder = new TextEncoder();
-/** Public diagnostics must fit even when an integration reports a large error. */
-function controlError<S extends z.ZodType<z.infer<typeof apiErrorSchema>>>(
-  schema: S,
+function controlError(
   limits:
     | Pick<typeof householdControlPolicy, "errorBytes" | "errorMessageLength">
     | typeof householdSpecificationPolicy = householdControlPolicy,
 ) {
-  return schema.transform((error) => {
+  return apiErrorSchema.transform((error) => {
     if (encoder.encode(JSON.stringify(error)).byteLength <= limits.errorBytes)
       return error;
     return {
@@ -66,15 +61,15 @@ function controlError<S extends z.ZodType<z.infer<typeof apiErrorSchema>>>(
     };
   });
 }
-const controlErrorSchema = controlError(mijiaErrorSchema);
+const controlErrorSchema = controlError();
 const homeIdSchema = z.string().min(1).max(householdControlPolicy.homeIdLength);
 const controlTimestampSchema = z.iso
   .datetime()
   .max(householdControlPolicy.timestampLength);
 const accountSchema = z.discriminatedUnion("status", [
-  mijiaAccountSchema.options[0],
-  mijiaAccountSchema.options[1],
-  mijiaAccountSchema.options[2].extend({ error: controlErrorSchema }),
+  accountSessionStateSchema.options[0],
+  accountSessionStateSchema.options[1],
+  accountSessionStateSchema.options[2].extend({ error: controlErrorSchema }),
 ]);
 const connectionSchema = z.discriminatedUnion("status", [
   operationSchema.options[0].extend({
@@ -84,12 +79,12 @@ const connectionSchema = z.discriminatedUnion("status", [
   operationSchema.options[1].extend({
     createdAt: controlTimestampSchema,
     updatedAt: controlTimestampSchema,
-    error: controlError(apiErrorSchema),
+    error: controlErrorSchema,
   }),
 ]);
 const bindingSchema = z.discriminatedUnion("status", [
-  mijiaStateSchema.shape.binding.options[0],
-  mijiaStateSchema.shape.binding.options[1].extend({
+  playbackBindingSchema.options[0],
+  playbackBindingSchema.options[1].extend({
     error: controlErrorSchema,
   }),
 ]);
@@ -137,7 +132,7 @@ export const householdSchema = z.object({
     "stopping",
   ]),
   stage: z.enum(["account", "directory", "ready"]),
-  homes: mijiaHomeSelectionSchema.omit({ items: true }).extend({
+  homes: homeSelectionSchema.omit({ items: true }).extend({
     selectedHomeId: homeIdSchema.nullable(),
   }),
   sync_status: z.enum(["unsynced", "syncing", "synced", "error"]),
@@ -170,10 +165,7 @@ export const deviceSchema = inventoryDeviceSchema.extend({
   device_id: z.string(),
   spec_id: specificationIdSchema.nullable(),
   spec_status: z.enum(["loading", "ready", "error"]),
-  spec_error: controlError(
-    mijiaErrorSchema,
-    householdSpecificationPolicy,
-  ).nullable(),
+  spec_error: controlError(householdSpecificationPolicy).nullable(),
   archived: z.boolean(),
   alias: z.string().nullable(),
   category: categorySchema,
@@ -350,7 +342,7 @@ export const resyncSchema = stateVersionSchema.extend({
 export const commandResultSchema = z.object({
   state_version: stateVersionSchema,
 });
-export const setupHomesSchema = mijiaHomeSelectionSchema.pick({ items: true });
+export const setupHomesSchema = homeSelectionSchema.pick({ items: true });
 export const selectHomeSchema = z.strictObject({
   scope_epoch: z.uuid(),
   home_id: homeIdSchema,
@@ -363,7 +355,6 @@ export type DirectoryRefreshTarget = z.infer<
   typeof refreshDirectorySchema
 >["target"];
 
-/** Apply a batch validated by stateChangeSchema at the input boundary. */
 export function applyChanges(
   projection: Projection,
   input: z.infer<typeof stateChangeSchema>,
@@ -393,7 +384,6 @@ export const roomFactsQuerySchema = z.strictObject({
   offset: z.number().int().nonnegative().max(20_000).default(0),
 });
 
-/** Pure view of one committed snapshot, shared by HTTP and the subscribed Web view. */
 export function selectRoomFacts(
   snapshot: z.infer<typeof snapshotSchema>,
   query: z.input<typeof roomFactsQuerySchema>,

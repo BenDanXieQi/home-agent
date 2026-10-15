@@ -131,7 +131,6 @@ test("close drains all workers before any native session release", async () => {
   try {
     expect(pool.close()).toBe(closing);
     await a;
-    // Give an incorrectly early release a chance to reach the worker boundary.
     await new Promise((resolve) => setImmediate(resolve));
     for (const worker of workers) {
       expect(
@@ -309,8 +308,6 @@ test("appearance can start with one idle slot while a detector remains active", 
   workers[0]!.run.mockImplementationOnce(() => detection.promise);
   const pending = pool.submit({ kind: "detect", frame });
   try {
-    // A continuously occupied detector must not prevent the other CPU slot
-    // from being assigned to appearance. No admitted detection is displaced.
     expect(pool.reserveTracking()).toBe(true);
     expect(pool.available).toBe(false);
   } finally {

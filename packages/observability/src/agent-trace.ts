@@ -30,7 +30,6 @@ function markContext(parent: Context) {
   );
 }
 
-/** An application execution boundary, independent of sampling and export destinations. */
 export function withAgentTrace<T>(run: () => T) {
   const parent = context.active();
   const span = trace.getSpan(parent);
@@ -38,13 +37,11 @@ export function withAgentTrace<T>(run: () => T) {
   return context.with(markContext(parent), run);
 }
 
-/** Restore the marker when durable work restores a span without its original baggage. */
 export function agentTraceContext(parent: Context) {
   const span = trace.getSpan(parent);
   return span && agentSpans.has(span) ? markContext(parent) : parent;
 }
 
-/** Enrich all destinations equally; only the Langfuse processor filters records. */
 export class AgentTraceMarker extends NoopSpanProcessor {
   override onStart(...args: Parameters<SpanProcessor["onStart"]>) {
     const [span, parent] = args;
@@ -65,7 +62,6 @@ export class AgentTraceMarker extends NoopSpanProcessor {
   }
 }
 
-/** Native batching owns the queue, export, flushing and shutdown. */
 export class LangfuseAgentSpanProcessor extends BatchSpanProcessor {
   override onEnd(span: Parameters<SpanProcessor["onEnd"]>[0]) {
     if (span.attributes[attribute] === true) super.onEnd(span);

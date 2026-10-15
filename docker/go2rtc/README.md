@@ -25,15 +25,6 @@ The backend establishes a go2rtc runtime session identified by `sessionId`, then
 
 Within `overlay/internal/xiaomi/`:
 
-- `home_agent.go`: HTTP boundary, go2rtc runtime session and lease.
-- `home_agent_audio.go`: request-owned, bounded audio readers; PCMA passthrough and Pion Opus/Ogg packaging with decoded-sample granule timing.
-- `home_agent_analysis.go`: request-owned, bounded MPEG-TS analysis consumers for H264/H265 video.
-- `home_agent_camera.go`: private camera-channel streams, resident consumers and capture recovery.
-- `home_agent_dual_camera.go`: dual-camera shared-connection ownership and per-channel private dialers.
-- `home_agent_playback.go`: viewer negotiation and retirement.
-- `home_agent_playback_timing.go`: viewer timing snapshots and correlated diagnostics.
-- `home_agent_recordings.go` and `home_agent_recording_download.go`: bounded reads of an existing producer's SD-card index and files.
-
 ## Internal API
 
 The base path is `/api/home-agent/mijia/`. Requests require `X-Home-Agent: mijia`, JSON bodies and a loopback/private-network peer; browser Origin and Fetch Metadata are rejected. This is a trusted local management interface, without multi-user authentication. Managed listeners bind to loopback.
@@ -71,8 +62,6 @@ Diagnostics report negotiation outcomes with their timing snapshot, resident att
 `runtime.patch` and the overlay add the private session/media API, bounded camera negotiation, stream recovery and CS2 packet handling fixes. They also remove sensitive Xiaomi protocol and media logs. Diagnostics expose fixed stage/reason labels rather than device identifiers, addresses or payloads.
 
 The MISS control-message drain includes the focused change from upstream [PR #2489](https://github.com/AlexxIT/go2rtc/pull/2489), commit [`3fd320ec0dd9cd4c90ac9e9bd9115f7637a350c8`](https://github.com/AlexxIT/go2rtc/commit/3fd320ec0dd9cd4c90ac9e9bd9115f7637a350c8).
-
-`overlay/pkg/xiaomi/miss/dual_camera.go` implements the MISS dual-lens transport. The dual-start command and channel-demultiplexing work in upstream [PR #2027](https://github.com/AlexxIT/go2rtc/pull/2027) informed the protocol investigation; this implementation uses the channel flags verified on C500, without resolution or sequence-number guessing. It does not cache credentials across runtime accounts.
 
 Camera compatibility depends on upstream Xiaomi support and backend channel mapping. See [camera usage and limitations](../../docs/mijia.md).
 

@@ -205,7 +205,6 @@ export const contextRecords = pgTable(
   {
     sourceKey: text("source_key"),
     sourceOccurredAt: timestamp("source_occurred_at", { withTimezone: true }),
-    // Producers reuse this ID when retrying the same submission.
     id: uuid("id").primaryKey(),
     kind: contextKind("kind").notNull(),
     topic: text("topic").notNull(),
@@ -397,7 +396,6 @@ export const devicePropertyDefinitions = pgTable(
     ),
   ],
 );
-/** Last successfully saved state for each device item; independent of history retention and wall-clock order. */
 export const deviceHistoryState = pgTable(
   "device_history_state",
   {

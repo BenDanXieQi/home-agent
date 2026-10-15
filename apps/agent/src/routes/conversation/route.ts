@@ -1,5 +1,5 @@
 import { createRouteApp, type RouteContext } from "../definition";
-import { chatInputSchema, chatResponseSchema } from "@home-agent/api/contracts";
+import { chatInputSchema, chatResponseSchema } from "../../assistant/contracts";
 import { AppError } from "@home-agent/api/errors";
 import { validateJson } from "@home-agent/api/errors/hono";
 import { createConversationInteraction } from "../../assistant/conversation";

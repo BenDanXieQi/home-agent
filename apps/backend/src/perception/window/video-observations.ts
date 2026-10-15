@@ -30,8 +30,6 @@ function frameKey(
   ].join(":");
 }
 
-// One owner for early and late video observations. Closed frame judgments are
-// immutable; all analyzers use the same exact frame identity and admission bound.
 export function createWindowVideoObservations() {
   const pending = new Map<
     Event["event"],

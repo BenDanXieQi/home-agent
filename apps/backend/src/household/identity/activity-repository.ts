@@ -28,7 +28,6 @@ import type { memberActivity } from "./activity";
 
 const memberSightingTopic = sql`${contextRecords.topic} = 'member_sighting'`;
 
-/** Sighting association fields and attribution revisions cross the storage boundary. */
 export const memberObservationSchema = z.object({
   id: z.uuid(),
   data: memberActivityDataSchema.pick({
@@ -259,7 +258,6 @@ export function createMemberActivityRepository(db: Database) {
       assertCurrent: () => void,
       activity: ReturnType<typeof memberActivity>,
     ) {
-      // Validate the shared JSON boundary before acquiring storage resources.
       const data = memberActivityDataSchema.parse(activity.record.data);
       const current = data.attribution.current;
       if (
@@ -373,8 +371,6 @@ export function createMemberActivityRepository(db: Database) {
             )
               throw new Error("Member activity correction count decreased");
           }
-          // The activity owner checks live member/reference eligibility here,
-          // under the same lock used to revoke matching before member mutations.
           assertCurrent();
           beforeWrite();
           if (!saved)

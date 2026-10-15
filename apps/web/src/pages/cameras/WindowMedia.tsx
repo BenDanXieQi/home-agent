@@ -200,7 +200,6 @@ function MediaRequest({
         <Button
           disabled={!active}
           onClick={() => {
-            // refetch owns request failures and exposes them through query.error.
             // oxlint-disable-next-line typescript/no-floating-promises
             query.refetch();
           }}

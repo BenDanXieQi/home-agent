@@ -226,7 +226,6 @@ describe("Mijia HTTP contract (real Hono app.request)", () => {
       await nextTurn();
       expect((await h.request("/events")).status).toBe(503);
       const heartbeat = reader.read();
-      // Hono buffers the initial snapshot; the next write blocks only slow readers.
       jest.advanceTimersByTime(householdLimits.heartbeatMs);
       expect(decoder.decode((await heartbeat).value)).toStartWith(
         "event: heartbeat\n",

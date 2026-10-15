@@ -5,7 +5,6 @@ import type {
   LogEntry,
 } from "../../modules/device-history/presentation";
 
-/** Comparison selection survives display refinements; its time anchor belongs to a query. */
 export function useLogComparison(
   devices: ReturnType<typeof historyDevices>,
   queryKey: string,

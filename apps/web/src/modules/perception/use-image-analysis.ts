@@ -80,7 +80,6 @@ export function useImageAnalysis() {
     try {
       let submitted = ownedImage.current;
       if (file) {
-        // Native preparation drains before only the latest selection proceeds.
         if (preparing.current) await Promise.allSettled([preparing.current]);
         current.signal.throwIfAborted();
         preparation = prepareAnalysisImage(file, current.signal);

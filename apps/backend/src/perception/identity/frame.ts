@@ -6,7 +6,6 @@ import profile from "./profile.json";
 import { loadImage } from "../detection/image";
 import type { imageRequestSchema } from "../detection/image-request";
 
-// Registration and online matching use identical full-frame geometry and pixels.
 export async function prepareIdentityFrame(
   observation: Pick<
     z.infer<typeof trackingObservationSchema>,
@@ -57,8 +56,6 @@ export async function prepareIdentityFrame(
   };
 }
 
-// A still photograph has no camera geometry. Preserve its aspect ratio and the
-// entire image so the single-face check cannot hide a second face by cropping.
 export async function prepareFacePhoto(
   input: z.infer<typeof imageRequestSchema>,
 ) {

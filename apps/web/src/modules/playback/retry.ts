@@ -1,7 +1,6 @@
 import { RequestError } from "../../api/errors";
 import type { PlaybackSession } from "./session";
 
-/** Retry transient playback failures at most three times per viewing attempt. */
 export function playbackRetryDelay(
   failure: ReturnType<PlaybackSession["getSnapshot"]>["failure"],
   attempts: number,

@@ -1,7 +1,5 @@
 import { FixedQueue, queueOptionsSymbol } from "piscina";
 
-// Queue residence is measured entirely in the compute process. Public queue
-// options associate Piscina's opaque task with the submitting request.
 export function createInferenceQueue() {
   const tasks = new FixedQueue();
   const enteredAt = new WeakMap<Parameters<FixedQueue["push"]>[0], number>();

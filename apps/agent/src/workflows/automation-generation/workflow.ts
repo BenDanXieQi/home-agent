@@ -1,9 +1,11 @@
+import {
+  automationDraftSchema,
+  type automationGenerationInputSchema,
+} from "./contracts";
 import { partial } from "radash";
 import { automationDefinitionSchema } from "@home-agent/api/automations";
 
 import {
-  automationDraftSchema,
-  type automationGenerationInputSchema,
   validateAutomationCapabilities,
   type AutomationCapabilities,
 } from "@home-agent/api/automations";
@@ -43,8 +45,6 @@ trigger 节点必须有 trigger：enter 表示条件从不满足变为满足；e
 未指定冷却时 cooldown_seconds=0，action_ttl_seconds=60；说明有效触发后仍需条件成立且动作未过期。保留用户已有的冷却、期限和未要求修改的条件及动作。
 规则对象的 JSON Schema：${JSON.stringify(z.toJSONSchema(automationDefinitionSchema))}`;
 
-// One explicit model wire format keeps recursive JSON out of tool-argument
-// objects. The shared definition remains the only executable configuration.
 const modelDraftSchema = automationDraftSchema
   .omit({ definition: true })
   .extend({

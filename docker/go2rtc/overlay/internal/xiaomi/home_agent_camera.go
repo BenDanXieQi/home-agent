@@ -19,7 +19,6 @@ import (
 	"github.com/pion/rtp"
 )
 
-// One private stream per camera channel, shared by its resident consumer and viewers.
 type homeAgentCameraState struct {
 	stream          *streams.Stream
 	ctx             context.Context
@@ -98,7 +97,6 @@ func homeAgentCamera(w http.ResponseWriter, r *http.Request) {
 		query.Set("channel", "2")
 		source.RawQuery = query.Encode()
 	}
-	// Private streams never enter the global stream registry or configuration.
 	ctx, cancel := context.WithCancel(context.Background())
 	camera := &homeAgentCameraState{
 		ctx: ctx, cancel: cancel, gate: make(chan struct{}, 1),
@@ -133,8 +131,6 @@ func homeAgentCloseCamera(camera *homeAgentCameraState) {
 	if camera.releaseSource != nil {
 		camera.releaseSource()
 	}
-	// Close cannot race AddConsumer. Retired cameras finish their own bounded dial
-	// and cleanup without blocking heartbeats, DELETE or a new camera's stream.
 	go func() {
 		camera.gate <- struct{}{}
 		defer func() { <-camera.gate }()
@@ -142,8 +138,6 @@ func homeAgentCloseCamera(camera *homeAgentCameraState) {
 	}()
 }
 
-// A packet-only consumer maintains source ownership without decoding or storing
-// video. Liveness uses every packet, independent of keyframe cadence.
 type homeAgentPacketActivity struct {
 	last          atomic.Int64
 	firstObserved atomic.Bool
@@ -178,8 +172,6 @@ func (c *homeAgentSourceConsumer) AddTrack(media *core.Media, _ *core.Codec, tra
 	return nil
 }
 
-// Rebuild the entire channel, including hidden viewers that cannot detect silence.
-// Never wait for a camera's gate while holding the session ownership lock.
 func homeAgentRestartStalled(session *homeAgentSession, camera *homeAgentCameraState, activity *homeAgentPacketActivity, observed time.Time) bool {
 	select {
 	case camera.gate <- struct{}{}:
@@ -190,8 +182,6 @@ func homeAgentRestartStalled(session *homeAgentSession, camera *homeAgentCameraS
 	if camera.ctx.Err() != nil {
 		return true
 	}
-	// A viewer dial or native reconnect may have restored the source while this
-	// watchdog waited for the gate. Preserve its consumers and reconnect backoff.
 	if camera.stream.HomeAgentReconnecting() || time.Unix(0, activity.last.Load()).After(observed) {
 		return false
 	}
@@ -207,22 +197,16 @@ func homeAgentRestartStalled(session *homeAgentSession, camera *homeAgentCameraS
 		homeAgentRetirePlayback(session, camera, playback)
 	}
 	homeAgentMu.Unlock()
-	// Removing only the resident consumer cannot stop a producer still owned by
-	// a browser. Close resets the private producer so the next attachment redials.
-	// Viewer cleanup can acquire homeAgentMu, so Close must run outside that lock.
 	camera.activity.CompareAndSwap(activity, nil)
 	camera.stream.Close()
 	return true
 }
 
-// Caller holds homeAgentMu. Source lifetime belongs to the backend session, never a viewer request.
 func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 	ctx := camera.ctx
 	go func() {
 		retryDelay := homeAgentRetryMinimum
 		for ctx.Err() == nil {
-			// A closed sender may still drain buffered packets. Its activity must
-			// never count as a first packet from a newer resident attachment.
 			activity := &homeAgentPacketActivity{first: make(chan time.Time, 1)}
 			consumer := homeAgentNewConsumer(activity)
 			select {
@@ -252,8 +236,6 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 					case packetAt := <-activity.first:
 						diagnostic.ReportDuration("source_first_packet", packetAt.Sub(sourceStarted), nil)
 					case <-ticker.C:
-						// The producer already owns retries after an established source
-						// fails. Removing its last consumer would reset that backoff.
 						if camera.stream.HomeAgentReconnecting() {
 							attachedAt = time.Now()
 							lastActivity = attachedAt
@@ -266,8 +248,6 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 								firstPacket = frame
 							}
 						}
-						// Repeated attachments without packets must not reset the retry
-						// delay. Sustained media, rather than a successful dial, resets it.
 						if !firstPacket.IsZero() && lastActivity.Sub(firstPacket) >= homeAgentRetryResetAfter {
 							retryDelay = homeAgentRetryMinimum
 						}
@@ -286,8 +266,6 @@ func homeAgentCapture(session *homeAgentSession, camera *homeAgentCameraState) {
 			camera.gate <- struct{}{}
 			camera.stream.RemoveConsumer(consumer)
 			<-camera.gate
-			// Per-source capped backoff avoids repeated failed attachments; jitter
-			// keeps cameras that lost connectivity together from redialing together.
 			wait := retryDelay - time.Duration(rand.Int64N(int64(retryDelay/4)))
 			timer := time.NewTimer(wait)
 			select {

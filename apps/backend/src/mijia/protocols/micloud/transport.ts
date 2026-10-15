@@ -3,19 +3,16 @@ import {
   ResponseBodyError,
 } from "@home-agent/api/http/read-body";
 import { parseRetryAfter } from "@home-agent/api/http/retry-after";
-// Adapted from homebridge-miot/lib/protocol/MiCloud.js; source and MIT license in ../README.md.
 // Copyright (c) 2025 Marcin.
 import { Cookie, CookieJar } from "tough-cookie";
 import { MiCloudError } from "./errors";
 import type { MiCloudSavedSession } from "./session";
 
-// Xiaomi redirects can replay form bodies on 307/308 responses.
 export type RequestOptions = Omit<RequestInit, "body"> & {
   body?: URLSearchParams;
   sameOriginRedirects?: boolean;
   rejectRedirects?: boolean;
 };
-/** Reports the first fetch dispatch, after local request preparation has succeeded. */
 export type RequestStartObserver = (startedAt: string) => void;
 type Identity = Pick<MiCloudSavedSession, "clientId" | "userAgent">;
 type CookieOptions = {
@@ -45,7 +42,6 @@ export function trustedUrl(value: string, base?: string) {
   }
 }
 
-/** Owns one account's cookies and requests; returned bodies are fully consumed. */
 export class MiCloudTransport {
   #controller = new AbortController();
   #cookies = new CookieJar();
@@ -84,18 +80,14 @@ export class MiCloudTransport {
   }
 
   cookie(name: string, url: URL | string) {
-    return (
-      this.#cookies
-        .getCookiesSync(url.toString())
-        .filter((cookie) => cookie.key === name)
-        // Protocol credential extraction uses the latest matching write. Jar
-        // ordering can put a seeded token before its rotated value in another scope.
-        .toSorted(
-          (a, b) =>
-            (this.#cookieWrites.get(this.#cookieKey(b)) ?? 0) -
-            (this.#cookieWrites.get(this.#cookieKey(a)) ?? 0),
-        )[0]
-    );
+    return this.#cookies
+      .getCookiesSync(url.toString())
+      .filter((cookie) => cookie.key === name)
+      .toSorted(
+        (a, b) =>
+          (this.#cookieWrites.get(this.#cookieKey(b)) ?? 0) -
+          (this.#cookieWrites.get(this.#cookieKey(a)) ?? 0),
+      )[0];
   }
 
   #cookieKey(cookie: Cookie) {
@@ -111,7 +103,6 @@ export class MiCloudTransport {
   }
 
   setCookie(key: string, value: string, url: string, options: CookieOptions) {
-    // JSON credentials are protocol values, not Set-Cookie header strings.
     if (!/^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]+$/.test(value))
       throw new MiCloudError("invalid-response");
     try {
@@ -164,7 +155,6 @@ export class MiCloudTransport {
         const location = response.headers.get("location");
         if ([301, 302, 303, 307, 308].includes(response.status) && location) {
           await response.body?.cancel();
-          // A command must never be replayed by an HTTP redirect.
           if (rejectRedirects) throw new MiCloudError("invalid-response");
           const destination = trustedUrl(location, next.toString());
           if (sameOriginRedirects && destination.origin !== url.origin)
@@ -243,7 +233,6 @@ export class MiCloudTransport {
     for (const header of response.headers.getSetCookie()) {
       const cookie = Cookie.parse(header);
       if (!cookie) continue;
-      // Anchor Max-Age to receipt; jar reads update lastAccessed.
       const expiryTime = cookie.expiryTime(new Date());
       if (
         cookie.maxAge !== null &&
@@ -253,7 +242,6 @@ export class MiCloudTransport {
         cookie.expires = new Date(expiryTime);
         cookie.maxAge = null;
       }
-      // Library errors can contain credentials and hostnames.
       const stored = this.#cookies.setCookieSync(cookie, url.toString(), {
         ignoreError: true,
       });

@@ -44,7 +44,6 @@ export function completeStructuredOutput(
     });
 
   if (hasApi(model, "anthropic-messages")) {
-    // Pi forwards the native tool_choice object to the Anthropic SDK unchanged.
     const toolChoice = {
       type: "tool" as const,
       name: tool.name,

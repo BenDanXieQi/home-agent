@@ -1,4 +1,3 @@
-/** Registration lifecycle failures; HTTP chooses status codes and translations. */
 export class ReferenceEnrollmentError extends Error {
   constructor(
     readonly reason:

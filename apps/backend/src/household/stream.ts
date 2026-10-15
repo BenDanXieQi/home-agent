@@ -38,7 +38,6 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
       snapshot: () => (snapshotFrame ??= serialize("snapshot", snapshot)),
       change: () => {
         if (!changes.length) return undefined;
-        // Runtime commits already validate and freeze every change record.
         return (changeFrame ??= serialize("state_change", {
           ...version,
           changes,
@@ -71,7 +70,6 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
     return cached;
   }
   return (c: Context) => {
-    // Hono dispatches HEAD through GET, then discards the body without cancelling it.
     if (c.req.method === "HEAD")
       return c.body(null, 200, {
         "Content-Type": "text/event-stream",
@@ -113,7 +111,6 @@ export function createHouseholdStream(runtime: HouseholdRuntime) {
         });
       }
       try {
-        // No await between registration and the single committed snapshot.
         detach = runtime.subscribe(() => {
           const next = current();
           if (

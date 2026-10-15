@@ -5,7 +5,6 @@ import type { createMaterialStorage } from "./storage";
 import { sourceMetadata } from "../protocols/source-metadata";
 import { success, type CollectorDiagnostic } from "./diagnostics";
 
-/** Own one speaker's page traversal; the service owns scheduling and retry gates. */
 export async function collectSpeakerConversations({
   access,
   speaker,

@@ -48,7 +48,7 @@ export function HistoryControls({
       exportController.current = null;
       controller?.abort();
     };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A changed filter cancels the export without remounting the toolbar.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [queryKey]);
 
   useEffect(() => {

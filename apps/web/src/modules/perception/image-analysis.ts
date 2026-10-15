@@ -63,8 +63,6 @@ export async function prepareAnalysisImage(file: File, signal: AbortSignal) {
     signal.throwIfAborted();
     if (blob.size > imageLimits.maxFileBytes)
       throw new Error("处理后的图片超过 32 MiB，请先缩小图片。");
-    // Preview and upload share this exact PNG, with EXIF orientation applied
-    // and transparency flattened. No metadata rotation remains for sharp.
     return {
       name: file.name,
       blob,

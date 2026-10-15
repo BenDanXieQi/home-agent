@@ -23,7 +23,6 @@ describe("readable capability gate", () => {
     expect(getDeviceSpec.mock.calls.map(([did]) => did)).toEqual(["a", "b"]);
     input[0]!.piid = 3;
     expect(result[0]?.piid).toBe(1);
-    // No notify capability or directory online fact is required for a readable property.
     expect(result[0]).toEqual({ did: "a", siid: 2, piid: 1 });
   });
 

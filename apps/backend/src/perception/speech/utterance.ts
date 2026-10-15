@@ -4,8 +4,6 @@ import type { audioTrackSchema } from "@home-agent/api/contracts";
 import type { z } from "zod";
 import { speechLimits } from "./limits";
 
-// Keep the pinned package subpaths here: its root also imports browser/ONNX modules.
-// Existing Silero probabilities are the only model input to this segmenter.
 export function createUtterances(options: {
   speech: () => void;
   activity: () => void;
@@ -28,7 +26,6 @@ export function createUtterances(options: {
   const processor = new FrameProcessor(
     () =>
       Promise.resolve({ isSpeech: probability, notSpeech: 1 - probability }),
-    // Segment boundaries do not reset the continuous P3 model; its audio run owns that state.
     () => {},
     {
       positiveSpeechThreshold: speechLimits.positiveThreshold,
@@ -93,7 +90,6 @@ export function createUtterances(options: {
       if (probability >= speechLimits.positiveThreshold)
         speechEndSample = endSample;
       await processor.process(samples, event);
-      // Enforce our sample budget from speech events, without inspecting library buffers.
       if (segmentLimit !== undefined && endSample >= segmentLimit) {
         forced = true;
         try {

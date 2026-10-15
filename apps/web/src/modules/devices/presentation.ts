@@ -93,7 +93,6 @@ export function deviceUnit(unit: string | null | undefined) {
   return !unit || unit === "none" ? "" : (units.get(unit) ?? unit);
 }
 
-/** Preserve raw value types when the supplied specification has no enum label. */
 export function formatDevicePropertyValue(
   value: z.infer<typeof propertyValueSchema>,
   metadata: {

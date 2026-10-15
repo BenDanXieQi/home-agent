@@ -3,7 +3,6 @@ import { getTableConfig, PgTable } from "drizzle-orm/pg-core";
 import * as schema from "../db/schema";
 import type { Transaction } from "../db/transaction-outcome";
 
-// Every table must declare its lifetime. Adding a table without a policy is a type error.
 const tableLifetime = {
   perceptionWindows: "household",
   credentials: "installation",
@@ -46,7 +45,6 @@ const tables = Object.entries(schema).flatMap(([key, value]) => {
   return [{ name: config.name, lifetime }];
 });
 
-/** Runs only inside the exclusive household-binding transaction. */
 export async function clearHouseholdData(tx: Transaction) {
   const actual = await tx
     .select({ name: sql<string>`tablename` })
@@ -65,7 +63,6 @@ export async function clearHouseholdData(tx: Transaction) {
     .map(
       (table) => sql`${sql.identifier("public")}.${sql.identifier(table.name)}`,
     );
-  // Explicitly list every household table; never cascade into installation data.
   await tx.execute(
     sql`truncate table ${sql.join(householdTables, sql`, `)} restrict`,
   );

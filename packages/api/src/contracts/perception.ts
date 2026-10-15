@@ -116,7 +116,6 @@ export const trackingObservationSchema = z.object({
     )
     .max(16),
 });
-// These are local face-reference observations, not authoritative household identities.
 const identityTrackSchema = z.object({
   trackId: z.int().positive(),
   state: z.enum(["unknown", "candidate", "confirmed", "conflict"]),
@@ -203,7 +202,6 @@ export const identityObservationSchema = trackingObservationSchema
       confirmationDelayMsTotal: z.number().nonnegative(),
     }),
   });
-// Public summaries preserve provenance without features or media bytes.
 export const appearanceSummarySchema = trackingObservationSchema
   .pick({
     run: true,
@@ -358,7 +356,6 @@ export const memberActivityDataSchema = z.object({
   timeBasis: z.literal("host_received_at"),
   attribution: memberActivityAttributionSchema,
 });
-// Frozen at tracking completion; pending describes that moment, not live work.
 export const identityFrameSnapshotSchema = z.object({
   status: identityObservationSchema.shape.status.or(z.literal("disabled")),
   evaluatedAt: z.number(),

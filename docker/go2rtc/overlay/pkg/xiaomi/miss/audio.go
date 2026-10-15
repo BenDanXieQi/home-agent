@@ -6,7 +6,6 @@ import (
 	"github.com/bluenviron/mediacommon/v2/pkg/codecs/opus"
 )
 
-// MISS audio uses sample counts for its RTP clock, shared by single and dual cameras.
 func audioSamples(packet *Packet) (uint32, error) {
 	if packet.CodecID == codecPCMA && len(packet.Payload) > 0 {
 		return uint32(len(packet.Payload)), nil

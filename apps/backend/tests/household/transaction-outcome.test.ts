@@ -4,7 +4,6 @@ import {
   StorageOutcomeUnknownError,
 } from "../../src/db/transaction-outcome";
 
-/** Commit acknowledgement and subsequent reads fail independently of durable data. */
 function storage() {
   const rows = new Map<string, string>();
   const mutations: { key: string; value: string }[] = [];

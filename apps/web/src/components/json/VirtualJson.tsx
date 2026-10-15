@@ -105,7 +105,7 @@ export const VirtualJson = memo(function VirtualJson({
         try {
           inFlight = true;
           prepared = latest;
-          // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Dedicated worker messaging has no targetOrigin.
+          // oxlint-disable-next-line unicorn/require-post-message-target-origin
           current.postMessage(request);
         } catch {
           fail("无法读取 JSON，请重新读取。");
@@ -127,7 +127,6 @@ export const VirtualJson = memo(function VirtualJson({
             setResizing(false);
             sendLayout();
           } else {
-            // One in-flight layout, plus only the latest requested width.
             sendLayout();
           }
         },
@@ -179,7 +178,7 @@ export const VirtualJson = memo(function VirtualJson({
     updateValue.current?.(value);
   }, [value, attempt]);
   const lines = result?.kind === "ready" ? result.lines : [];
-  // oxlint-disable-next-line react/incompatible-library -- Read the virtualizer's current visible range on each render.
+  // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => scroller.current,
@@ -243,7 +242,7 @@ export const VirtualJson = memo(function VirtualJson({
       <section
         ref={scroller}
         aria-label="完整 JSON 连续滚动阅读区"
-        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- This scrollable text region needs keyboard scrolling without focusing a virtual row.
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         className="h-96 min-w-0 overflow-auto rounded-xl bg-surface p-3 focus-visible:outline-2 focus-visible:outline-accent"
         style={{

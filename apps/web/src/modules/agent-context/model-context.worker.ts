@@ -2,7 +2,7 @@ import {
   createHouseholdModelView,
   encodeHouseholdContext,
   ModelContextError,
-} from "@home-agent/api/household-model-view";
+} from "@home-agent/agent/context/model-view";
 
 export function compressModelContext(
   snapshot: Parameters<typeof createHouseholdModelView>[0],
@@ -33,7 +33,7 @@ export function compressModelContext(
 self.addEventListener(
   "message",
   (event: MessageEvent<Parameters<typeof compressModelContext>[0]>) => {
-    // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Dedicated worker messaging has no targetOrigin.
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin
     self.postMessage(compressModelContext(event.data));
   },
 );

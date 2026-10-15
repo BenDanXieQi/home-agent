@@ -9,8 +9,6 @@ afterEach(async () => {
 });
 
 test("an unconfirmed initial media installation preserves cloud access and is deleted before its replacement", async () => {
-  // MiLoCo test_reinit.py::test_client_init_camera_failure_triggers_full_cleanup
-  // tears down its combined native client. Here media owns a separate remote lease.
   const originalFetch = globalThis.fetch;
   let loseFirstInstallResponse = true;
   const request = async (
@@ -26,7 +24,6 @@ test("an unconfirmed initial media installation preserves cloud access and is de
       init?.method === "PUT"
     ) {
       loseFirstInstallResponse = false;
-      // The peer received the authorization; the backend never receives its ACK.
       await response.body?.cancel();
       throw new TypeError("fixture lost installation response");
     }

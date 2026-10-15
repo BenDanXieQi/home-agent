@@ -32,7 +32,6 @@ export function useRecordingPlayback(target: RecordingTarget | null) {
   const request = mutation.variables;
   const query = useQuery({
     ...recordingPlaybackOptions(request),
-    // A lost PUT response is recovered by GET for the same resource ID.
     enabled: !!target && !!request && !mutation.isPending,
   });
   const [now, setNow] = useState(Date.now);
@@ -51,7 +50,6 @@ export function useRecordingPlayback(target: RecordingTarget | null) {
     owner.current = null;
     if (!current) return;
     current.controller.abort();
-    // TanStack owns cancellation failures and always resolves this Promise.
     // oxlint-disable-next-line typescript/no-floating-promises
     client.cancelQueries({
       queryKey: recordingPlaybackOptions(current.input).queryKey,

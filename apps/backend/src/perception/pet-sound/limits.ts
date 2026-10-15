@@ -1,4 +1,3 @@
-// Model context belongs to sound analysis, independently of capture windows.
 export const petSoundPolicy = Object.freeze({
   sampleRate: 16000,
   contextMs: 4000,

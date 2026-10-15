@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-// Shared native-worker lifecycle; each analyzer supplies its actual result schema.
 export function audioInferenceResponse<Result extends z.ZodType>(
   result: Result,
   modelSha256: string,

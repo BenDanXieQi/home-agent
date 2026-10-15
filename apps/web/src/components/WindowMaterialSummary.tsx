@@ -7,7 +7,6 @@ import {
 } from "../modules/perception/window-presentation";
 import { formatTime } from "../modules/presentation/time";
 
-/** Render the supplied version without reading or deriving a newer material state. */
 export function WindowMaterialSummary({
   material,
 }: {

@@ -4,7 +4,6 @@ import { join, resolve } from "node:path";
 import { z } from "zod";
 import { referenceStorageLimits } from "./contracts";
 
-/** Private directory only: keys are generated UUIDs, never request paths. */
 export function createReferenceFiles(directory: string) {
   const root = resolve(directory);
   const path = (key: string) => join(root, z.uuid().parse(key));

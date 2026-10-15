@@ -25,7 +25,6 @@ afterEach(async () => {
   for (const household of households.splice(0)) await household.close();
 });
 
-// BND-02/03/06: candidates are information, and only one durable selection grants scope.
 test("concurrent first choices cannot grant access before persistence or disagree with the saved home", async () => {
   const h = await runningHousehold(householdCatalog(), { homeId: null });
   households.push(h);
@@ -130,7 +129,6 @@ test("concurrent first choices cannot grant access before persistence or disagre
   expect(await h.homes.read(account)).toEqual(saved);
 });
 
-// SC-19, BND-01/02/07, RUN-02/09/10: a late acknowledgement cannot revive a stopped run.
 test("a binding committed before shutdown survives restart but its late receipt cannot authorize either run", async () => {
   const h = await runningHousehold(householdCatalog(), { homeId: null });
   households.push(h);
@@ -233,7 +231,6 @@ test("a binding committed before shutdown survives restart but its late receipt 
   expect(h.runtime.ready).toBe(false);
 });
 
-// SC-14, BND-08, RUN-08/10: failed credential removal does not undo access revocation.
 test("failed logout needs a new complete cloud result and never revives old reads, observations or viewers", async () => {
   const catalog = householdCatalog();
   catalog.homes[0]!.deviceIds.push("camera-a");

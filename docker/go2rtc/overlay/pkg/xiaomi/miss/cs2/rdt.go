@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-// RDT carries SD-card metadata and recording files on the existing authenticated CS2 connection.
-// Its framing, UDP reordering and acknowledgements use the existing dataChannel.
-// A camera can place a whole recording in one encrypted transport message.
-// The extra bytes allow the nonce, command/length header and response prefix,
-// not extra file data.
 const MaxRDTFileBytes = 96 << 20
 const maxRDTChunk = MaxRDTFileBytes + 20
 
@@ -25,14 +20,10 @@ func newRDTChannel() *dataChannel {
 	return channel
 }
 
-// Only the connection's receive goroutine changes dataChannel parser state.
 func (c *Conn) failRDT() {
 	c.channels[1].discard = true
 	c.channels[1].waitData = nil
 	c.channels[1].pushBuf = nil
-	// No more data will be enqueued after discard. Release queued recordings
-	// before waking the reader, which otherwise exits and leaves them retained
-	// for the lifetime of the still-healthy live-video connection.
 	defer c.rdtFailureOnce.Do(func() { close(c.rdtFailed) })
 	for {
 		select {
@@ -60,8 +51,6 @@ func (c *Conn) ReadRDT() ([]byte, error) {
 	}
 }
 
-// One small, read-only request. No media mode change or second camera session.
-// UDP loss is reported as a query timeout, never as an empty recording index.
 func (c *Conn) WriteRDT(ctx context.Context, payload []byte) error {
 	if len(payload) > 1024 {
 		return ErrRDTUnavailable
@@ -97,8 +86,6 @@ func (c *Conn) WriteRDT(ctx context.Context, payload []byte) error {
 		_ = c.Conn.SetWriteDeadline(time.Time{})
 	}()
 
-	// CS2 data header + one length-prefixed encrypted RDT chunk. Unlike MISS
-	// commands there is no 0x1001 command id between length and ciphertext.
 	packet := make([]byte, 12+len(payload))
 	packet[0], packet[1], packet[4], packet[5] = magic, msgDrw, magicDrw, 1
 	binary.BigEndian.PutUint16(packet[2:], uint16(8+len(payload)))

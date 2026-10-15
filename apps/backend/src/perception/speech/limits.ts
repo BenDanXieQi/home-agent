@@ -18,7 +18,6 @@ export const speechLimits = Object.freeze({
   redemptionMs: 512,
 });
 
-// Consumers retain history through segmentation, cold loading and delivery.
 export function speechDeliveryDeadline(endedAt: number, maxFrameAgeMs: number) {
   return (
     endedAt +

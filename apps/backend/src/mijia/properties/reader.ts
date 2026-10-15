@@ -46,8 +46,6 @@ function propertyKey(property: MiotPropertyAddress) {
 }
 
 function classifyRow(row: z.infer<typeof responseRowSchema>) {
-  // MiLoCo result_codes.py accepts these two negative status codes; Xiaomi's
-  // SDK error table names them OK/accept. A value must still be present and valid.
   const code =
     typeof row.code === "number" && Number.isFinite(row.code)
       ? row.code
@@ -122,10 +120,8 @@ function propertyObservations(
   }));
 }
 
-/** One owner shares one serial HTTP budget across every read invocation. */
 export class PropertyReader {
   private tail: Promise<void> = Promise.resolve();
-  // Source identity survives credential renewal; new credentials do not bypass rate limits.
   private readonly retryGates = new Map<string, RetryGate>();
 
   async read(
@@ -186,8 +182,6 @@ export class PropertyReader {
       () => {},
       () => {},
     );
-    // Cancel the caller immediately, while retaining the in-flight operation's
-    // budget until its transport has actually stopped.
     return new Promise<T>((resolve, reject) => {
       const abort = () => {
         signal.removeEventListener("abort", abort);
@@ -215,7 +209,6 @@ export class PropertyReader {
   ) {
     signal.throwIfAborted();
     context.assertCurrent();
-    // Check after entering the shared queue: an earlier batch may have just set the gate.
     const gate = this.retryGates.get(context.source_id);
     if (gate && gate.until > Date.now()) {
       const outcome = {
@@ -264,7 +257,6 @@ export class PropertyReader {
             },
           },
         };
-        // A repeated failure or malformed row cannot erase an accepted value.
         if (
           !previous ||
           (previous.status !== "success" && outcome.status === "success") ||

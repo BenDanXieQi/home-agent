@@ -30,6 +30,7 @@ import { createWebRoutes } from "./web/routes";
 import { secureHeaders } from "hono/secure-headers";
 import { createChatRoutes } from "./chat/routes";
 import { createWorkflowRoutes } from "./workflows/routes";
+import { createHouseholdWorkflows } from "./workflows/service";
 import type { Environment } from "./environment";
 import { createConnectionRoutes } from "./connections/routes";
 import type { ConnectionStore } from "./connections/store";
@@ -97,6 +98,12 @@ export function createApp({
   shutdownSignal,
   agent,
 }: AppDependencies) {
+  const workflows = createHouseholdWorkflows({
+    timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+    agent,
+    household,
+    shutdownSignal,
+  });
   const recordingService = createRecordingService({
     ...recordings,
     household,
@@ -239,10 +246,7 @@ export function createApp({
       "/api/workflows",
       createWorkflowRoutes({
         port: environment.BACKEND_PORT,
-        timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
-        agent,
-        household,
-        shutdownSignal,
+        workflows,
       }),
     )
     .route(
@@ -258,7 +262,6 @@ export function createApp({
         provenance,
       ),
     );
-  // Unknown API routes must not fall through to the web application's HTML.
   app.all("/api/*", handleNotFound);
   if (staticRoot) app.route("/", createWebRoutes(staticRoot));
   app.notFound(handleNotFound);

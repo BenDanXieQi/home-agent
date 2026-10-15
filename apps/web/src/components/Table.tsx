@@ -9,7 +9,6 @@ import {
 import { flexRender, type Table as TableModel } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 
-/** Pages own data and table state; this component owns table presentation. */
 export function Table<T>({
   table,
   label,
@@ -49,8 +48,7 @@ export function Table<T>({
   }, []);
   const columns = table.getVisibleLeafColumns();
   const interactive = Boolean(onRowClick);
-  // Keep absolutely positioned screen-reader labels inside the scroll boundary.
-  // oxlint-disable jsx-a11y/no-noninteractive-tabindex -- Native scroll regions need keyboard focus.
+  // oxlint-disable jsx-a11y/no-noninteractive-tabindex
   return (
     <section
       ref={scrollRegion}

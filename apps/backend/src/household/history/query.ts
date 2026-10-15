@@ -67,7 +67,6 @@ function decodeCursor(value: string | undefined) {
   }
 }
 
-/** Assemble complete records within one page's count and byte budgets. */
 function createPage(
   input: z.infer<typeof deviceHistoryQuerySchema>,
   transportBytes: (
@@ -111,7 +110,6 @@ function createPage(
   };
 }
 
-/** Owns continuation; export consumes one statement snapshot without reopening pages. */
 export function createDeviceHistoryQuery(
   repository: ReturnType<typeof createDeviceHistoryRepository>,
 ) {
@@ -164,7 +162,6 @@ export function createDeviceHistoryQuery(
         cursor: undefined,
         limit: deviceHistoryPolicy.maxLimit,
       });
-      // Finish the one database snapshot before waiting for a remote reader.
       await using directory = await mkdtempDisposable(
         join(tmpdir(), "home-agent-device-history-"),
       );

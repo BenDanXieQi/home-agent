@@ -11,7 +11,6 @@ export function appendWindowPetSound(
   now: number,
   acceptingUntil: number,
 ) {
-  // Ownership is (startedAt, endedAt]; sample tolerance only applies to coverage.
   const analysis = window.audio.petSounds;
   if (
     !analysis ||

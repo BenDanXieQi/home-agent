@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
 import { twMerge } from "tailwind-merge";
 
-/** Shared geometry for live, unavailable and loading camera headings. */
 export function CameraHeader({
   title,
   children,

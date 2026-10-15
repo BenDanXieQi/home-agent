@@ -7,7 +7,6 @@ import {
 } from "@home-agent/api/agent-context";
 import { requestJson } from "../../api/client";
 
-/** Each retained source owns its availability and retry state. */
 export function useObservationMaterials(
   scope: z.infer<typeof agentContextScopeSchema>,
   record: z.infer<typeof agentObservationSchema>,

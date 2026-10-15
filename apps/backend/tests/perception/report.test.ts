@@ -34,7 +34,6 @@ test("on-time producer callbacks offer every planned frame exactly once", () => 
 
 test("report uses worker model metadata without opening the model file", async () => {
   const metadata = {
-    // Deliberately absent: only the managed worker opens and hashes assets.
     modelPath: "/worker-owned/model.onnx",
     sha256: "a".repeat(64),
     input: {

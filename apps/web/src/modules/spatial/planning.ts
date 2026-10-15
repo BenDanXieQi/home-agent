@@ -1,7 +1,5 @@
-import {
-  agentWorkflowResultSchema,
-  spatialPlanningInputSchema,
-} from "@home-agent/api/agent-workflows";
+import { spatialPlanningInputSchema } from "@home-agent/agent/workflows/spatial-planning";
+import { agentWorkflowResultSchema } from "@home-agent/agent/workflows";
 import { requestJson } from "../../api/client";
 import { RequestError } from "../../api/errors";
 
@@ -40,7 +38,7 @@ export async function closeSpatialPlanning(scope: string, sessionId: string) {
       cause instanceof RequestError &&
       ["not_found", "household_scope_changed"].includes(cause.details.code)
     )
-      return; // Agent scope revocation also owns closing the old conversation.
+      return;
     throw cause;
   }
 }

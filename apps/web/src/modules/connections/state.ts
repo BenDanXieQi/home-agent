@@ -93,7 +93,6 @@ export const go2rtcConnectedAtom = atom((get) => {
     !services.isError && services.data?.services.go2rtc.status === "connected"
   );
 });
-// Service reachability and account media setup are separate readiness steps.
 const readinessStates = {
   checking: {
     ready: false,
@@ -169,7 +168,6 @@ export const connectionReadinessAtom = atom((get) => {
     : readinessStates.unbound;
 });
 
-/** One presentation source for the navigation mascot and its connection details. */
 export const connectionNoticeAtom = atom((get) => {
   const backendOffline = get(backendStatusAtom) === "unavailable";
   const readiness = get(connectionReadinessAtom);

@@ -24,8 +24,6 @@ export function createReferences(
       typeof identityReferenceSnapshotSchema
     >["members"][number]["className"],
   ) {
-    // Cat and dog crops use the same embedding model and preparation.
-    // Detection chooses the identity family, not a closed species gallery.
     return members.filter((member) =>
       className === "human"
         ? member.className === "human"

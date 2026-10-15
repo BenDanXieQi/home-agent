@@ -3,7 +3,7 @@ import type { z } from "zod";
 import {
   agentReceiptIndexSchema,
   agentCurrentContextSchema,
-} from "@home-agent/api/agent-receipts";
+} from "@home-agent/agent/context/contracts";
 import { requestJson } from "../../api/client";
 
 export function useReceiptIndex() {

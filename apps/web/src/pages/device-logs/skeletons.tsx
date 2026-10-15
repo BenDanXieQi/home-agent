@@ -21,7 +21,6 @@ export function LogDevicesSkeleton() {
   ));
 }
 
-/** Uses the real event markup, inert, so each placeholder row is exactly as tall. */
 export function LogEventsSkeleton() {
   return (
     <output

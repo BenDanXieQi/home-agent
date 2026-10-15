@@ -1,7 +1,5 @@
 import { munkres } from "munkres";
 
-// Dummy columns permit unmatched tracks. Their penalty makes cardinality take
-// precedence over cost; gated edges can never beat an available dummy column.
 export function assign(costs: number[][], threshold: number) {
   const columns = costs[0]?.length ?? 0;
   if (!columns) return [];

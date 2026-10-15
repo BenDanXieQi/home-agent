@@ -64,7 +64,6 @@ export type Parts = z.infer<typeof agentContextPartsSchema>;
 export const identified = (row: { id: string }) => row.id;
 export const named = (row: { name: string }) => row.name;
 
-/** UTF-8 byte counts use binary units; display rounding never changes stored counts. */
 export function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;

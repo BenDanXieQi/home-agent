@@ -77,7 +77,6 @@ let peakRss = process.memoryUsage().rss;
 const started = performance.now();
 const cpuStart = process.cpuUsage();
 try {
-  // References are processed first so duplicate bytes cannot leak into targets.
   const samples = dataset.samples.toSorted(
     (a, b) =>
       (a.role === "reference" ? 0 : 1) - (b.role === "reference" ? 0 : 1) ||
@@ -190,7 +189,6 @@ function scoreTarget(
     correctOtherCamera: maximum(
       correct.filter((item) => item.camera !== target.camera),
     ),
-    // Static annotations are identity truth, never direct face confirmation.
     references: scores,
   };
 }
@@ -252,7 +250,6 @@ const tune = observations.filter(
 const holdout = observations.filter(
   (row) => row.split === "holdout" && row.cameraScope === "all",
 );
-// Fixed grid declared before looking at holdout. Zero observed errors is not a safety guarantee.
 const grid = [];
 for (let score = 0; score <= 100; score++)
   for (let difference = 0; difference <= 100; difference++) {
@@ -296,7 +293,6 @@ function summarize(rows: typeof observations) {
       : null,
   };
 }
-// Representative failure selection uses tune only; holdout is summarized without choosing examples or changing policy.
 const rejected = (row: (typeof observations)[number]) =>
   !selected ||
   row.bestScore < selected.threshold ||

@@ -1,14 +1,12 @@
 import { animate, useMotionValue, useReducedMotion } from "motion/react";
 import { useLayoutEffect, useRef, type RefObject } from "react";
 
-/** Structural changes have time to read, with a finite finish and no bounce. */
 export const spring = {
   type: "spring",
   duration: 0.34,
   bounce: 0,
 } as const;
 
-/** Content updates remain sharp; a quiet crossfade communicates replacement. */
 export const contentSwap = {
   initial: { opacity: 0 },
   animate: { opacity: 1, transition: { duration: 0.2, ease: "easeOut" } },
@@ -25,7 +23,6 @@ export const iconSwap = {
   exit: { opacity: 0, scale: 0.94, transition: { duration: 0.16 } },
 } as const;
 
-/** Height morphs for panels that open in place and push surrounding content. */
 export const expand = {
   initial: { height: 0, opacity: 0 },
   animate: { height: "auto", opacity: 1, transition: spring },
@@ -39,12 +36,6 @@ export const expand = {
 const px = (value: string) => Number.parseFloat(value) || 0;
 const roundOff = { type: "spring", duration: 0.2, bounce: 0 } as const;
 
-/**
- * Springs the parent of `content` to fit it, so container morphs change real
- * dimensions and text never scales. With `circle`, the parent instead becomes
- * a circle as tall as it is: width and radius spring from wherever they are.
- * Width and height are `auto` until the first measurement.
- */
 export function useFittedSize(
   content: RefObject<HTMLElement | null>,
   circle = false,
@@ -94,8 +85,6 @@ export function useFittedSize(
       }
       animate(width, nextWidth, spring);
       animate(height, fittedHeight, spring);
-      // Stay round throughout: corners round off before the width contracts,
-      // and relax only once the width has mostly grown back.
       animate(
         radius,
         nextRadius,

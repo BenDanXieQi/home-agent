@@ -1,4 +1,3 @@
-// IPC transport owns completion and disconnection; adapters own message schemas.
 export function sendProcessMessage(
   value: object,
   requestId: string | null = null,

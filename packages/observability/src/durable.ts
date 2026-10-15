@@ -464,7 +464,6 @@ export function createDurableTracing(harness: Harness, agentName: string) {
       );
       if (id === undefined)
         throw new Error("Durable conversation is not attached");
-      // A conversation owns correlation only; finite runs own exported spans.
       if (name === agentName)
         return new DurableObservation(
           undefined,
@@ -527,7 +526,6 @@ export function createDurableTracing(harness: Harness, agentName: string) {
       ).update(attributes);
     },
     forceFlush: flushTelemetry,
-    // The application owns NodeSDK shutdown after Harness observation finishes.
     shutdown: async () => {},
   } satisfies TraceBackend;
   const runtime = createLangfuseRuntimeFromBackend(backend);

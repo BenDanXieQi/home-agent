@@ -91,8 +91,6 @@ export function createAutomationRepository(db: Database) {
           .from(automations)
           .where(householdWhere(scope))
           .for("update");
-        // A completed decision may already have dispatched devices before its
-        // best-effort result log was saved. Never classify that as unsent.
         if (rows.length)
           await tx
             .update(automationRuns)
@@ -183,8 +181,6 @@ export function createAutomationRepository(db: Database) {
     ) {
       const recordingStartedAt = new Date().toISOString();
       const recorded = await transaction(scope, async (tx) => {
-        // Logs do not grant execution permission. Retain real results after a
-        // revision change, but never recreate a deleted rule.
         if (!(await find(tx, scope, execution.run.automationId))) return false;
         await tx
           .insert(automationRuns)

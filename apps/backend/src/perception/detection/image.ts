@@ -13,15 +13,12 @@ import {
 } from "./image-request";
 
 async function readImage(path: string) {
-  // Nonblocking open also lets us reject a FIFO before waiting for a writer.
   const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     const stat = await file.stat();
     if (!stat.isFile()) throw new Error("Image input must be a regular file");
     if (stat.size > imageLimits.maxFileBytes)
       throw new Error("Image file exceeds the 32 MiB limit");
-    // One extra byte detects growth without allowing readFile() to allocate
-    // beyond the checked size. Hashing and decoding use this same byte snapshot.
     const bytes = Buffer.allocUnsafe(stat.size + 1);
     let length = 0;
     while (length < bytes.length) {
@@ -41,7 +38,6 @@ async function readImage(path: string) {
   }
 }
 
-// Shared bounded decoding for the inference worker and the standalone debug exporter.
 export async function loadImage(input: z.infer<typeof imageRequestSchema>) {
   const imagePath = resolve(input.path);
   const readStarted = performance.now();
@@ -108,7 +104,6 @@ export async function detectImage(
   input: z.infer<typeof imageRequestSchema>,
 ) {
   const image = await loadImage(input);
-  // Native inference failures keep their identity for process recovery.
   const result = await detector.detect(image.frame);
   return {
     imagePath: image.imagePath,

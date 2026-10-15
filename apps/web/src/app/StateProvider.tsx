@@ -8,7 +8,6 @@ import { saveConfigurationAtom } from "../modules/connections/state";
 
 function AppStateEffects({ children }: PropsWithChildren) {
   useEffect(() => subscribeHousehold(appStore), []);
-  // Configuration saves can continue while navigation is resolving.
   useAtomValue(saveConfigurationAtom);
   return children;
 }

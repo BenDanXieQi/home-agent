@@ -10,7 +10,6 @@ import type { observationSchema } from "../observations";
 import { createVideoSource } from "./source";
 import { createVideoScheduler } from "./scheduler";
 
-// Dependencies are composed by process-entry; video does not import a pool implementation.
 export function createVideoRuntime(dependencies: {
   identity: ReturnType<typeof createIdentityRuntime>;
   tracking: ReturnType<typeof createTrackingRuntime>;
@@ -197,7 +196,6 @@ export function createVideoRuntime(dependencies: {
         dependencies.identity.stop(id),
         source.close(),
       ]);
-      // Retiring instances still consume decoder capacity until exit is confirmed.
       if (sources.get(id) === source) sources.delete(id);
     },
     async close() {

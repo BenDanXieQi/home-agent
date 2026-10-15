@@ -1,5 +1,4 @@
 import PQueue from "p-queue";
-import type { HouseholdRuntime } from "../runtime";
 import type { Database } from "../../db";
 import type { accessHousehold } from "../access";
 import type { createDeviceOperations } from "../operations/service";
@@ -27,7 +26,6 @@ export function createAutomationActions(deps: {
   db: Database;
   operations: ReturnType<typeof createDeviceOperations>;
   signal: AbortSignal;
-  snapshot: HouseholdRuntime["snapshot"];
   eligible: (
     automationId: string,
     definition: AutomationDefinition,
@@ -102,55 +100,43 @@ export function createAutomationActions(deps: {
             ),
           ),
         ]);
-        const parts = (
-          action.kind === "set_property"
-            ? action.property_key
-            : action.action_key
-        ).split(".");
         timing.dispatch_started_at = new Date().toISOString();
         timing.command_id = row.id;
-        const command =
+        const operation = (
           action.kind === "set_property"
-            ? await operations.executePropertyWrite(
-                scope,
-                execution.source,
-                {
-                  device_id: action.device_id,
-                  siid: Number(parts[1]),
-                  piid: Number(parts[2]),
-                  value: action.value,
-                },
-                signal,
-                assertCurrent,
-                row.id,
-              )
-            : await operations.executeDeviceAction(
-                scope,
-                execution.source,
-                {
-                  device_id: action.device_id,
-                  siid: Number(parts[1]),
-                  aiid: Number(parts[2]),
-                  inputs: action.inputs,
-                },
-                signal,
-                assertCurrent,
-                row.id,
-              );
+            ? {
+                kind: "property",
+                device_id: action.device_id,
+                property_key: action.property_key,
+                value: action.value,
+              }
+            : {
+                kind: "action",
+                device_id: action.device_id,
+                action_key: action.action_key,
+                inputs: action.inputs,
+              }
+        ) satisfies Parameters<typeof operations.execute>[2];
+        const command = await operations.execute(
+          scope,
+          execution.source,
+          operation,
+          signal,
+          assertCurrent,
+          row.id,
+        );
         timing.command_id = command.command_id;
         const result = command.result;
-        if (result) {
-          if (result.sent_at) timing.sent_at = result.sent_at;
-          if (result.received_at)
-            timing.response_received_at = result.received_at;
-          status = result.status;
-          reason =
-            result.status === "accepted"
-              ? "设备服务已接纳请求，实际效果尚待核对"
-              : result.status === "rejected"
-                ? `设备服务拒绝请求（${result.provider_code ?? "未知代码"}）`
-                : reason;
-        }
+        if (result.sent_at) timing.sent_at = result.sent_at;
+        if (result.received_at)
+          timing.response_received_at = result.received_at;
+        status = result.status;
+        reason =
+          result.status === "accepted"
+            ? "设备服务已接纳请求，实际效果尚待核对"
+            : result.status === "rejected"
+              ? `设备服务拒绝请求（${result.provider_code ?? "未知代码"}）`
+              : reason;
       }
     } catch {
       status = "cancelled";
@@ -188,7 +174,6 @@ export function createAutomationActions(deps: {
         return;
       }
       pending += execution.actions.length;
-      // MijiaCommands owns per-device ordering; this queue only limits concurrency.
       const tasks = execution.actions.map((row) =>
         controls.add(() => execute(scope, execution, row)),
       );

@@ -12,7 +12,6 @@ function unknown(
   return { type: "unknown" as const, reason };
 }
 
-/** Compare exact decoded frames. Host receipt times never establish alignment. */
 export function alignRecordingFrames(
   window: z.infer<typeof windowSummarySchema>,
   candidates: readonly ({
@@ -24,7 +23,6 @@ export function alignRecordingFrames(
   const frames = window.frames
     .filter((frame) => frame.fingerprint !== undefined)
     .toSorted((a, b) => a.sequence - b.sequence);
-  // One content match proves a frame location, not a relationship between clocks.
   if (frames.length < 2) return unknown("no_frame_mapping");
   const generation = window.generation;
   if (

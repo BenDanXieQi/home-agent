@@ -41,7 +41,6 @@ function pageChanges(
   });
 }
 
-/** Deliver database pages; commit notifications only invalidate the live first page. */
 export async function deliverDeviceHistory({
   input,
   read,

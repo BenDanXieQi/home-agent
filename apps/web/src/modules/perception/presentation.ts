@@ -222,8 +222,6 @@ export function createFramePresentation(
       if (timestamp === lastTimestamp) return;
       lastTimestamp = timestamp;
       try {
-        // WebCodecs carries the source RTP identity through decoding.
-        // Continuous presentation and freeze use this same immutable bitmap.
         const frame = input.frame;
         const scale = Math.min(
           1,

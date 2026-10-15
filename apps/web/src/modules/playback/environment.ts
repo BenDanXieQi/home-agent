@@ -5,7 +5,6 @@ function networkConnection() {
     : null;
 }
 
-/** A coarse comparison hint, never a network identity. */
 export function readPlaybackEnvironment() {
   const connection = networkConnection();
   if (!connection) return null;
@@ -23,7 +22,6 @@ export function readPlaybackEnvironment() {
     : JSON.stringify(values);
 }
 
-/** Observes connectivity changes; the history owner controls the subscription. */
 export function observePlaybackEnvironment(onChange: () => void) {
   const connection = networkConnection();
   let observedClass = readPlaybackEnvironment();
@@ -33,8 +31,6 @@ export function observePlaybackEnvironment(onChange: () => void) {
   };
   const connectionClassChanged = () => {
     const nextClass = readPlaybackEnvironment();
-    // RTT/downlink fluctuate during ordinary requests. Only a changed coarse
-    // connection class signals a new environment for this observer.
     if (nextClass === observedClass) return;
     observedClass = nextClass;
     onChange();

@@ -1,6 +1,5 @@
 import { z } from "zod";
 
-/** Portable session data; persistence and encryption belong to the backend. */
 export const savedSessionSchema = z.strictObject({
   region: z.literal("cn"),
   userId: z.string().regex(/^[0-9]{1,32}$/),

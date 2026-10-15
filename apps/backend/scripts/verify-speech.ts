@@ -6,7 +6,7 @@ import { resolve, dirname } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { Hono } from "hono";
-import { speechInboxSchema } from "@home-agent/api/speech-dialogue";
+import { speechInboxSchema } from "../src/conversation/contracts";
 import { perceptionSnapshotSchema } from "@home-agent/api/contracts";
 import { speechLimits } from "../src/perception/speech/limits";
 import { createAudioSource } from "./perception-evaluation/audio-source";
@@ -492,9 +492,6 @@ if (
   errors.push("A transcription was delivered more than once");
 const rejectedDeliveries = deliveries.filter(({ accepted }) => !accepted);
 const acceptedCount = deliveries.length - rejectedDeliveries.length;
-// During this window every source is withdrawn, so a late handoff can only
-// belong to the recorded revoked runs. The 1-second handoff deadline ends
-// before the script grants a new scope after at least 5 seconds.
 const revokedHandoffRejections =
   revocationHandoff?.rejectedAfter !== undefined
     ? revocationHandoff.rejectedAfter - revocationHandoff.rejectedBefore

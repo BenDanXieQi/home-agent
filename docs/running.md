@@ -134,7 +134,7 @@ bun --env-file=.env apps/backend/dist/main.js --config ./local-config/config.yam
 ```sh
 bunx turbo run dev --filter=@home-agent/web
 bun run --cwd apps/backend dev
-bun run --cwd apps/agent dev
+bunx turbo run dev --filter=@home-agent/agent-host
 bun run check
 bun run build
 ```

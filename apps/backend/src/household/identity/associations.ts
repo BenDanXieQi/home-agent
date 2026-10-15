@@ -15,7 +15,6 @@ type Source = Pick<
     | Parameters<ReturnType<typeof createIdentityMatching>["associate"]>[0]
     | null;
 };
-/** Owns the selected source results. Updates consume accepted domain state; reads never confirm. */
 export function createMemberAssociations(
   matching:
     | Pick<
@@ -52,7 +51,6 @@ export function createMemberAssociations(
               item.trackId === track.trackId &&
               (item.className === "human") === (track.className === "human"),
           );
-          // Pet features can correct detection species, including tentative matches.
           if (
             directAssociation &&
             (directAssociation.state === "confirmed" ||

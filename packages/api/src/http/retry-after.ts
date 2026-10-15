@@ -1,4 +1,3 @@
-/** Parse HTTP Retry-After (delay-seconds or HTTP-date) into a nonnegative delay. */
 export function parseRetryAfter(value: string | null, now = Date.now()) {
   if (value === null || value.trim() === "") return undefined;
   const text = value.trim();
@@ -8,7 +7,6 @@ export function parseRetryAfter(value: string | null, now = Date.now()) {
     : Date.parse(text) - now;
   const boundedDelay = Math.max(0, delay);
   const retryAt = now + boundedDelay;
-  // Every consumer must be able to represent the deadline as a JavaScript date.
   if (
     !Number.isSafeInteger(retryAt) ||
     Math.abs(retryAt) > 8_640_000_000_000_000

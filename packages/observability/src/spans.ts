@@ -26,7 +26,6 @@ export function currentTraceId() {
   return span && isSpanContextValid(span) ? span.traceId : undefined;
 }
 
-/** Call only after access to the internal endpoint has been checked. */
 export function withRequestSpan(
   request: Request,
   run: () => Promise<Response>,
@@ -66,7 +65,6 @@ export function recordFailure(span: Span, error: unknown, errorType?: string) {
     (error instanceof Error && error.name === "TimeoutError"
       ? "timeout"
       : "Error");
-  // Error messages from model providers may contain prompts or credentials.
   const message =
     telemetryStatus().includeContent && error instanceof Error
       ? error.message

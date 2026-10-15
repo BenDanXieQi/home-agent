@@ -5,7 +5,6 @@ import {
   createVad,
 } from "../../src/perception/audio/silero-vad";
 
-// Physical observations must not change with transport chunking or activity on another camera.
 const pcm = Int16Array.from({ length: 16_777 }, (_, index) =>
   Math.round(12000 * Math.sin(index * 0.173) * (index < 9000 ? 1 : 0.2)),
 );
@@ -61,7 +60,6 @@ test("the same sound yields the same facts despite transport chunking and anothe
       await other.accept(new Int16Array(1024));
     }
     expect(actual).toEqual(uninterrupted.vad);
-    // A replacement track must behave like a fresh source, not inherit another run's speech history.
     const replacement = await observe(
       createAudioAnalysis(createSileroTrack(evaluate)),
       pcm,

@@ -1,6 +1,5 @@
 import { PlaybackSession } from "./session";
 
-// Outside analysis, only bridge a route handoff; scrolling does not build a stream cache.
 const handoffMs = 1000;
 const targetKey = (target: ConstructorParameters<typeof PlaybackSession>[0]) =>
   JSON.stringify([
@@ -53,7 +52,6 @@ export function createPlaybackSessions() {
       if (active === analysisActive) return;
       analysisActive = active;
       if (active) {
-        // Preserve only viewers already in use on the wall, not previously visited sources.
         for (const [key, entry] of entries) {
           if (entry.users && !entry.session.stopped) {
             wallConnections.add(key);

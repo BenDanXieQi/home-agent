@@ -5,8 +5,6 @@ import { createDetector } from "../../src/perception/detection/detector";
 import { createReid } from "../../src/perception/tracking/reid";
 import { createHumanTracker } from "../../src/perception/tracking/tracker";
 
-// External public video and human annotations: no generated tracking output is
-// used as truth, and this test never downloads data or calls a remote service.
 const video = process.env.PERCEPTION_TUD_VIDEO_PATH;
 const labels = process.env.PERCEPTION_TUD_LABELS_PATH;
 test.skipIf(!video || !labels)(

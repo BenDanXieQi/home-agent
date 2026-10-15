@@ -1,4 +1,3 @@
-// Shared wire codes, HTTP statuses and safe messages. Never include upstream data.
 export const mijiaErrorDefinitions = {
   mijia_binding_conflict: {
     status: 409,

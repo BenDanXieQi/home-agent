@@ -14,7 +14,6 @@ const require = createRequire(import.meta.url);
 const packageMetadata = z.object({ version: z.string().min(1) });
 
 export async function readDependencyVersion(path: string | URL) {
-  // Read package metadata without importing the native inference runtime here.
   const source = await readFile(path, "utf8");
   return packageMetadata.parse(JSON.parse(source)).version;
 }

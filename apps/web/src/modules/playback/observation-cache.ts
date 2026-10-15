@@ -14,7 +14,6 @@ export function observationWindowListOptions(
   return { ...cachedWindowListOptions(source), select: selectWindows };
 }
 
-// Existing data does not confirm a cache miss while a refresh is fetching or paused.
 export function observationCacheSettled(
   query: Pick<UseQueryResult, "isSuccess" | "fetchStatus"> | undefined,
 ) {
