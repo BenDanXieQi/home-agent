@@ -46,7 +46,6 @@ export function createAgentContextStream(
           }
         | undefined;
       function notify(snapshot: z.infer<typeof agentContextSnapshotSchema>) {
-        // A reset is a required delivery barrier even if fresh reads finish quickly.
         if (
           Object.keys(snapshot.parts).length ===
             agentContextPartsSchema.keyof().options.length &&
@@ -73,7 +72,6 @@ export function createAgentContextStream(
             snapshot = pendingClear.snapshot;
             delivered = pendingClear.revisions;
             pendingClear = undefined;
-            // A later reset replaces this obsolete barrier before delivery.
             if (!isDeepStrictEqual(snapshot.scope, current.scope)) continue;
           } else if (first) snapshot = current;
           else if (dirty) {
@@ -116,7 +114,6 @@ export function createAgentContextStream(
                 ...snapshot.parts,
               },
             };
-          // A clear barrier may precede values already committed before this write.
           dirty ||=
             pendingClear !== undefined ||
             !isDeepStrictEqual(seen, service.revisions());

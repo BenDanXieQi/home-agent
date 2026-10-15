@@ -224,7 +224,6 @@ export function newQuery(capabilities: AutomationCapabilities) {
   });
 }
 
-/** Adapt scalar/list editors while preserving the library's node metadata. */
 export function normalizeQuery(query: RuleGroupType) {
   const rules: RuleGroupType["rules"] = [];
   for (const node of query.rules) {

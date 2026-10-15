@@ -1,4 +1,3 @@
-/** Independent exports serialize only when requested, away from the UI thread. */
 export function exportJson(value: unknown) {
   try {
     return {
@@ -12,6 +11,6 @@ export function exportJson(value: unknown) {
   }
 }
 self.addEventListener("message", (event: MessageEvent<unknown>) => {
-  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Dedicated worker messaging has no targetOrigin.
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin
   self.postMessage(exportJson(event.data));
 });

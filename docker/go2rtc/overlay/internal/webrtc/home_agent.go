@@ -12,8 +12,6 @@ import (
 	pion "github.com/pion/webrtc/v4"
 )
 
-// HomeAgentOffer has a read-only media contract and returns the owned connection
-// so the caller can explicitly release it. Neither SDP nor source URLs are logged.
 func HomeAgentOffer(ctx context.Context, stream *streams.Stream, offer string, cleanup func(*webrtc.Conn), observe func(string, time.Duration, error)) (string, *webrtc.Conn, error) {
 	if ctx.Err() != nil {
 		return "", nil, errors.New("signaling_failed")

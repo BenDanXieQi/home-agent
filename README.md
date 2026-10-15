@@ -31,12 +31,13 @@ Home Agent 是一个本地运行的家庭助手项目。backend 提供有来源�
 
 技术栈：Bun、TypeScript、React、Hono、pi-durable、Langfuse、PostgreSQL 和 go2rtc。
 
-| 模块           | 已实现职责                                                                        |
-| -------------- | --------------------------------------------------------------------------------- |
-| `apps/backend` | 来源接入、设备事实、成员与身份接纳、感知和媒体、语音交付、聊天转发与 Web 静态托管 |
-| `apps/agent`   | pi-durable 进程内主会话、独立上下文接收和只读历史客户端，不保存跨重启会话         |
-| `apps/web`     | 登录、设备与房间、成员、摄像头与分析、设备日志、数据库浏览、聊天和设置            |
-| go2rtc         | 摄像头取流与浏览器媒体连接                                                        |
+| 模块              | 已实现职责                                                                        |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `apps/backend`    | 来源接入、设备事实、成员与身份接纳、感知和媒体、语音交付、聊天转发与 Web 静态托管 |
+| `apps/agent`      | Agent 业务实现、workflow Schema、进程内主会话及上下文接收与读取能力               |
+| `apps/agent-host` | Agent 进程启动、依赖装配、Backend RPC 适配与服务启停                              |
+| `apps/web`        | 登录、设备与房间、成员、摄像头与分析、设备日志、数据库浏览、聊天和设置            |
+| go2rtc            | 摄像头取流与浏览器媒体连接                                                        |
 
 backend 与 Agent 在独立进程中通过 HTTP 通信，由项目启动命令统一管理。本地感知不依赖 Agent 模型凭据；单独启动方式见[运行说明](docs/running.md#单独启动与检查)。
 
@@ -64,5 +65,5 @@ bun run dev
 - [文档导航与编码任务入口](docs/README.md)：按任务选择当前功能、业务契约与代码位置。
 - [本地运行](docs/running.md)：启动、配置与部署限制。
 - [实施计划](docs/plans/README.md)：未交付能力及主交付顺序。
-- [Backend](apps/backend/README.md) · [Agent](apps/agent/README.md) · [Web](apps/web/README.md)：应用边界与开发说明。
+- [Backend](apps/backend/README.md) · [Agent](apps/agent/README.md) · [Agent Host](apps/agent-host/README.md) · [Web](apps/web/README.md)：应用边界与开发说明。
 - [共享契约](packages/api/README.md) · [追踪](packages/observability/README.md) · [go2rtc](docker/go2rtc/README.md)：跨应用能力与媒体适配。

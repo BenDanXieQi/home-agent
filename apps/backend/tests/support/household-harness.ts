@@ -62,7 +62,6 @@ export function householdCatalog() {
   } satisfies Awaited<ReturnType<MiCloud["getCatalog"]>>;
 }
 
-/** Real account, runtime, directory, specification and read owners; only I/O is replaced. */
 export async function runningHousehold(
   initialCatalog: Awaited<
     ReturnType<MiCloud["getCatalog"]>
@@ -177,7 +176,6 @@ export async function runningHousehold(
   }
 }
 
-/** Hold the next durable credential write before its stored value changes. */
 export function holdCredentialWrite(
   household: Awaited<ReturnType<typeof runningHousehold>>,
 ) {
@@ -209,7 +207,6 @@ function redirect(location: string) {
   return new Response(null, { status: 302, headers: { location } });
 }
 
-/** Replay provider HTTP replies while keeping MiCloud QR/cookies and OAuth parsing real. */
 export function loginHttp(
   household: Awaited<ReturnType<typeof runningHousehold>>,
   overrides: Parameters<typeof savedSession>[0] = { userId: "200002" },

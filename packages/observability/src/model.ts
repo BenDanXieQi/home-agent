@@ -65,7 +65,6 @@ const piUsageEventSchema = z.object({
   usage: z.object({ input: tokenCount, output: tokenCount }),
 });
 
-/** Detect reported usage; Pi remains the sole owner of token normalization. */
 function reportsUsage(api: Api, event: unknown) {
   switch (api) {
     case "openai-completions":
@@ -196,8 +195,6 @@ function observeModelStream(
   ) => ReturnType<Provider["stream"]>,
 ) {
   const output = createAssistantMessageEventStream();
-  // Pi owns error normalization; the forwarding stream only keeps the active
-  // generation span alive until every provider event has been observed.
   withSpan(
     `chat ${model.id}`,
     {
@@ -209,7 +206,6 @@ function observeModelStream(
     async (span) => {
       recordEvaluationModel(context, span);
       if (span.isRecording() && telemetryStatus().includeContent) {
-        // Pi normalizes system instructions and tool declarations into system messages.
         span.setAttributes({
           "gen_ai.input.messages": JSON.stringify(
             genAiMessages(context.messages),
@@ -231,8 +227,6 @@ function observeModelStream(
               requestModel,
             );
             if (span.isRecording()) {
-              // Inspect only allowlisted sampling fields after the caller's final
-              // payload transformation; headers, credentials and prompts stay out.
               const parameters = modelParametersSchema.safeParse(
                 replacement === undefined ? payload : replacement,
               );
@@ -287,7 +281,6 @@ function observeModelStream(
             }
             const chunkReportedUsage = reportsUsage(model.api, data);
             await options.onProviderStreamEvent?.(data, requestModel);
-            // A throwing caller observer prevents Pi from normalizing this chunk.
             if (chunkReportedUsage) reportedUsage = true;
           },
         });
@@ -300,7 +293,6 @@ function observeModelStream(
             event.delta.length > 0
           ) {
             completionStarted = true;
-            // Langfuse currently uses this extension to display first-token latency.
             span.setAttribute(
               "langfuse.observation.completion_start_time",
               new Date().toISOString(),
@@ -315,8 +307,6 @@ function observeModelStream(
                 usage.reasoning !== undefined && usage.reasoning <= usage.output
                   ? usage.reasoning
                   : 0;
-              // OTel counts cache tokens in input and reasoning tokens in output.
-              // Pi's cache buckets are separate; its output already includes reasoning.
               span.setAttributes({
                 "gen_ai.usage.input_tokens":
                   usage.input + usage.cacheRead + usage.cacheWrite,

@@ -3,7 +3,6 @@ import { readLimitedJson } from "@home-agent/api/http/read-body";
 import { z } from "zod";
 import type { sourceAccessSchema } from "../../perception/sources";
 
-// Only the trusted composition root supplies this descriptor, never an HTTP client.
 export async function readAnalysisStream(
   access: z.infer<typeof sourceAccessSchema>,
   signal: AbortSignal,

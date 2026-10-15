@@ -37,8 +37,6 @@ test.skipIf(!dataDirectory)(
     expect(score.images).toBe(63);
     expect(score.negativeImages).toBe(10);
     expect(score.negativeWithPredictions).toBeLessThanOrEqual(1);
-    // Non-regression bounds for the current model, not household acceptance targets.
-    // Ground truth comes from COCO annotations; improvements remain permissible.
     for (const [label, minimumMatches, maximumFalsePositives] of [
       ["human", 20, 1],
       ["cat", 22, 0],

@@ -4,7 +4,6 @@ import {
   playbackTargetSchema,
 } from "@home-agent/api/playback";
 
-// Retention defaults, not measured performance thresholds.
 export const playbackHistoryPolicy = {
   lifetimeMs: 24 * 60 * 60 * 1_000,
   maximumGroups: 128,
@@ -17,7 +16,6 @@ export type PlaybackHistoryTarget = ReturnType<
   typeof playbackTargetSchema.parse
 >;
 
-/** One foreground success, measured entirely by the same browser clock. */
 export const playbackHistorySampleSchema = playbackTargetSchema.extend({
   id: z.uuid(),
   recordedAt: playbackDurationSchema,
@@ -49,7 +47,6 @@ function isRecentSample(sample: PlaybackHistorySample, now: number) {
   );
 }
 
-/** Merge one comparable group, retaining its newest distinct successes. */
 export function mergePlaybackHistorySamples(
   samples: readonly PlaybackHistorySample[],
   now: number,
@@ -66,7 +63,6 @@ export function mergePlaybackHistorySamples(
     .slice(0, playbackHistoryPolicy.maximumSamples);
 }
 
-/** The caller supplies one comparable group and handles its environment scope. */
 export function estimateRemainingPlaybackTime(
   samples: readonly PlaybackHistorySample[],
   {
@@ -85,7 +81,6 @@ export function estimateRemainingPlaybackTime(
     now < 0
   )
     return null;
-  // Compare only prior waits which had not yet produced a frame at this point.
   const remaining = samples
     .filter(
       (sample) =>

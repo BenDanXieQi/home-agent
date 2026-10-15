@@ -59,7 +59,6 @@ export function sessionBaggageContext(parent: Context, id?: string) {
   return propagation.setBaggage(parent, baggage);
 }
 
-/** Bind only an application-confirmed session; it is correlation, not authorization. */
 export function bindTraceSession(value: string) {
   const id = traceSessionId(value);
   if (!id) return;
@@ -71,7 +70,6 @@ export function bindTraceSession(value: string) {
   if (span?.isRecording()) span.setAttribute("session.id", id);
 }
 
-/** A fresh holder lets the HTTP response return a session discovered by its handler. */
 export function withRequestSession<T>(
   acceptIncoming: boolean,
   run: (session: RequestSession) => Promise<T>,
@@ -92,7 +90,6 @@ export function withRequestSession<T>(
   );
 }
 
-/** Durable work keeps immutable correlation and must not retain an HTTP holder. */
 export function withoutRequestSession(parent: Context) {
   return sessionBaggageContext(
     parent.deleteValue(key),

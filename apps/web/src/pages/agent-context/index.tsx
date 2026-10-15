@@ -6,7 +6,7 @@ import {
   ChevronRight,
   RefreshCw,
 } from "lucide-react";
-import type { agentReceiptIndexSchema } from "@home-agent/api/agent-receipts";
+import type { agentReceiptIndexSchema } from "@home-agent/agent/context/contracts";
 import type { z } from "zod";
 import { Button } from "../../components/Button";
 import { PageHeaderContent } from "../../components/PageHeaderContent";
@@ -25,7 +25,6 @@ const connectionLabels = {
   disconnected: "与 Backend 断开",
 };
 
-// Receipt polling must not update the header when its connection state is unchanged.
 const ConnectionStatus = memo(function ConnectionStatus({
   connected,
   label,
@@ -42,7 +41,7 @@ const ConnectionStatus = memo(function ConnectionStatus({
         <span
           className={`size-1.5 shrink-0 rounded-full ${connected ? "bg-sage" : "bg-muted"}`}
         />
-        {/* Reserve the usual status width until the first read supplies evidence. */}
+        {}
         {label ?? connectionLabels.connected}
       </span>
     </PageHeaderContent>
@@ -236,7 +235,6 @@ export default function AgentContextPage() {
   const [tab, setTab] = useState<"receipts" | "context" | "compressed">(
     "receipts",
   );
-  // A failed read must not present the last successful response as current receipt evidence.
   const data = query.isError ? undefined : query.data;
   return (
     <section className="space-y-4 [overflow-anchor:none]">

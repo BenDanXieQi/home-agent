@@ -105,7 +105,6 @@ function prepareCommit(
   } = {},
   lifecycle?: Household["status"],
 ) {
-  // Only the selected statechart transition can change the public lifecycle.
   const output = updateHousehold(projection, {
     status: lifecycle ?? context.projection.household.household.status,
   });
@@ -296,7 +295,6 @@ function sourceChanged(
     lifecycle,
   );
 }
-/** Prepare one input before the internal commit chooses a lifecycle target. */
 function prepareInput(
   context: ReturnType<typeof initialContext>,
   event: Input,
@@ -462,7 +460,6 @@ function prepareInput(
       );
     }
     case "revoke":
-      // The runtime derives this candidate only by removing already accepted data.
       return prepareCommit(
         context,
         event.projection,
@@ -505,7 +502,6 @@ function prepareTransition(
   };
 }
 
-/** Internal events finish within the same macrostep, before publishing a snapshot. */
 function commitTransition(lifecycle: Household["status"]) {
   return {
     target: `#household.${lifecycle}`,
@@ -558,7 +554,6 @@ const revocations = [
   updateState,
 ];
 
-/** Statechart transitions own lifecycle; the projection only publishes their result. */
 export const householdMachine = setup({
   types: {
     // oxlint-disable-next-line typescript/no-unsafe-type-assertion

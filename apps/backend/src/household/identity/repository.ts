@@ -17,7 +17,6 @@ import { HouseholdError } from "../errors";
 
 export const membersLock = "household_members";
 
-// Shared with member writes; caller already holds the household binding lock.
 export function lockIdentityMembers(
   tx: Transaction,
   mode: Parameters<typeof lockTransaction>[2] = "exclusive",
@@ -25,7 +24,6 @@ export function lockIdentityMembers(
   return lockTransaction(tx, membersLock, mode);
 }
 
-/** Membership writes resolve a previous commit before starting another mutation. */
 export function createMemberWriter(db: Database) {
   const queue = new PQueue({ concurrency: 1 });
   const bindingTransaction = createLockedTransactions(

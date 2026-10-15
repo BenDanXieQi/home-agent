@@ -157,7 +157,6 @@ async function enroll(
   const detections = (await detector.detect(image.frame)).detections;
   const tracker = createHumanTracker();
   const input = tracker.begin(sample.timeMs, detections);
-  // Registration geometry comes from actual detection; it does not require an identity state.
   const tracks = tracker.finish(
     input,
     input.humans.map(() => null),
@@ -218,7 +217,6 @@ const started = performance.now();
 const cpuStart = process.cpuUsage();
 let peakRss = process.memoryUsage().rss;
 try {
-  // Frozen enrollment rule: earliest quality-accepted C1 frame per planned enrolled identity.
   for (const sample of dataset.sources[0]!.samples) {
     if (
       !sample.people.some(
@@ -328,7 +326,6 @@ try {
     const truthTracks = observation.tracks.flatMap((track) => {
       if (!track.measuredBox) return [];
       const identity = primaryForBox(sample, track.measuredBox, false);
-      // Both eyes must have exactly one measured owner; background tracks stay unlabelled.
       if (
         identity === null ||
         observation.tracks.filter(
@@ -486,7 +483,6 @@ try {
       sequence: state.sequence,
       receivedAt: sample.timeMs,
       sampledAt: sample.timeMs,
-      // These 90k ticks bind this isolated calibration's original frame, not network RTP.
       mediaTime: {
         generation: state.generation,
         pts: sample.frameNumber * 3000,

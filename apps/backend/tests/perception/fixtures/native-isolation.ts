@@ -1,6 +1,5 @@
 import { createRequire } from "node:module";
 
-// This probe runs in a fresh process, independent of other test files' imports.
 const require = createRequire(import.meta.url);
 const nativeImports = () =>
   Object.keys(require.cache).filter((path) =>
@@ -24,7 +23,6 @@ try {
   const separateProcess = pool.getStatus().processId !== process.pid;
   await pool.close();
   const afterClose = nativeImports();
-  // Verify that this runtime's cache inspection actually detects both libraries.
   await import("sharp");
   await import("onnxruntime-node");
   const loaded = nativeImports();

@@ -119,8 +119,6 @@ export const mijiaCanStartLoginAutomaticallyAtom = atom((get) => {
   );
 });
 export const startMijiaLoginAutomaticallyAtom = atom(null, async (get, set) => {
-  // Recheck shared state at dispatch: StrictMode or another mounted consumer
-  // must not replace the attempt that the first caller has already started.
   if (!get(mijiaCanStartLoginAutomaticallyAtom)) return;
   await set(performMijiaAtom, { type: "startLogin" });
 });

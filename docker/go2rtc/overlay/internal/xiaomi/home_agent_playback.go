@@ -84,7 +84,6 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 	camera.playbacks[body.PlaybackID] = playback
 	homeAgentMu.Unlock()
 
-	// A viewer has its own deadline and cancellation, independent of the source.
 	ctx, cancel := context.WithTimeout(ownerCtx, 50*time.Second)
 	defer cancel()
 	stopRequestCancellation := context.AfterFunc(r.Context(), cancel)
@@ -138,8 +137,6 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 		homeAgentError(w, err.Error(), http.StatusBadGateway)
 		return
 	}
-	// Transfer connection lifetime from the request to its explicit owner before
-	// publishing the answer. DELETE can cancel even while the answer is in flight.
 	context.AfterFunc(ownerCtx, func() {
 		_ = conn.Close()
 		cleanup(conn)
@@ -152,7 +149,6 @@ func homeAgentPlayback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	homeAgentMu.Unlock()
-	// A slow HTTP writer never blocks a newer offer or cancellation.
 	w.Header().Set("Content-Type", "application/json")
 	failureCode = "response_failed"
 	success = json.NewEncoder(w).Encode(map[string]any{"playbackId": playback.id, "answer": answer, "telemetry": playback.timing.snapshot(), "media": map[string]any{"generation": homeAgentMediaGeneration(camera), "clockRate": 90000}}) == nil
@@ -173,8 +169,6 @@ func homeAgentRelease(w http.ResponseWriter, r *http.Request) {
 	if session == nil {
 		return
 	}
-	// A DELETE can overtake camera preparation or SDP negotiation. Retain a
-	// tombstone beyond every request deadline so that delayed work stays retired.
 	session.retired[body.PlaybackID] = time.Now().Add(2 * time.Minute)
 	if camera := session.cameras[body.SourceID]; camera != nil {
 		if playback := camera.playbacks[body.PlaybackID]; playback != nil {
@@ -184,8 +178,6 @@ func homeAgentRelease(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Caller holds homeAgentMu. Viewer ownership ends on DELETE, failure or peer close;
-// the camera's resident consumer remains attached independently.
 func homeAgentRetirePlayback(session *homeAgentSession, camera *homeAgentCameraState, playback *homeAgentPlaybackState) {
 	if camera.playbacks[playback.id] != playback {
 		return

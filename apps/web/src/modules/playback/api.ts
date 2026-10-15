@@ -1,8 +1,8 @@
 import {
   mijiaTimeouts,
   mijiaPlaybackResponseSchema,
-  mijiaPlaybackReservationResponseSchema,
 } from "@home-agent/api/mijia";
+import { playbackReservationSchema } from "@home-agent/api/playback";
 import {
   requestJson,
   requestEmpty,
@@ -24,7 +24,7 @@ export function reserveMijiaPlayback(
         },
         options,
       ),
-    mijiaPlaybackReservationResponseSchema,
+    playbackReservationSchema,
     { timeoutMs: mijiaTimeouts.control },
   );
 }
@@ -48,7 +48,6 @@ export function offerMijiaPlayback(
 }
 
 export function releaseMijiaPlayback(id: string) {
-  // Only the viewer is released. keepalive allows teardown during navigation.
   requestEmpty(
     (client, options) =>
       client.api.mijia.playback[":id"].$delete({ param: { id } }, options),

@@ -232,8 +232,6 @@ export function createObservationStore(maxAgeMs: number) {
       }
       if (event.event === "settled" && event.observation) {
         const observation = event.observation;
-        // Both processes use the host wall clock only to account for IPC residence.
-        // Reject a clock rollback; expiry thereafter uses this process's monotonic clock.
         const elapsed = Date.now() - observation.receivedAt;
         const age = Math.max(observation.ageMs, elapsed);
         if (

@@ -11,7 +11,6 @@ export const faceEngine = {
   engine: "opencv-wasm-onnxruntime" as const,
   version: `${opencv.version}/${ort.version}`,
 };
-// SFace's published five-landmark 112x112 template; estimation belongs to nudged.
 export const faceAlignment = {
   estimator: "nudged-TSR",
   version: nudged.version,

@@ -29,7 +29,6 @@ const responseSchema = z.object({
     .string()
     .min(1)
     .max(96 * 1024),
-  // Missing or invalid observation data cannot invalidate the media answer.
   telemetry: z.unknown().optional(),
 });
 const heartbeatSchema = z.object({ playbackIds: z.array(z.uuid()).max(32) });
@@ -101,7 +100,6 @@ type AdapterEvents = {
   onPlaybackEnded: (ids: readonly string[]) => void;
 };
 
-/** One backend-owned, memory-only session on one configured go2rtc instance. */
 export class Go2RtcAdapter {
   private sessionId: string | undefined;
   private ready = false;
@@ -119,7 +117,6 @@ export class Go2RtcAdapter {
     private readonly events: AdapterEvents,
   ) {}
 
-  /** Startup recovery: remove only the adapter's private residual state. */
   async reset() {
     this.stopHeartbeat();
     this.ready = false;
@@ -132,8 +129,6 @@ export class Go2RtcAdapter {
     this.stopHeartbeat();
     this.ready = false;
     const sessionId = crypto.randomUUID();
-    // The ID is retained on failure so a partial installation can be fenced off
-    // by close(). The remote API clears the previous session before authenticating.
     this.sessionId = sessionId;
     const controller = new AbortController();
     this.heartbeatController = controller;
@@ -166,7 +161,6 @@ export class Go2RtcAdapter {
       }, HEARTBEAT_INTERVAL_MS),
     );
     this.heartbeatTimer.unref();
-    // Token installation can consume most of the conservative initial lease.
     this.renewSessionLease().catch(() => {
       if (this.ready)
         console.warn(
@@ -284,7 +278,6 @@ export class Go2RtcAdapter {
     }
   }
 
-  /** Verifies instance ownership and renews the 60-second remote lease. */
   async renewSessionLease(signal?: AbortSignal) {
     if (signal?.aborted) throw new Go2RtcError("request_cancelled");
     const sessionId = this.requireSession();
@@ -300,12 +293,10 @@ export class Go2RtcAdapter {
         if (this.heartbeatPending === current)
           this.heartbeatPending = undefined;
       };
-      // probeSession owns failure state; callers own the rejected wait.
       pending.promise.then(settle, settle);
     }
     const promise = pending.promise;
     if (!signal) return promise;
-    // A viewer owns only its wait, not the shared session's renewal request.
     return new Promise<void>((resolve, reject) => {
       const onAbort = () => reject(new Go2RtcError("request_cancelled"));
       signal.addEventListener("abort", onAbort, { once: true });
@@ -322,8 +313,6 @@ export class Go2RtcAdapter {
       {},
       async () => {
         const sentAt = performance.now();
-        // Only compare viewers established before this request. A response may
-        // arrive after an unrelated offer has just completed.
         const trackedIds = this.events.activePlaybackIds();
         try {
           const payload = await this.request(
@@ -369,13 +358,11 @@ export class Go2RtcAdapter {
     );
   }
 
-  /** Stop using this authorization immediately, before its queued remote cleanup. */
   revoke() {
     this.stopHeartbeat();
     this.ready = false;
   }
 
-  /** Stop media, delete the private stream and invalidate its account cache. */
   async close() {
     this.revoke();
     const sessionId = this.sessionId;
@@ -413,8 +400,6 @@ export class Go2RtcAdapter {
   }
 
   private renewLease(sessionId: string, sentAt: number) {
-    // The server renewed after this request began. Response arrival would
-    // overestimate the remaining lease when transport or body reads are slow.
     this.leaseUntil = sentAt + SESSION_LEASE_MS;
     this.heartbeatFailure = undefined;
     this.scheduleLeaseExpiry(sessionId);
@@ -457,8 +442,6 @@ export class Go2RtcAdapter {
     timeoutMs: number = mijiaTimeouts.upstream,
     callerSignal?: AbortSignal,
   ) {
-    // Only static operation metadata is traced. Raw transport failures, request
-    // bodies, response bodies, credentials and SDP never reach tracing/logging.
     return withSpan(
       `mijia.go2rtc.${action}`,
       { "http.request.method": method },

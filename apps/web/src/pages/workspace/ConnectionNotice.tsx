@@ -5,7 +5,6 @@ import { ArrowUpRight, X } from "lucide-react";
 import { Popover } from "radix-ui";
 import { connectionNoticeAtom } from "../../modules/connections/state";
 
-/** Connection details belong to the navigation mascot's popover. */
 export function ConnectionNotice() {
   const notice = useAtomValue(connectionNoticeAtom);
   const titleId = useId();

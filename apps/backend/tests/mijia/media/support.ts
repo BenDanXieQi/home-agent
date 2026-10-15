@@ -36,7 +36,6 @@ async function readCall(request: Request) {
   };
 }
 
-/** A local private-API peer, not a replacement for adapter/session domain behavior. */
 export function mediaPeer(
   events?: ConstructorParameters<typeof Go2RtcAdapter>[1],
 ) {

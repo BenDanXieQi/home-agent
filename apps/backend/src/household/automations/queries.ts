@@ -10,7 +10,6 @@ import type { automations } from "../../db/schema";
 
 function page<T>(items: T[], input: z.infer<typeof automationListQuerySchema>) {
   const selected = items.slice(input.offset, input.offset + input.limit);
-  // Leave room for metadata; never truncate an individual capability or rule.
   while (
     selected.length &&
     Buffer.byteLength(JSON.stringify(selected)) >

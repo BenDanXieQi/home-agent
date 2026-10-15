@@ -10,7 +10,6 @@ import { Button } from "../../components/Button";
 import { RequestFeedback } from "../../components/RequestFeedback";
 import { useLogin } from "../../modules/mijia/use-login";
 
-/** Rendered inside AnimatePresence, which plays its exit before unmounting. */
 export default function AccountDialog() {
   const flow = useLogin();
   const content = useRef<HTMLDivElement>(null);
@@ -37,7 +36,7 @@ export default function AccountDialog() {
           content.current?.focus();
         }}
       >
-        {/* Background and content are one panel, so they always move together. */}
+        {}
         <m.div
           ref={content}
           tabIndex={-1}

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { fetchMock } from "./support/http";
 
-// Install before application imports: the RPC client captures fetch at construction.
 vi.stubGlobal("fetch", fetchMock);
 
 beforeEach(() => {

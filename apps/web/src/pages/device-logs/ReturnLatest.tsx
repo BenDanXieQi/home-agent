@@ -10,7 +10,6 @@ import {
 import { AgentAvatar } from "../../components/AgentAvatar";
 import { Button } from "../../components/Button";
 
-/** Scroll proximity owns the button fade; presence owns only the outer flight. */
 export function ReturnLatest({
   returning,
   count,

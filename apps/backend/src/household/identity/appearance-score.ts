@@ -1,4 +1,3 @@
-// Inputs are normalized ReID vectors accepted by the private evidence boundary.
 export function appearanceScore(vector: number[], reference: number[]) {
   return Math.max(
     -1,

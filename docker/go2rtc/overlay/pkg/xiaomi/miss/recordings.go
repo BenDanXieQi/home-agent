@@ -12,19 +12,13 @@ import (
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/miss/cs2"
 )
 
-// Wire evidence: xiaomi-camera-viewer, MIT, commit
-// 4dc3ae3a77245c5c9afed1981d9840816a439de7, recordings.go and miss/client.go.
-// This adapter reads recording metadata and files from the selected storage channel. It does not send
-// playback, recording-setting, deletion or format commands.
 const recordingIndexCommand = 6
 const recordingMaxEntries = 65536
 const recordingIndexBytes = 4 + 8*recordingMaxEntries
 const recordingQueryTimeout = 15 * time.Second
 
-// These reference-parser bounds reject stale slots in the fixed-size card
-// index. They are index validity limits, not a universal camera date range.
-const recordingMinStart = 1577836800 // 2020-01-01
-const recordingMaxStart = 2524608000 // 2050-01-01
+const recordingMinStart = 1577836800
+const recordingMaxStart = 2524608000
 
 var ErrRecordingsUnsupported = errors.New("recordings_unsupported")
 var ErrRecordingsBusy = errors.New("recordings_busy")
@@ -55,7 +49,7 @@ type recordingRequest struct {
 	command  uint32
 	file     chan recordingFileChunk
 	done     chan recordingReply
-	finished bool // guarded by recordingReader.mu
+	finished bool
 }
 
 type recordingReader struct {
@@ -83,8 +77,6 @@ func (c *Client) beginRecordingRequest(ctx context.Context, command uint32) (*re
 		return nil, ctx.Err()
 	}
 	r := &c.recordings
-	// Both lenses share this physical reader. Admit one request and one waiter;
-	// cancellation before acquiring the wire must not fence the active reader.
 	r.init.Do(func() {
 		r.slots = make(chan struct{}, 2)
 		r.gate = make(chan struct{}, 1)
@@ -126,8 +118,6 @@ func (c *Client) releaseRecordingRequest(request *recordingRequest, completed bo
 	if r.request == request {
 		r.request = nil
 	}
-	// The wire has no request id. A timed-out/cancelled partial response
-	// cannot be assigned to another query in this physical connection.
 	if !completed && !request.finished {
 		r.failed = true
 	}
@@ -166,7 +156,6 @@ func (c *Client) listRecordings(ctx context.Context, storageChannel uint32) (Rec
 	}
 	completed := false
 	defer func() { c.releaseRecordingRequest(request, completed) }()
-	// Storage channels are 0 and 10, distinct from the live lens flags 0 and 1.
 	payload := make([]byte, 24)
 	binary.LittleEndian.PutUint32(payload[8:], storageChannel)
 	if err := c.writeRecordingCommand(ctx, recordingIndexCommand, payload); err != nil {
@@ -233,7 +222,7 @@ func (c *Client) startRecordingReader() {
 			c.recordings.mu.Unlock()
 			if failed {
 				continue
-			} // Drain bounded transport data without retaining it.
+			}
 			if len(chunk) < 8 {
 				c.finishRecordingRequest(request, recordingReply{err: ErrRecordingsInvalid}, true)
 				continue
@@ -270,8 +259,6 @@ func (c *Client) startRecordingReader() {
 					remaining, body, owner = 0, nil, nil
 					continue
 				}
-				// C700 declares only the index table. Its verified four-byte
-				// zero prefix is outside that length.
 				if remaining > 8*recordingMaxEntries {
 					c.finishRecordingRequest(request, recordingReply{err: ErrRecordingsCapacity}, true)
 					continue
@@ -318,8 +305,6 @@ func parseRecordingIndex(body []byte) (RecordingIndex, error) {
 		return RecordingIndex{}, ErrRecordingsCapacity
 	}
 	index := RecordingIndex{Recordings: make([]Recording, 0)}
-	// Fixed-size card indexes include unwritten zero/stale slots. Keep their
-	// rejection count visible instead of equating an unknown layout to no card.
 	for offset := 4; offset+8 <= len(body); offset += 8 {
 		start := binary.LittleEndian.Uint32(body[offset:])
 		flags := binary.LittleEndian.Uint32(body[offset+4:])

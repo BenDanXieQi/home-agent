@@ -42,7 +42,6 @@ function fail(error: unknown) {
   process.exitCode = 1;
   const details = errorDetails(error);
   console.error(details.stack ?? details.message);
-  // Flush the fatal IPC message before leaving this isolated process.
   send({ kind: "fatal", ...details })
     .finally(() => process.exit(1))
     .catch((flushError: unknown) => {
@@ -163,7 +162,6 @@ function send(message: z.infer<typeof responseSchema>) {
     });
   });
 }
-// Piscina, rather than an IPC promise chain, owns the compute queue.
 process.on("message", (message: unknown) => {
   const acknowledgement = windowAcknowledgementSchema.safeParse(message);
   if (acknowledgement.success) {
@@ -196,7 +194,6 @@ process.on("message", (message: unknown) => {
     )
     .catch(fail);
 });
-// No thread termination here; losing the parent ends this isolated process.
 process.on("disconnect", () => {
   const cleanup = video?.close() ?? Promise.resolve();
   cleanup.then(

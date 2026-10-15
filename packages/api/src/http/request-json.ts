@@ -3,7 +3,6 @@ import { apiErrorSchema, type ErrorCode } from "../contracts/errors";
 import { AppError } from "../errors";
 import { readLimitedJson } from "./read-body";
 
-/** One service request. The caller owns endpoint policy; never retries. */
 export async function requestJson<T>(
   send: (signal: AbortSignal) => Promise<Pick<Response, "body" | "ok">>,
   schema: z.ZodType<T>,

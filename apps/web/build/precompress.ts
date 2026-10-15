@@ -3,7 +3,6 @@ import { join, resolve } from "node:path";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import type { Plugin } from "vite";
 
-/** Produce transport variants once at build time, including copied public files. */
 export function precompress() {
   let outputDirectory = "";
   let write = false;

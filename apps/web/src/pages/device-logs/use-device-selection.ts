@@ -6,7 +6,6 @@ import { devicesAtom } from "../../modules/devices/state";
 
 const emptyFilters = { query: "", room: "", category: "" };
 
-/** Owns device selection and refinements shared by the picker and log reader. */
 export function useDeviceSelection(
   allDevices: ReturnType<typeof historyDevices>,
 ) {

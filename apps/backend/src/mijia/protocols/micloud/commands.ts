@@ -25,35 +25,13 @@ const actionResponseSchema = miotActionRequestSchema.omit({ in: true }).extend({
   out: z.unknown().optional(),
 });
 
-// Only codes that establish rejection before execution belong here. Generic
-// device/cloud errors, malformed results and timeouts cannot establish that.
-// Source: MiEcosystem/miot-plugin-sdk wiki, 米家后台服务接口错误码对照表.
 const rejectedCodes = new Set([
-  -704010000, // unauthorized
-  -704000000, // bad request
-  -704000001, // bad request body
-  -704090001, // device not found
-  -704042001, // device not found
-  -704042011, // device offline
-  -704012901, // token absent or expired
-  -704012902, // token invalid
-  -704012903, // authorization expired
-  -704012904, // device unauthorized
-  -704012905, // device not bound
-  -704012906, // OAuth failed
-  -704040002, // service not found
-  -704040003, // property not found
-  -704030023, // property cannot write
-  -704030992, // request denied by rate limit
-  -704220043, // invalid property value
-  -704040005, // action not found
-  -704220035, // invalid action arguments
-  -704220025, // action argument count mismatch
-  -704040999, // operation not implemented
-  -704013101, // operation not supported
+  -704010000, -704000000, -704000001, -704090001, -704042001, -704042011,
+  -704012901, -704012902, -704012903, -704012904, -704012905, -704012906,
+  -704040002, -704040003, -704030023, -704030992, -704220043, -704040005,
+  -704220035, -704220025, -704040999, -704013101,
 ]);
 
-/** Provider acknowledgement never establishes a causal link to a later report. */
 function resultStatus(code: number | null) {
   if (code === 0 || code === -702000000)
     return {

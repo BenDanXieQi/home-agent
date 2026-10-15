@@ -1,6 +1,6 @@
 import { createRouteApp, type RouteContext } from "../definition";
 import { validateJson } from "@home-agent/api/errors/hono";
-import { agentWorkflowInputSchema } from "@home-agent/api/agent-workflows";
+import { agentWorkflowInputSchema } from "../../workflows/contracts";
 
 export function createRoutes({ workflows }: Pick<RouteContext, "workflows">) {
   return createRouteApp().post(

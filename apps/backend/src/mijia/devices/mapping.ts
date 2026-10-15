@@ -12,8 +12,6 @@ export function isCamera(device: MiCloudDevice) {
 export function cameraChannels(device: MiCloudDevice) {
   if (!isCamera(device)) return [];
   const count = cameraChannelCount(device.model);
-  // The media boundary supports one or two lenses. Never silently truncate a
-  // larger declared inventory into a working-looking but incomplete camera.
   return (
     count === 2 ? [1, 2] : count === 1 ? [1] : []
   ) satisfies CameraSourceSpec["channel"][];

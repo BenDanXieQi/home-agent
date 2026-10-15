@@ -67,7 +67,6 @@ function newTrack(trackId: number, clock: number, at: number) {
   };
 }
 
-// Owns only local identity evidence. Tracking owns geometry and track lifetimes.
 export function createIdentityAnalysis(
   config: z.infer<typeof identityConfigSchema>,
   initialReferences: z.infer<typeof identityReferenceSnapshotSchema> | null,

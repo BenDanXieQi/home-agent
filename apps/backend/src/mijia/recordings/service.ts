@@ -226,7 +226,6 @@ export function createRecordingService(options: {
         throw new RecordingGenerationError("recording_missing");
       return [clip];
     }
-    // Host receipt time only narrows the search. It never confirms a file/frame mapping.
     const nearby = index.recordings.filter(
       (clip) =>
         clip.endAt >= target - limits.searchMs &&
@@ -246,7 +245,6 @@ export function createRecordingService(options: {
       0,
       Math.min(nearest - 1, nearby.length - limits.clips),
     );
-    // Download the nearest clip first so optional neighbours cannot prevent playback.
     return nearby
       .slice(first, first + limits.clips)
       .toSorted((a, b) => distance(a) - distance(b));
@@ -275,8 +273,6 @@ export function createRecordingService(options: {
           received > transfer.declaredBytes
         )
           throw new RecordingGenerationError("capacity_exceeded");
-        // A user release stops storage, but the unnumbered physical reply must
-        // finish before the queue can admit another recording on this connection.
         if (!signal.aborted) controller.enqueue(chunk);
       },
     });
@@ -290,8 +286,6 @@ export function createRecordingService(options: {
       output.once("close", resolveClosed);
     });
     try {
-      // The native pipeline owns backpressure, errors and cancellation. Keep
-      // the generation slot until the automatically owned descriptor closes.
       await pipeline(
         Readable.fromWeb(transfer.stream.pipeThrough(bounded)),
         output,

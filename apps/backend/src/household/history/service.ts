@@ -18,7 +18,6 @@ export function createDeviceHistoryService(
   let closed = false;
   let bytes = 0;
   let revision = 0;
-  // Preserve each device's acceptance order while allowing independent devices to save concurrently.
   const writers = new Map<string, { queue: PQueue; submissions: number }>();
   const pending = new Set<Promise<void>>();
   const listeners = new Set<
@@ -57,7 +56,6 @@ export function createDeviceHistoryService(
       assertAccessCurrent();
       if (closed) throw new HouseholdError("stale_session");
     };
-    // Admission belongs to the received batch, not to each device in an inventory.
     bytes += size;
     const tasks = [...Map.groupBy(history, (report) => report.device_id)].map(
       ([deviceId, reports]) => {
@@ -91,7 +89,6 @@ export function createDeviceHistoryService(
             try {
               assertCurrent();
             } catch {
-              // Saving succeeded; a later access revocation only suppresses publication.
               return;
             }
             revision++;

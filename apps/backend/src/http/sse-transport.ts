@@ -4,7 +4,6 @@ import pTimeout from "p-timeout";
 
 type Message = Omit<SSEMessage, "data"> & { data: string };
 
-/** Counts the UTF-8 frame Hono writes, including multiline data prefixes. */
 function messageBytes(message: Message) {
   const lines = message.data.split(/\r\n|\r|\n/);
   return (
@@ -18,7 +17,6 @@ function messageBytes(message: Message) {
   );
 }
 
-/** One native FIFO owns writes, their budgets, and the client cancellation. */
 export function createSseTransport(
   stream: SSEStreamingApi,
   options: {
@@ -102,7 +100,6 @@ export function createSseTransport(
   }
 
   function enqueue(...args: Parameters<typeof send>) {
-    // Synchronous publishers delegate failed deliveries to the lifecycle owner.
     send(...args).catch(close);
   }
 

@@ -60,7 +60,6 @@ export function initialProjectionState(projection: Projection) {
   return { projection: parseImmutable(projectionSchema, projection) };
 }
 
-/** Validate changed records once and preserve untouched immutable references. */
 export function prepareProjection(
   state: ReturnType<typeof initialProjectionState>,
   candidate: Projection,

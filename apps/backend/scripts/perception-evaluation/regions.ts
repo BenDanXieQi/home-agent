@@ -2,7 +2,6 @@ import sharp from "sharp";
 import type { createDetector } from "../../src/perception/detection/detector";
 import { iou } from "../../src/perception/tracking/assignment";
 
-// Deterministic proposals use only image dimensions, never annotation boxes.
 export function evaluationRegions(width: number, height: number) {
   const side = Math.min(width, height);
   return {

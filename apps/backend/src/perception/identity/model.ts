@@ -56,7 +56,6 @@ function adapter(
   };
 }
 
-// One compute owner; each model owns its files, preparation and recoverable errors.
 export function createIdentityModel(directory: string) {
   const human = adapter(() => createFaceModel(directory));
   const pet = adapter(() => createPetModel(directory));
@@ -96,7 +95,6 @@ export function createIdentityModel(directory: string) {
         );
         if (!tracks.some((track) => request.targets.includes(track.trackId)))
           continue;
-        // Keep all animal boxes for the pet overlap check, including unselected animals.
         const result = await selected.extract({ ...request, tracks });
         if (result.kind === "enrollment")
           throw new Error("Unexpected tracking enrollment result");

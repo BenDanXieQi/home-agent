@@ -34,28 +34,22 @@ export interface PiLangfuseDurableOptions extends Omit<
 > {
   harness: Harness;
   conversationId: ConversationId;
-  /** Governs observation only. Cancellation never aborts execution or resumes recovery. */
   context: Context;
-  /** Prepare tracing context before observing a committed run. */
   beforeRun?: (inputs: readonly SubmissionId[]) => Promise<void>;
 }
 
 export interface PiLangfuseDurableConversation {
   readonly active: boolean;
-  /** Resolves when observation has detached, including cancellation and Harness closure. */
   readonly closed: Promise<void>;
-  /** Read committed status without waiting for or starting agent work. Also supports late submission attachment. */
   observeSubmission(
     id: SubmissionId,
     correlation?: DurableCorrelation,
   ): Promise<void>;
-  /** Detach and close observations, without flushing/shutting down the runtime or modifying durable work. */
   dispose(): Promise<void>;
 }
 
 const observedConversations = new WeakMap<Harness, Set<ConversationId>>();
 
-/** Attach a fail-open observer using only public durable APIs. A failed attachment returns an inactive controller. */
 export async function createPiLangfuseDurableConversation(
   runtime: LangfuseRuntime,
   options: PiLangfuseDurableOptions,
@@ -102,7 +96,7 @@ export async function createPiLangfuseDurableConversation(
     try {
       const submission = await options.harness.submission(id, context);
       if (disposed || !submission) return;
-      const record = await submission.status(context); // wait() would resume paused recovery.
+      const record = await submission.status(context);
       if (disposed) return;
       await recorder?.submission(record, readEntry, correlation, true);
     } catch {
@@ -113,7 +107,6 @@ export async function createPiLangfuseDurableConversation(
   function dispose() {
     if (disposePromise) return disposePromise;
     disposed = true;
-    // Publish disposal before cancellation can trigger closure callbacks.
     disposePromise = Promise.resolve().then(async () => {
       await initialization;
       try {
@@ -121,7 +114,6 @@ export async function createPiLangfuseDurableConversation(
       } catch {
         report("observer stop");
       }
-      // stop() detaches immediately; it does not join a listener already running.
       await Promise.allSettled([delivery]);
       recorder?.dispose();
       if (ownsConversation) {
@@ -163,7 +155,6 @@ export async function createPiLangfuseDurableConversation(
         options.conversationId,
         context,
       );
-      // Retain the owned stream before callback-capable trace acquisition so partial disposal joins it.
       stream = attached;
       if (disposed || runtime.closed) {
         dispose().catch(() => {
@@ -179,7 +170,6 @@ export async function createPiLangfuseDurableConversation(
         });
         return;
       }
-      // Failed attachment must not open a trace or publish its ID.
       recorder = new DurableRecorder(internal.backend, {
         ...options,
         metadata: { ...options.metadata },
@@ -226,7 +216,6 @@ export async function createPiLangfuseDurableConversation(
         })();
         return delivery;
       });
-      // Observe closure even if the host never awaits closed. No execution wait is used.
       stream.closed
         .then(
           (end) => {

@@ -34,7 +34,6 @@ const confirmationSchema = z.object({
   _ssign: z.string().min(1),
 });
 
-// Never let supplier URLs, response bodies or credentials escape as error messages.
 async function request(url: URL, init: RequestInit, signal: AbortSignal) {
   let response: Response | undefined;
   try {
@@ -59,7 +58,6 @@ async function request(url: URL, init: RequestInit, signal: AbortSignal) {
           : { retry_after_at: new Date(now + retryDelay).toISOString() },
       );
     }
-    // OAuth redirects carry their result in Location and may have no body.
     if (response.status === 302) return { response, text: "" };
     const text = new TextDecoder().decode(
       await readLimitedBytes(response, MAX_RESPONSE_BYTES, signal),
@@ -79,7 +77,6 @@ async function request(url: URL, init: RequestInit, signal: AbortSignal) {
 }
 function decode(text: string) {
   try {
-    // These application IDs are larger than Number.MAX_SAFE_INTEGER.
     return JSON.parse(
       text
         .replace(/^&&&START&&&/, "")
@@ -150,7 +147,6 @@ export async function refreshOAuth(
   );
 }
 
-/** Completes the authorization included in the single QR login flow. */
 export async function authorizeOAuth(
   session: MiCloudSavedSession,
   parent: AbortSignal,

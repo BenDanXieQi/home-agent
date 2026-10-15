@@ -1,5 +1,3 @@
-// AudioSet labels with an explicit domestic species meaning. Shared labels
-// such as Growling, Hiss and Howl cannot establish which animal made a sound.
 const speciesLabels = {
   dog: new Set(["Dog", "Bark", "Yip", "Bow-wow", "Whimper (dog)"]),
   cat: new Set(["Cat", "Purr", "Meow", "Caterwaul"]),

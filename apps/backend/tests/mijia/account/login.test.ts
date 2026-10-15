@@ -145,7 +145,6 @@ describe("interactive login candidate", () => {
     expect(h.login.state.status).toBe("completed");
     h.login.dispose();
     expect(dispose).not.toHaveBeenCalled();
-    // The account owner, rather than the login attempt, now releases this client.
     h.commit.mock.calls[0]![0].cloud.dispose();
   });
 });

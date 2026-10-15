@@ -1,7 +1,6 @@
 import { DeviceList, DeviceRow } from "./DeviceList";
 import { Skeleton } from "../../components/Skeleton";
 
-/** Same grid and row height as `DeviceBrowser` rows, so real rows replace it in place. */
 export function DeviceRowsSkeleton({ rows = 6 }: { rows?: number }) {
   return Array.from({ length: rows }, (_, index) => (
     <DeviceRow key={index} aria-hidden="true">
@@ -18,7 +17,6 @@ export function DeviceRowsSkeleton({ rows = 6 }: { rows?: number }) {
   ));
 }
 
-/** Filters, heading and rows of `DeviceBrowser` while its code or data is loading. */
 export function DeviceBrowserSkeleton() {
   return (
     <output className="block" aria-label="正在读取设备">

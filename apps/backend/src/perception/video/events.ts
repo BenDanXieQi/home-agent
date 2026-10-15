@@ -68,7 +68,6 @@ export const videoEventSchema = z.discriminatedUnion("event", [
   }),
 ]);
 
-// Validate frame/target binding before any internal consumer sees vectors.
 export function validAppearanceEvent(
   event: Extract<z.infer<typeof videoEventSchema>, { event: "tracking" }>,
 ) {

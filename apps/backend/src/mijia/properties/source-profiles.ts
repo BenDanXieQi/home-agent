@@ -4,7 +4,6 @@ import {
   MIOT_PROPERTY_TIMEOUT_MS,
 } from "../protocols/micloud/properties";
 
-/** Protocol review is evidence for encoding and semantics, not a device run. */
 export const miotCloudCacheProfile = {
   contract_id: "miot-cloud-cache-read",
   contract_version: 1,
@@ -64,7 +63,6 @@ export const miotCloudCacheProfile = {
     },
     real_device_read: {
       status: "scoped_verified",
-      // Successful value delivery only; no cache-age or other-device guarantee.
       models: [
         {
           model: "yeelink.light.bslamp2",
@@ -108,7 +106,6 @@ export const miotCloudCacheProfile = {
   },
 } as const;
 
-/** Stable across token renewal; no account identifier is exposed in the ID. */
 export function miotSourceId(userId: string, region: "cn" = "cn") {
   const identity = JSON.stringify(["xiaomi", userId, region, "micloud_rc4"]);
   return `miot-${createHash("sha256").update(identity).digest("hex")}`;
@@ -120,7 +117,6 @@ export function miotPushSourceId(userId: string) {
     .digest("hex")}`;
 }
 
-/** Subscription evidence and actual message evidence remain separate. */
 export const miotCloudPushProfile = {
   contract_id: "miot-cloud-push",
   contract_version: 1,

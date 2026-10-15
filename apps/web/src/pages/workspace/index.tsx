@@ -11,7 +11,6 @@ import { PageHeaderContext } from "../../components/page-header-context";
 import { accountDialogOpenAtom } from "./account-dialog-state";
 import { WorkspaceSidebar } from "./WorkspaceSidebar";
 import { WorkspaceHeader } from "./WorkspaceHeader";
-// Keep the dialog eager so the first open can animate immediately.
 import AccountDialog from "./AccountDialog";
 
 export default function WorkspaceLayout() {
@@ -46,7 +45,7 @@ export default function WorkspaceLayout() {
     });
     return () => animation?.cancel();
   }, [
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Only switching navigation sections replays the page entrance; detail routes remain visible.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
     pageEntranceKey,
     reducedMotion,
   ]);
@@ -85,7 +84,7 @@ export default function WorkspaceLayout() {
             tabIndex={-1}
             className={`px-4 pb-6 ${contained ? "min-h-0 flex-1" : ""}`}
           >
-            {/* The router owns page lifetimes; animating must not remount its outlet. */}
+            {}
             <div
               ref={page}
               className={

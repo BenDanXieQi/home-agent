@@ -2,10 +2,14 @@ import { HouseholdCollection } from "../household/collection";
 import { createMijiaCollectionSource } from "./collection";
 import { defaultCollectionPolicy } from "../household/collection-policy";
 import { HouseholdRuntime } from "../household/runtime";
+import { HouseholdError } from "../household/errors";
+import { householdPublicError } from "../household/public-errors";
 import type { HouseholdRepository } from "../household/repository";
 import type { MiotSpecClient } from "./protocols/spec/client";
 import { isRecoverableMijiaError, safeMijiaError } from "./errors";
 import type { MijiaService } from "./service";
+import { playbackReservationSchema } from "@home-agent/api/playback";
+import { errorPayload } from "@home-agent/api/errors";
 
 export function createMijiaSpecificationLoader(
   client: Pick<MiotSpecClient, "resolve" | "read">,
@@ -29,14 +33,16 @@ export function createMijiaSpecificationLoader(
     },
     failure(error: unknown) {
       return {
-        error: safeMijiaError(error, "spec_failed").toPayload(),
+        error:
+          error instanceof HouseholdError
+            ? errorPayload(householdPublicError(error))
+            : safeMijiaError(error, "spec_failed").toPayload(),
         retryable: isRecoverableMijiaError(error),
       };
     },
   };
 }
 
-/** Compose integration resources with the independent household application. */
 export function createMijiaHousehold(
   service: MijiaService,
   repository: HouseholdRepository | undefined,
@@ -54,7 +60,11 @@ export function createMijiaHousehold(
           login: state.login,
           connection: state.connectionOperation,
           media: { revision: state.revision, binding: state.binding },
-          homes: state.homes,
+          homes: {
+            selectedHomeId: state.homes.selectedHomeId,
+            status: state.homes.status,
+            items: state.homes.items,
+          },
           directory_sync:
             state.directory.status === "error"
               ? ("error" as const)
@@ -81,12 +91,16 @@ export function createMijiaHousehold(
       logout: () => service.logout(),
       close: () => service.close(),
       reservePlayback: (revision, id, channel) =>
-        service.reservePlayback(revision, id, channel),
+        playbackReservationSchema.parse(
+          service.reservePlayback(revision, id, channel),
+        ),
       failure: (error, stage) =>
-        safeMijiaError(
-          error,
-          stage === "account" ? "home_storage" : "devices_failed",
-        ).toPayload(),
+        error instanceof HouseholdError
+          ? errorPayload(householdPublicError(error))
+          : safeMijiaError(
+              error,
+              stage === "account" ? "home_storage" : "devices_failed",
+            ).toPayload(),
     },
     repository,
     loader,

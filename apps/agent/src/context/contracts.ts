@@ -1,4 +1,4 @@
-import { deviceCapabilitySchema } from "../domain/devices";
+import { deviceCapabilitySchema } from "@home-agent/api/devices";
 import { z } from "zod";
 import {
   agentContextEventSchema,
@@ -9,7 +9,7 @@ import {
   agentSightingSummarySchema,
   agentObservationSourceSchema,
   agentContextDataSchemas,
-} from "./agent-context";
+} from "@home-agent/api/agent-context";
 
 export const agentReceiptQuerySchema = z
   .strictObject({

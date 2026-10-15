@@ -25,7 +25,7 @@ import { createAgentContextStream } from "./stream";
 import { createDeviceHistoryReader } from "../household/history/read";
 import { jsonBytes } from "../household/config";
 import { HouseholdError } from "../household/errors";
-import { householdHttpError } from "../household/http-errors";
+import { householdPublicError } from "../household/public-errors";
 
 export function createAgentContextRoutes(
   port: number,
@@ -65,7 +65,7 @@ export function createAgentContextRoutes(
   app.onError((error, c) =>
     handleHttpError(
       error instanceof HouseholdError
-        ? householdHttpError(error)
+        ? householdPublicError(error)
         : error instanceof PerceptionHistoryError
           ? new AppError("household_unavailable")
           : error,

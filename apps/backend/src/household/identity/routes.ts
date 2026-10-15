@@ -30,7 +30,7 @@ import type { createIdentityReferences } from "./references";
 import type { HouseholdRuntime } from "../runtime";
 import { createMemberAccess } from "../members/access";
 import { HouseholdError } from "../errors";
-import { safeMijiaError } from "../../mijia/errors";
+import { householdPublicError } from "../public-errors";
 
 function parse<S extends z.ZodType>(schema: S, value: unknown) {
   const result = schema.safeParse(value);
@@ -56,7 +56,7 @@ function wireError(error: unknown) {
   if (error instanceof HouseholdError)
     return error.reason === "invalid_state"
       ? new AppError("identity_reference_unavailable", { cause: error })
-      : safeMijiaError(error);
+      : householdPublicError(error);
   if (error instanceof DetectionPoolError)
     return new AppError(
       error.code === "busy"

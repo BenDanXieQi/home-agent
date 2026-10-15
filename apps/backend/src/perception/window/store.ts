@@ -55,8 +55,6 @@ function source(run: z.infer<typeof runSchema>, identity: string, now: number) {
     lastClosedAt: -Infinity,
   };
 }
-// Only these fields can change when an observation reaches a closed window.
-// Their serialized size delta is also the exact delta of the complete summary.
 function analysisDescriptionBytes(
   summary: z.infer<typeof windowSummarySchema>,
 ) {
@@ -78,8 +76,6 @@ function retained(
   identities: ReturnType<typeof windowIdentities>,
   petAcceptingUntil: number,
 ) {
-  // Closed windows keep only encoder input; gray pixels and live facts belong
-  // to aggregation. Freeze the shared metadata once before lending it to encoders.
   const frames = Object.freeze(
     summary.gate.candidate === "video"
       ? input.frames.map(({ rgb, retainedWidth, retainedHeight }) =>
@@ -125,7 +121,6 @@ export function createWindowStore(options: {
 }) {
   const sources = new Map<string, ReturnType<typeof source>>();
   const windows = new Map<string, RetainedWindow>();
-  // IDs only: the window remains the sole owner of retained evidence.
   const analysisWindows = new Map<string, Set<string>>();
   const readLeases = new Set<
     Pick<RetainedWindow, "identity" | "authorization"> & {
@@ -192,7 +187,6 @@ export function createWindowStore(options: {
     const previous = entry.summary.inputState;
     const next =
       previous === "available" || reason === "revoked" ? reason : previous;
-    // These enum values are ASCII strings; only their value length changes.
     const addedBytes = next.length - previous.length;
     entry.descriptionBytes += addedBytes;
     descriptionBytes += addedBytes;
@@ -321,7 +315,6 @@ export function createWindowStore(options: {
     entry.lastClosedAt = Math.max(entry.lastClosedAt, value.endedAt);
     if (!admitted) {
       counters.skipped++;
-      // Keep bounded evidence while an independent analyzer can still admit it.
       if (
         now >= Math.max(summary.speech.acceptingUntil, petAcceptingUntil) ||
         !summary.audio.run ||
@@ -406,7 +399,6 @@ export function createWindowStore(options: {
             windowLimits.graceMs
       )
         clearContext(entry);
-      // Empty windows are facts about missing input, never an absence judgment.
       getDraft(entry, now);
       const ready = [...entry.drafts.entries()]
         .filter(([, value]) => value.endedAt + windowLimits.graceMs <= now)
@@ -674,8 +666,6 @@ export function createWindowStore(options: {
           counters.droppedFrames++;
           return;
         }
-        // A video restart cannot truncate a healthy audio window. Keep its
-        // original video producer and admit the replacement in the next window.
         if (value.videoRun && !isCurrentRun(value.videoRun, event.run)) {
           counters.droppedFrames++;
           value.gaps.add("video_run_changed");
@@ -876,7 +866,6 @@ export function createWindowStore(options: {
     acquireRead(id: string, now: number) {
       const entry = lookup(id, now);
       if (!entry || entry.summary.inputState === "revoked") return undefined;
-      // An admitted read retains authorization independently of the window summary.
       const lease = {
         run: entry.summary.run,
         identity: entry.identity,
@@ -893,7 +882,6 @@ export function createWindowStore(options: {
     acquire(id: string, now: number) {
       const entry = lookup(id, now);
       if (!entry || entry.summary.inputState !== "available") return undefined;
-      // Borrow only encoder pixels; the signal never exposes revocation authority.
       return {
         authorizationSignal: entry.authorization.signal,
         bytes: entry.bytes,

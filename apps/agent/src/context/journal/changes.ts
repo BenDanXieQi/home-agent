@@ -4,9 +4,9 @@ import type {
   agentObservationSourceSchema,
 } from "@home-agent/api/agent-context";
 import { isDeepStrictEqual } from "node:util";
-import { createAgentDeviceMetadata } from "@home-agent/api/agent-context/devices";
-import type { agentReceiptSchema } from "@home-agent/api/agent-receipts";
-import { agentReceiptChangeSchema } from "@home-agent/api/agent-receipts";
+import { createAgentDeviceMetadata } from "../devices";
+import type { agentReceiptSchema } from "../contracts";
+import { agentReceiptChangeSchema } from "../contracts";
 import type { z } from "zod";
 
 function collectionState(
@@ -24,7 +24,6 @@ function observationSourceState(
   return state;
 }
 
-/** Capture structured differences while both accepted contexts are available. */
 export function collectReceiptChanges(
   input: Pick<z.infer<typeof agentReceiptSchema>, "message" | "context">,
   previous: z.infer<typeof agentReceiptSchema>["context"] | null,

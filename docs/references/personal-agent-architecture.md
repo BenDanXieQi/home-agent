@@ -125,7 +125,7 @@ flowchart TD
 
 ### 当前项目的缺口
 
-当前 [Agent](../../apps/agent/src/assistant/assistant.ts) 使用 pi-durable 在进程内复用主会话处理文本消息，尚无家庭工具、跨重启会话、持续工作与待回答问题管理；[语音判断](../../apps/agent/src/workflows/speech-interpretation/workflow.ts)及其[共享契约](../../packages/api/src/contracts/speech-dialogue.ts)只判断转写是否构成完整助手请求。当前流程不包含 Agent 刚刚提出的问题或待回答任务，因此“好”“先不要”“另一台”等回答不能只沿用独立请求判定。
+当前 [Agent](../../apps/agent/src/assistant/assistant.ts) 使用 pi-durable 在进程内复用主会话处理文本消息，尚无家庭工具、跨重启会话、持续工作与待回答问题管理；[语音判断](../../apps/agent/src/workflows/speech-interpretation/workflow.ts)及其[Agent 契约](../../apps/agent/src/workflows/speech-interpretation/contracts.ts)只判断转写是否构成完整助手请求。当前流程不包含 Agent 刚刚提出的问题或待回答任务，因此“好”“先不要”“另一台”等回答不能只沿用独立请求判定。
 
 [感知说明](../perception.md#语音片段交付与对话判断)明确了短期语音收件箱的生命周期；它不是跨重启的任务交接存储。实时多轮回应和设备执行不能由该入口推定已实现。还需要输出设备接入、问题状态、回答关联、超时取消、可靠交接和播放收音协调。摄像头可收音不代表其扬声器已能被本项目控制。
 

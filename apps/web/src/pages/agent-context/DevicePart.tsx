@@ -7,7 +7,7 @@ import {
   connectionLabels,
 } from "../../modules/devices/presentation";
 import { propertySubject, propertyDisplayValue } from "./receipt-presentation";
-import { createAgentDeviceMetadata } from "@home-agent/api/agent-context/devices";
+import { createAgentDeviceMetadata } from "@home-agent/agent/context/devices";
 import { memo, useMemo, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Select } from "../../components/Select";

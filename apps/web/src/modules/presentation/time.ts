@@ -32,7 +32,6 @@ const options = {
 } satisfies Record<string, Intl.DateTimeFormatOptions>;
 const formatters = new Map<keyof typeof options, Intl.DateTimeFormat>();
 
-/** Wall-clock display uses the browser's local zone; durations are formatted separately. */
 export function formatTime(
   value: string | number | Date | null | undefined,
   style: keyof typeof options = "dateTime",

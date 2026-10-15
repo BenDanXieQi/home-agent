@@ -7,7 +7,6 @@ function safeIdentifier(value: unknown) {
     : undefined;
 }
 
-// Keep source locations, not the stack's message, function names or absolute paths.
 function sourceLocations(stack: string | undefined) {
   const locations: string[] = [];
   for (const line of stack?.split("\n").slice(1, 40) ?? []) {

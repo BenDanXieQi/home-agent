@@ -27,7 +27,6 @@ export function useWindowDetail(
   });
   const inputState = useWindowInputState(entry);
   const mediaState = useWindowMediaState(entry?.sampledMedia);
-  // Frame judgments are frozen. Only completed speech can add historical evidence.
   const window = useMemo(
     () =>
       query.data && entry && inputState !== undefined

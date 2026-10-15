@@ -3,8 +3,6 @@ import { Demuxer } from "node-av/api";
 import { AV_CODEC_ID_RAWVIDEO, AV_PIX_FMT_RGB24 } from "node-av/constants";
 import { frameLimits } from "../detection/frame";
 
-// FFmpeg owns decoding and sampling in its isolated process. libavformat owns
-// container parsing; each raw packet carries its own PTS and complete pixels.
 export async function* readNutFrames(input: Readable, signal: AbortSignal) {
   await using demuxer = await Demuxer.open(input, {
     format: "nut",
@@ -46,8 +44,6 @@ export async function* readNutFrames(input: Readable, signal: AbortSignal) {
       )
         throw new Error("Invalid RGB24 frame size or media timestamp");
       previous = pts;
-      // The inference worker takes ownership of this JS buffer after the native
-      // packet is released; do not expose native memory to the transfer list.
       yield { width, height, rgb: Uint8Array.from(packet.data), pts };
     } finally {
       packet.free();

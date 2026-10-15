@@ -22,7 +22,6 @@ import { referenceInputSchema, referenceStorageLimits } from "./contracts";
 import type { createReferenceFiles } from "./files";
 import { lockIdentityMembers } from "./repository";
 
-/** Owns reference storage, not image extraction, matching, or HTTP. */
 export function createIdentityReferences(
   db: Database,
   files: ReturnType<typeof createReferenceFiles>,
@@ -35,9 +34,6 @@ export function createIdentityReferences(
     "shared",
   );
   const cleanup = async () => {
-    // Capture candidates before taking the lock. A writer creates its file
-    // under that lock, so reacquiring it settles the candidate's DB ownership.
-    // Keys are never reused: deletion can safely happen after releasing locks.
     const candidates = await files.listKeys();
     if (!candidates.length) return;
     const unreferenced = await transaction(householdBindingLock, async (tx) => {
@@ -50,8 +46,6 @@ export function createIdentityReferences(
     });
     await files.remove(unreferenced);
   };
-  // Cleanup never turns a committed deletion into a reported rollback. Orphans
-  // remain inaccessible and are retried at startup and after the next mutation.
   async function cleanupAfterMutation() {
     try {
       await matching.refresh();

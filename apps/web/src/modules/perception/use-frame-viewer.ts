@@ -6,7 +6,6 @@ import { playbackRetryDelay } from "../playback/retry";
 import { createFramePresentation } from "./presentation";
 import type { createPerceptionSourceState } from "./source-state";
 
-/** Owns the canvas view across short-lived playback connections and frozen inspection. */
 export function useFrameViewer(
   source: ReturnType<typeof createPerceptionSourceState>,
 ) {
@@ -52,7 +51,6 @@ export function useFrameViewer(
     NonNullable<Parameters<typeof usePlaybackSession>[0]["onFrame"]>
   >(
     (frame) => {
-      // Read current eligibility at the frame boundary, without waiting for a React effect.
       if (!store.get(source.playbackTargetAtom)) return;
       display.current?.capture(frame);
       display.current?.update(store.get(source.activeSourceAtom));
@@ -71,7 +69,7 @@ export function useFrameViewer(
   const retries = useRef(0);
   useEffect(() => {
     retries.current = 0;
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- A different viewing scope or manual resume starts a fresh retry budget.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
   }, [target?.scope_epoch, target?.revision, watching]);
   useEffect(() => {
     if (snapshot.phase === "playing") retries.current = 0;

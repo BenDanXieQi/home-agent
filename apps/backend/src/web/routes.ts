@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { etag } from "hono/etag";
 
-/** Static delivery only; API routes and streams never enter this router. */
 export function createWebRoutes(root: string) {
   const options = {
     root,

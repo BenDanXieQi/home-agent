@@ -9,8 +9,6 @@ import (
 	pion "github.com/pion/webrtc/v4"
 )
 
-// HomeAgentCompleteAnswer supports cancellation during ICE gathering. Candidate
-// callbacks never block, including when the peer closes before gathering finishes.
 func (c *Conn) HomeAgentCompleteAnswer(ctx context.Context, candidates []string, filter func(*pion.ICECandidate) bool) (string, error) {
 	var mu sync.Mutex
 	complete := pion.GatheringCompletePromise(c.pc)

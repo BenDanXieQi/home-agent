@@ -126,7 +126,6 @@ function matchesCapability(value: Latest["value"], capability: Capability) {
   return "valid" as const;
 }
 
-/** Remove revoked facts in the same commit as the inventory; never publish an orphan. */
 export function reconcileFactScope(before: Projection, candidate: Projection) {
   if (
     before.device === candidate.device &&
@@ -188,7 +187,6 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
   });
 }
 
-/** Ordinary synchronous domain reduction; the household actor owns the resulting state. */
 export function reduceFacts(
   projection: Projection,
   previous: ReturnType<typeof initialFactState>,
@@ -569,7 +567,6 @@ export function reduceFacts(
       metadata,
     };
   });
-  // Control transitions can alter many records; property reports only account for their own delta.
   if (
     input.kind !== "observe" ||
     (input.event.kind !== "property" && input.event.kind !== "read") ||

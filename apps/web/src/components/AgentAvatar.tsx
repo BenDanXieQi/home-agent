@@ -14,7 +14,6 @@ const blink = [1, 1, 0.15, 1, 1];
 const blinkTimes = [0, 0.43, 0.45, 0.47, 1];
 const talk = [1, 1.7, 0.75, 1];
 
-/** Numeric values own their initial pose; no DOM transform parsing is needed. */
 function useAvatarMotion(
   pose: number,
   reduced: boolean | null,
@@ -43,7 +42,6 @@ function useAvatarMotion(
         ...(times ? { times } : {}),
       });
     };
-    // Mount (including StrictMode replay) starts at the actual pose immediately.
     const arrival =
       !reduced && value.get() !== pose
         ? animate(value, pose, settle)
@@ -65,7 +63,6 @@ function useAvatarMotion(
   return value;
 }
 
-/** Decorative identity; the containing control or message provides its accessible name. */
 export function AgentAvatar({
   state = "idle",
   className = "",

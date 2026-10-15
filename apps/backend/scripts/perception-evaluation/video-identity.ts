@@ -26,7 +26,6 @@ import {
 } from "../../src/perception/tracking/feature-version";
 import type { frameSchema } from "../../src/perception/detection/frame";
 
-// Offline single-reference mode; the caller owns decoding, detection and tracking.
 export async function createVideoIdentityAnalysis(
   modelDirectory: string,
   sourceName: string,
@@ -229,7 +228,6 @@ export async function createVideoIdentityAnalysis(
         comparison: [],
       };
     }
-    // File PTS supplies this calibration's frame binding; it is not network RTP.
     const ticks = Math.round(input.ptsMs * 90);
     const observation = trackingObservationSchema.parse({
       run,

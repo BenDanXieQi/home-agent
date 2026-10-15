@@ -10,8 +10,6 @@ import {
 } from "../src/perception/compute/pool";
 import { createPerceptionReport } from "./perception-report";
 
-// Frame slots follow wall-clock time. A late callback only offers the latest
-// due frame; older slots are counted as missed rather than emitted as a burst.
 export function createFrameSchedule(fps: number, durationMs: number) {
   const planned = Math.floor((durationMs * fps) / 1000);
   let accounted = 0;

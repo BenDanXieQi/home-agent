@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Plus } from "lucide-react";
-import type { spatialPlanningResultSchema } from "@home-agent/api/agent-workflows";
-import { spatialDraftSchema } from "@home-agent/api/spatial";
+import type { spatialPlanningResultSchema } from "@home-agent/agent/workflows/spatial-planning";
+import { spatialDraftSchema } from "@home-agent/agent/workflows/spatial-planning";
 import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";

@@ -3,8 +3,6 @@ import { Demuxer, Decoder, FilterAPI } from "node-av/api";
 import { AV_SAMPLE_FMT_S16 } from "node-av/constants";
 import type { createAudioDecoder } from "../../src/perception/audio/decoder";
 
-// Benchmark alternative only. It intentionally has the same PCM and time contract,
-// but a native failure here shares the VAD process rather than one FFmpeg child.
 export function createLibavAudioDecoder(
   options: Parameters<typeof createAudioDecoder>[0],
 ) {

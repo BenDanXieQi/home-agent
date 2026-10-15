@@ -11,8 +11,6 @@ import (
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/miss"
 )
 
-// A transport chunk may contain a whole recording. Bound aggregate file-transfer
-// memory by admitting one download across the runtime; index reads stay per-camera.
 var homeAgentRecordingDownloadGate = make(chan struct{}, 1)
 
 type homeAgentRecordingWriter struct {
@@ -32,8 +30,6 @@ func (w *homeAgentRecordingWriter) Write(data []byte) (int, error) {
 	if err := controller.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		return 0, err
 	}
-	// Register after installing the deadline so an already cancelled context
-	// cannot have its interruption overwritten by a later deadline update.
 	interrupted := make(chan struct{})
 	stop := context.AfterFunc(w.ctx, func() {
 		_ = controller.SetWriteDeadline(time.Now())
@@ -131,8 +127,6 @@ func homeAgentRecordingDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		diagnostic.Report("recording_download_failed", err)
-		// Abort a failed body so native HTTP clients cannot accept a partial
-		// recording as a completed Content-Length response.
 		panic(http.ErrAbortHandler)
 	}
 }

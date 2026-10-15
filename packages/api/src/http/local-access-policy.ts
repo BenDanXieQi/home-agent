@@ -15,8 +15,6 @@ function isLoopbackAddress(address: string | undefined) {
   );
 }
 
-// Do not trust forwarded headers. Both local proxies preserve Host and Origin.
-// JSON PUT requests need an explicit Origin check; hono/csrf only covers forms.
 export function createLocalAccessCheck(
   ports: readonly number[],
   options: { webEntry?: boolean } = {},

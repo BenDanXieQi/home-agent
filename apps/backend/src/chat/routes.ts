@@ -1,4 +1,4 @@
-import { chatInputSchema } from "@home-agent/api/contracts";
+import { chatInputSchema } from "@home-agent/agent/assistant/contracts";
 import { validateJson } from "@home-agent/api/errors/hono";
 import { Hono } from "hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";

@@ -1,4 +1,5 @@
 import { createMijiaDeviceControl } from "./mijia/control/adapter";
+import { mijiaAutomationProperties } from "./mijia/automation-properties";
 import { createStoredRecordAccess } from "./household/records/access";
 import { createRecordWriter } from "./household/records/writer";
 import { createRecordMaintenance } from "./household/records/maintenance";
@@ -266,6 +267,7 @@ const automations =
         db: database.db,
         household,
         operations,
+        properties: mijiaAutomationProperties,
         signal: shutdown.signal,
         readEventTypes: () => [],
       })

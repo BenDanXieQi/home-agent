@@ -126,7 +126,6 @@ describe("account directory invalidation", () => {
     jest.advanceTimersByTime(4_000);
     expect(refresh).not.toHaveBeenCalled();
     const current = connected(1);
-    // A valid old topic on the new transport still has no current consumer.
     notify(current);
     expect(directory.snapshot().received).toBe(1);
     jest.advanceTimersByTime(4_000);

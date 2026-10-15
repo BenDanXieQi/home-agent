@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { agentReceivedContextSchema } from "@home-agent/api/agent-receipts";
+import type { agentReceivedContextSchema } from "../contracts";
 import type { agentContextDataSchemas } from "@home-agent/api/agent-context";
 import type { deviceCapabilitySchema } from "@home-agent/api/devices";
 
@@ -53,7 +53,6 @@ export function requireReadyContext(snapshot: ReceivedContext) {
   };
 }
 
-/** Lexical ordering independent of the host locale. */
 export function compareText(a: string, b: string) {
   return a < b ? -1 : a > b ? 1 : 0;
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { BackendClient } from "@home-agent/backend-client";
+import type { ContextSource } from "./source";
 import {
   agentContextPolicy,
   agentHistoryQuerySchema,
@@ -15,12 +15,11 @@ type WithoutScope<Input> = Input extends unknown
   ? Omit<Input, "account_id" | "home_id">
   : never;
 
-/** Reads materials belonging to the currently synchronized context, without updating it. */
 export function createContextReader(options: {
-  client: BackendClient;
+  client: Pick<ContextSource, "history" | "material">;
   receiver: Pick<ReturnType<typeof createContextReceiver>, "qualification">;
 }) {
-  const api = options.client.api.agent.context;
+  const client = options.client;
   type Scope = NonNullable<
     ReturnType<typeof options.receiver.qualification>
   >["scope"];
@@ -63,11 +62,7 @@ export function createContextReader(options: {
           home_id: scope.home_id,
         });
         const result = await requestJson(
-          (requestSignal) =>
-            api.history.$post(
-              { json: input },
-              { init: { signal: requestSignal } },
-            ),
+          (requestSignal) => client.history(input, requestSignal),
           agentHistoryResponseSchema,
           { ...policy, signal },
         );
@@ -89,11 +84,7 @@ export function createContextReader(options: {
       return readWithinScope(signal, async (scope) => {
         const input = agentMaterialQuerySchema.parse({ ...reference, scope });
         const result = await requestJson(
-          (requestSignal) =>
-            api.material.$post(
-              { json: input },
-              { init: { signal: requestSignal } },
-            ),
+          (requestSignal) => client.material(input, requestSignal),
           agentMaterialResponseSchema,
           { ...policy, signal },
         );

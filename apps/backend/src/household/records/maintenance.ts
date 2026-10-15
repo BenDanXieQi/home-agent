@@ -2,7 +2,6 @@ import { recordPruneBatchSize } from "./retention";
 import type { createMaterialRepository } from "../materials/repository";
 import type { createCommandRepository } from "../operations/repository";
 
-/** Household record retention runs independently of vendor collection. */
 export function createRecordMaintenance(
   materials: Pick<ReturnType<typeof createMaterialRepository>, "pruneRecords">,
   commands: Pick<ReturnType<typeof createCommandRepository>, "pruneRecords">,

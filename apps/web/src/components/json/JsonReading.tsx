@@ -15,7 +15,6 @@ export function JsonToolbar({
   );
 }
 
-/** Match the reader's toolbar and viewport while conversion or code loading runs. */
 export function JsonLoading({
   value,
   name,

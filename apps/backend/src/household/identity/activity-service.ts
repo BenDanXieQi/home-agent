@@ -45,7 +45,6 @@ function stateSignature(activity: ReturnType<typeof memberActivity>) {
     ? "unknown"
     : `${current.association.basis}:${current.association.memberId}:${current.association.state}`;
 }
-// This owner accumulates every accepted correction before queue coalescing.
 export function createMemberActivityService(
   household: HouseholdRuntime,
   perception: Pick<
@@ -62,7 +61,6 @@ export function createMemberActivityService(
   const queue = new PQueue({ concurrency: 1 });
   const writes = new Set<Promise<void>>();
   const entries = new Map<string, ReturnType<typeof pendingActivity>>();
-  // Source-target dependencies survive reference expiry and successful writes.
   const dependents = new Map<string, Set<string>>();
   let closed = false;
   let closing: Promise<void> | undefined;
@@ -220,8 +218,6 @@ export function createMemberActivityService(
     const writing = queue
       .add(
         async () => {
-          // The queue signal only cancels waiting tasks. Running storage retains
-          // its serial slot until the transaction has actually settled.
           entry.waiting = null;
           if (entries.get(key) !== entry || !eligible(entry)) return;
           const activity = structuredClone(entry.activity);
@@ -260,7 +256,6 @@ export function createMemberActivityService(
             entry.activity.record.data.attribution.revision ===
             activity.record.data.attribution.revision
           ) {
-            // Invalid reference or member eligibility cannot become valid by retrying old evidence.
             discard(entry);
           }
         },
@@ -289,7 +284,6 @@ export function createMemberActivityService(
         entry.inFlight = null;
         dependencies();
         release(key, entry);
-        // An old receipt acknowledges only its selected version. Corrections bypass throttling.
         if (entries.get(key) === entry && !closed) schedule(key, entry);
       });
     writes.add(writing);
@@ -354,7 +348,6 @@ export function createMemberActivityService(
   ) {
     if (entry.terminalChecked) return;
     entry.terminalChecked = true;
-    // Version invalidation abandons an unsavable snapshot; it does not rewrite history or claim a storage receipt.
     if (
       !eligible(entry) &&
       entry.activity.record.data.attribution.current.kind === "known"
@@ -566,7 +559,6 @@ export function createMemberActivityService(
         source.tracking.tracks.some((item) => item.trackId === data.trackId);
       if (!track && !entry.terminalChecked) {
         entry.endingAt ??= Date.now();
-        // Appearance owns human terminal certification. Pet/direct-only paths use raw recent.
         const appearanceTarget = perception.appearance?.target(key);
         if (!appearanceTarget) {
           const recent =

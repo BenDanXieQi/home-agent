@@ -20,7 +20,6 @@ function loginMaterial(state: MijiaLoginAttempt) {
   };
 }
 
-/** Owns only an interactive attempt. Account adoption belongs to the coordinator. */
 export class LoginFlow {
   private currentState: MijiaLoginAttempt = { status: "idle" };
   get state() {
@@ -208,8 +207,6 @@ export class LoginFlow {
     } catch (error) {
       if (this.isCurrent(attempt)) {
         const failure = safeMijiaError(error, "authentication");
-        // Only a rejected code is retryable in this challenge. Other failures
-        // may follow a consumed code or a partial STS exchange; discard them.
         if (failure.reason !== "security_code_invalid") {
           this.loginFailed(attempt, failure);
           return;

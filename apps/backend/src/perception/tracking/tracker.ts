@@ -47,7 +47,6 @@ export function createHumanTracker(allocateId = createTrackIds()) {
     const cached = humans.map(
       () => null as { vector: number[]; trackId: number; at: number } | null,
     );
-    // Cache only unambiguous, static, immediately preceding observations.
     for (const [ti, di] of assign(
       tracks.map((t) => humans.map((d) => 1 - iou(t.box, d))),
       0.7,
@@ -95,7 +94,6 @@ export function createHumanTracker(allocateId = createTrackIds()) {
       throw new Error("Stale tracking update");
     const remaining = new Set(input.humans.map((_, i) => i));
     const matched = new Map<number, number>();
-    // Cascade by actual last observation time, then solve globally within each age group.
     for (const seen of [...new Set(tracks.map((t) => t.lastSeen))].toSorted(
       (a, b) => b - a,
     )) {

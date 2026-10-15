@@ -7,8 +7,6 @@ import {
   type PerceptionSources,
 } from "../../src/perception/sources";
 
-// A paced encoded source exercises the production HTTP/FFmpeg/IPC path.
-// Quiet and audible sources are distinct physical inputs, not mocked VAD results.
 export async function createAudioSource(
   count = 1,
   options: { speech?: Uint8Array; video?: boolean } = {},

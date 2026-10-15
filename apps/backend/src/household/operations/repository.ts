@@ -98,8 +98,6 @@ export function createCommandRepository(db: Database) {
         const records: ReturnType<typeof commandRecordSchema.parse>[] = [];
         let bytes = 512;
         let more = false;
-        // Full command bodies can be 64 KiB each. Stop the native cursor as
-        // soon as the page is full instead of buffering up to 1001 bodies.
         for await (const rows of query.cursor(16)) {
           scope.assertCurrent();
           for (const row of rows) {

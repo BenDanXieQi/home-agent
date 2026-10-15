@@ -1,8 +1,6 @@
 import { createRequire } from "node:module";
 import { z } from "zod";
 
-// The published CommonJS library has no declarations. Validate its public
-// constructors and numeric output at this boundary instead of trusting any.
 const native = z
   .object({
     KalmanFilter: z.instanceof(Function),
@@ -15,8 +13,6 @@ const nativeState = z.object({
   covariance: z.tuple([pair, pair]),
 });
 
-// Independent constant-velocity axes for DeepSORT's x/y/aspect/height state.
-// Covariance stays block diagonal: measurements and process noise do not couple axes.
 export function measurement(box: {
   x: number;
   y: number;
@@ -31,7 +27,6 @@ export function initiate(box: Parameters<typeof measurement>[0]) {
     velocity: 0,
     pp: (i === 2 ? 0.01 : box.h / 10) ** 2,
     pv: 0,
-    // Velocity is pixels/second: allow half a body height per second at birth.
     vv: (i === 2 ? 0.01 : box.h / 2) ** 2,
   }));
 }

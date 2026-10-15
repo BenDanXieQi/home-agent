@@ -18,7 +18,6 @@ export class CredentialStoreError extends Error {
 export class CredentialCommitUnknownError extends CredentialStoreError {}
 const lockKey = (name: string) => `credentials/${name}`;
 
-/** Encrypted provider credentials. Record keys are authenticated as AAD. */
 export function createCredentialStore(
   db: Database,
   loadKey: () => Promise<string>,

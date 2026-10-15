@@ -12,13 +12,11 @@ import {
 let json = "";
 let prepared: ReturnType<typeof prepareWithSegments>[] | null = null;
 
-/** The worker owns the reading snapshot and reuses measurements across width changes. */
 export function layoutJson(request: JsonLayoutRequest) {
   try {
     if (request.kind === "prepare") {
       setLocale(request.locale);
       json = JSON.stringify(request.value, null, 2) ?? "null";
-      // Bound each prepare call by JSON paragraphs instead of segmenting a megabyte-long string.
       const paragraphs = json.split(/(?<=\n)/);
       prepared = null;
       const blocks: ReturnType<typeof prepareWithSegments>[] = [];
@@ -54,6 +52,6 @@ export function layoutJson(request: JsonLayoutRequest) {
 }
 
 self.addEventListener("message", (event: MessageEvent<JsonLayoutRequest>) => {
-  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Dedicated worker messaging has no targetOrigin.
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin
   self.postMessage(layoutJson(event.data));
 });

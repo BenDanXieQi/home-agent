@@ -7,6 +7,5 @@ export const miotPropertyAddressSchema = z.object({
 });
 export type MiotPropertyAddress = z.infer<typeof miotPropertyAddressSchema>;
 
-/** Application budgets for one cloud property request, not upstream guarantees. */
 export const MIOT_PROPERTY_BATCH_SIZE = 150;
 export const MIOT_PROPERTY_TIMEOUT_MS = 30_000;

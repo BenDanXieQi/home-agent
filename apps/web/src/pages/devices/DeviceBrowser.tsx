@@ -73,7 +73,6 @@ export const DeviceBrowser = memo(function DeviceBrowser({
   const [refinementsOpen, setRefinementsOpen] = useState(activeRefinements > 0);
   const options = useAtomValue(deviceFilterOptionsAtom);
   const devices = useAtomValue(filteredDevicesAtom);
-  // Rows animate only when the listed set changes, not when content above moves.
   const membership = devices.map((device) => device.id).join();
   const keys = useMemo(
     () => new Set(devices.map((device) => device.id)),
@@ -87,7 +86,6 @@ export const DeviceBrowser = memo(function DeviceBrowser({
   useLayoutEffect(() => {
     const element = list.current;
     if (!element) return undefined;
-    // The list and page ancestors stay untransformed; row animations live inside.
     const measure = () =>
       setScrollMargin(element.getBoundingClientRect().top + window.scrollY);
     measure();
@@ -104,7 +102,7 @@ export const DeviceBrowser = memo(function DeviceBrowser({
     };
   }, [layoutRef, refinementsOpen]);
   const focusedIndex = devices.findIndex((device) => device.id === focused);
-  // oxlint-disable-next-line react/incompatible-library -- Read live virtual measurements directly rather than compiler-memoizing them.
+  // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useWindowVirtualizer({
     count: devices.length,
     estimateSize: () => 76,
@@ -253,7 +251,7 @@ export const DeviceBrowser = memo(function DeviceBrowser({
         ) : null}
       </AnimatePresence>
       <DeviceList showHeader={devices.length > 0 || status === "loading"}>
-        {/* Rows keep their identity as filters change: survivors slide into place. */}
+        {}
         <div
           ref={list}
           className="relative"
@@ -269,7 +267,7 @@ export const DeviceBrowser = memo(function DeviceBrowser({
               setFocused(null);
           }}
         >
-          {/* Clear exiting rows before the zero-height list exposes the empty state. */}
+          {}
           <AnimatePresence
             key={devices.length > 0 ? "populated" : "empty"}
             initial={false}

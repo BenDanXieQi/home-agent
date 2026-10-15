@@ -69,7 +69,6 @@ function observationSource(
     read_at: status === "loading" ? null : new Date().toISOString(),
   });
 }
-/** One owner refreshes source parts; connections only consume its committed views. */
 export function createAgentContextService(options: {
   household: HouseholdRuntime;
   members: ReturnType<typeof createMemberRepository> | undefined;
@@ -152,7 +151,6 @@ export function createAgentContextService(options: {
       throw new HouseholdError("capacity_exceeded");
     if (!Object.keys(update).length) return;
     const snapshot = freeze({ scope, parts: update });
-    // Each updated part was validated by its reader; retain the other owned values.
     parts = freeze({
       spatial: update.spatial ?? parts.spatial,
       household: update.household ?? parts.household,
@@ -342,8 +340,6 @@ export function createAgentContextService(options: {
       records: [],
       complete_audit: false,
     });
-    // The ready envelope and ISO timestamp have fixed size; count each full
-    // record once rather than serializing every growing prefix again.
     let bytes = jsonBytes({
       ...ready(data),
       read_at: asOf.toISOString(),
@@ -472,7 +468,6 @@ export function createAgentContextService(options: {
           const key = sightingStateKey(record);
           if (!latestTimes.has(key))
             latestTimes.set(key, record.data.lastObservedAt);
-          // Recent association rows are internal; only latest sightings must be published.
           if (latestTimes.get(key) === record.data.lastObservedAt)
             referenceBytes += jsonBytes(record.id) + 1;
           if (referenceBytes > agentContextPolicy.partBytes.observations)
@@ -635,7 +630,6 @@ export function createAgentContextService(options: {
       if (stateChanged) deviceLane.refresh();
     }
   }
-  // Register all notifications before starting the initial asynchronous reads.
   const releases = [
     household.subscribe(householdChanged),
     options.commands?.subscribe(operationsLane.refresh),

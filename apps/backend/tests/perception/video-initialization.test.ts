@@ -27,7 +27,6 @@ await mock.module("../../src/perception/compute/process", () => ({
       },
       async submit(task: Parameters<typeof child.submit>[0]) {
         if (task.kind === "initialize") {
-          // Fail at the model boundary with a real OS process still owned by the pool.
           if (first) throw new Error("Model initialization failed");
           retryEntered.resolve();
           await allowRetry.promise;

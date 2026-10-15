@@ -53,7 +53,6 @@ function typeName(type: string) {
   return name;
 }
 
-/** Public metadata only. This client never receives account cookies or tokens. */
 export class MiotSpecClient {
   constructor(private readonly maxResponseBytes: number) {}
   private readonly requests = new Map<
@@ -121,7 +120,6 @@ export class MiotSpecClient {
           if (translated.success)
             translations = translated.data.data["zh_cn"] ?? {};
         } catch {
-          // Optional translations do not invalidate successfully read capabilities.
           this.assertActive(parentSignal);
         }
       }
@@ -131,8 +129,6 @@ export class MiotSpecClient {
         ...parseSpec(instance, translations),
       };
     } finally {
-      // Keep the instance available while translation is pending. A model that
-      // resolves to this URN later can join without fetching the instance again.
       this.releaseRequest(instanceRequest);
     }
   }

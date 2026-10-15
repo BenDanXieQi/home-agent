@@ -10,8 +10,6 @@ afterEach(() => {
   for (const restore of restores.splice(0).toReversed()) restore();
 });
 
-// Replace the transport boundary only. The real client prepares encrypted envelopes,
-// enforces request budgets, parses responses and joins membership with device details.
 function cloudDeviceApi(
   respond: (path: string, data: Record<string, unknown>) => unknown,
 ) {

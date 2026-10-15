@@ -30,7 +30,6 @@ function requireOnlineSpec(did: string, context: CommandContext) {
   return specification;
 }
 
-/** Orders commands per device; it never schedules retries or owns action history. */
 export class MijiaCommands {
   private readonly deviceQueues = new Map<string, PQueue>();
   private pendingCommands = 0;
@@ -128,8 +127,6 @@ export class MijiaCommands {
     if (this.pendingCommands >= 100) throw new MijiaError("capacity_exceeded");
     this.pendingCommands++;
     const release = Promise.withResolvers<void>();
-    // Reserve every device before yielding. Overlapping multi-device batches
-    // keep the same admission order while disjoint commands can run together.
     const reservations = [...new Set(deviceIds)].map((did) => {
       const key = JSON.stringify([context.accountKey, did]);
       let queue = this.deviceQueues.get(key);
@@ -165,8 +162,6 @@ export class MijiaCommands {
             context.signal.throwIfAborted();
             assertCapabilities();
           } catch (error) {
-            // Transport intentionally sanitizes unknown exceptions. Preserve
-            // our local rejection so a revoked command retains its reason.
             preflight.error = error;
             throw error;
           }
@@ -186,8 +181,6 @@ export class MijiaCommands {
           this.retryAfter.set(context.accountKey, error.retryAfterAt);
         if (error instanceof MiCloudError && error.code === "authentication")
           context.authenticationRejected();
-        // A rejected preflight has no effect. Losing the reply after dispatch
-        // cannot establish whether the device acted.
         if (sentAt === null) throw safeMijiaError(preflight.error ?? error);
         return {
           response: null,

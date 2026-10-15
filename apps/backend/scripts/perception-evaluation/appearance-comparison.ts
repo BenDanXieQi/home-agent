@@ -14,7 +14,6 @@ function addTiming(state: ReturnType<typeof newTiming>, value: number) {
   state.minMs = Math.min(state.minMs ?? value, value);
   state.maxMs = Math.max(state.maxMs ?? value, value);
 }
-// Real evidence is shared across these isolated domains; no replayed pixels or model calls.
 export function createAppearanceComparison(
   matching: Parameters<typeof createAppearanceIdentity>[0]["matching"],
 ) {

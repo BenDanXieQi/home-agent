@@ -50,7 +50,6 @@ export function handleHttpError(error: Error, c: Context) {
       }),
     );
   }
-  // Keep middleware headers (e.g. Retry-After) without exposing its body or message.
   if (error instanceof HTTPException) {
     for (const [name, value] of error.getResponse().headers) {
       if (
@@ -96,7 +95,6 @@ export async function readValidatedJson<T>(
   return parsed.data;
 }
 
-/** Preserve the shared JSON/error contract while exposing input types to Hono RPC. */
 export function validateJson<S extends z.ZodType<object>>(
   schema: S,
   code: ErrorCode = "invalid_request",

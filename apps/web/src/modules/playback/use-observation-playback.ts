@@ -138,7 +138,6 @@ export function useObservationPlayback(
   const recordings = useQueries({
     queries: groups.map((group, index) => {
       const target = targets[index];
-      // Refresh status gates execution, not the query identity or cached result.
       const at = [
         ...new Set(
           group.activities

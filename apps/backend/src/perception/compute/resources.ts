@@ -2,8 +2,6 @@ import { resolveComputeBudget } from "./budget";
 import type { z } from "zod";
 import type { perceptionConfigSchema } from "../config";
 
-// Reservations bound admitted model capacity, not OS RSS or decoder CPU usage.
-// ReID borrows a video CPU slot but has its own resident model allocation.
 const modelMemoryMiB = Object.freeze({
   detection: 384,
   tracking: 256,
@@ -23,8 +21,6 @@ export function planPerceptionResources(
   const speechThreads = audioEnabled && config.speech.enabled ? 1 : 0;
   const petSoundThreads = audioEnabled && config.petSounds.enabled ? 1 : 0;
   const identityThreads = config.identity !== null ? 1 : 0;
-  // Continuous capture keeps one detector and one VAD lane even on a tiny share.
-  // Optional analysis must fit beyond that minimum; it cannot raise the budget itself.
   const nativeThreads = Math.max(1 + audioThreads, host.workersPerProcess);
   const audioMemory =
     audioThreads * modelMemoryMiB.vad +

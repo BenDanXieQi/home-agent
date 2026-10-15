@@ -93,7 +93,6 @@ describe("Logout confirmation across HTTP and the household stream", () => {
       expect(store.get(canStartPlaybackAtom)).toBe(false);
 
       const confirmed = householdSnapshot();
-      // A later login may already have superseded the logout receipt's epoch.
       confirmed.scope_epoch =
         status === "unbound"
           ? otherEpoch

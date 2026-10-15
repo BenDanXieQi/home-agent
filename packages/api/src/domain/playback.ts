@@ -1,9 +1,19 @@
 import { z } from "zod";
+import { apiErrorSchema } from "../contracts/errors";
+
+export const playbackBindingSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.enum(["unbound", "installing", "ready"]) }),
+  z.object({ status: z.literal("error"), error: apiErrorSchema }),
+]);
 
 export const playbackTargetSchema = z.strictObject({
   revision: z.uuid(),
   deviceId: z.string().min(1).max(128),
   channel: z.union([z.literal(1), z.literal(2)]),
+});
+
+export const playbackReservationSchema = z.object({
+  id: z.uuid(),
 });
 
 export const playbackDurationSchema = z
@@ -12,7 +22,6 @@ export const playbackDurationSchema = z
   .nonnegative()
   .max(Number.MAX_SAFE_INTEGER);
 
-/** Connection milestones describe media work, independent of its transport. */
 export const playbackStageTimingsSchema = z.object({
   queueMs: playbackDurationSchema.optional(),
   sourceMs: playbackDurationSchema.optional(),
@@ -60,7 +69,6 @@ export type PlaybackConnectionObservation = z.infer<
   typeof playbackConnectionObservationSchema
 >;
 
-/** Measurements returned once with the accepted playback answer. */
 export const playbackConnectionSummarySchema = z.object({
   sourceRecentlyActive: z.boolean().nullable(),
   timings: playbackStageTimingsSchema.extend({

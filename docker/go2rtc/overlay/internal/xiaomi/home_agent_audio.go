@@ -16,7 +16,6 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
 )
 
-// Audio has its own request, liveness and bounded queue; it never waits for video.
 type homeAgentAudioConsumer struct {
 	core.Connection
 	cancel        context.CancelFunc
@@ -61,8 +60,6 @@ func (c *homeAgentAudioConsumer) AddTrack(media *core.Media, _ *core.Codec, trac
 		if err != nil {
 			return err
 		}
-		// Pion v4.2.16 counts decoded samples, including the first packet.
-		// Its fixed 3840-sample Opus pre-skip advances decoded media by 80 ms.
 		c.startOffsetMs = 80
 		write = writer.WriteRTP
 	default:
@@ -73,7 +70,6 @@ func (c *homeAgentAudioConsumer) AddTrack(media *core.Media, _ *core.Codec, trac
 	var nextTimestamp uint32
 	sender.Output = func(packet *rtp.Packet) {
 		if seen && (packet.SequenceNumber != previous+1 || packet.Timestamp != nextTimestamp) {
-			// Missing encoded packets invalidate continuous VAD state. Never splice across a gap.
 			c.cancel()
 			return
 		}

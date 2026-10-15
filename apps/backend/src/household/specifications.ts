@@ -18,7 +18,6 @@ type Metadata = Pick<Spec, "urn" | "category" | "spec">;
 
 const encodedSizes = new WeakMap<Spec, number>();
 
-/** Count the JSON object without serializing unchanged, owned specifications again. */
 export function specificationBytes(specs: Record<string, Spec>) {
   let bytes = 2;
   let count = 0;
@@ -48,7 +47,6 @@ type Loader = {
   };
 };
 
-/** Owns accepted URN metadata separately from model resolution and refresh work. */
 export class HouseholdSpecifications {
   private accepted = new Map<string, { result: Spec; refreshed: number }>();
   private bindings = new Map<
@@ -133,7 +131,6 @@ export class HouseholdSpecifications {
     this.sources = sources;
     this.bindings = bindings;
     this.accepted = this.referencedMetadata(bindings);
-    // Already accepted metadata adds no bytes and does not restart a shared source.
     if (attached.size) this.changed(attached);
     this.pump();
     this.finishBatch();
@@ -166,7 +163,6 @@ export class HouseholdSpecifications {
     );
   }
 
-  /** Display metadata can outlive the definition for which it was verified. */
   isApplicable(deviceId: Device["id"], model: Device["model"]) {
     const binding = this.bindings.get(deviceId);
     if (!binding || binding.model !== model || binding.urn === null)
@@ -177,7 +173,6 @@ export class HouseholdSpecifications {
     );
   }
 
-  /** Revocation only removes references and work; it cannot fail a capacity check. */
   retain(deviceIds: ReadonlySet<string>) {
     if ([...this.bindings.keys()].every((id) => deviceIds.has(id))) return;
     const bindings = new Map(

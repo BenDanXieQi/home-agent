@@ -11,7 +11,6 @@ export const receivePerceptionAtom = atom(
   null,
   (get, set, snapshot: ReturnType<typeof perceptionSnapshotSchema.parse>) => {
     const previous = get(perceptionSnapshotAtom);
-    // The single SSE reader delivers snapshots in order and replaces them on reconnect.
     set(perceptionSnapshotAtom, replaceEqualDeep(previous, snapshot));
   },
 );

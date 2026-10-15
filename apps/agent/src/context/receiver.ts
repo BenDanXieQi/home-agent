@@ -1,8 +1,8 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { createReceiptJournal } from "./journal";
 import { z } from "zod";
-import type { BackendClient } from "@home-agent/backend-client";
-import { mergeAgentContextSnapshot } from "@home-agent/api/agent-context/merge";
+import type { ContextSource } from "./source";
+import { mergeAgentContextSnapshot } from "./merge";
 import {
   agentContextEventSchema,
   agentContextPartsSchema,
@@ -12,9 +12,8 @@ import {
 } from "@home-agent/api/agent-context";
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
 
-/** The transport owns connection and household qualification; the shared reducer applies updates. */
 export function createContextReceiver(options: {
-  client: BackendClient;
+  client: Pick<ContextSource, "stream">;
   onScopeChange?: (
     scope: z.infer<typeof agentContextScopeSchema> | null,
   ) => Promise<void>;
@@ -120,16 +119,7 @@ export function createContextReceiver(options: {
       try {
         await consumeEventStream(
           {
-            request: (requestSignal) =>
-              options.client.api.agent.context.stream.$get(
-                {},
-                {
-                  init: {
-                    headers: { Accept: "text/event-stream" },
-                    signal: requestSignal,
-                  },
-                },
-              ),
+            request: (requestSignal) => options.client.stream(requestSignal),
             signal,
             maxBufferSize: agentContextPolicy.eventBytes,
             maxEventBytes: agentContextPolicy.maxSnapshotBytes,

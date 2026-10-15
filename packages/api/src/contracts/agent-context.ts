@@ -30,7 +30,6 @@ import {
   windowHistoryRetentionMs,
 } from "./perception-window";
 
-/** The shared time schema normalizes UTC to six fractional digits. */
 export function agentHistoryTimeDifference(
   value: z.output<typeof deviceHistoryTimeSchema>,
 ) {
@@ -254,7 +253,6 @@ export const agentContextSnapshotSchema = z.strictObject({
   scope: agentContextScopeSchema.nullable(),
   parts: agentContextPartsSchema.partial(),
 });
-// Reuse household change validation, including each record's stable identity.
 const otherDeviceChangeSchema = changeSchema.transform((change, ctx) => {
   switch (change.entity) {
     case "latest":
@@ -421,7 +419,6 @@ export const agentHistoryResponseSchema = z.discriminatedUnion("kind", [
   perceptionWindowsHistoryResponseSchema,
 ]);
 
-/** Resolve one reference against its authoritative source, never embed it in snapshots. */
 export const agentMaterialQuerySchema = z.strictObject({
   scope: agentContextScopeSchema,
   kind: z.enum(["member_sighting", "perception_window"]),

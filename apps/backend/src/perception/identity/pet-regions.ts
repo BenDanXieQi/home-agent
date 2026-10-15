@@ -2,7 +2,6 @@ import type { z } from "zod";
 import type { enrollmentCommandSchema } from "./enrollment-protocol";
 import { iou } from "../tracking/assignment";
 
-// Validate the entire photo before selecting its one inference target.
 export function selectPetPhotoRegions(
   regions: Extract<
     z.infer<typeof enrollmentCommandSchema>,

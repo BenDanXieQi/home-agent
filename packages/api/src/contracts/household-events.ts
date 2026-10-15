@@ -15,7 +15,6 @@ export const householdEventEvidenceSchema = z.strictObject({
   observed_at: z.iso.datetime().nullable(),
 });
 
-/** Stable producer identity survives delivery retries and process restarts. */
 export const householdEventSubmissionSchema = z.strictObject({
   event: automationEventSchema,
   producer_id: referenceId,

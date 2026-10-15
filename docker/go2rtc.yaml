@@ -1,4 +1,3 @@
-# Managed launchers override these listeners to the host loopback.
 api:
   listen: ":1984"
 rtsp:

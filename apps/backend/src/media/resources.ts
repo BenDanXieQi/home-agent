@@ -35,7 +35,6 @@ export function mediaExpired(item: ReturnType<typeof resource>) {
   return Date.now() >= item.expiresAt || performance.now() >= item.expiresMono;
 }
 
-// Each media domain owns an instance: slow SD transfers cannot occupy window slots.
 export function createMediaResources(options: {
   bytes: number;
   concurrency: number;
@@ -113,7 +112,6 @@ export function createMediaResources(options: {
         );
       for (const candidate of candidates) {
         if (bytes + reservedBytes + size <= options.bytes) break;
-        // Earlier deletions yield to new readers and other retirements.
         if (
           candidate.retired ||
           !candidate.path ||
@@ -130,7 +128,6 @@ export function createMediaResources(options: {
     item.reserved = size;
   }
   function invalidate(item: ReturnType<typeof resource>, reason: Retirement) {
-    // The resource retains retirement and records rejection for close().
     // oxlint-disable-next-line typescript/no-floating-promises
     retire(item, reason);
   }
@@ -177,8 +174,6 @@ export function createMediaResources(options: {
       },
     ) {
       if (closed || item.pending) throw new Error("Media task unavailable");
-      // Only queued work is cancellable by PQueue. Once started, the native
-      // operation owns cancellation and must keep its slot through cleanup.
       const waiting = new AbortController();
       const signal = AbortSignal.any([input.signal, item.generation.signal]);
       const cancelWaiting = () => waiting.abort(signal.reason);
@@ -188,7 +183,6 @@ export function createMediaResources(options: {
         .add(
           async () => {
             signal.removeEventListener("abort", cancelWaiting);
-            // Register ownership before generation can trigger retirement.
             await Promise.resolve();
             let succeeded = false;
             try {

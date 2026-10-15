@@ -1,22 +1,15 @@
 import { z } from "zod";
-import { apiErrorSchema } from "./errors";
-import { speechObservationSchema } from "./perception";
+import { speechObservationSchema } from "@home-agent/api/contracts";
 
 export const speechDialogueLimits = Object.freeze({
-  entries: 64,
   contextSegments: 3,
   lifetimeMs: 45000,
-  timeoutMs: 12000,
 });
 const assistantNamesSchema = z
   .array(z.string().trim().min(1).max(32))
   .min(1)
   .max(8);
-export const speechDialogueConfigSchema = z.strictObject({
-  enabled: z.boolean().default(false),
-  assistantNames: assistantNamesSchema.default(["家庭助手"]),
-  callsPerMinute: z.int().min(1).max(30).default(6),
-});
+
 export const speechDecisionSchema = z
   .object({
     needsResponse: z.boolean(),
@@ -74,28 +67,4 @@ export const speechDialogueResponseSchema = z.object({
   id: z.uuid(),
   observationId: speechObservationSchema.shape.id,
   decision: speechDecisionSchema,
-});
-export const speechInboxEntrySchema = z.object({
-  sequence: z.int().positive(),
-  observation: speechObservationSchema,
-  expiresAt: z.number(),
-  status: z.enum([
-    "captured",
-    "pending",
-    "analyzing",
-    "ready",
-    "ignored",
-    "incomplete",
-    "unavailable",
-  ]),
-  decision: speechDecisionSchema.nullable(),
-  error: apiErrorSchema.nullable(),
-});
-export const speechInboxSchema = z.object({
-  instanceId: z.uuid(),
-  settings: speechDialogueConfigSchema,
-  revision: z.int().nonnegative(),
-  sequence: z.int().nonnegative(),
-  rejected: z.int().nonnegative(),
-  entries: z.array(speechInboxEntrySchema).max(speechDialogueLimits.entries),
 });

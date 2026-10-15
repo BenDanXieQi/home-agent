@@ -17,8 +17,6 @@ export const mediaFrameTimeSchema = z
     message: "PTS must preserve the source RTP timestamp",
   });
 
-// The digest covers the complete packed RGB24 frame at its decoded dimensions.
-// Resized, cropped, encoded, or approximate image hashes are different evidence.
 export const frameFingerprintSchema = z.object({
   algorithm: z.literal("md5_rgb24"),
   value: z.string().regex(/^[a-f0-9]{32}$/),
@@ -26,8 +24,6 @@ export const frameFingerprintSchema = z.object({
   height: z.int().positive(),
 });
 
-// Xiaomi's camera SDK defines LOW=1 and HIGH=3. Profile 2 is also accepted;
-// no profile number asserts a model-specific resolution.
 export const cameraVideoQualitySchema = z.union([
   z.literal(1),
   z.literal(2),

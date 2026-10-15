@@ -65,7 +65,7 @@ function DataBrowser({ scope }: { scope: string }) {
       })),
     [table?.columns],
   );
-  // oxlint-disable-next-line react/incompatible-library -- Read TanStack Table state directly.
+  // oxlint-disable-next-line react/incompatible-library
   const recordsTable = useReactTable({
     data: data?.rows ?? [],
     columns,
@@ -77,7 +77,7 @@ function DataBrowser({ scope }: { scope: string }) {
     },
     getCoreRowModel: getCoreRowModel(),
   });
-  // oxlint-disable-next-line react/incompatible-library -- Read TanStack Table state directly.
+  // oxlint-disable-next-line react/incompatible-library
   const schemaTable = useReactTable({
     data: table?.columns ?? [],
     columns: [

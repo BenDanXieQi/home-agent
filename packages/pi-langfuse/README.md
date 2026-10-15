@@ -23,19 +23,9 @@ const tracing = await createPiLangfuseDurableConversation(runtime, {
   captureContent: false,
   onError: (stage) => reportObservationFailure(stage),
 });
-
-// 会话结束时停止观察；最后关闭共享运行时。
 await tracing.dispose();
 await runtime.shutdown();
 ```
-
-调用方拥有 Harness、存储、模型、执行取消及恢复策略。观察器只读取已提交的条目和提交状态，使用独立观察上下文；`dispose()` 停止观察并关闭未结束的记录，共享运行时的 `shutdown()` 先释放所有观察器，再刷新、关闭后端。
-
-控制器提供 `active`、`closed`、`observeSubmission(id)` 和幂等的 `dispose()`。`observeSubmission()` 可补充已知提交的最终状态，不启动或等待 Agent 执行。初始化或事件处理失败通过固定阶段名称通知 `onError`，不会改变执行结果。错误回调自身失败时输出固定诊断，不输出异常正文。
-
-`TraceBackend.start()` 接收名称、输入输出、元数据及父观测，返回支持 `update()`、可选 `updateTrace()` 和 `end()` 的 `Observation`。后端另提供 `forceFlush()`、`shutdown()`；字段约束见 [后端契约](src/tracing.ts)。模型生成记录默认由观察器采集；调用方已在 Provider 采集时，设置 `generations: "provider"`，观察器只维护运行轮次及工具关系，不再创建或投影模型记录。
-
-`beforeRun(inputs)` 在观察快照或事件中的运行前提供已提交的输入 ID，供后端恢复执行来源上下文。观察器的父观测关系是后端契约，不要求后端为长期 Conversation 导出一个根 span。本项目的 [`@home-agent/observability/durable`](../observability/README.md) 后端只将长期会话归入 Session（多轮追踪分组），为有限运行与工具创建原生 OTel span；提交适配保存来源上下文，Generation／Tool hook 与实际执行包装将模型和工具显式接到对应运行下。单一来源保留其 trace，多来源通过提交 ID 元数据及 OTel links（跨追踪来源关联）联系，不承诺 Langfuse 界面展示 links。
 
 本项目的逻辑评测根输入输出与 `metadata.evaluation_context` 由共享 observability 层汇集，模型用量只记录在 Provider generation（一次模型生成记录）。这些评测材料依赖 `OTEL_INCLUDE_CONTENT=true`，不会因子观测属于同一 trace 或 Session 而自动成为 Judge（使用模型评分的评测器）的输入；调用方仍须显式映射所需字段。本包不创建评测器、生成评分或管理评测运行，Langfuse 真实入库和界面展示的验证边界见[共享追踪说明](../observability/README.md)。
 

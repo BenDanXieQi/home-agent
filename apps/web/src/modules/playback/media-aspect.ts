@@ -6,7 +6,6 @@ const mediaAspectsAtom = atom<{
   ratios: Map<string, number>;
 }>({ scope_epoch: undefined, ratios: new Map() });
 
-/** Keep the measured picture ratio available while a route takes over its media. */
 export function createCameraAspectAtom(deviceId: string, channel: number) {
   const key = `${deviceId}:${channel}`;
   return atom(

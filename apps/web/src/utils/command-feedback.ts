@@ -1,4 +1,3 @@
-/** Commands settle only after the authoritative state has caught up. */
 export function commandFeedback({
   sending,
   confirming,

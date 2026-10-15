@@ -65,7 +65,6 @@ export async function stopNative() {
   throw new Error("原生 go2rtc 未在 15 秒内退出；未强制终止，请检查后重试。");
 }
 
-/** Probe every published media port; never adopt or terminate an unknown owner. */
 export async function requireFreePorts() {
   const servers: ReturnType<typeof createServer>[] = [];
   const udp = createSocket("udp4");
@@ -92,9 +91,7 @@ export async function requireFreePorts() {
         await new Promise<void>((done) => server.close(() => done()));
     try {
       udp.close();
-    } catch {
-      /* The UDP socket may not have bound. */
-    }
+    } catch {}
   }
 }
 
@@ -160,14 +157,11 @@ export async function startNative(
         });
         await response.body?.cancel();
         if (response.ok) return;
-      } catch {
-        /* Wait for the owned process to start listening. */
-      }
+      } catch {}
       await delay(250);
     }
     throw new Error("原生 go2rtc 未就绪，请查看 config/runtime/go2rtc.log。");
   } catch (error) {
-    // The ChildProcess handle belongs to this launch, never to an adopted PID.
     if (child.exitCode === null) child.kill("SIGTERM");
     throw error;
   }

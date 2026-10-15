@@ -38,7 +38,6 @@ export function durableDiagnosticCount(entry: EntryRecord | undefined) {
     : 0;
 }
 
-/** Project committed messages without provider configuration, deltas or raw diagnostics. */
 export function durableContent(
   messages: readonly Message[] | undefined,
   capture: boolean,
@@ -51,8 +50,6 @@ export function durableContent(
         role: message.role,
         parts: [{ type: "text", content: "[assistant error content omitted]" }],
       };
-    // The public ToolResultEntry shape appends rendered diagnostics as its last text block.
-    // That block can contain raw errors, headers or credentials even when the tool succeeds.
     const omitDiagnosticBlock =
       message.role === "toolResult" &&
       diagnosticCount > 0 &&

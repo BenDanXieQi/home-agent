@@ -3,7 +3,6 @@ import { useLayoutEffect, useRef, type ComponentProps } from "react";
 
 import { useComposedRef } from "../utils/use-composed-ref";
 
-/** Reveal a heading and its metadata together without retaining old content. */
 export function TextReveal({
   children,
   changeKey,
@@ -24,7 +23,7 @@ export function TextReveal({
     );
     return () => animation?.cancel();
   }, [
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Replay only when the heading context changes, not on live count updates.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
     changeKey,
     reducedMotion,
   ]);

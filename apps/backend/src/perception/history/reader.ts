@@ -20,7 +20,6 @@ import { HouseholdError } from "../../household/errors";
 
 export class PerceptionHistoryError extends Error {}
 
-/** Projects retained evidence and current media access into history reads. */
 export function createWindowHistoryReader({
   windows,
   media,

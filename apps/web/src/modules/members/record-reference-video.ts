@@ -9,7 +9,6 @@ export function referenceRecordingSupported() {
   );
 }
 
-// Records only the already-authorized camera video; playback owns the source tracks.
 export async function recordReferenceVideo(
   video: HTMLVideoElement,
   signal: AbortSignal,

@@ -17,7 +17,7 @@ import { createSseTransport } from "../../http/sse-transport";
 import { accessHousehold } from "../access";
 import { HouseholdError } from "../errors";
 import type { HouseholdRuntime } from "../runtime";
-import { householdHttpError } from "../http-errors";
+import { householdPublicError } from "../public-errors";
 import type { createDeviceHistoryQuery } from "./query";
 import { createDeviceHistoryReader } from "./read";
 import type { createDeviceHistoryService } from "./service";
@@ -50,7 +50,7 @@ export function createDeviceHistoryRoutes(
   );
   app.onError((error, c) =>
     handleHttpError(
-      error instanceof HouseholdError ? householdHttpError(error) : error,
+      error instanceof HouseholdError ? householdPublicError(error) : error,
       c,
     ),
   );
@@ -128,7 +128,7 @@ export function createDeviceHistoryRoutes(
           if (!transport.signal.aborted) {
             const failure =
               error instanceof HouseholdError
-                ? householdHttpError(error)
+                ? householdPublicError(error)
                 : error instanceof AppError
                   ? error
                   : new AppError("internal_error");

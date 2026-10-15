@@ -41,7 +41,6 @@ try {
   modelError = String(error).slice(0, 4096);
 }
 let inferenceSince: number | null = null;
-// One shared CPU session and at most one pending call per bounded source decoder.
 let inference = Promise.resolve();
 function evaluate(input: Float32Array, state: Float32Array) {
   const task = inference.then(async () => {
@@ -286,7 +285,6 @@ process.on("message", (message: unknown) => {
   handleCommand(message).catch(fatal);
 });
 process.on("disconnect", () => {
-  // No native thread termination: stop decoder children before leaving the owner.
   closing = true;
   delivery?.resolve(false);
   clearInterval(pulseTimer);

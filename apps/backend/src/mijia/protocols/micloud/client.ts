@@ -8,7 +8,6 @@ import {
   sceneHistoryResponseSchema,
 } from "./history";
 import { MicoClient } from "./mico";
-// Adapted from homebridge-miot/lib/protocol/MiCloud.js at the commit in ../README.md.
 // Copyright (c) 2025 Marcin. MIT license; see ../LICENSE.
 import { createHash, randomInt, randomBytes } from "node:crypto";
 import { z } from "zod";
@@ -39,7 +38,6 @@ export type { MiCloudSavedSession } from "./session";
 
 export type MiCloudRegion = MiCloudSavedSession["region"];
 
-/** Server-only raw data. Project a field whitelist before returning devices to a browser. */
 export interface MiCloudDevice extends Partial<DeviceLocation> {
   did: string;
   name?: string;
@@ -49,7 +47,6 @@ export interface MiCloudDevice extends Partial<DeviceLocation> {
   [key: string]: unknown;
 }
 
-/** Server-only credentials for the camera adapter. Never serialize into API responses. */
 export type MiCloudCredentials = ReturnType<MiCloud["getCredentials"]>;
 
 const objectSchema = z.looseObject({});
@@ -111,7 +108,6 @@ function seconds(
     : fallback;
 }
 
-/** Owns one cloud identity; renewal returns an isolated candidate for durable adoption. */
 export class MiCloud {
   readonly region: MiCloudRegion;
   #mico: MicoClient | undefined;
@@ -314,7 +310,6 @@ export class MiCloud {
       if (data.ssecurity || data.userId || data.passToken || data.location) {
         throw new MiCloudError("missing-credentials");
       }
-      // Upstream keeps non-completed long-poll responses pending until the QR session's deadline.
       return { status: "pending" as const };
     } catch (error) {
       if (error instanceof MiCloudError && error.code === "expired")
@@ -329,7 +324,6 @@ export class MiCloud {
     }
   }
 
-  /** Submit the SMS/email code requested by Xiaomi's verification page, never an account token. */
   async submitSecurityCode(code: string, signal?: AbortSignal) {
     this.#assertLoginActive(signal);
     if (!this.#verificationUrl || this.#busy)
@@ -413,7 +407,6 @@ export class MiCloud {
     return cloud;
   }
 
-  /** Exchange the current passToken without mutating the active device session. */
   async renewSession(signal?: AbortSignal) {
     this.#transport.assertActive(signal);
     const saved = this.exportSession();
@@ -563,8 +556,6 @@ export class MiCloud {
     const locations = deviceLocations(homes);
     const ids = [...locations.keys()];
     const devices: MiCloudDevice[] = [];
-    // Account-wide device_list omits shared-home devices. Resolve the explicit
-    // membership IDs through the paged detail endpoint used by Xiaomi Home.
     for (let offset = 0; offset < ids.length; offset += 150) {
       const batch = ids.slice(offset, offset + 150);
       const requested = new Set(batch);
@@ -611,12 +602,9 @@ export class MiCloud {
       devices.push(...found.values());
     }
     this.#transport.assertActive(requestSignal);
-    // Home membership does not guarantee that this account can obtain details.
-    // Keep membership for location mapping; only returned details grant access.
     return { homes, devices };
   }
 
-  /** One batch over this account's existing RC4 session; scheduling belongs to properties/. */
   async getProperties(
     properties: readonly MiotPropertyAddress[],
     signal?: AbortSignal,
@@ -629,8 +617,6 @@ export class MiCloud {
     )
       throw new MiCloudError("invalid-input");
     if (properties.length === 0) return [];
-    // Xiaomi SDK: datasource=1 prefers cached values and can use RPC on a cache miss.
-    // https://github.com/MiEcosystem/miot-plugin-sdk/wiki/04-miot_spec
     const result = await this.#deviceRequest(
       "/miotspec/prop/get",
       {
@@ -746,7 +732,6 @@ export class MiCloud {
       onRequestStarted,
     );
     const encrypted = response.body.toString("utf8");
-    // An unencrypted authentication error must not be decoded as device data.
     if (encrypted.trimStart().startsWith("{")) {
       const error = parseJson(encrypted);
       const upstreamCode =
@@ -831,7 +816,6 @@ export class MiCloud {
   ) {
     if (!location) throw new MiCloudError("invalid-response");
     const transferredPassToken = this.#pendingCredentials.passToken;
-    // QR returns account cookies in the response body; carry them into this same login's STS exchange.
     for (const name of ["userId", "passToken"] as const) {
       const value = this.#pendingCredentials[name];
       if (value)
@@ -863,8 +847,6 @@ export class MiCloud {
       "passToken",
       credentialUrl,
     )?.value;
-    // An unchanged transfer cookie must not mask credentials rotated by the
-    // response body or login pragma during the STS exchange.
     const passToken =
       cookiePassToken && cookiePassToken !== transferredPassToken
         ? cookiePassToken
@@ -888,8 +870,6 @@ export class MiCloud {
     ) {
       throw new MiCloudError("invalid-response");
     }
-    // The protocol transfers the STS token to the device API. Preserve its
-    // absolute expiry while narrowing cookies to this API host and path.
     const expiryTime = serviceCookie.expiryTime();
     const expires =
       expiryTime !== undefined && Number.isFinite(expiryTime)

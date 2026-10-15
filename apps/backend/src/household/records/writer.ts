@@ -3,7 +3,6 @@ import PQueue from "p-queue";
 import { jsonBytes } from "../config";
 import { HouseholdError } from "../errors";
 
-/** One bounded admission budget for command snapshots and supplier materials. */
 export function createRecordWriter() {
   const queue = new PQueue({ concurrency: 1 });
   let bytes = 0;
@@ -24,7 +23,6 @@ export function createRecordWriter() {
       bytes += size;
       try {
         const result = await queue.add(async () => {
-          // Stable record IDs make retrying a lost commit acknowledgement safe.
           for (let attempt = 0; ; attempt++) {
             try {
               return await save();

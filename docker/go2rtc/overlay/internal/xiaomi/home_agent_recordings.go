@@ -17,8 +17,6 @@ type homeAgentRecordingReader interface {
 	DownloadRecording(context.Context, uint32, io.Writer, func(int) error) error
 }
 
-// This reader is attached by the resident producer factory; reading a card never
-// dials a camera, modifies recording settings or switches its live media mode.
 func homeAgentRecordings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		SessionID string `json:"sessionId"`

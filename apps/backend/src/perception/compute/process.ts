@@ -12,8 +12,6 @@ import {
 import { isCurrentRun } from "../observations";
 import { detectionComputeBudget } from "./budget";
 
-// Backend main-thread ownership: all camera callers must share its pool.
-// Keep the slot until OS exit, even when IPC has already disconnected.
 const processes = new Set<ReturnType<typeof fork>>();
 
 type ReceivedResult = z.infer<typeof resultResponseSchema> & {
@@ -39,7 +37,6 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
       execPath: process.execPath,
       execArgv: [],
       detached: true,
-      // Parent and child run the same Bun executable; preserve Uint8Array pixels.
       serialization: "advanced",
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       env: { ...process.env, ORT_DISABLE_TELEMETRY: "1" },
@@ -103,8 +100,6 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
           !(error instanceof Error && "code" in error && error.code === "EPERM")
         )
           throw error;
-        // macOS can transiently refuse signals while an aborted leader is exiting.
-        // Keep ownership and retry confirmation; permission errors are never proof of exit.
         terminationError = error;
       }
       await delay(25);
@@ -113,20 +108,16 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
       cause: terminationError,
     });
   }
-  // Startup settles as a value even when no caller has submitted a request yet.
   child.stderr?.on("data", (data: Buffer) => {
     stderr = (stderr + data.toString()).slice(-4096);
   });
 
-  // Failure owns both request rejection and termination. Exit confirmation
-  // remains separate so callers cannot reuse the process budget too early.
   function abort(reason: unknown) {
     if (failure.signal.aborted) return;
     failure.abort(reason);
     ready.resolve({ ready: false, reason });
     for (const request of pending.values()) request.reject(reason);
     pending.clear();
-    // Kill the isolated OS process, never a thread hosting an active N-API call.
     for (const task of videoTasks.values()) clearTimeout(task.timer);
     videoTasks.clear();
     try {
@@ -215,7 +206,6 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
     else request.resolve({ ...response, receivedAt });
   });
   child.on("error", (error) => {
-    // A failed spawn has no process and may never emit exit.
     if (child.pid === undefined) {
       stopped = true;
       processes.delete(child);
@@ -240,8 +230,6 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
     const startup = await ready.promise;
     if (!startup.ready) throw startup.reason;
     failure.signal.throwIfAborted();
-    // IPC may serialize the whole backing buffer. Copy oversized views explicitly;
-    // Buffer.slice() would preserve the oversized backing allocation.
     if (
       task.kind === "detect" &&
       task.frame.rgb.buffer.byteLength !== task.frame.rgb.byteLength
@@ -273,7 +261,6 @@ export function createDetectionProcess(taskTimeoutMs = 10_000) {
       ...result,
       timing: {
         ...result.timing,
-        // Only durations cross IPC; clocks in separate processes have no shared origin.
         ipcRoundTripMs: Math.max(
           0,
           response.receivedAt - sentAt - response.processingMs,

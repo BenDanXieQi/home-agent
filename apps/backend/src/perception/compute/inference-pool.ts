@@ -6,8 +6,6 @@ import { createInferenceQueue } from "./inference-queue";
 import type run from "./inference-worker";
 import { ComputeBusyError, restoreError } from "./protocol";
 
-// One single-thread Piscina per model owner makes initialize/release addressable.
-// This module owns their shared admission budget; no caller chooses a worker.
 export function createInferencePool(
   onFailure: (error: Error) => void,
   budget: z.infer<typeof computeBudgetSchema>,
@@ -128,8 +126,6 @@ export function createInferencePool(
     if (task.kind === "close") return close();
     if (!initialized)
       return Promise.reject(new Error("Inference pool is not initialized"));
-    // Image requests can use the existing bounded wait slot even while video
-    // is ready. dispatchQueued() admits it before waking video listeners.
     if (
       !onAdmitted &&
       task.kind !== "detect_image" &&
@@ -224,8 +220,6 @@ export function createInferencePool(
     reserveTracking() {
       if (closing || failure || !initialized || workers.length < 2)
         return false;
-      // Stop refilling this slot immediately, but let admitted detections drain.
-      // A later request can start ReID as soon as the reserved CPU is free.
       auxiliary.add("tracking");
       return (
         workers.reduce((sum, worker) => sum + worker.active, 0) <=

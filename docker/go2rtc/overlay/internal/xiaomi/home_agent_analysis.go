@@ -15,7 +15,6 @@ import (
 	"github.com/pion/rtp"
 )
 
-// Request-owned, with no persistent identifier or independent lease.
 type homeAgentAnalysisConsumer struct {
 	core.Connection
 	cancel  context.CancelFunc
@@ -58,8 +57,6 @@ func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, t
 		if !anchored {
 			origin, anchored = packet.Timestamp, true
 		}
-		// Preserve the muxer's reader-relative PTS. Its previous-timestamp sentinel
-		// is zero, so use a reader-local clock starting at one even for source tick zero.
 		payload := c.muxer.GetPayload(pid, packet.Timestamp-origin+1, packet.Payload)
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -157,7 +154,6 @@ func homeAgentAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	controller := http.NewResponseController(w)
-	// Cancellation interrupts a blocked network write; it never takes the global lock.
 	stopWrite := context.AfterFunc(ctx, func() { _ = controller.SetWriteDeadline(time.Now()) })
 	defer stopWrite()
 	w.Header().Set("Content-Type", "video/mp2t")

@@ -18,7 +18,7 @@ import {
   automationRunsRequestSchema,
 } from "@home-agent/api/automations";
 import { HouseholdError } from "../errors";
-import { householdHttpError } from "../http-errors";
+import { householdPublicError } from "../public-errors";
 import type { AutomationService } from "./service";
 
 export function createAutomationRoutes(
@@ -39,7 +39,7 @@ export function createAutomationRoutes(
   });
   app.onError((error, c) =>
     handleHttpError(
-      error instanceof HouseholdError ? householdHttpError(error) : error,
+      error instanceof HouseholdError ? householdPublicError(error) : error,
       c,
     ),
   );

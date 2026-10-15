@@ -8,8 +8,6 @@ afterEach(async () => {
   for (const household of households.splice(0)) await household.close();
 });
 
-// MiLoCo test_prop_subscriptions allows account-wide property subscriptions.
-// Home Agent shares account-wide directory notifications with explicitly scoped observations.
 test("property observations follow the selected home while directory notifications still cover both homes", async () => {
   const h = await runningHousehold(undefined, {
     homeId: "home-a",
@@ -22,8 +20,6 @@ test("property observations follow the selected home while directory notificatio
     "device/device-a/up/properties_changed/#",
   ];
   old.connected();
-  // Automatic collection already owns the property topics. Leave their shared
-  // SUBACKs pending so logout must still reject late confirmations.
   for (let index = 0; index < old.subscriptions.length; index++)
     if (!propertyTopics.includes(old.subscriptions[index]!.topic))
       old.ack(index);
@@ -38,7 +34,6 @@ test("property observations follow the selected home while directory notificatio
     "device/device-b/up/properties_changed/#",
   );
 
-  // A mixed valid/foreign request must be rejected as a whole, before subscribing either device.
   await expect(
     h.service.observeDevices(
       ["device-a", "device-b"],

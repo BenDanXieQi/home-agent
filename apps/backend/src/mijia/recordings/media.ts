@@ -162,8 +162,6 @@ export async function inspectRecording(
     packet.alloc();
     let count = 0;
     try {
-      // The high-level iterator folds read failures into EOF. Reading through
-      // the owned native context preserves errors and original packet clocks.
       while (true) {
         checkSignal(signal);
         const result = await context.readFrame(packet);
@@ -296,7 +294,6 @@ function parseFingerprints(
   const frames = lines
     .filter((line) => line.trim() !== "" && !line.startsWith("#"))
     .map((line, index) => {
-      // framemd5's fixed packet record is five integers and one MD5 value.
       const fields =
         /^\s*0,\s*(-?\d+),\s*(-?\d+),\s*(\d+),\s*(\d+),\s*([0-9a-f]{32})\s*$/.exec(
           line,
@@ -527,8 +524,6 @@ export async function encodeRecording(
     const encodedAudio = result.streams.find(
       (stream) => stream.codecType === AVMEDIA_TYPE_AUDIO,
     );
-    // AAC can extend the final audio packet by at most one 1024-sample block.
-    // Video PTS are independently checked at the output's 90 kHz resolution.
     const timestampToleranceMs = 1 / 90 + 0.000001;
     const durationToleranceMs =
       (encodedAudio && encodedAudio.sampleRate > 0
@@ -561,7 +556,6 @@ export async function encodeRecording(
       throw error;
     }
     checkSignal(signal);
-    // Native codec and filesystem errors can expose media diagnostics or paths.
     // oxlint-disable-next-line eslint/preserve-caught-error
     throw new Error("recording_encoding_failed");
   } finally {

@@ -1,7 +1,6 @@
 import { atom } from "jotai";
 import { householdSnapshotAtom, householdSyncedAtom } from "../household/state";
 
-/** Owned by the video route, so removals survive list/detail navigation. */
 export const perceptionSourceAccessAtom = atom({
   epoch: "",
   available: new Set<string>(),

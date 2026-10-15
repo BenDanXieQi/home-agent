@@ -6,8 +6,6 @@ import (
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/diagnostic"
 )
 
-// LoginHomeAgentSession observes only this new client's login requests. It retains
-// LoginWithToken's request, redirect and credential handling without logging them.
 func (c *Cloud) LoginHomeAgentSession(userID, passToken string) error {
 	previous := c.client.Transport
 	next := previous

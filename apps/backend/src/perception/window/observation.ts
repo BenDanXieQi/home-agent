@@ -16,8 +16,6 @@ export function projectWindowObservation(
       generation: frame.mediaTime.generation,
       receivedAt: frame.receivedAt,
       trackIds: frame.tracks?.map((track) => track.trackId) ?? [],
-      // Body tracks retain the exact measured detection box. Head/face detections
-      // can belong to an enclosing human track without being separate targets.
       untrackedTarget:
         frame.detections?.some((detection) => {
           const body = ["human", "cat", "dog"].includes(detection.className);

@@ -18,10 +18,6 @@ import { buttonStyles } from "../../components/button-styles";
 import { cameraTransitionName } from "./camera-styles";
 import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 
-/**
- * Surface and status row shared by every tile state, so switching between
- * waiting, playing, paused and failed never changes the tile's height.
- */
 export function CameraFrame({
   children,
   placeholder,
@@ -69,7 +65,7 @@ export function CameraFrame({
         >
           {children}
         </div>
-        {/* The first frame is revealed by fading the placeholder, not by a cut. */}
+        {}
         <AnimatePresence initial={false}>
           {placeholder !== null ? (
             <m.div

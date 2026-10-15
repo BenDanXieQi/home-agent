@@ -137,7 +137,6 @@ describe("one MQTT generation", () => {
   });
 
   test("cancelled devices, directory topics and new devices share one 16-operation budget until ACK", () => {
-    // MiLoCo has separate reconciliation/replay limits; this adapter also budgets UNSUBSCRIBE.
     const owner = new MiotMqtt("source", oauth, new Map());
     owners.push(owner);
     const old = owner.observe(
@@ -176,7 +175,6 @@ describe("one MQTT generation", () => {
       wire.ackUnsubscribe(acknowledgedUnsubscriptions++);
       expect(outstanding()).toBeLessThanOrEqual(16);
     };
-    // Late SUBACKs must release capacity only when their replacement UNSUBACKs arrive.
     for (let index = 0; index < 16; index++) acknowledgeSubscription();
     expect(wire.subscriptions).toHaveLength(16);
     expect(wire.unsubscriptions).toHaveLength(16);
@@ -264,7 +262,6 @@ describe("account watch recovery", () => {
   });
 
   test("late SUBACK after cancellation cannot restore the old watcher or strand a replacement behind UNSUBACK", async () => {
-    // MiLoCo tests subscribe/unsubscribe supersession; shared watchers also allow rejoining mid-unsubscribe.
     const account = observeAccount();
     const directory = account.owner.observeTopics(
       ["user/1001/g_op/bind"],

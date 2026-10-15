@@ -1,7 +1,7 @@
 import { presentReceiptChange } from "./receipt-presentation";
 import { useState } from "react";
 import type { z } from "zod";
-import type { agentReceiptSchema } from "@home-agent/api/agent-receipts";
+import type { agentReceiptSchema } from "@home-agent/agent/context/contracts";
 import { Button } from "../../components/Button";
 
 export function ReceiptChanges({

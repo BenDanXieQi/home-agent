@@ -19,7 +19,6 @@ type Watch = {
   binding?: ReturnType<MiotMqtt["observe"]>;
 };
 
-/** Owns shared account observations, topic authorization failures and connection recovery. */
 export class AccountObservations {
   private connection: MiotMqtt | undefined;
   private readonly watches = new Set<Watch>();
@@ -75,7 +74,6 @@ export class AccountObservations {
         await this.connection?.close();
         if (this.stopped || !this.watches.size || this.authenticationFailed)
           return;
-        // This attempt uses current credentials, including updates during close.
         clearTimeout(this.timer);
         this.timer = undefined;
         const connection = new MiotMqtt(
@@ -107,7 +105,6 @@ export class AccountObservations {
       }
     } finally {
       this.connecting = false;
-      // A synchronous callback can replace the last watch while this attempt closes.
       if (this.connection?.closed) this.schedule();
     }
   }
@@ -123,7 +120,6 @@ export class AccountObservations {
         !this.rejectedTopics.has(event.topic)
       ) {
         this.rejectedTopics.set(event.topic, event.code);
-        // Topic ACL rejection is not evidence that the account token is invalid.
         if (event.code === 0x87) this.onPermissionRejected(event);
       }
       if (event.kind === "connection") {
@@ -153,7 +149,6 @@ export class AccountObservations {
             listener,
             watch.signal,
           );
-    // observe delivers events synchronously; callbacks may cancel this watch.
     if (
       this.stopped ||
       !this.watches.has(watch) ||

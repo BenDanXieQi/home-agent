@@ -2,7 +2,6 @@ import { identityCapacity } from "@home-agent/api/contracts";
 import profile from "./profile.json";
 import { z } from "zod";
 
-// Native paths stay in backend configuration and never enter public snapshots.
 export const identityConfigSchema = z
   .strictObject({
     modelDirectory: z.string().min(1),

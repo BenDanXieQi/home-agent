@@ -11,7 +11,6 @@ import type {
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
 
-// One additional native process owns every audio decoder and a single VAD CPU thread.
 export function createAudioProcess(options: {
   track: (
     track: z.infer<typeof audioTrackSchema>,
@@ -19,7 +18,6 @@ export function createAudioProcess(options: {
   ) => void;
   failure: (error: string) => void;
   petSound?: (observation: z.infer<typeof petSoundObservationSchema>) => void;
-  // The return value acknowledges conversational inbox delivery, independently of history.
   speech?: (observation: z.infer<typeof speechObservationSchema>) => boolean;
 }) {
   if (process.platform === "win32")

@@ -11,7 +11,6 @@ import type { HistoryQuery } from "./page";
 
 export const historyStreamSilenceMs = deviceHistoryStreamPolicy.heartbeatMs * 3;
 
-/** One history request; the live owner alone decides whether to reconnect. */
 export async function streamDeviceHistory(
   input: HistoryQuery,
   delivery: ReturnType<

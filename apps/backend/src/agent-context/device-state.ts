@@ -2,7 +2,6 @@ import type { z } from "zod";
 import type { Projection } from "@home-agent/api/household";
 import { agentDevicePropertySchema } from "@home-agent/api/agent-context";
 
-/** Validate each new dynamic record once; preserve unchanged records by source identity. */
 export function createAgentDeviceStateProjection() {
   const properties = new WeakMap<
     Projection["latest"][string],

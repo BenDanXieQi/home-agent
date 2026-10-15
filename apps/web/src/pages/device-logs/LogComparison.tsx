@@ -137,7 +137,7 @@ export function ComparisonSelection({
   );
 }
 
-/* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable comparison region must be keyboard accessible. */
+/* oxlint-disable jsx-a11y/no-noninteractive-tabindex */
 export const LogComparison = memo(function LogComparison({
   devices,
   rows,
@@ -174,7 +174,7 @@ export const LogComparison = memo(function LogComparison({
     () => buckets.findIndex(([second]) => second === focused),
     [buckets, focused],
   );
-  // oxlint-disable-next-line react/incompatible-library -- Read current measurements on each render.
+  // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     useFlushSync: false,
     count: buckets.length,

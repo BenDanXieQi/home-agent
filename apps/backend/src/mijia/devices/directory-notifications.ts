@@ -4,7 +4,6 @@ import type { AccountObservations } from "../account/observations";
 
 const DIRECTORY_DEBOUNCE_MS = 5_000;
 
-/** Account-wide directory invalidations; current household filtering happens on commit. */
 export class DirectoryNotifications {
   private controller: AbortController | undefined;
   private binding: ReturnType<AccountObservations["observeTopics"]> | undefined;
@@ -58,7 +57,6 @@ export class DirectoryNotifications {
       },
       controller.signal,
     );
-    // Attach the replacement first so a shared connection never loses its last owner.
     previous?.abort();
   }
 

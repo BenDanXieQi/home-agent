@@ -105,7 +105,6 @@ function ObservationRecording({
           缓存录像查询失败：{requestErrorMessage(recording.error)}
           <Button
             onClick={() => {
-              // Refetch exposes request failures through recording.error.
               // oxlint-disable-next-line typescript/no-floating-promises
               recording.retry();
             }}

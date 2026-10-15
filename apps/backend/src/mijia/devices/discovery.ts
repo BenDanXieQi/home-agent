@@ -31,7 +31,6 @@ type DeviceDependencies = {
   onDevices: (devices: MiCloudDevice[], retryFailed: boolean) => void;
 };
 
-/** Maintains vendor discovery and the access index for the accepted household. */
 export class DeviceDiscovery {
   private currentState: MijiaState["devices"] = { status: "idle", items: [] };
   get state() {
@@ -339,7 +338,6 @@ export class DeviceDiscovery {
       retryStorage && this.pendingCatalog?.account === account
         ? this.pendingCatalog.catalog
         : undefined;
-    // Every trigger shares the supplier deadline; a local save needs no request.
     if (!pendingCatalog && Date.now() < this.retryAfterAt) {
       this.scheduleRetry(account);
       return this.state;

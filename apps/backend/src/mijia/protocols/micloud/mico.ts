@@ -24,7 +24,6 @@ export const conversationPageSchema = z.object({
   ),
   nextEndTime: z.number().int().safe().nonnegative().optional(),
 });
-/** Mico tokens are isolated from the MiCloud session and discarded with it. */
 export class MicoClient {
   private token: string | undefined;
   private authentication: Promise<void> | undefined;

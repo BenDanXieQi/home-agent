@@ -22,11 +22,6 @@ const buttonSizes = {
   small: { control: "min-h-8 px-3 py-1.5 text-xs", icon: "size-8 min-w-8 p-0" },
 };
 
-/**
- * One glyph for the whole operation, so it transforms instead of swapping: the
- * spinner's arc draws in, shrinks to a dot on completion, and the check or the
- * alert mark draws out of it. Strokes match Lucide icons.
- */
 function StatusGlyph({ status }: { status: "pending" | "success" | "error" }) {
   const reduced = useReducedMotion();
   const settle = { duration: 0.22, ease: "easeOut", delay: 0.12 } as const;
@@ -72,7 +67,7 @@ function StatusGlyph({ status }: { status: "pending" | "success" | "error" }) {
         }
         transition={settle}
       />
-      {/* The alert mark draws in two strokes, the dot a beat after the bar. */}
+      {}
       <m.path
         d="M12 7v6"
         initial={{ pathLength: 0, opacity: 0 }}
@@ -97,7 +92,6 @@ function StatusGlyph({ status }: { status: "pending" | "success" | "error" }) {
   );
 }
 
-// Labels stay sharp and stationary while the button's surface changes size.
 const labelSwap = {
   initial: { opacity: 0 },
   animate: {
@@ -107,10 +101,6 @@ const labelSwap = {
   exit: { opacity: 0, transition: { duration: 0.16, ease: "easeIn" } },
 } as const;
 
-/**
- * Shows an operation's outcome only after this button has watched it run, then
- * settles back to idle. A result that was already settled on mount stays quiet.
- */
 function useStatusFeedback(status: "idle" | "pending" | "success" | "error") {
   const [previous, setPrevious] = useState(status);
   const [settled, setSettled] = useState<"success" | "error" | null>(null);
@@ -130,11 +120,6 @@ function useStatusFeedback(status: "idle" | "pending" | "success" | "error") {
   return status === "pending" ? status : (settled ?? "idle");
 }
 
-/**
- * Ordinary operations keep their label and show only pending feedback.
- * Cancellable operations reveal their action with the delayed pending feedback.
- * A result morph is explicitly chosen for a committed action such as saving.
- */
 export function Button({
   variant = "secondary",
   size = "default",
@@ -233,7 +218,7 @@ export function Button({
           ) : null}
         </AnimatePresence>
       </span>
-      {/* The circle hides the label visually; assistive tech keeps the name. */}
+      {}
       {compact && label !== null ? (
         <span className="sr-only">{label}</span>
       ) : null}

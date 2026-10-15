@@ -9,7 +9,6 @@ import type { createMaterialRepository } from "../../household/materials/reposit
 import type { recordRetentionConfigSchema } from "../../household/records/config";
 import { providerPayload } from "../protocols/source-metadata";
 
-/** Sanitize every stored field, including structured answers and event arguments. */
 export function createMaterialStorage(deps: {
   writer: ReturnType<typeof createRecordWriter>;
   repository: ReturnType<typeof createMaterialRepository>;

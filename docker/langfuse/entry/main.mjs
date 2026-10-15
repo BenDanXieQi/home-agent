@@ -59,7 +59,6 @@ async function signIn() {
 }
 
 async function handle(request, response) {
-  // The public entry is local-only; reject unexpected Host values as well.
   if (
     ![publicUrl.host, `127.0.0.1:${publicUrl.port}`].includes(
       request.headers.host,

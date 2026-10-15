@@ -10,8 +10,6 @@ import { createHumanTracker } from "./tracker";
 import type { createReidProcess } from "./reid-process";
 import { frameLimits } from "../detection/frame";
 
-// Preserve the memory ceiling of two maximum-size RGB24 frames while allowing
-// more low-resolution sources to retain pixels for appearance and identity.
 const retainedPixelBytes = 2 * frameLimits.maxPixels * 3;
 
 function metadata(run: z.infer<typeof runSchema>, frame: VideoFrame) {
@@ -63,7 +61,6 @@ export function createTrackingRuntime(options: {
   let releasing: Promise<void> | undefined;
   const runs = new Map<string, ReturnType<typeof createRunState>>();
   const pending = new Set<Promise<void>>();
-  // FIFO eligibility contains only source IDs and expires when input stops.
   const pixelTurns = new Map<string, number>();
   let retainedBytes = 0;
   let closed = false;
@@ -75,8 +72,6 @@ export function createTrackingRuntime(options: {
     if (releasing) return releasing;
     const owned = model;
     releasing = (async () => {
-      // Interrupt native work before draining its publication tasks. Do not
-      // release the CPU slot or create a replacement before confirmed exit.
       await owned.close();
       await Promise.allSettled(pending);
       options.releaseCompute();
@@ -135,8 +130,6 @@ export function createTrackingRuntime(options: {
         retainedBytes + pixelBytes <= retainedPixelBytes &&
         pixelTurns.keys().next().value === run.runId &&
         now - frame.availableAt < maxAgeMs;
-      // Geometry needs no pixels. Only appearance owns a bounded independent
-      // copy, because detection transfers the original buffer to Piscina.
       let rgb = hasPixels ? new Uint8Array(frame.rgb) : undefined;
       if (hasPixels) {
         retainedBytes += pixelBytes;
@@ -273,8 +266,6 @@ export function createTrackingRuntime(options: {
                 ...entry.pets.update(frame.availableAt, detections),
               ].map((track) => {
                 const previous = entry.times.get(track.trackId);
-                // Preserve the original frame's host time when predicting or
-                // reusing a feature, even if the system clock has been corrected.
                 const times = {
                   measuredClock: track.lastMeasuredAt,
                   measuredAt:

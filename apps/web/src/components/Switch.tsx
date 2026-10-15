@@ -3,18 +3,12 @@ import { useState, useRef, type ComponentProps, type ReactNode } from "react";
 import { m, useReducedMotion } from "motion/react";
 import { Switch as RadixSwitch } from "radix-ui";
 
-// Track geometry in px; mirrored by the track and knob utility classes below.
 const inset = 2;
 const knob = 16;
 const travel = 12;
 const pressedKnob = 20;
 const offset = (on: boolean) => inset + (on ? travel : 0);
 
-/**
- * Toggle whose knob widens while pressed and tracks the pointer while dragged.
- * After release, the checked prop owns both the track and knob destination.
- * Remaining props go to the motion label, so presence and layout need no wrapper.
- */
 export function Switch({
   checked,
   onCheckedChange,
@@ -55,8 +49,6 @@ export function Switch({
         props.onKeyDownCapture?.(event);
       }}
       onClickCapture={(event) => {
-        // Release outside the track can click the label, which forwards a
-        // detail=0 click to the button. Suppress the whole drag's activation.
         if (dragged.current) {
           event.preventDefault();
           event.stopPropagation();

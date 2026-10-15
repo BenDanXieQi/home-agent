@@ -30,7 +30,6 @@ import { householdSyncStatusAtom } from "../../modules/household/sync";
 import { deviceCapabilityFailureCountAtom } from "../../modules/devices/state";
 import { accountDialogOpenAtom } from "./account-dialog-state";
 
-// Stable presentation values keep irrelevant source updates from repainting the brand.
 const activities = {
   idle: { state: "idle", label: "就绪" },
   offline: { state: "offline", label: "本机服务未连接" },
@@ -50,7 +49,6 @@ const activities = {
   camerasError: { state: "attention", label: "有摄像头暂时无法播放" },
 } as const;
 
-/** The router supplies scope; Jotai derives presentation directly from feature owners. */
 export function createWorkspaceActivityAtom(path: string, navigating: boolean) {
   return atom((get) => {
     const backend = get(backendStatusAtom);

@@ -60,7 +60,6 @@ export async function createAssistant({
     ...(subagentModelRefs ?? []),
   ]);
 
-  // Langfuse session grouping shared by the root and its child conversations.
   const sessionId = randomUUID();
   const timeoutMs = budget.timeoutMs;
   const models = createModels();
@@ -222,7 +221,6 @@ export async function createAssistant({
     new NodeExecutionEnv({ cwd: workspacePath }),
     (instance) => instance.cleanup(BACKGROUND_CONTEXT),
   );
-  // Keep observers alive until Harness has finished closing.
   const observers = resources.use(new AsyncDisposableStack());
   const harness = resources.adopt(
     await Harness.open(

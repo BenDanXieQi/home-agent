@@ -11,7 +11,6 @@ export const accountSessionSchema = z.strictObject({
   oauth: oauthSessionSchema,
 });
 
-/** Prepare a candidate without changing the current account or durable authorization. */
 export async function renewAccountSession(
   account: MiCloud,
   oauth: z.infer<typeof oauthSessionSchema>,

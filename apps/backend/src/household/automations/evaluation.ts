@@ -28,7 +28,6 @@ export function advanceAutomation(
     const episode = stage.id;
     const value = input.leaves[condition.id]?.truth ?? null;
     const old = baseline ? undefined : previous.leaves[condition.id];
-    // A condition must stay in the same episode to retain its sustained timer.
     const continuous = old?.truth === true && old.episode === episode;
     const adjacent = old?.episode === stage.previous_id;
     const expiry = input.leaves[condition.id]?.expires_at;
@@ -39,8 +38,6 @@ export function advanceAutomation(
       input.kind === "facts" &&
       input.report?.device_id === condition.predicate.device_id &&
       input.report.property_key === condition.predicate.property_key;
-    // Cached values establish condition state. Only a live report can start
-    // an attribute trigger or its sustained interval.
     const start = property
       ? !baseline && reported
         ? input.at

@@ -2,7 +2,6 @@ import type { MijiaFailureReason } from "@home-agent/api/mijia";
 import { recordFailure, withSpan } from "@home-agent/observability";
 import { safeMijiaError } from "./errors";
 
-/** Only static operation names and sanitized failures cross the tracing boundary. */
 export function mijiaOperation<T>(
   name: string,
   fallback: MijiaFailureReason,

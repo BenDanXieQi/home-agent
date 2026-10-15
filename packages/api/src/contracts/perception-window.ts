@@ -56,7 +56,6 @@ export const windowFrameSchema = z.object({
   retainedHeight: z.int().positive(),
   detections: z.array(detectionSchema).max(128).nullable(),
   tracks: trackingObservationSchema.shape.tracks.nullable(),
-  // Null means no matching frame snapshot; disabled is an explicit snapshot.
   identity: identityFrameSnapshotSchema.nullable(),
 });
 export const windowSummarySchema = z.object({

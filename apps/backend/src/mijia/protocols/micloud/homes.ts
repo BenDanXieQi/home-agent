@@ -59,7 +59,6 @@ type CloudRequest = (
   signal?: AbortSignal,
 ) => Promise<unknown>;
 
-/** Resolve membership from the home/room API, including its device-membership pages. */
 export async function readHomes(request: CloudRequest, signal?: AbortSignal) {
   const result = homesSchema.safeParse(
     await request(

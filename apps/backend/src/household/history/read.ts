@@ -7,7 +7,6 @@ import { HouseholdError } from "../errors";
 import type { HouseholdRuntime } from "../runtime";
 import type { createDeviceHistoryQuery } from "./query";
 
-/** Capture one binding and keep every history page within its request lifetime. */
 export function createDeviceHistoryReader(
   household: HouseholdRuntime,
   query: ReturnType<typeof createDeviceHistoryQuery> | undefined,

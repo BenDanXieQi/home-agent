@@ -9,7 +9,7 @@ import {
   type speechDialogueRequestSchema,
   type speechDialogueResponseSchema,
   validSpeechDialogueRequest,
-} from "@home-agent/api/speech-dialogue";
+} from "./contracts";
 import { z } from "zod";
 import { AppError } from "@home-agent/api/errors";
 import { completeStructuredOutput } from "../structured-output";

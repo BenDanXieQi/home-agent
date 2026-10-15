@@ -8,7 +8,6 @@ export function createPlaybackStatusAtom() {
   );
 }
 
-// Only phase is shared. Each playback session owns its media resources.
 const viewersAtom = atom(
   new Set<ReturnType<typeof createPlaybackStatusAtom>>(),
 );

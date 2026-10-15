@@ -8,8 +8,6 @@ import { windowLimits } from "./limits";
 
 sharp.concurrency(1);
 
-// Capture owns its pixel copy before detection transfers the original buffer.
-// No queue: at most two native resize operations across all camera channels.
 export function createWindowCapture(
   emit: (
     event:
@@ -53,7 +51,6 @@ export function createWindowCapture(
           report("capture_capacity", frame.receivedAt);
           return;
         }
-        // A rejected frame must not consume the source's sampling interval.
         lastPts = frame.mediaTime.pts;
         active++;
         const rgb = new Uint8Array(frame.rgb);

@@ -7,7 +7,6 @@ import { householdAtom, reconnectHouseholdAtom } from "./state";
 import { householdSyncMessageAtom } from "./sync";
 import { mijiaActionErrorAtom } from "../mijia/commands";
 
-/** Shared household access and synchronization feedback, independent of a route's content. */
 export function HouseholdAccess({
   fallback,
   children,

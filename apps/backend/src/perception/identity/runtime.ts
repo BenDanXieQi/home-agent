@@ -161,7 +161,6 @@ export function createIdentityRuntime(options: {
     enrolling = true;
     session.lastDemandAt = performance.now();
     try {
-      // A user registration waits for the one admitted online frame; enrolling prevents new online work.
       await session.pending;
       ensureModel(session);
       await session.creating;
@@ -334,7 +333,6 @@ export function createIdentityRuntime(options: {
         if (session.model === model) session.model = undefined;
         releaseCompute(session);
       } catch (cause) {
-        // Keep both process ownership and capacity until exit is confirmed.
         session.error = String(cause).slice(0, 4096);
         session.retryAt = Infinity;
         options.fatal(cause);
@@ -348,7 +346,6 @@ export function createIdentityRuntime(options: {
     session.controller.abort(new Error("Identity session stopped"));
     await session.creating;
     await session.unloading;
-    // Closing first interrupts a stalled inference before waiting for its owner.
     try {
       await session.model?.close();
     } catch (cause) {
@@ -521,7 +518,6 @@ export function createIdentityRuntime(options: {
       const model = session.model;
       const analysis = source.analysis;
       const admittedSnapshot = snapshot;
-      // Keep the tracking-owned pixel buffer alive for this one admitted resize.
       const pixels = rgb;
       analysis.admitted(targets, availableAt);
       session.pending = (async () => {
@@ -603,8 +599,6 @@ export function createIdentityRuntime(options: {
           session.pending = undefined;
         }
       })();
-      // Freeze only what was known when tracking completed. This frame's native
-      // result may inform later frames, but never rewrites this historical view.
       return frameSnapshot(source, session, "pending", snapshot);
     },
     async stop(runId: string) {

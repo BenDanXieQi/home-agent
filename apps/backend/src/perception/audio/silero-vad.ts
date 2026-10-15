@@ -92,8 +92,6 @@ export async function createVad() {
   }
 }
 
-// Each track owns its model state, 64-sample context and unfinished 512-sample block.
-// The supplied evaluator serializes calls to the one process-wide ONNX session.
 export function createSileroTrack(
   evaluate?: Awaited<ReturnType<typeof createVad>>["evaluate"],
   observe?: (

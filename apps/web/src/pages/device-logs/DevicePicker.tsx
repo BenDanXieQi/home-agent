@@ -54,7 +54,6 @@ export const DevicePicker = memo(function DevicePicker({
   } = deviceSelection;
   const { query: deviceQuery, room, category } = filters;
   const { comparing, compareIds, toggleComparison } = comparison;
-  // List items animate only when the listed set changes, never when content above moves.
   const membership = useMemo(
     () => `${comparing}:${devices.map((device) => device.id).join()}`,
     [comparing, devices],
@@ -73,7 +72,6 @@ export const DevicePicker = memo(function DevicePicker({
     const element = deviceRows.current;
     const scroller = deviceList.current;
     if (!element || !scroller) return undefined;
-    // The positioned scroll container is the rows' direct offsetParent.
     const measure = () => setDeviceRowsOffset(element.offsetTop);
     measure();
     const observer = new ResizeObserver(measure);
@@ -89,9 +87,8 @@ export const DevicePicker = memo(function DevicePicker({
       ),
     [devices, deviceId, focusedDevice],
   );
-  // oxlint-disable-next-line react/incompatible-library -- Read live virtual measurements directly rather than compiler-memoizing them.
+  // oxlint-disable-next-line react/incompatible-library
   const deviceVirtualizer = useVirtualizer({
-    // Panel resizing can notify during a React commit; let React batch that update.
     useFlushSync: false,
     count: devices.length,
     getScrollElement: () => deviceList.current,

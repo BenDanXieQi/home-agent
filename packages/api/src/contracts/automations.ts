@@ -57,7 +57,6 @@ export const automationTimeWindowSchema = z.strictObject({
         return false;
       }
     }, "无效的时区"),
-  // ISO weekdays. Overnight windows belong to the day on which they start.
   weekdays: z.array(z.number().int().min(1).max(7)).min(1).max(7),
 });
 export const automationEventPredicateSchema = z.strictObject({
@@ -398,22 +397,6 @@ export const automationDeleteRequestSchema = automationScopeSchema.extend({
 export const automationEvaluateRequestSchema = automationScopeSchema.extend({
   definition: automationDefinitionSchema,
 });
-export const automationGenerateRequestSchema = automationScopeSchema.extend({
-  text: z.string().trim().min(1),
-  definition: automationDefinitionSchema.optional(),
-});
-export const automationDraftSchema = z.object({
-  definition: automationDefinitionSchema.nullable(),
-  behavior: z.string(),
-  clarifications: z.array(z.string()),
-});
-/** Input supplied by the caller; generation has no device side effects. */
-export const automationGenerationInputSchema = z.strictObject({
-  text: z.string().trim().min(1),
-  definition: automationDefinitionSchema.optional(),
-  capabilities: automationCapabilitiesSchema,
-});
-
 export const automationDecisionInputSchema = z.strictObject({
   request_id: z.uuid(),
   automation_id: z.uuid(),

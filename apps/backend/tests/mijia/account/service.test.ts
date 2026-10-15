@@ -41,8 +41,6 @@ function harness(
     name: "Test account",
     avatarUrl: null,
   });
-  // The shared MQTT transport and media owners have their own lifecycle suites.
-  // Keep account persistence tests isolated from those external side effects.
   spyOn(DirectoryNotifications.prototype, "update").mockImplementation(
     () => {},
   );

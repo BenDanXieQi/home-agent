@@ -1,4 +1,5 @@
 import { z } from "zod";
+
 export const chatInputSchema = z.strictObject({
   message: z.string().trim().min(1),
 });

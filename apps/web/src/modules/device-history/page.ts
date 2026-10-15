@@ -56,7 +56,6 @@ function changedRecords<Record extends HistoryResponse["records"][number]>(
   });
 }
 
-/** Replace page order while sharing unchanged records. */
 export function applyHistoryChange(
   previous: HistoryResponse,
   change: ReturnType<typeof deviceHistoryChangeSchema.parse>,
@@ -85,7 +84,6 @@ function appendRecords<Record extends HistoryResponse["records"][number]>(
   ];
 }
 
-/** Append a continuation without duplicating records already loaded. */
 export function appendHistoryPage(
   previous: HistoryResponse,
   page: HistoryResponse,

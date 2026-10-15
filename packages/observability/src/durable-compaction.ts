@@ -5,7 +5,6 @@ import {
 } from "@earendil-works/pi-durable";
 import { withDurableCompactionTrace } from "./durable";
 
-/** Decorate the built-in summarization phase for the pinned Pi runtime. */
 export function observeDurableRegistry(registry: RegistryReader) {
   const definition = CompactionTask.definition;
   const summarize = definition.phases.summarize;

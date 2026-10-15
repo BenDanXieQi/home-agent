@@ -4,7 +4,6 @@ function readClock() {
   return { monotonicMs: performance.now(), wallMs: Date.now() };
 }
 
-/** Mounted only for a visible startup; remounting reads the clock before paint. */
 export function usePlaybackClock(startedAt: number | null) {
   const [clock, setClock] = useState(readClock);
   useEffect(() => {

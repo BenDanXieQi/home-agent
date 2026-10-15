@@ -22,7 +22,6 @@ const units = new Map(
     watt: "W",
   }),
 );
-// MIoT standard quantities used by the model view; source units take precedence.
 const standardUnits = new Map(
   Object.entries({
     temperature: "°C",
@@ -113,7 +112,6 @@ export function createCapabilityCatalog(spec: Specification) {
     return { address, metadata, reason };
   });
   const eligible = audit.filter((entry) => entry.reason === null);
-  // JSON keys keep arbitrary capability names separate from object prototype keys.
   const byType = groupBy(eligible, ({ address, metadata }) =>
     JSON.stringify(metadata.type_name || address),
   );

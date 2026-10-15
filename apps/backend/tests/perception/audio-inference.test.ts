@@ -15,8 +15,6 @@ async function until(check: () => boolean) {
   expect(check()).toBe(true);
 }
 
-// Only replace the OS/native-worker boundary. Real segmentation, ownership,
-// queueing, protocol validation and publication remain in the production runtime.
 function nativeChild() {
   const process = new childProcess.ChildProcess();
   Object.defineProperty(process, "stderr", { value: null });

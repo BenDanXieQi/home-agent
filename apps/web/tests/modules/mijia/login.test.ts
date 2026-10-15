@@ -49,8 +49,6 @@ describe("Automatic login coordination", () => {
   });
 
   it("waits for old media cleanup before automatically starting reauthentication", async () => {
-    // docs/mijia.md requires completed media cleanup before automatic login.
-    // A failed session DELETE retains its upstream unavailable code during cleanup.
     const expired = householdSnapshot();
     const error = {
       code: "mijia_authentication",

@@ -7,7 +7,6 @@ type PropertyReadPreparation = {
   assertCurrent: () => void;
 };
 
-/** Verify each device's requested properties once before consuming HTTP budget. */
 export function preparePropertyRead(
   properties: readonly MiotPropertyAddress[],
   preparation: PropertyReadPreparation,

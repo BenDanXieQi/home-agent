@@ -1,4 +1,3 @@
-/** Native JSON source access preserves vendor identifiers beyond JS integer precision. */
 export function parseProviderJson(text: string) {
   const parsed: unknown = JSON.parse(
     text.replace(/^&&&START&&&/, ""),

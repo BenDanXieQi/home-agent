@@ -141,7 +141,6 @@ export function createSpatialRepository(db: Database) {
       }
       throw new SpatialError("storage_unavailable", { cause });
     } finally {
-      // A completed write callback can have an uncertain COMMIT outcome.
       if (attempted && callbackCompleted) notify();
     }
   }

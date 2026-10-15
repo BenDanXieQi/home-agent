@@ -6,7 +6,6 @@ import {
   type agentContextSnapshotSchema,
 } from "@home-agent/api/agent-context";
 
-/** Compare against this connection's last completed delivery, including skipped commits. */
 export function prepareAgentContextDelivery(
   previous: z.infer<typeof agentContextSnapshotSchema> | undefined,
   next: z.infer<typeof agentContextSnapshotSchema>,
@@ -31,7 +30,6 @@ export function prepareAgentContextDelivery(
     const before = baseline.data[entity];
     const after = current.data[entity];
     if (before === after) continue;
-    // Collection is a singleton and can only be replaced, never removed.
     if (entity !== "collection") {
       for (const key of Object.keys(before)) {
         if (!Object.hasOwn(after, key))
@@ -63,7 +61,6 @@ export function prepareAgentContextDelivery(
       },
     },
   } satisfies z.infer<typeof agentContextPublicationSchema>;
-  // A widespread change can be cheaper to send as a complete part.
   const data = JSON.stringify(delta);
   return Buffer.byteLength(data) < fullBytes ? data : undefined;
 }

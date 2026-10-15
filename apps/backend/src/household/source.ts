@@ -1,13 +1,13 @@
-import type { Projection, selectHomeSchema } from "@home-agent/api/household";
 import type {
-  mijiaPlaybackReservationResponseSchema,
-  mijiaHomeSelectionSchema,
-} from "@home-agent/api/mijia";
+  Projection,
+  selectHomeSchema,
+  setupHomesSchema,
+} from "@home-agent/api/household";
 import type { z } from "zod";
+import type { playbackReservationSchema } from "@home-agent/api/playback";
 
 type Household = Projection["household"]["household"];
 
-/** Safe integration state consumed by the household lifecycle. */
 export type HouseholdSourceState = {
   provider: string;
   account_id: Household["account_id"];
@@ -15,18 +15,16 @@ export type HouseholdSourceState = {
   login: Projection["login"]["login"];
   connection: Projection["connection"]["connection"];
   media: Projection["media"]["media"];
-  homes: z.infer<typeof mijiaHomeSelectionSchema>;
+  homes: Household["homes"] & z.infer<typeof setupHomesSchema>;
   directory_sync: Household["sync_status"];
   directory_error: Household["error"];
   directory_capacity: boolean;
   directory_storage: boolean;
 };
 
-/** Account and media resources stay with their integration adapter. */
 export type HouseholdSource = {
   snapshot: () => HouseholdSourceState;
   subscribe: (listener: () => void) => () => void;
-  /** Save the binding, commit its lifecycle, then install its access scope. */
   bindHome: (
     homeId: z.infer<typeof selectHomeSchema>["home_id"],
     assertCurrent: () => void,
@@ -39,7 +37,7 @@ export type HouseholdSource = {
     revision: string,
     id: string,
     channel: 1 | 2,
-  ) => z.infer<typeof mijiaPlaybackReservationResponseSchema>;
+  ) => z.infer<typeof playbackReservationSchema>;
   failure: (
     error: unknown,
     stage?: "account" | "directory",

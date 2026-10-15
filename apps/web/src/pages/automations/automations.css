@@ -93,7 +93,6 @@
     width: 7rem;
   }
 
-  /* Only style the query builder's native actions; shared controls own theirs. */
   .automation-editor
     button:not([aria-haspopup]):not(.button):not([role="switch"]),
   .automation-editor .ruleGroup-notToggle {

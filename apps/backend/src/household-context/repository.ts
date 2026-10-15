@@ -70,7 +70,6 @@ export function createContextRepository(db: Database) {
             ? await tx
                 .select({
                   ...getTableColumns(householdSubjects),
-                  // Retain database microseconds; JS Date truncation would skip tied rows.
                   cursorTime: sql<string>`to_char(${householdSubjects.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`,
                 })
                 .from(householdSubjects)
@@ -144,7 +143,6 @@ export function createContextRepository(db: Database) {
                     contextEntities.role,
                   )
                   .limit(pageSize + 1);
-        // PostgreSQL maintains these estimates without scanning history on each page.
         const statistics = await tx.execute(
           sql`select relname, n_live_tup from pg_stat_user_tables where schemaname = current_schema() and relname in ('context_records', 'context_entities')`,
         );
@@ -216,8 +214,6 @@ export function createContextRepository(db: Database) {
             next_cursor: continuationCursor,
             rows: [],
           });
-          // Serialize each complete row once; array separators count toward the
-          // same response budget. The cursor always follows the last accepted row.
           if (
             envelopeBytes + rowsBytes + rowBytes + count - 1 >
             2 * 1024 * 1024
@@ -227,8 +223,6 @@ export function createContextRepository(db: Database) {
           rowsBytes += rowBytes;
           nextCursor = continuationCursor;
         }
-        // A single row must fit intact; no empty continuation page can advance
-        // past it without losing data.
         if (rows.length && !accepted.length)
           throw new HouseholdError("capacity_exceeded");
         const response = contextBrowseResponseSchema.parse({

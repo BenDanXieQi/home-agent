@@ -11,7 +11,6 @@ import type { stateVersionSchema } from "@home-agent/api/household";
 import type { appearanceEvidenceSchema } from "./appearance-evidence";
 import type { createIdentityMatching } from "./matching";
 
-// Resource limits and time candidates are not calibrated recognition parameters.
 export const appearanceLimits = {
   targets: 256,
   temporarySamples: 8192,
@@ -164,8 +163,6 @@ function revocationTrigger(
   observation: Observation,
   track: Observation["tracks"][number],
 ) {
-  // Retain the original state even when an individual evidence payload exceeds
-  // the metadata budget. Resource admission must never hide a conflict or end.
   const evidence = track.evidence.filter(
     (face) =>
       Buffer.byteLength(JSON.stringify(face)) <=
@@ -267,7 +264,6 @@ type Event =
   | ReturnType<typeof endedEvent>
   | { kind: "changed" };
 
-/** Single household owner; all clock values belong to the receiving process. */
 export function createAppearanceIdentity(options: {
   matching: Pick<
     ReturnType<typeof createIdentityMatching>,
@@ -331,7 +327,6 @@ export function createAppearanceIdentity(options: {
     target.confirmations.clear();
     target.referenceMember = null;
     statistics.referencesRevoked += removed.length;
-    // Activity owns historical dependencies by source target, even after references expire.
     emit(revokedEvent(target, removed.map(referenceSummary), reason, trigger));
   }
   function finish(
@@ -426,7 +421,6 @@ export function createAppearanceIdentity(options: {
       (reference) => reference.memberId === face.memberId,
     );
     if (memberReferences.length >= appearanceLimits.referencesPerMember) {
-      // Keep at least one sample from each established source; quality breaks same-source ties.
       const sourceKey = (reference: ReturnType<typeof newReference>) =>
         `${reference.appearance.run.deviceId}:${reference.appearance.run.channel}`;
       const incomingKey = `${appearance.evidence.run.deviceId}:${appearance.evidence.run.channel}`;
@@ -590,7 +584,6 @@ export function createAppearanceIdentity(options: {
       score: best.score,
       margin,
     });
-    // All supporting frames must share a reference still eligible right now.
     const common = best.referenceIds.filter((id) =>
       target.supports.every((support) => support.referenceIds.includes(id)),
     );
@@ -693,8 +686,6 @@ export function createAppearanceIdentity(options: {
           source.trackingSequence,
         );
       for (const target of targets.values()) {
-        // A restored snapshot admits only frames produced after this boundary,
-        // including when null is followed by the same reference version.
         target.faceSequence = Math.max(
           target.faceSequence,
           target.source.confirmationCutoff,
@@ -823,8 +814,6 @@ export function createAppearanceIdentity(options: {
           continue;
         }
         target.appearanceSequence = evidence.sequence;
-        // Keep new frames while blocked so a later same-frame legal confirmation
-        // can pair them. pair/rank still prohibit references and inference here.
         const key = frameKey(evidence);
         if (
           target.appearances.has(key) ||
@@ -905,7 +894,6 @@ export function createAppearanceIdentity(options: {
           .map((association) => [association.trackId, association]),
       );
       const newConfirmations = new Set<number>();
-      // Destructive updates from BOTH collections precede every positive update.
       for (const track of all) {
         const target = targets.get(
           targetKey(source.run, source.generation, track.trackId),
@@ -1013,7 +1001,6 @@ export function createAppearanceIdentity(options: {
           acceptedAt + Math.max(0, association.expiresAt - wallNow);
         target.supports = [];
         target.inferred = null;
-        // Only this publication's latest new support is paired; older confirmation history is not replayed.
         const face = fresh.at(-1)!;
         const age =
           observation.ageMs + observation.receivedAt - face.observedAt;
@@ -1040,7 +1027,6 @@ export function createAppearanceIdentity(options: {
           targetKey(source.run, source.generation, track.trackId),
         );
         if (!target) continue;
-        // A terminal snapshot under an unavailable reference or identity engine cannot certify a clean end.
         finish(
           target,
           compatible &&

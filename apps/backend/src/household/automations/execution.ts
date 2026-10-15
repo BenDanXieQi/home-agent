@@ -6,7 +6,6 @@ import type {
   automationActions,
 } from "../../db/schema";
 
-/** Freeze one admitted trigger and the actions selected for this execution. */
 export function createAutomationExecution(
   automation: typeof automations.$inferSelect,
   input: typeof automationRuns.$inferSelect.input,

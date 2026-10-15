@@ -10,7 +10,6 @@ const layouts = {
   stable: "w-full",
 };
 
-/** A quiet content surface with one explanation and one next step. */
 export function EmptyState({
   icon,
   title,

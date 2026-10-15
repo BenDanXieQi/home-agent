@@ -1,6 +1,37 @@
 import { z } from "zod";
-import { spatialDraftSchema } from "./spatial";
-import { agentContextScopeSchema } from "./agent-context";
+import {
+  spaceDefinitionSchema,
+  passageDefinitionSchema,
+} from "@home-agent/api/spatial";
+import { agentContextScopeSchema } from "@home-agent/api/agent-context";
+
+export const spatialDraftSchema = z
+  .strictObject({
+    spaces: z.array(spaceDefinitionSchema),
+    passages: z.array(passageDefinitionSchema),
+  })
+  .superRefine((draft, ctx) => {
+    const spaces = new Set(draft.spaces.map((space) => space.id));
+    const passages = new Set(draft.passages.map((passage) => passage.id));
+    if (
+      spaces.size !== draft.spaces.length ||
+      passages.size !== draft.passages.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Draft record IDs must be unique.",
+      });
+    draft.passages.forEach((passage, index) => {
+      for (const endpoint of ["space_a_id", "space_b_id"] as const) {
+        if (!spaces.has(passage[endpoint]))
+          ctx.addIssue({
+            code: "custom",
+            path: ["passages", index, endpoint],
+            message: "Passage endpoints must refer to draft spaces.",
+          });
+      }
+    });
+  });
 
 const imageSchema = z.strictObject({
   type: z.literal("image"),
@@ -27,9 +58,7 @@ export const spatialPlanningInputSchema = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("close"), ...session }),
 ]);
 
-export const spatialPlanningScopeSchema = agentContextScopeSchema;
-const household = { scope: spatialPlanningScopeSchema };
-/** Backend supplies this scope after checking the active household. */
+const household = { scope: agentContextScopeSchema };
 export const spatialPlanningRequestSchema = z.discriminatedUnion("action", [
   spatialPlanningInputSchema.options[0].safeExtend(household),
   spatialPlanningInputSchema.options[1].safeExtend(household),

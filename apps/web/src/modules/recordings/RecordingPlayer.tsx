@@ -53,7 +53,6 @@ export function RecordingPlayer({
           <Button
             size="small"
             onClick={() => {
-              // refetch owns failures and exposes them through playback.error.
               // oxlint-disable-next-line typescript/no-floating-promises
               playback.refresh();
             }}
@@ -130,7 +129,7 @@ function ReadyRecording({
   return (
     <div className="space-y-3">
       <RecordingSurface>
-        {/* Camera recordings have no verified transcript; do not invent captions. */}
+        {}
         {/* oxlint-disable-next-line jsx-a11y/media-has-caption */}
         <video
           ref={video}
@@ -150,7 +149,6 @@ function ReadyRecording({
             setFailure(
               "录像读取或解码失败，可能已过期、连接中断或浏览器不支持当前编码。",
             );
-            // refetch owns request failures and reports the current resource state.
             // oxlint-disable-next-line typescript/no-floating-promises
             refresh();
           }}

@@ -1,15 +1,21 @@
-import { collectAutomationConditions } from "@home-agent/api/automations";
-import type { automations, automationRuns } from "../../db/schema";
+import {
+  collectAutomationConditions,
+  type AutomationDefinition,
+  type AutomationEvaluation,
+} from "@home-agent/api/automations";
+import type { z } from "zod";
+import type { automationInputSchema } from "./state";
+import type { AutomationProperties } from "./properties";
 import type { HouseholdRuntime } from "../runtime";
 
-/** Explain only the admitted trigger nodes, using the same captured input. */
 export function createAutomationSource(
-  definition: typeof automations.$inferSelect.definition,
-  input: typeof automationRuns.$inferSelect.input,
-  evaluation: typeof automationRuns.$inferSelect.evaluation,
+  definition: AutomationDefinition,
+  input: z.infer<typeof automationInputSchema>,
+  evaluation: AutomationEvaluation,
   context: {
     devices: ReturnType<HouseholdRuntime["snapshot"]>["projection"]["device"];
     specs: ReturnType<HouseholdRuntime["specifications"]>;
+    propertyReference: AutomationProperties["reference"];
   },
 ) {
   const ids = new Set(evaluation.triggered_by);
@@ -36,7 +42,8 @@ export function createAutomationSource(
       const fact = input.facts.find(
         (item) =>
           item.device_id === predicate.device_id &&
-          `prop.${item.siid}.${item.piid}` === predicate.property_key,
+          context.propertyReference(item).property_key ===
+            predicate.property_key,
       );
       detail = `${device?.name ?? "未知设备"}（${predicate.device_id}）/${capability?.description ?? "未知属性"}（${predicate.property_key}） ${predicate.operator} ${JSON.stringify(predicate.value)}；单位：${capability?.unit ?? "未知"}；本次原值：${fact?.has_value ? JSON.stringify(fact.value) : "未知"}；报告时间：${fact?.last_report_at ?? "未知"}`;
     } else if (predicate.kind === "time_window") {

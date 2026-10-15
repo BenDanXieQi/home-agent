@@ -54,8 +54,6 @@ func initHomeAgent() {
 	}()
 }
 
-// The host publishes go2rtc only on loopback. Docker forwards host requests from
-// its private gateway; private peers are accepted, browser origins are never accepted.
 func homeAgentLocalRequest(r *http.Request) bool {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	ip := net.ParseIP(host)
@@ -152,8 +150,6 @@ func homeAgentAPI(w http.ResponseWriter, r *http.Request) {
 
 	homeAgentMu.Lock()
 	defer homeAgentMu.Unlock()
-	// A timed-out management request must not replace a newer camera or
-	// reset a subsequently established session.
 	if r.Context().Err() != nil {
 		return
 	}
@@ -230,7 +226,6 @@ func homeAgentInstall(w http.ResponseWriter, r *http.Request) {
 		homeAgentError(w, "invalid_credentials", http.StatusBadRequest)
 		return
 	}
-	// Clear first so failed installation cannot retain an old account's picture.
 	homeAgentClear()
 	cloud := xiaomi.NewCloud(AppXiaomiHome)
 	err := cloud.LoginHomeAgentSession(body.UserID, body.PassToken)
@@ -269,7 +264,6 @@ func homeAgentCloudErrorCode(err error) string {
 	return "credentials_rejected"
 }
 
-// Caller holds homeAgentMu. Static token config and other account caches remain intact.
 func homeAgentClear() {
 	session := homeAgentCurrent.Swap(nil)
 	if session == nil {

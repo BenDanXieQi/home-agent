@@ -79,8 +79,6 @@ function validateConfiguration(input: unknown, fromFile: boolean) {
 async function readSource(path: string) {
   let source: string;
   try {
-    // Nonblocking open rejects FIFOs without hanging a request. Check the opened
-    // file, then read at most the limit plus one byte even if it grows meanwhile.
     const file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
     try {
       const information = await file.stat();
@@ -182,8 +180,6 @@ export function createConnectionStore(configPath: string) {
         const document = new Document(initial);
         document.commentBefore =
           " yaml-language-server: $schema=./config.schema.json";
-        // Exclusive creation never replaces an existing YAML, including a file
-        // created by another startup between the existence check and this write.
         await writeFile(path, document.toString(), { flag: "wx", mode: 0o600 });
       } catch (creationError) {
         if (!hasCode(creationError, "EEXIST")) {
@@ -196,8 +192,6 @@ export function createConnectionStore(configPath: string) {
     }
 
     try {
-      // Avoid overwriting the YAML if a custom path or symlink points at the
-      // schema filename. Editor hints are optional and never gate valid YAML.
       const [yamlTarget, schemaTarget] = await Promise.all([
         realpath(path),
         realpath(schemaPath).catch((error: unknown) => {
@@ -218,8 +212,6 @@ export function createConnectionStore(configPath: string) {
   }
 
   async function read() {
-    // Read on every request so manual edits and permission failures are observed.
-    // Only YAML parsing is cached, by exact content rather than timestamps.
     const source = await readSource(path);
     if (parsed?.source !== source) {
       parsed = {
@@ -232,8 +224,6 @@ export function createConnectionStore(configPath: string) {
 
   async function isWritable() {
     try {
-      // write-file-atomic follows symlinks, so check the actual replacement
-      // directory as well as the file's permissions, including explicit modes.
       const target = await realpath(path);
       const directory = dirname(target);
       const [fileInformation, directoryInformation] = await Promise.all([
@@ -263,9 +253,6 @@ export function createConnectionStore(configPath: string) {
     if (!(await isWritable())) {
       throw new AppError("connection_config_read_only");
     }
-    // Mutating existing scalar nodes through Document preserves nearby comments
-    // and formatting. Manual editing and Web saves must be performed separately;
-    // this local single-user store deliberately has no conflict detection.
     document.setIn(
       ["services", "agent", "url"],
       configuration.services.agent.url,
@@ -281,8 +268,6 @@ export function createConnectionStore(configPath: string) {
       });
     }
     try {
-      // The library preserves existing mode/ownership, fsyncs, then renames an
-      // adjacent temporary file. Its built-in per-file serialization is enough.
       await writeFileAtomic(path, contents);
     } catch (error) {
       const readOnly = ["EACCES", "EPERM", "EROFS"].some((code) =>

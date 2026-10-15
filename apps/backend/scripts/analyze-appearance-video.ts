@@ -162,7 +162,6 @@ async function readVideoMetadata(path: string) {
   const file = Bun.file(resolve(path));
   if (file.size > budget)
     throw new Error("Video metadata exceeds the metadata budget");
-  // A lazy file slice bounds the read even if the file grows after the size check.
   const bytes = Buffer.from(await file.slice(0, budget + 1).arrayBuffer());
   if (bytes.length > budget)
     throw new Error("Video metadata exceeds the metadata budget");
@@ -242,8 +241,6 @@ async function analyze(video: (typeof manifest.videos)[number]) {
     const pts = frame.best_effort_timestamp_time;
     if (pts === undefined)
       throw new Error(`Sampled frame ${index} has no presentation timestamp`);
-    // FFprobe renders time to microseconds. Subtract integers so an exact
-    // cutoff cannot round below FFmpeg's half-open output duration.
     const ptsUs = Math.round(pts * 1_000_000);
     const timeUs = ptsUs - originUs;
     return timeUs < durationUs

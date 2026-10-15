@@ -196,9 +196,6 @@ describe("resident camera source ownership", () => {
   });
 
   test("dual lenses keep distinct backend sources and a failed lens preparation cannot retire the other viewer", async () => {
-    // MiLoCo cameraChannel.test.ts covers synthetic did:ch0/ch1 identities.
-    // This boundary uses one physical did with explicit 1/2 channels and source IDs;
-    // it does not exercise the Go MISS connection shared by the physical camera.
     const peer = mediaPeer();
     peers.push(peer);
     await peer.install();
@@ -398,8 +395,6 @@ describe("private media session boundary", () => {
     expect(() => session.playbackSnapshot(id)).toThrow();
     expect(() => session.reservePlayback(revision, camera.did, 1)).toThrow();
     expect(await cleanup).toMatchObject({ reason: "go2rtc_unavailable" });
-    // Cleanup preserves the adapter error code; consumers cannot identify a
-    // pending cleanup solely by looking for mijia_go2rtc_cleanup.
     expect(session.binding).toMatchObject({
       status: "error",
       error: { code: "mijia_go2rtc_unavailable" },

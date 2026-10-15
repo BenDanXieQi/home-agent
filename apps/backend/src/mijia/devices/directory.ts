@@ -1,7 +1,6 @@
 import type { MiCloud } from "../protocols/micloud";
 import { describeMijiaDevice } from "./mapping";
 
-/** Convert a vendor catalog into the selected household's directory candidate. */
 export function deviceDirectory(
   catalog: Awaited<ReturnType<MiCloud["getCatalog"]>>,
   accountId: string,

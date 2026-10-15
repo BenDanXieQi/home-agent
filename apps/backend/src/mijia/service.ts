@@ -34,7 +34,6 @@ export type MijiaDependencies = {
   credentialStore: CredentialStore | undefined;
 };
 
-/** Owns the durable account; only the current task may adopt credentials or media. */
 export class MijiaService {
   private state: Pick<MijiaState, "account" | "connectionOperation"> = {
     connectionOperation: null,
@@ -207,8 +206,6 @@ export class MijiaService {
     assertCurrent();
     this.flushChanges();
     if (!this.household) throw new MijiaError("invalid_state");
-    // Membership can name devices whose details are unavailable to this account.
-    // getCatalog completes every page before its returned devices define access.
     const definitionChanges = this.discovery.definitionChanges(catalog);
     const revocation = this.discovery.revocation(catalog);
     if (revocation) {
@@ -418,7 +415,6 @@ export class MijiaService {
           this.accountKey(current) === accountKey &&
           this.observationScope.signal === scope
         ) {
-          // A topic ACL refusal can revoke device access without invalidating the token.
           this.discovery.load(true).catch((error: unknown) => {
             console.warn("Device refresh failed", safeMijiaError(error).code);
           });
@@ -534,7 +530,6 @@ export class MijiaService {
       )
         throw new MijiaError("stale_session");
     };
-    // Revocation removes only the affected topics from the account-owned watch.
     const assertDevices = () => {
       assertCurrent();
       this.discovery.requireHome();
@@ -552,7 +547,6 @@ export class MijiaService {
         this.mqtt = undefined;
       }
       assertDevices();
-      // A renewal can replace the account while this operation is queued.
       if (!this.accountOAuth || this.accountOAuth.expiresAt <= Date.now())
         throw new MijiaError("authentication");
       const mqtt = this.accountObservations(account);
@@ -562,8 +556,6 @@ export class MijiaService {
       const observation = observe(
         ids,
         (event) => {
-          // Scope-invalidated control events are allowed to explain lost coverage;
-          // data and confirmations must still belong to the active account/scope.
           if (
             (event.kind === "connection" && event.status === "closed") ||
             (event.kind === "subscription" && event.status === "cancelled")
@@ -661,8 +653,6 @@ export class MijiaService {
         item.reason === "request_failed" &&
         item.error.kind === "authentication",
     );
-    // Restore the shared account through its existing owner; never replay a read
-    // or discard successful observations from earlier batches.
     if (rejected)
       this.maintenance.renew(client).catch((backgroundError: unknown) => {
         console.error("service: maintenance.renew failed", backgroundError);
@@ -968,9 +958,7 @@ export class MijiaService {
         this.state.account = { ...this.state.account, profile };
         this.changed();
       }
-    } catch {
-      // Profile availability must not affect account authorization or devices.
-    }
+    } catch {}
   }
 
   private async commitRenewed(
@@ -993,7 +981,6 @@ export class MijiaService {
             oauth: candidate.oauth,
           }),
         );
-        // A queued logout must delete the same durable and in-memory candidate.
         if (this.stopped || this.accountClient !== account) return;
         reinstall = this.media.needsRebind(
           next.passToken !== previous.passToken,
@@ -1100,13 +1087,10 @@ export class MijiaService {
     this.stopAccountMaintenance();
     this.cancelRestore();
     this.media.cancelBinding();
-    // A durable login write already in progress must finish selecting the same
-    // account in memory before the queued deletion can succeed or fail.
     if (!this.committingCredentials) this.loginFlow.dispose();
     this.media.pauseForLogout();
     try {
       const revoked = await this.serial(async () => {
-        // Delete durable authorization first. Failure must never report a successful logout.
         try {
           await this.persistAuthorization("remove", () =>
             this.requireStore().remove("mijia"),
@@ -1131,8 +1115,6 @@ export class MijiaService {
         this.state.connectionOperation = null;
         this.changed();
         this.media.revokeAccount();
-        // Authorization is already revoked. A cleanup failure must remain a
-        // media error, without restoring the account or reporting logout success.
         return { cleanup: this.media.clearAdapter() };
       });
       await revoked.cleanup;
@@ -1142,8 +1124,6 @@ export class MijiaService {
         const accountChanged = this.accountClient !== account;
         this.media.resumeAfterLogout(wasBinding, accountChanged);
         this.startAccountMaintenance(this.accountClient);
-        // The household revoked its public scope before durable logout. Rebuild
-        // it through fresh, validated discovery when authorization remains valid.
         this.loadDevices().catch((cause: unknown) => {
           console.warn(
             "Account recovery device refresh failed",
@@ -1160,7 +1140,6 @@ export class MijiaService {
 
   private serial<T>(run: () => Promise<T>) {
     const result = this.lifecycleQueue.then(run);
-    // The caller owns rejection; the queue retains its settlement and keeps ordering.
     this.lifecycleQueue = result.then(
       () => ({ status: "fulfilled" as const }),
       (reason: unknown) => ({ status: "rejected" as const, reason }),
@@ -1185,9 +1164,7 @@ export class MijiaService {
           if (this.initialRestorePending)
             await this.household?.restore(accountId, selection?.homeId ?? null);
         }
-      } catch {
-        /* Account maintenance reports storage failures through its public state. */
-      }
+      } catch {}
       await this.media.initialize();
       if (this.initialRestorePending) await this.maintenance.restore();
     } finally {

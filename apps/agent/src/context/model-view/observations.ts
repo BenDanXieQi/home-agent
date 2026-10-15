@@ -1,7 +1,6 @@
 import type { requireReadyContext } from "./source";
 import { compareText } from "./source";
 
-/** Backend owns latest-state selection; this projection only formats its snapshot. */
 export function latestObservations(
   source: ReturnType<typeof requireReadyContext>,
 ) {

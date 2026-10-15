@@ -15,7 +15,7 @@ import { errorResponse, validateJson } from "@home-agent/api/errors/hono";
 import type { createPerceptionService } from "../service";
 import { WindowMediaError } from "../media/window-media";
 import { HouseholdError } from "../../household/errors";
-import { householdHttpError } from "../../household/http-errors";
+import { householdPublicError } from "../../household/public-errors";
 
 const windowQuerySchema = windowListQuerySchema.extend({
   before: z.string().transform(Number).pipe(z.number().finite()).optional(),
@@ -85,7 +85,7 @@ export function createWindowRoutes(
       if (c.req.raw.signal.aborted)
         return errorResponse(c, new AppError("request_cancelled"));
       if (error instanceof HouseholdError)
-        return errorResponse(c, householdHttpError(error));
+        return errorResponse(c, householdPublicError(error));
       if (error instanceof WindowMediaError)
         return errorResponse(c, new AppError(mediaErrorCode[error.reason]));
       throw error;

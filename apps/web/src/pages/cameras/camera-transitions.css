@@ -1,4 +1,3 @@
-/* Picture and black backdrop resize separately, so letterboxing stays continuous. */
 html:active-view-transition-type(camera-expand) {
   &::view-transition-group(.camera),
   &::view-transition-group(.camera-background) {

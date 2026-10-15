@@ -19,7 +19,6 @@ import type { LogEntry } from "../../modules/device-history/presentation";
 import { ReturnLatest } from "./ReturnLatest";
 import { presentLogEntry } from "./presentation";
 
-/** Hold the visible batch while reading history; reaching the top resumes live rows. */
 export function LogEvents({
   rows,
   showDevice,
@@ -47,7 +46,6 @@ export function LogEvents({
   const scroller = useRef<HTMLElement>(null);
   const reducedMotion = useReducedMotion();
   const { scrollY } = useScroll({ container: scroller });
-  // React schedules fresh rows separately from the urgent return-button exit.
   const visible = useDeferredValue(reading ?? rows);
   const visibleIds = useMemo(
     () => new Set(visible.map((row) => row.id)),
@@ -71,7 +69,7 @@ export function LogEvents({
       ),
     [visible, expanded, focused],
   );
-  // oxlint-disable-next-line react/incompatible-library -- Read current measurements on each render.
+  // oxlint-disable-next-line react/incompatible-library
   const virtualizer = useVirtualizer({
     useFlushSync: false,
     count: visible.length,
@@ -88,8 +86,6 @@ export function LogEvents({
     ),
   });
   useLayoutEffect(() => {
-    // Frozen reading keeps its measurements. At turnover, use public APIs to
-    // release retired measurements and immediately remeasure mounted rows.
     if ([...previousVisibleIds.current].some((id) => !visibleIds.has(id))) {
       virtualizer.measure();
       for (const element of scroller.current?.querySelectorAll<HTMLElement>(
@@ -163,19 +159,17 @@ export function LogEvents({
           />
         ) : null}
       </AnimatePresence>
-      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- This scroll region handles native scrolling keys, not a custom widget. */}
+      {/* oxlint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
       <section
         ref={scroller}
         aria-label="日志事件"
-        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard users need to focus the independently scrolling log region.
+        // oxlint-disable-next-line jsx-a11y/no-noninteractive-tabindex
         tabIndex={0}
         className="h-full overflow-auto overscroll-contain [overflow-anchor:none] [scrollbar-gutter:stable] px-1 pb-2"
         data-empty={visible.length === 0}
         onScrollEnd={(event) => {
           if (event.currentTarget.scrollTop <= 1 && reading) resumeLatest();
         }}
-        // A late scrollend from the preceding gesture must not cancel the return.
-        // Only a new user scroll takes control away from the requested animation.
         onWheel={interruptReturn}
         onPointerDown={interruptReturn}
         onKeyDown={(event) => {
@@ -210,7 +204,6 @@ export function LogEvents({
         }}
         onScroll={(event) => {
           const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-          // Start the flight as soon as smooth scrolling reaches the exact top.
           if (reading && scrollTop <= (returning ? 0 : 1)) resumeLatest();
           else if (scrollTop > 1 && !reading) onReadingChange(true);
           if (

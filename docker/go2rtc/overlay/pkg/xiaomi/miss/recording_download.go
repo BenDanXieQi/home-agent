@@ -14,8 +14,6 @@ const recordingFileCommand = 1
 const recordingDownloadTimeout = 90 * time.Second
 const recordingDownloadIdle = 3 * time.Second
 
-// C700 replies put four zero bytes before the declared file bytes. This
-// response prefix is verified separately and is never forwarded as file data.
 const recordingFilePrefixBytes = 4
 
 var ErrRecordingIncomplete = errors.New("recording_incomplete")
@@ -26,9 +24,6 @@ type recordingFileChunk struct {
 	data     []byte
 }
 
-// DownloadRecording reads the exact index start second through RDT command 1
-// on the resident connection. A successful transport still needs container
-// validation before the caller can offer a playable recording.
 func (p *Producer) DownloadRecording(ctx context.Context, start uint32, output io.Writer, onStart func(int) error) error {
 	return p.client.downloadRecording(ctx, start, 0, output, onStart)
 }
@@ -51,7 +46,6 @@ func (c *Client) downloadRecording(ctx context.Context, start, storageChannel ui
 	defer func() { c.releaseRecordingRequest(request, completed) }()
 	payload := make([]byte, 24)
 	binary.LittleEndian.PutUint32(payload, start)
-	// The firmware reads offset 8 only when the payload exceeds 19 bytes.
 	binary.LittleEndian.PutUint32(payload[8:], storageChannel)
 	if err := c.writeRecordingCommand(ctx, recordingFileCommand, payload); err != nil {
 		completed = errors.Is(err, ErrRecordingsBusy)

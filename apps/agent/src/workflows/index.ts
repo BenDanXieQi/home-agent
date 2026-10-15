@@ -3,7 +3,7 @@ import type { z } from "zod";
 import {
   type agentWorkflowInputSchema,
   agentWorkflowResultSchema,
-} from "@home-agent/api/agent-workflows";
+} from "./contracts";
 import { AppError } from "@home-agent/api/errors";
 import { configureWorkflowRegistry } from "./registry.generated";
 import type { WorkflowContext } from "./definition";

@@ -72,7 +72,6 @@ export function createConversationInteraction(
 
     return readAndRecordAnswer(submission, signal, span).catch(
       async (error) => {
-        // Cancelling a waiter may withdraw its queued input, but does not stop other work.
         if (signal.aborted) await submission.abort(BACKGROUND_CONTEXT);
         throw error;
       },

@@ -25,7 +25,6 @@ import { perceptionConfigSchema, sourceKey } from "./config";
 import { createDetectionPool, DetectionPoolError } from "./compute/pool";
 import { createObservationStore } from "./observation-store";
 
-// Capture belongs to the backend; browser viewing and freezing do not own its lifetime.
 export function createPerceptionService(options: {
   identityReferences?:
     | Pick<
@@ -450,8 +449,6 @@ export function createPerceptionService(options: {
               entry.identity !== access.identity
             )
               return;
-            // Window history admits original-frame results on its own deadline,
-            // independently of live tracking and appearance freshness.
             windows.video(
               {
                 event: "tracking",
@@ -649,7 +646,6 @@ export function createPerceptionService(options: {
       signal.throwIfAborted();
       const compute = await ensurePool();
       signal.throwIfAborted();
-      // Cancellation stops HTTP waiting, not an admitted native computation.
       return await compute.detectImage(input);
     },
     async enrollment(command: z.infer<typeof enrollmentCommandSchema>) {
@@ -750,8 +746,6 @@ export function createPerceptionService(options: {
         const deadline = performance.now() + 10_000;
         try {
           await Promise.allSettled([initializing, creatingPool]);
-          // The pool closes the whole video runtime, including sources still
-          // preparing when their individual stop command was superseded.
           await Promise.all([
             pool?.close(),
             audio.close(),

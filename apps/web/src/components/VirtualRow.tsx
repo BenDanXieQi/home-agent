@@ -4,7 +4,6 @@ import { m, useIsPresent } from "motion/react";
 
 import { useComposedRef } from "../utils/use-composed-ref";
 
-/** Virtual positioning owns top; Motion owns only the visible filter transition. */
 export function VirtualRow({
   id,
   index,

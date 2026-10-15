@@ -2,8 +2,6 @@ import { test, expect, spyOn } from "bun:test";
 import * as childProcess from "node:child_process";
 import { createAudioProcess } from "../../src/perception/audio/process";
 
-// Model an OS boundary that acknowledges termination late. A user retry must
-// recover ownership after confirmation, without signalling a reused group id.
 test("a late OS exit confirmation allows a previously timed-out audio shutdown to finish", async () => {
   const child = new childProcess.ChildProcess();
   const pid = 2_000_000_000;

@@ -17,7 +17,6 @@ export type MiCloudErrorCode =
   | "invalid-state"
   | "unsupported-region";
 
-/** Static messages only: upstream bodies, headers, URLs and causes are never retained. */
 export class MiCloudError extends Error {
   readonly httpStatus: number | undefined;
   readonly upstreamCode: number | undefined;

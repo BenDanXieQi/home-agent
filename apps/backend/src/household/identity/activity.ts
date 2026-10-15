@@ -4,7 +4,6 @@ import {
   identityReferenceVersionsSchema,
 } from "@home-agent/api/contracts";
 
-/** Accepted attribution evidence only; no inferred room location, pixels or features. */
 export function memberActivity(
   id: string,
   input: z.infer<typeof memberActivityDataSchema>,

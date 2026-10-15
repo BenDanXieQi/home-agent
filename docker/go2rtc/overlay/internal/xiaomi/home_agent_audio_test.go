@@ -12,8 +12,6 @@ import (
 	"github.com/pion/rtp"
 )
 
-// A source alternates 20/40 ms Opus silence. Its 1.2 s timeline must survive
-// our real consumer and a real decoder, including the discarded initial audio.
 func TestAudioTimelineSurvivesOpusPackaging(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

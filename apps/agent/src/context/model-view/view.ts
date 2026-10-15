@@ -81,12 +81,6 @@ function reportGroup(fact: Fact) {
   };
 }
 
-/**
- * Convert one validated snapshot without I/O, subscriptions, or cross-call caches.
- * Own the used data so query() stays on this snapshot even if the caller mutates
- * its input. Call again with a newer snapshot to obtain a newer view.
- * Missing scope or unready parts throw; connection freshness belongs to the caller.
- */
 export function createHouseholdModelView(
   snapshot: ReceivedContext,
   attention: z.infer<typeof attentionSchema> = {},
@@ -241,7 +235,6 @@ export function createHouseholdModelView(
     ...(Object.keys(recent).length ? { 最近关注: recent } : {}),
   };
 
-  /** Query this view’s snapshot; this does not read the receiver or the network. */
   function query(
     deviceId: string,
     keys: readonly string[],

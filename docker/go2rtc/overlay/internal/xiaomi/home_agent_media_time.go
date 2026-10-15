@@ -9,8 +9,6 @@ import (
 	"github.com/pion/rtp"
 )
 
-// Each physical producer attachment has one media generation. Reset and wrap
-// retire its readers before the first packet with reused timestamps is forwarded.
 type homeAgentMediaTime struct {
 	Generation string `json:"generation"`
 	ClockRate  int    `json:"clockRate"`
@@ -43,7 +41,6 @@ func homeAgentTimeProducer(camera *homeAgentCameraState, producer core.Producer)
 	return p
 }
 
-// Caller holds homeAgentMu. It never waits for stream attachment or network IO.
 func homeAgentRetireMedia(camera *homeAgentCameraState) {
 	for _, cancel := range camera.analyses {
 		cancel()
@@ -76,8 +73,6 @@ func (p *homeAgentTimedProducer) GetTrack(media *core.Media, codec *core.Codec) 
 		timeline.mu.Lock()
 		changed := timeline.seen && packet.Timestamp < timeline.last
 		if changed {
-			// Includes uint32 wrap. Each branch uses the same source generation
-			// rather than independently reconstructing an earlier clock cycle.
 			homeAgentMu.Lock()
 			if p.camera.timeline.Load() != timeline {
 				homeAgentMu.Unlock()

@@ -23,7 +23,6 @@ export const retryOnceOnTransportFailure: RetryPolicy = {
 export type RequestOptions = {
   acceptedStatuses?: readonly number[];
   signal?: AbortSignal | undefined;
-  // Per-attempt limit. The caller's signal bounds the whole operation, including retries.
   timeoutMs?: number | null;
   keepalive?: boolean;
   retry?: RetryPolicy;
@@ -44,7 +43,6 @@ function transportError(error: unknown, signal: AbortSignal) {
   });
 }
 
-/** Inject transport once. Endpoint calls retain hc's inferred input/output types. */
 export function createApiClient(
   baseUrl = "/",
   fetchImpl: typeof fetch = globalThis.fetch,

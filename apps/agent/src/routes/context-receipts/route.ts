@@ -1,7 +1,7 @@
 import { createRouteApp, type RouteContext } from "../definition";
 import { validator } from "hono/validator";
 import { AppError, validationIssues } from "@home-agent/api/errors";
-import { agentReceiptQuerySchema } from "@home-agent/api/agent-receipts";
+import { agentReceiptQuerySchema } from "../../context/contracts";
 
 export function createRoutes({
   context: receiver,

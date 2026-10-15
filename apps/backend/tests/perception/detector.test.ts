@@ -5,7 +5,6 @@ import { detectionComputeBudget } from "../../src/perception/compute/budget";
 const originalConcurrency = sharp.concurrency();
 const originalOrt = { ...(await import("onnxruntime-node")) };
 
-// Fixtures use the model's published [cx, cy, w, h, five class scores] rows.
 function modelOutput(rows: number[][]) {
   const data = new Float32Array(rows.length * 9);
   rows.forEach((row, index) => {
@@ -219,8 +218,6 @@ test("keeps the strongest class, suppresses same-class overlap, and includes the
 });
 
 test("keeps boxes whose continuous IoU is below 0.7 even when rounded boxes overlap more", async () => {
-  // After scaling back to 16x16: x edges [0.1,10.1] and [1.9,11.9],
-  // both y edges [0,10]. Continuous IoU is 8.2 / 11.8, about 0.695.
   run.mockResolvedValueOnce({
     output0: modelOutput([
       [1.275, 1.25, 2.5, 2.5, 0.9, 0, 0, 0, 0],
@@ -237,7 +234,6 @@ test("keeps boxes whose continuous IoU is below 0.7 even when rounded boxes over
 });
 
 test("suppresses the weaker same-class box when continuous IoU exceeds 0.7", async () => {
-  // x edges [0.1,10.1] and [1.8,11.8]: continuous IoU is 8.3 / 11.7.
   run.mockResolvedValueOnce({
     output0: modelOutput([
       [1.275, 1.25, 2.5, 2.5, 0.9, 0, 0, 0, 0],
@@ -299,7 +295,6 @@ test("disposes the input tensor when native inference rejects", async () => {
   });
 });
 
-// Invalid scores must not become valid negative observations.
 test.each([NaN, Infinity, -Infinity, -0.1, 1.1])(
   "rejects invalid confidence %s even outside the winning class",
   async (score) => {

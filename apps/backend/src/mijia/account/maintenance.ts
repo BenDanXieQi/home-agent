@@ -43,7 +43,6 @@ type MaintenanceDependencies = {
 
 const UNKNOWN_EXPIRY_RENEWAL_INTERVAL_MS = 6 * 60 * 60_000;
 
-/** Prepares account candidates and owns maintenance work; service alone commits ownership. */
 export class AccountMaintenance {
   private readonly restoreRetry = new RetryTimer();
   private readonly renewalRetry = new RetryTimer();
@@ -175,7 +174,6 @@ export class AccountMaintenance {
     clearTimeout(this.renewalTimer);
     this.renewalTimer = undefined;
     this.renewalRetry.cancel();
-    // A durable write already underway must finish selecting the same owner in memory.
     if (!this.deps.committing()) {
       this.renewalTask?.controller.abort();
       this.renewalTask = undefined;
@@ -187,10 +185,7 @@ export class AccountMaintenance {
     this.renewalTimer = undefined;
     this.renewalRetry.cancel();
     if (!this.activeAccount(account)) return;
-    // An accepted account replaces any ownerless restore attempt and its deadline.
     this.restoreRetryAfterAt = 0;
-    // Resuming the same account after a failed logout/login must not bypass a
-    // supplier deadline. A successfully adopted candidate has a new identity.
     if (
       this.failedAccount === account &&
       Date.now() < this.renewalRetryAfterAt
@@ -272,8 +267,6 @@ export class AccountMaintenance {
           if (!this.currentRenewal(task)) throw new MijiaError("cancelled");
         };
         assertCurrent();
-        // A rejection may arrive while an ordinary renewal is already in flight.
-        // Keep it across transient failures and the existing Retry-After budget.
         if (candidate.oauth.accessToken === this.rejectedOAuth?.accessToken) {
           candidate.oauth = await refreshOAuth(
             candidate.oauth,
@@ -310,7 +303,6 @@ export class AccountMaintenance {
           if (candidate?.client !== this.deps.currentAccount())
             candidate?.client.dispose();
           if (this.renewalTask === task) this.renewalTask = undefined;
-          // A rejection during the durable commit must reach the new owner too.
           if (candidate && this.activeAccount(candidate.client)) {
             if (
               this.deps.currentOAuth()?.accessToken ===

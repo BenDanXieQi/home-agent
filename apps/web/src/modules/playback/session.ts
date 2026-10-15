@@ -93,7 +93,6 @@ type PlaybackSurface = {
   }) => void;
 };
 
-/** Owns one connection; video and canvas surfaces can take turns displaying it. */
 export class PlaybackSession {
   private frameReader: ReadableStreamDefaultReader<VideoFrame> | undefined;
   private media:
@@ -189,7 +188,6 @@ export class PlaybackSession {
         this.fail("unsupported_browser");
         return;
       }
-      // Cancelling the canvas reader must not end the reusable receiver track.
       const track = this.stream.getVideoTracks()[0]!.clone();
       this.frameTrack = track;
       this.readFrames(track).catch((error: unknown) => {
@@ -452,8 +450,6 @@ export class PlaybackSession {
         },
         { signal },
       );
-      // Reservation must finish even after teardown, so its returned ID can be
-      // released. It does not start media and runs alongside browser preparation.
       const [reservation] = await Promise.all([
         reserveMijiaPlayback({
           ...this.target,

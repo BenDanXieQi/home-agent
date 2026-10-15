@@ -11,7 +11,7 @@ import type {
   agentReceiptChangeSchema,
   agentReceiptDeviceSchema,
   agentReceiptPropertyMetadataSchema,
-} from "@home-agent/api/agent-receipts";
+} from "@home-agent/agent/context/contracts";
 import type { z } from "zod";
 import { partLabels, statusLabels, time } from "./presentation";
 import {

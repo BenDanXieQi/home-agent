@@ -12,7 +12,6 @@ class GenAiContext {
   constructor(readonly attributes: Attributes) {}
 }
 
-/** Correlation for durable work without inheriting the scheduling HTTP span. */
 export function withGenAiContext<T>(attributes: Attributes, run: () => T) {
   const sessionId = attributes["session.id"];
   if (typeof sessionId === "string") bindTraceSession(sessionId);

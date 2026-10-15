@@ -6,13 +6,12 @@ import {
   agentReceiptSummarySchema,
   type agentReceiptSchema,
   type agentReceiptQuerySchema,
-} from "@home-agent/api/agent-receipts";
+} from "../contracts";
 
 function jsonBytes(value: unknown) {
   return Buffer.byteLength(JSON.stringify(value));
 }
 
-/** Diagnostic history of messages accepted in the current connection. */
 export function createReceiptJournal() {
   let journalId = crypto.randomUUID();
   let sequence = 0;

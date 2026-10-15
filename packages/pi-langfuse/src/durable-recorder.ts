@@ -31,7 +31,6 @@ export interface DurableRecorderOptions extends DurableCorrelation {
   sessionId?: string;
   traceName?: string;
   captureContent?: boolean;
-  /** The provider adapter can own generation records while this observer owns runs and tools. */
   generations?: "observer" | "provider";
   metadata?: Readonly<Record<string, unknown>>;
   submissionCorrelation?: (record: SubmissionRecord) => DurableCorrelation;
@@ -67,7 +66,6 @@ function submissionOutcome(record: SubmissionRecord) {
             reason === "faulted"
           ? ("ERROR" as const)
           : ("WARNING" as const),
-    // Arbitrary unanswered reason/detail can contain provider secrets.
     metadata: {
       "pi.durable.submission_status": record.status,
       "pi.durable.answer_entry_id": record.answer,
@@ -101,7 +99,6 @@ interface RunSpan {
   completedTools: Set<string>;
 }
 
-/** Durable state machine using the same trace backend, ownership and capture core as the Pi adapter. */
 export class DurableRecorder {
   private readonly root: Span;
   private run: RunSpan | undefined;
@@ -223,7 +220,6 @@ export class DurableRecorder {
         },
       );
     });
-    // A missing parent handle must never become a new exporter root for descendants.
     if (!span.observation) span.ended = true;
     if (this.disposed)
       this.interrupted(span, "Observer disposed during exporter start.");
@@ -245,7 +241,6 @@ export class DurableRecorder {
     if (!span || span.ended) return;
     span.ended = true;
     const observation = span.observation;
-    // Release ended SDK handles/payloads, and claim the end before any callback can reenter disposal.
     span.observation = undefined;
     this.safe(() => {
       observation?.update(durableAttributes(attributes));
@@ -338,7 +333,6 @@ export class DurableRecorder {
       this.pendingSubmissions.add(record.id);
     }
     if (state.terminal) return;
-    // Status reads can be newer than the run snapshot. Only ordered placement events extend membership.
     if (
       !snapshot &&
       record.status === "placed" &&
@@ -385,7 +379,6 @@ export class DurableRecorder {
       if (record.status === "done" && record.type === "input") {
         const entry = await readEntry(record.answer);
         if (this.disposed || state.terminal) return;
-        // The answer ID is authoritative; no streamed fragments or last intermediate assistant inference.
         state.content.output = durableContent(
           entry?.model,
           this.options.captureContent ?? true,
@@ -431,7 +424,6 @@ export class DurableRecorder {
       );
     if (snapshot.run) {
       this.beginRun(snapshot.run.inputs, true);
-      // Do not turn snapshot transcript/partials/tools into historical starts or completions.
       if (this.run)
         this.update(this.run.span, {
           metadata: { "pi.durable.observation_incomplete": true },
@@ -489,7 +481,6 @@ export class DurableRecorder {
     const run = this.run;
     if (!run) return;
     const settling = { run, endTime: Date.now() };
-    // Claim the active run before exporter callbacks can reenter disposal or start another run.
     this.run = undefined;
     this.settlingRuns.set(run.primary, settling);
     this.closeRound(
@@ -700,7 +691,6 @@ export class DurableRecorder {
             metadata: { "pi.durable.failed_task_id": event.taskId },
           });
         break;
-      // turn_end is a round boundary, never a submission boundary. Deltas and arbitrary diagnostics are not captured.
       default:
         break;
     }

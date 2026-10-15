@@ -2,7 +2,6 @@ import type { z } from "zod";
 import type { windowBoxSchema } from "@home-agent/api/contracts";
 import { windowLimits } from "../window/limits";
 
-// Domain threshold: strictly greater than 25, at least 0.5% of gray pixels.
 export function visualDifference(previous: Uint8Array, current: Uint8Array) {
   if (
     previous.length !== windowLimits.graySide ** 2 ||

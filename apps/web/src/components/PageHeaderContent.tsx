@@ -3,7 +3,6 @@ import { useContext, type PropsWithChildren, type ContextType } from "react";
 import { createPortal } from "react-dom";
 import { PageHeaderContext } from "./page-header-context";
 
-// Routes own their controls; the shell only provides their shared placement.
 export function PageHeaderContent({
   slot,
   children,

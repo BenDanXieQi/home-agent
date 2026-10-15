@@ -15,6 +15,6 @@ const codes = {
   devices_failed: "household_unavailable",
 } satisfies Record<HouseholdError["reason"], ErrorCode>;
 
-export function householdHttpError(error: HouseholdError) {
-  return new AppError(codes[error.reason]);
+export function householdPublicError(error: HouseholdError) {
+  return new AppError(codes[error.reason], { cause: error });
 }

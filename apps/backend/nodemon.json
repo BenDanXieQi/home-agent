@@ -1,6 +1,7 @@
 {
   "watch": [
     "src",
+    "../agent/src/**/contracts.ts",
     "../../packages/api/src",
     "../../packages/observability/src",
     "../../.env"

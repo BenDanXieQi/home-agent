@@ -14,7 +14,6 @@ const declaredBytesSchema = z.coerce
   .positive()
   .max(recordingTransferLimits.bytes);
 
-// The caller owns this bounded transfer and validates the received container.
 export async function readRecordingFile(
   access: ReturnType<Go2RtcAdapter["recordingDownloadAccess"]>,
   startAt: number,

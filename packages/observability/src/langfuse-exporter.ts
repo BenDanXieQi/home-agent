@@ -11,7 +11,6 @@ import {
   TraceExporterMetricsHelper,
 } from "@opentelemetry/otlp-transformer";
 
-/** Configure this destination without the Collector's OTEL environment settings. */
 export function createLangfuseTraceExporter(
   url: string,
   authorization: string,

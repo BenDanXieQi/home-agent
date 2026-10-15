@@ -7,7 +7,6 @@ const OPAQUE_SIGNATURE_KEYS = new Set([
   "thoughtSignature",
 ]);
 
-/** Copy trace data through native JSON serialization, filtering exported secrets and media. */
 export function sanitizeTraceValue(
   value: unknown,
   redactCredentialFields = false,

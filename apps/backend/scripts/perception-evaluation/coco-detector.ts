@@ -5,7 +5,6 @@ import { InferenceSession, Tensor } from "onnxruntime-node";
 import type { createDetector } from "../../src/perception/detection/detector";
 import { iou } from "../../src/perception/tracking/assignment";
 
-// These adapters are offline evaluation boundaries, not runtime model selection.
 export async function prepareCocoInput(
   frame: Parameters<Awaited<ReturnType<typeof createDetector>>["detect"]>[0],
   side: number,

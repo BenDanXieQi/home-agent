@@ -14,8 +14,6 @@ type homeAgentDualCamera struct {
 	channels int
 }
 
-// Caller holds homeAgentMu. Ownership is scoped to the runtime account, device
-// and address; neither producers nor cloud credentials use a global device cache.
 func homeAgentDualStream(session *homeAgentSession, source url.URL, channel int, camera *homeAgentCameraState) (*streams.Stream, func()) {
 	query := source.Query()
 	quality := query.Get("subtype")

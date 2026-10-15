@@ -10,8 +10,6 @@ export const petTrackingPolicySchema = z.object({
   confirmationHits: z.int().min(1).max(3).default(1),
 });
 
-// Pets use motion and overlap only; the human appearance model is not a pet
-// identity model. The two species share eight slots but can never match each other.
 export function createPetTracker(
   allocateId = createTrackIds(),
   input: z.input<typeof petTrackingPolicySchema> = {},
@@ -49,8 +47,6 @@ export function createPetTracker(
             box.confidence >= policy.continuationConfidence,
         )
         .toSorted((a, b) => b.confidence - a.confidence);
-      // High-confidence matches always take precedence. Weak candidates can
-      // continue a confirmed trajectory, but never create or confirm one.
       const high = candidates
         .filter((box) => box.confidence >= 0.5)
         .slice(0, 8);
@@ -70,9 +66,6 @@ export function createPetTracker(
           eligible.map((track) =>
             indices.map((index) => {
               const box = pets[index]!;
-              // Pet poses change aspect ratio sharply even while boxes overlap.
-              // Keep motion prediction for assignment, without the human
-              // shape-distance gate splitting a continuous pet trajectory.
               return track.className === box.className
                 ? 1 - iou(predictedBox(track.motion), box)
                 : Infinity;

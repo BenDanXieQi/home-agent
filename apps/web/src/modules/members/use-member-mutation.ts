@@ -8,7 +8,6 @@ import { RequestError } from "../../api/errors";
 import { deleteMember, memberListOptions, saveMember } from "./queries";
 import { memberReadyAtom, memberScopeAtom } from "./state";
 
-/** Cache coordination belongs to members; mounted pages own navigation. */
 export function useMemberMutation(scope: string) {
   const client = useQueryClient();
   const store = useStore();
