@@ -11,37 +11,24 @@ import { AppError } from "@home-agent/api/errors";
 import { requestJson } from "@home-agent/api/http/request-json";
 import type { createContextReceiver } from "./receiver";
 
-type WithoutScope<Input> = Input extends unknown
-  ? Omit<Input, "account_id" | "home_id">
-  : never;
-
 export function createContextReader(options: {
   client: Pick<ContextSource, "history" | "material">;
-  receiver: Pick<ReturnType<typeof createContextReceiver>, "qualification">;
+  receiver: Pick<
+    ReturnType<typeof createContextReceiver>,
+    "currentSignal" | "householdPart"
+  >;
 }) {
   const client = options.client;
-  type Scope = NonNullable<
-    ReturnType<typeof options.receiver.qualification>
-  >["scope"];
-
-  async function readWithinScope<T>(
-    signal: AbortSignal,
-    read: (scope: Scope) => Promise<T>,
+  async function readCurrent<T>(
+    requestSignal: AbortSignal,
+    read: (signal: AbortSignal) => Promise<T>,
   ) {
-    const qualification = options.receiver.qualification();
-    if (!qualification) throw new AppError("household_unavailable");
-    const scope = qualification.scope;
-    const result = await read(scope);
+    const currentSignal = options.receiver.currentSignal();
+    if (!currentSignal) throw new AppError("household_unavailable");
+    const signal = AbortSignal.any([requestSignal, currentSignal]);
     signal.throwIfAborted();
-    const current = options.receiver.qualification();
-    if (
-      !current ||
-      current.generation !== qualification.generation ||
-      current.scope.scope_epoch !== scope.scope_epoch ||
-      current.scope.account_id !== scope.account_id ||
-      current.scope.home_id !== scope.home_id
-    )
-      throw new AppError("household_scope_changed");
+    const result = await read(signal);
+    signal.throwIfAborted();
     return result;
   }
 
@@ -51,53 +38,55 @@ export function createContextReader(options: {
     unavailableCode: "household_unavailable" as const,
   };
   return {
+    readRooms(requestSignal: AbortSignal) {
+      return readCurrent(requestSignal, async () => {
+        const household = options.receiver.householdPart();
+        if (household?.status !== "ready")
+          throw new AppError("household_unavailable");
+
+        return Object.values(household.data.room)
+          .filter((room) => !room.archived)
+          .map(({ room_id, name }) => ({ room_id, name }));
+      });
+    },
     readHistory(
-      query: WithoutScope<z.input<typeof agentHistoryQuerySchema>>,
-      signal: AbortSignal,
+      query: z.input<typeof agentHistoryQuerySchema>,
+      requestSignal: AbortSignal,
     ) {
-      return readWithinScope(signal, async (scope) => {
-        const input = agentHistoryQuerySchema.parse({
-          ...query,
-          account_id: scope.account_id,
-          home_id: scope.home_id,
-        });
+      return readCurrent(requestSignal, async (signal) => {
+        const input = agentHistoryQuerySchema.parse(query);
         const result = await requestJson(
-          (requestSignal) => client.history(input, requestSignal),
+          (transportSignal) => client.history(input, transportSignal),
           agentHistoryResponseSchema,
           { ...policy, signal },
         );
         if (
           result.kind !== input.kind ||
-          result.account_id !== input.account_id ||
-          result.home_id !== input.home_id ||
           result.start !== input.start ||
           result.end !== input.end
         )
-          throw new AppError("household_scope_changed");
+          throw new AppError("household_unavailable");
         return result;
       });
     },
     readMaterial(
-      reference: Omit<z.input<typeof agentMaterialQuerySchema>, "scope">,
-      signal: AbortSignal,
+      reference: z.input<typeof agentMaterialQuerySchema>,
+      requestSignal: AbortSignal,
     ) {
-      return readWithinScope(signal, async (scope) => {
-        const input = agentMaterialQuerySchema.parse({ ...reference, scope });
+      return readCurrent(requestSignal, async (signal) => {
+        const input = agentMaterialQuerySchema.parse(reference);
         const result = await requestJson(
-          (requestSignal) => client.material(input, requestSignal),
+          (transportSignal) => client.material(input, transportSignal),
           agentMaterialResponseSchema,
           { ...policy, signal },
         );
         if (
-          result.scope.scope_epoch !== input.scope.scope_epoch ||
-          result.scope.account_id !== input.scope.account_id ||
-          result.scope.home_id !== input.scope.home_id ||
           result.kind !== input.kind ||
           (result.kind === "member_sighting"
             ? result.record.id
             : result.window.id) !== input.id
         )
-          throw new AppError("household_scope_changed");
+          throw new AppError("household_unavailable");
         return result;
       });
     },

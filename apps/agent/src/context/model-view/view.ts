@@ -86,19 +86,10 @@ export function createHouseholdModelView(
   attention: z.infer<typeof attentionSchema> = {},
 ) {
   const source = structuredClone(requireReadyContext(snapshot));
-  const { household, state, scope } = source;
+  const { household, state } = source;
   const devices = Object.values(household.device)
     .filter((d) => !d.archived)
-    .toSorted(
-      (a, b) =>
-        compareText(a.account_id, b.account_id) ||
-        compareText(a.device_id, b.device_id),
-    );
-  if (devices.some((d) => d.account_id !== scope.account_id))
-    throw new ModelContextError(
-      "invalid_identity",
-      "Device outside household account scope",
-    );
+    .toSorted((a, b) => compareText(a.device_id, b.device_id));
   const devicesById = new Map(devices.map((d) => [d.device_id, d]));
   if (devicesById.size !== devices.length)
     throw new ModelContextError(
@@ -107,10 +98,7 @@ export function createHouseholdModelView(
     );
   const facts = new Map<string, Fact>();
   for (const fact of Object.values(state.latest)) {
-    if (
-      fact.account_id !== scope.account_id ||
-      !devicesById.has(fact.device_id)
-    )
+    if (!devicesById.has(fact.device_id))
       throw new ModelContextError(
         "invalid_identity",
         "Unresolved property device identity",
@@ -127,17 +115,9 @@ export function createHouseholdModelView(
     facts.set(key, fact);
   }
   const rooms = new Map(
-    Object.values(household.room).map((r) => [
-      JSON.stringify([r.account_id, r.room_id]),
-      r.name,
-    ]),
+    Object.values(household.room).map((r) => [r.room_id, r.name]),
   );
-  const online = new Map(
-    state.online.map((d) => [
-      JSON.stringify([d.account_id, d.device_id]),
-      d.online,
-    ]),
-  );
+  const online = new Map(state.online.map((d) => [d.device_id, d.online]));
   const catalogs = new Map<
     string,
     ReturnType<typeof createCapabilityCatalog>
@@ -178,10 +158,8 @@ export function createHouseholdModelView(
     return {
       device: describeDevice(
         device,
-        rooms.get(JSON.stringify([device.account_id, device.room_id])) ??
-          "未分配房间",
-        online.get(JSON.stringify([device.account_id, device.device_id])) ??
-          device.online,
+        rooms.get(device.room_id ?? "") ?? "未分配房间",
+        online.get(device.device_id) ?? device.online,
       ),
       capabilities,
       reports,

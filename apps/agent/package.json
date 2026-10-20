@@ -35,14 +35,16 @@
     "oxfmt": "catalog:"
   },
   "exports": {
-    "./workflows": "./src/workflows/contracts.ts",
-    "./workflows/automation-generation": "./src/workflows/automation-generation/contracts.ts",
-    "./workflows/spatial-planning": "./src/workflows/spatial-planning/contracts.ts",
-    "./workflows/speech-interpretation": "./src/workflows/speech-interpretation/contracts.ts",
+    "./workflows": "./src/workflows/contracts.generated.ts",
+    "./workflows/automation-generation": "./src/workflows/automation-generation/workflow.ts",
+    "./workflows/spatial-planning": "./src/workflows/spatial-planning/workflow.ts",
+    "./workflows/spatial-planning/extension": "./src/workflows/spatial-planning/extension.ts",
+    "./workflows/speech-interpretation": "./src/workflows/speech-interpretation/workflow.ts",
     "./assistant": "./src/assistant/assistant.ts",
     "./assistant/contracts": "./src/assistant/contracts.ts",
     "./config": "./src/config.ts",
     "./models": "./src/models.ts",
+    "./runtime": "./src/runtime.ts",
     "./routes": "./src/routes/index.ts",
     "./workflows/runtime": "./src/workflows/index.ts",
     "./context/receiver": "./src/context/receiver.ts",
@@ -53,6 +55,7 @@
     "./context/model-view": "./src/context/model-view/index.ts",
     "./context/model-view/format": "./src/context/model-view/format.ts",
     "./context/model-view/decoding": "./src/context/model-view/decoding.ts",
-    "./development": "./scripts/watch.ts"
+    "./development": "./scripts/watch.ts",
+    "./conversation/contracts": "./src/conversation/contracts.ts"
   }
 }

@@ -40,7 +40,6 @@ export const agentReceivedContextSchema = agentContextSnapshotSchema.extend({
   received_at: z.iso.datetime().nullable(),
 });
 const deviceIdentity = agentDevicePropertySchema.pick({
-  account_id: true,
   device_id: true,
 });
 export const agentReceiptDeviceSchema = deviceIdentity.extend({

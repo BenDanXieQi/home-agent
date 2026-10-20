@@ -24,8 +24,6 @@ export default function DeviceLogsPage() {
     <DeviceLogWorkspace
       key={scope}
       scope={scope}
-      accountId={household.account_id}
-      homeId={household.home_id}
       ready={synced && household.status === "running"}
     />
   );

@@ -1,3 +1,5 @@
+import { streamOperation } from "@home-agent/api/http/stream-operation";
+import { AppError } from "@home-agent/api/errors";
 import { householdWorkflowInputSchema } from "./contracts";
 import { Hono } from "hono";
 import { requireLocalAccess } from "@home-agent/api/local-access";
@@ -21,8 +23,17 @@ export function createWorkflowRoutes({
         c,
       ),
     )
-    .post("/", validateJson(householdWorkflowInputSchema), async (c) => {
-      c.header("Cache-Control", "no-store");
-      return c.json(await workflows.run(c.req.valid("json"), c.req.raw.signal));
+    .post("/", validateJson(householdWorkflowInputSchema), (c) => {
+      const input = c.req.valid("json");
+      return streamOperation(
+        c,
+        (signal, receive) => workflows.run(input, signal, receive),
+        (error) =>
+          error instanceof HouseholdError
+            ? householdPublicError(error)
+            : error instanceof AppError
+              ? error
+              : new AppError("internal_error", { cause: error }),
+      );
     });
 }

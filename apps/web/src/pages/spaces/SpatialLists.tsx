@@ -54,7 +54,6 @@ export function SpatialLists({
                         action: "delete",
                         resource: "space",
                         input: {
-                          scope: snapshot.scope,
                           id: record.id,
                           expected_updated_at: record.updated_at,
                         },
@@ -103,7 +102,6 @@ export function SpatialLists({
                         action: "delete",
                         resource: "passage",
                         input: {
-                          scope: snapshot.scope,
                           id: record.id,
                           expected_updated_at: record.updated_at,
                         },
@@ -147,7 +145,6 @@ export function SpatialLists({
                         action: "enabled",
                         resource: "binding",
                         input: {
-                          scope: snapshot.scope,
                           id: record.id,
                           expected_updated_at: record.updated_at,
                           enabled: !record.enabled,
@@ -175,7 +172,6 @@ export function SpatialLists({
                         action: "delete",
                         resource: "binding",
                         input: {
-                          scope: snapshot.scope,
                           id: record.id,
                           expected_updated_at: record.updated_at,
                         },

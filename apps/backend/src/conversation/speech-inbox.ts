@@ -214,7 +214,6 @@ export function createSpeechInbox(options: {
       if (
         closed ||
         !source ||
-        source.run.scopeEpoch !== observation.run.scopeEpoch ||
         source.run.deviceId !== observation.run.deviceId ||
         observation.endSample <= source.lastEndSample ||
         Date.now() - observation.observedEndAt >=

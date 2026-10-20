@@ -23,6 +23,7 @@ export function createHouseholdWorkflows({
   async function run(
     input: z.output<typeof householdWorkflowInputSchema>,
     requestSignal: AbortSignal,
+    receive?: Parameters<ReturnType<typeof createAgentClient>["workflow"]>[2],
   ) {
     const timeout = AbortSignal.timeout(timeoutMs);
     const revoked = new AbortController();
@@ -46,18 +47,21 @@ export function createHouseholdWorkflows({
                 ...input.input,
                 capabilities: readAutomationCapabilities(household),
               }
-            : {
-                ...input.input,
-                scope: {
-                  account_id: current.identity.accountId,
-                  home_id: current.identity.homeId,
-                  scope_epoch: current.snapshot.scope_epoch,
-                },
-              },
+            : input.input,
       });
       signal.throwIfAborted();
       current.assertCurrent();
-      const result = await agent.workflow(request, signal);
+      const result = await agent.workflow(
+        request,
+        signal,
+        async (progress, operationSignal) => {
+          signal.throwIfAborted();
+          current.assertCurrent();
+          if (progress.workflow !== input.workflow)
+            throw new AppError("agent_execution_failed");
+          await receive?.(progress, operationSignal);
+        },
+      );
       signal.throwIfAborted();
       current.assertCurrent();
       if (result.workflow !== input.workflow)

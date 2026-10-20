@@ -16,8 +16,6 @@ export const perceptionWindows = pgTable(
   "perception_windows",
   {
     id: uuid("id").primaryKey(),
-    accountId: text("account_id").notNull(),
-    homeId: text("home_id").notNull(),
     deviceId: text("device_id").notNull(),
     channel: integer("channel").notNull(),
     startedAt: bigint("started_at", { mode: "number" }).notNull(),
@@ -31,19 +29,12 @@ export const perceptionWindows = pgTable(
   },
   (table) => [
     index("perception_windows_source_time").on(
-      table.accountId,
-      table.homeId,
       table.deviceId,
       table.channel,
       table.startedAt,
       table.id,
     ),
-    index("perception_windows_history_time").on(
-      table.accountId,
-      table.homeId,
-      table.startedAt,
-      table.id,
-    ),
+    index("perception_windows_history_time").on(table.startedAt, table.id),
     index("perception_windows_observed_range").using(
       "gist",
       sql`numrange(${table.observedStartAt}, ${table.observedEndAt}, '[]')`,

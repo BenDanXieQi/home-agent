@@ -1,18 +1,12 @@
-import { eq, or } from "drizzle-orm";
+import { eq, inArray, or } from "drizzle-orm";
 import type { Database } from "../../db";
 import {
   createLockedTransactions,
   lockTransaction,
   type Transaction,
 } from "../../db/transaction-outcome";
+import { spaces, passages, observationBindings } from "../../db/schema";
 import {
-  spaces,
-  passages,
-  observationBindings,
-  mijiaHomeSelections,
-} from "../../db/schema";
-import {
-  sameSpatialScope,
   spaceSchema,
   passageSchema,
   observationBindingSchema,
@@ -21,7 +15,7 @@ import {
   type observationBindingSaveSchema,
   type observationBindingEnabledSchema,
   type spatialDeleteSchema,
-  type spatialScopeSchema,
+  type spatialLayoutApplySchema,
   type SpatialSaveOperation,
 } from "@home-agent/api/spatial";
 import { SpatialError } from "./errors";
@@ -81,6 +75,23 @@ function updatedAt(
   );
 }
 
+async function readSnapshot(tx: Transaction) {
+  return {
+    spaces: (
+      await tx.select().from(spaces).orderBy(spaces.createdAt, spaces.id)
+    ).map(spaceRecord),
+    passages: (
+      await tx.select().from(passages).orderBy(passages.createdAt, passages.id)
+    ).map(passageRecord),
+    observation_bindings: (
+      await tx
+        .select()
+        .from(observationBindings)
+        .orderBy(observationBindings.createdAt, observationBindings.id)
+    ).map(bindingRecord),
+  };
+}
+
 export function createSpatialRepository(db: Database) {
   const listeners = new Set<() => void>();
   function notify() {
@@ -94,35 +105,19 @@ export function createSpatialRepository(db: Database) {
   }
   const transaction = createLockedTransactions(db, 5000, "shared");
   async function run<T>(
-    expected: ReturnType<typeof spatialScopeSchema.parse> | undefined,
-    work: (
-      tx: Transaction,
-      scope: ReturnType<typeof spatialScopeSchema.parse>,
-      beforeWrite: () => void,
-    ) => Promise<T>,
+    write: boolean,
+    work: (tx: Transaction, beforeWrite: () => void) => Promise<T>,
   ) {
     let attempted = false;
     let callbackCompleted = false;
     try {
       return await transaction(householdBindingLock, async (tx) => {
-        const rows = await tx.select().from(mijiaHomeSelections).limit(2);
-        if (rows.length > 1) throw new SpatialError("scope_changed");
-        const binding = rows[0];
-        const scope = binding?.homeId
-          ? {
-              account_id: binding.accountKey,
-              home_id: binding.homeId,
-              updated_at: binding.updatedAt.toISOString(),
-            }
-          : null;
-        if (expected !== undefined && !sameSpatialScope(expected, scope))
-          throw new SpatialError("scope_changed");
         await lockTransaction(
           tx,
           "spatial_configuration",
-          expected === undefined ? "shared" : "exclusive",
+          write ? "exclusive" : "shared",
         );
-        const result = await work(tx, scope, () => {
+        const result = await work(tx, () => {
           attempted = true;
         });
         callbackCompleted = true;
@@ -152,27 +147,145 @@ export function createSpatialRepository(db: Database) {
       };
     },
     read() {
-      return run(undefined, async (tx, scope) => ({
-        scope,
-        spaces: (
-          await tx.select().from(spaces).orderBy(spaces.createdAt, spaces.id)
-        ).map(spaceRecord),
-        passages: (
-          await tx
-            .select()
-            .from(passages)
-            .orderBy(passages.createdAt, passages.id)
-        ).map(passageRecord),
-        observation_bindings: (
-          await tx
-            .select()
+      return run(false, readSnapshot);
+    },
+    // Replaces the whole space and passage layout in one transaction. The
+    // caller's `expected` versions must match the stored layout exactly, so a
+    // layout planned from stale records is rejected instead of merged.
+    applyLayout(input: ReturnType<typeof spatialLayoutApplySchema.parse>) {
+      return run(true, async (tx, beforeWrite) => {
+        const storedSpaces = await tx.select().from(spaces);
+        const storedPassages = await tx.select().from(passages);
+        for (const [stored, expected] of [
+          [storedSpaces, input.expected.spaces],
+          [storedPassages, input.expected.passages],
+        ] as const) {
+          const versions = new Map(
+            stored.map((row) => [row.id, row.updatedAt.toISOString()]),
+          );
+          if (
+            versions.size !== expected.length ||
+            expected.some(
+              (record) => versions.get(record.id) !== record.updated_at,
+            )
+          )
+            throw new SpatialError("record_changed");
+        }
+        const keptSpaces = new Set(input.spaces.map((space) => space.id));
+        const keptPassages = new Set(
+          input.passages.map((passage) => passage.id),
+        );
+        const removedSpaces = storedSpaces
+          .filter((row) => !keptSpaces.has(row.id))
+          .map((row) => row.id);
+        const removedPassages = storedPassages
+          .filter((row) => !keptPassages.has(row.id))
+          .map((row) => row.id);
+        if (removedSpaces.length || removedPassages.length) {
+          const conditions = [
+            ...(removedSpaces.length
+              ? [inArray(observationBindings.spaceId, removedSpaces)]
+              : []),
+            ...(removedPassages.length
+              ? [inArray(observationBindings.passageId, removedPassages)]
+              : []),
+          ];
+          const [referenced] = await tx
+            .select({ id: observationBindings.id })
             .from(observationBindings)
-            .orderBy(observationBindings.createdAt, observationBindings.id)
-        ).map(bindingRecord),
-      }));
+            .where(or(...conditions))
+            .limit(1);
+          if (referenced) throw new SpatialError("layout_referenced");
+        }
+        const spaceRows = new Map(storedSpaces.map((row) => [row.id, row]));
+        const passageRows = new Map(storedPassages.map((row) => [row.id, row]));
+        const createdSpaces = input.spaces.filter(
+          (space) => !spaceRows.has(space.id),
+        );
+        const changedSpaces = input.spaces.filter((space) => {
+          const row = spaceRows.get(space.id);
+          return (
+            row &&
+            (row.name !== space.name || row.description !== space.description)
+          );
+        });
+        const createdPassages = input.passages.filter(
+          (passage) => !passageRows.has(passage.id),
+        );
+        const changedPassages = input.passages.filter((passage) => {
+          const row = passageRows.get(passage.id);
+          return (
+            row &&
+            (row.name !== passage.name ||
+              row.description !== passage.description ||
+              row.spaceAId !== passage.space_a_id ||
+              row.spaceBId !== passage.space_b_id)
+          );
+        });
+        if (
+          !createdSpaces.length &&
+          !changedSpaces.length &&
+          !removedSpaces.length &&
+          !createdPassages.length &&
+          !changedPassages.length &&
+          !removedPassages.length
+        )
+          return readSnapshot(tx);
+        beforeWrite();
+        // New records get increasing creation times so reads keep the
+        // layout's order.
+        const created = Date.now();
+        if (createdSpaces.length)
+          await tx.insert(spaces).values(
+            createdSpaces.map((space, index) => ({
+              ...space,
+              createdAt: new Date(created + index),
+              updatedAt: new Date(created + index),
+            })),
+          );
+        for (const space of changedSpaces)
+          await tx
+            .update(spaces)
+            .set({
+              name: space.name,
+              description: space.description,
+              updatedAt: updatedAt(spaceRows.get(space.id)),
+            })
+            .where(eq(spaces.id, space.id));
+        if (removedPassages.length)
+          await tx
+            .delete(passages)
+            .where(inArray(passages.id, removedPassages));
+        if (createdPassages.length)
+          await tx.insert(passages).values(
+            createdPassages.map(
+              ({ space_a_id, space_b_id, ...passage }, index) => ({
+                ...passage,
+                spaceAId: space_a_id,
+                spaceBId: space_b_id,
+                createdAt: new Date(created + index),
+                updatedAt: new Date(created + index),
+              }),
+            ),
+          );
+        for (const passage of changedPassages)
+          await tx
+            .update(passages)
+            .set({
+              name: passage.name,
+              description: passage.description,
+              spaceAId: passage.space_a_id,
+              spaceBId: passage.space_b_id,
+              updatedAt: updatedAt(passageRows.get(passage.id)),
+            })
+            .where(eq(passages.id, passage.id));
+        if (removedSpaces.length)
+          await tx.delete(spaces).where(inArray(spaces.id, removedSpaces));
+        return readSnapshot(tx);
+      });
     },
     saveSpace(input: ReturnType<typeof spaceSaveSchema.parse>) {
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(spaces)
@@ -204,7 +317,7 @@ export function createSpatialRepository(db: Database) {
       });
     },
     savePassage(input: ReturnType<typeof passageSaveSchema.parse>) {
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(passages)
@@ -243,7 +356,7 @@ export function createSpatialRepository(db: Database) {
         existing: ReturnType<typeof bindingRecord> | undefined,
       ) => void,
     ) {
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(observationBindings)
@@ -282,7 +395,7 @@ export function createSpatialRepository(db: Database) {
     setObservationBindingEnabled(
       input: ReturnType<typeof observationBindingEnabledSchema.parse>,
     ) {
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(observationBindings)
@@ -300,7 +413,7 @@ export function createSpatialRepository(db: Database) {
     },
     deleteSpace(input: ReturnType<typeof spatialDeleteSchema.parse>) {
       const { id } = input;
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select({ id: spaces.id, updatedAt: spaces.updatedAt })
           .from(spaces)
@@ -332,7 +445,7 @@ export function createSpatialRepository(db: Database) {
     },
     deletePassage(input: ReturnType<typeof spatialDeleteSchema.parse>) {
       const { id } = input;
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select({ id: passages.id, updatedAt: passages.updatedAt })
           .from(passages)
@@ -359,7 +472,7 @@ export function createSpatialRepository(db: Database) {
       input: ReturnType<typeof spatialDeleteSchema.parse>,
     ) {
       const { id } = input;
-      return run(input.scope, async (tx, _scope, beforeWrite) => {
+      return run(true, async (tx, beforeWrite) => {
         const [existing] = await tx
           .select()
           .from(observationBindings)

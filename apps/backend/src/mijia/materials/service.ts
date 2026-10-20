@@ -47,7 +47,6 @@ export function createMijiaMaterials(deps: {
     | undefined;
   let sourceRevision: string | undefined;
   let sourceGeneration = 0;
-  let rateAccount: string | undefined;
   let retryAfterAt = 0;
   let ticking: Promise<void> | undefined;
   let speakers: ReturnType<typeof speakerSchema.parse>[] = [];
@@ -220,7 +219,7 @@ export function createMijiaMaterials(deps: {
     const session = deps.mijia.materialSession(signal);
     const authentication = await run(
       "mico_auth",
-      scope.identity.accountId,
+      "current",
       async (diagnostic) => {
         const discovered = await session.client.mico().devices(session.signal);
         session.assertCurrent();
@@ -268,37 +267,31 @@ export function createMijiaMaterials(deps: {
   }
   async function collectSceneHistory(scope: Scope) {
     const session = deps.mijia.materialSession(signal);
-    const previous = state("mijia_scene_execution", scope.identity.homeId);
+    const previous = state("mijia_scene_execution", "current");
     if (previous.error === "home_owner_id_unavailable" && session.home.ownerId)
-      gates.delete(
-        JSON.stringify(["mijia_scene_execution", scope.identity.homeId]),
-      );
-    await run(
-      "mijia_scene_execution",
-      scope.identity.homeId,
-      async (diagnostic) => {
-        if (!session.home.ownerId) {
-          diagnostic.status = "limited";
-          diagnostic.suspended = true;
-          diagnostic.error = "home_owner_id_unavailable";
-          return;
-        }
-        const response = await session.client.sceneHistory(
-          session.home.id,
-          session.home.ownerId,
-          session.signal,
-        );
-        scope.assertCurrent();
-        session.assertCurrent();
-        success(diagnostic, response.history.length, [
-          "execution_identity_unverified",
-          "target_semantics_and_pagination_unverified",
-          "records_not_admitted",
-        ]);
+      gates.delete(JSON.stringify(["mijia_scene_execution", "current"]));
+    await run("mijia_scene_execution", "current", async (diagnostic) => {
+      if (!session.home.ownerId) {
         diagnostic.status = "limited";
         diagnostic.suspended = true;
-      },
-    );
+        diagnostic.error = "home_owner_id_unavailable";
+        return;
+      }
+      const response = await session.client.sceneHistory(
+        session.home.id,
+        session.home.ownerId,
+        session.signal,
+      );
+      scope.assertCurrent();
+      session.assertCurrent();
+      success(diagnostic, response.history.length, [
+        "execution_identity_unverified",
+        "target_semantics_and_pagination_unverified",
+        "records_not_admitted",
+      ]);
+      diagnostic.status = "limited";
+      diagnostic.suspended = true;
+    });
   }
   async function collectDeviceHistory(
     input: ReturnType<typeof deviceHistoryCollectionSchema.parse>,
@@ -410,16 +403,12 @@ export function createMijiaMaterials(deps: {
         sourceRevision = source.revision;
       }
       generation = sourceGeneration;
-      if (rateAccount !== scope.identity.accountId) {
-        retryAfterAt = 0;
-        rateAccount = scope.identity.accountId;
-      }
       state("mijia_device_history", "on_request").limitations = [
         "requires_explicit_device_and_time_range",
       ];
       states.delete(JSON.stringify(["sources", "current_household"]));
-      state("mico_auth", scope.identity.accountId);
-      state("mijia_scene_execution", scope.identity.homeId);
+      state("mico_auth", "current");
+      state("mijia_scene_execution", "current");
       eventSubscriptions.observe(scope);
       await Promise.all([
         collectConversations(scope),

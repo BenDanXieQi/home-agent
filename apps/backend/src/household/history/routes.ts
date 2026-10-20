@@ -74,11 +74,6 @@ export function createDeviceHistoryRoutes(
       if (input.delivery === "live" && Date.parse(input.start) >= Date.now())
         throw new AppError("invalid_request");
       const access = accessHousehold(household, household.epoch);
-      if (
-        access.identity.accountId !== input.account_id ||
-        access.identity.homeId !== input.home_id
-      )
-        throw new HouseholdError("stale_session");
       connections++;
       const response = streamSSE(c, async (stream) => {
         const scope = new AbortController();

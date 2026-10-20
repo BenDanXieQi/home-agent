@@ -11,18 +11,17 @@ import {
   agentContextSnapshotSchema,
 } from "@home-agent/api/agent-context";
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
+import { AppError } from "@home-agent/api/errors";
 
 export function createContextReceiver(options: {
   client: Pick<ContextSource, "stream">;
-  onScopeChange?: (
-    scope: z.infer<typeof agentContextScopeSchema> | null,
-  ) => Promise<void>;
+  onReset?: () => Promise<void>;
 }) {
   const receipts = createReceiptJournal();
   let heartbeatAt: string | null = null;
   const partNames = Object.keys(agentContextPartsSchema.shape);
   let scope: z.infer<typeof agentContextScopeSchema> | null = null;
-  let acceptedScope: z.infer<typeof agentContextScopeSchema> | null | undefined;
+  let acceptedEpoch: string | null | undefined;
   let parts: z.infer<typeof agentContextSnapshotSchema>["parts"] = {};
   let status: "stopped" | "connecting" | "connected" | "disconnected" =
     "stopped";
@@ -31,12 +30,13 @@ export function createContextReceiver(options: {
   let lastError: { reason: string; at: string } | null = null;
   let nextErrorLogAt = 0;
   let connectionGeneration = 0;
-  let qualificationGeneration = 0;
+  let reads = new AbortController();
   let controller: AbortController | undefined;
   let subscriptionPromise: Promise<void> | undefined;
 
   function resetConnection(nextStatus: typeof status) {
-    qualificationGeneration++;
+    reads.abort(new AppError("request_cancelled"));
+    reads = new AbortController();
     receipts.clear();
     heartbeatAt = null;
     scope = null;
@@ -46,9 +46,9 @@ export function createContextReceiver(options: {
     status = nextStatus;
   }
 
-  function qualification() {
+  function currentSignal() {
     return status === "connected" && synchronized && scope
-      ? { scope, generation: qualificationGeneration }
+      ? reads.signal
       : null;
   }
 
@@ -71,24 +71,17 @@ export function createContextReceiver(options: {
     }
     receivedAt = now;
     const next = message.data.scope;
-    if (
-      scope?.scope_epoch !== next?.scope_epoch ||
-      scope?.account_id !== next?.account_id ||
-      scope?.home_id !== next?.home_id
-    ) {
-      qualificationGeneration++;
+    if (scope?.scope_epoch !== next?.scope_epoch) {
+      reads.abort(new AppError("request_cancelled"));
+      reads = new AbortController();
       receipts.clear();
       parts = {};
       synchronized = false;
     }
-    if (
-      acceptedScope === undefined ||
-      acceptedScope?.scope_epoch !== next?.scope_epoch ||
-      acceptedScope?.account_id !== next?.account_id ||
-      acceptedScope?.home_id !== next?.home_id
-    ) {
-      await options.onScopeChange?.(next);
-      acceptedScope = next;
+    const nextEpoch = next?.scope_epoch ?? null;
+    if (acceptedEpoch !== nextEpoch) {
+      await options.onReset?.();
+      acceptedEpoch = nextEpoch;
     }
     if (signal.aborted || generation !== connectionGeneration) return false;
     const previous = { scope, parts };
@@ -180,11 +173,15 @@ export function createContextReceiver(options: {
     await subscriptionPromise;
     subscriptionPromise = undefined;
     controller = undefined;
-    acceptedScope = undefined;
+    acceptedEpoch = undefined;
+    await options.onReset?.();
   }
 
   return {
-    qualification,
+    currentSignal,
+    householdPart() {
+      return parts.household;
+    },
     receiptIndex(query?: Parameters<typeof receipts.index>[0]) {
       return {
         ...receipts.index(query),
@@ -196,7 +193,6 @@ export function createContextReceiver(options: {
     },
     receipt: receipts.detail,
     journalId: receipts.id,
-    currentScope: () => qualification()?.scope ?? null,
     snapshot() {
       return {
         context_bytes: Buffer.byteLength(JSON.stringify({ scope, parts })),

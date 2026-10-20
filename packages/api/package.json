@@ -13,6 +13,7 @@
     "./errors/hono": "./src/errors/hono.ts",
     "./http/retry-after": "./src/http/retry-after.ts",
     "./http/read-body": "./src/http/read-body.ts",
+    "./http/stream-operation": "./src/http/stream-operation.ts",
     "./http/event-stream": "./src/http/event-stream.ts",
     "./household": "./src/contracts/household.ts",
     "./observations": "./src/contracts/observations.ts",
@@ -29,7 +30,8 @@
     "./automation-reviews": "./src/contracts/automation-reviews.ts",
     "./household-events": "./src/contracts/household-events.ts",
     "./http/request-json": "./src/http/request-json.ts",
-    "./action-provenance": "./src/contracts/action-provenance.ts"
+    "./action-provenance": "./src/contracts/action-provenance.ts",
+    "./http/operation-stream": "./src/http/operation-stream.ts"
   },
   "scripts": {
     "lint": "oxlint --type-aware --max-warnings 0 .",

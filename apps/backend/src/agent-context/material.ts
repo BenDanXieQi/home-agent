@@ -24,12 +24,7 @@ export function createAgentMaterialReader(
     input: z.infer<typeof agentMaterialQuerySchema>,
     requestSignal: AbortSignal,
   ) => {
-    const access = accessHousehold(household, input.scope.scope_epoch);
-    if (
-      access.identity.accountId !== input.scope.account_id ||
-      access.identity.homeId !== input.scope.home_id
-    )
-      throw new HouseholdError("stale_session");
+    const access = accessHousehold(household, household.epoch);
     const timeout = AbortSignal.timeout(timeoutMs);
     const signal = AbortSignal.any([requestSignal, shutdown, timeout]);
     const assertCurrent = () => {
@@ -48,7 +43,6 @@ export function createAgentMaterialReader(
     const run = async () =>
       input.kind === "member_sighting"
         ? {
-            scope: input.scope,
             kind: input.kind,
             record: await sightings!.byId(
               access.identity,
@@ -57,7 +51,6 @@ export function createAgentMaterialReader(
             ),
           }
         : {
-            scope: input.scope,
             kind: input.kind,
             window: await perception.readWindow(input.id, signal),
           };

@@ -117,3 +117,120 @@ index 8675a1487e5f12c71d27026152a56fc264a15a64..2afeab97c0150d2315a251aa29109574
  }
 -//# sourceMappingURL=context.js.map
 \ No newline at end of file
+diff --git a/dist/harness/events.d.ts b/dist/harness/events.d.ts
+index e9c32df338c8b864f1fee795add5c1356ea003c4..d75ce0c1cbe0fba99b5627a3618848de45c5aa53 100644
+--- a/dist/harness/events.d.ts
++++ b/dist/harness/events.d.ts
+@@ -174,7 +174,8 @@ export interface AgentEventStream {
+     /** The `snapshot` event at attachment. */
+     readonly snapshot: SnapshotEvent;
+     start(listener: (events: readonly AgentEvent[], context: Context) => Promise<void>): void;
+-    stop(): Promise<WatchEnd>;
++    /** Finish queued batches before stopping when `drain` is set. Do not await this from the listener itself. */
++    stop(options?: { drain?: boolean }): Promise<WatchEnd>;
+     readonly closed: Promise<WatchEnd>;
+ }
+ /**
+@@ -183,4 +184,3 @@ export interface AgentEventStream {
+  */
+ export declare function watchEvents(harness: Harness, conversationId: ConversationId, context: Context): Promise<AgentEventStream>;
+ export {};
+-//# sourceMappingURL=events.d.ts.map
+\ No newline at end of file
+diff --git a/dist/harness/events.js b/dist/harness/events.js
+index f6ac01a89600ad141b0a46301581effb30eec15a..4c4d50b711b6a3faa7c086a45f94376340596ca1 100644
+--- a/dist/harness/events.js
++++ b/dist/harness/events.js
+@@ -69,7 +69,7 @@ export async function watchEvents(harness, conversationId, context) {
+     return {
+         snapshot,
+         start: (listener) => watch.start((events, _ops, deliveryContext) => listener(events, deliveryContext)),
+-        stop: () => watch.stop(),
++        stop: (options) => watch.stop(options),
+         closed: watch.closed,
+     };
+ }
+@@ -370,4 +370,3 @@ function toolUpdate(viewOps, at, slot, previous) {
+ function startsWith(path, prefix) {
+     return prefix.length <= path.length && prefix.every((segment, index) => path[index] === segment);
+ }
+-//# sourceMappingURL=events.js.map
+\ No newline at end of file
+diff --git a/dist/session/observation.d.ts b/dist/session/observation.d.ts
+index c310a36b1a9110b5ec58d9000294862737c2d937..9019d301843497fb71a4384a3967fc1ce8480b82 100644
+--- a/dist/session/observation.d.ts
++++ b/dist/session/observation.d.ts
+@@ -30,7 +30,8 @@ export declare class CommittedWatch<T = ObservedDocumentValue> implements WatchH
+     get value(): T;
+     get closed(): Promise<WatchEnd>;
+     start(listener: (value: T, ops: readonly Op[], context: Context) => Promise<void>): void;
+-    stop(): Promise<WatchEnd>;
++    /** Freeze new frames and finish queued delivery when `drain` is set; cancellation can still interrupt. */
++    stop(options?: { drain?: boolean }): Promise<WatchEnd>;
+     observeCancellation(signal: AbortSignal): void;
+     cancel(): void;
+     /** End with `session_closed`, or with `session_failed` and the error when the Session failed. */
+@@ -39,4 +40,3 @@ export declare class CommittedWatch<T = ObservedDocumentValue> implements WatchH
+     }): void;
+     advance(value: T, ops: readonly Op[], context: Context): void;
+ }
+-//# sourceMappingURL=observation.d.ts.map
+\ No newline at end of file
+diff --git a/dist/session/observation.js b/dist/session/observation.js
+index 9449f6ad739c3c482e46c1905710b4339f68203b..28a58bcb44f985956d58a677000e92e9e694acce 100644
+--- a/dist/session/observation.js
++++ b/dist/session/observation.js
+@@ -151,6 +151,7 @@ export class CommittedWatch {
+     #started = false;
+     #scheduled = false;
+     #running = false;
++    #draining = false;
+     #retired = false;
+     /** Set once, by `#terminate()`. */
+     #end;
+@@ -182,8 +183,17 @@ export class CommittedWatch {
+         if (this.#pending.length > 0)
+             this.#schedule();
+     }
+-    stop() {
+-        this.#terminate({ reason: "stopped" });
++    stop(options) {
++        if (options?.drain && this.#started && this.#end === undefined) {
++            this.#draining = true;
++            if (!this.#running && this.#pending.length === 0)
++                this.#terminate({ reason: "stopped" });
++            else
++                this.#schedule();
++        }
++        else {
++            this.#terminate({ reason: "stopped" });
++        }
+         return this.#closed.promise;
+     }
+     observeCancellation(signal) {
+@@ -205,7 +215,7 @@ export class CommittedWatch {
+         this.#terminate(failure === undefined ? { reason: "session_closed" } : { reason: "session_failed", error: failure.error });
+     }
+     advance(value, ops, context) {
+-        if (this.#end !== undefined || this.#retired)
++        if (this.#end !== undefined || this.#retired || this.#draining)
+             return;
+         if (value === null)
+             this.#retired = true;
+@@ -258,7 +268,9 @@ export class CommittedWatch {
+         }
+         finally {
+             this.#running = false;
+-            if (this.#end === undefined && this.#pending.length > 0)
++            if (this.#end === undefined && this.#draining && this.#pending.length === 0)
++                this.#terminate({ reason: "stopped" });
++            else if (this.#end === undefined && this.#pending.length > 0)
+                 this.#schedule();
+         }
+     }
+@@ -278,4 +290,3 @@ export class CommittedWatch {
+ function toError(error) {
+     return error instanceof Error ? error : new Error(errorMessage(error));
+ }
+-//# sourceMappingURL=observation.js.map
+\ No newline at end of file

@@ -27,92 +27,77 @@ const matches = (key: ReturnType<typeof householdEventIdentitySchema.parse>) =>
         eq(householdEvents.sourceEventId, key.source_event_id),
       );
 
+async function acceptInTransaction(
+  tx: Transaction,
+  submission: ReturnType<typeof householdEventSubmissionSchema.parse>,
+  assertCurrent: () => void,
+  validate?: (tx: Transaction, event: typeof submission.event) => Promise<void>,
+) {
+  submission = householdEventSubmissionSchema.parse(submission);
+  if (Buffer.byteLength(JSON.stringify(submission)) > 64 * 1024)
+    throw new HouseholdEventError("capacity_exceeded");
+  await tx.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended('household-events', 0))`,
+  );
+  const existing = await tx
+    .select()
+    .from(householdEvents)
+    .where(or(matches({ id: submission.event.id }), matches(submission)))
+    .limit(2);
+  if (existing.length) {
+    if (
+      existing.length !== 1 ||
+      !isDeepStrictEqual(existing[0]!.submission, submission)
+    )
+      throw new HouseholdEventError("conflict");
+    return {
+      status: "duplicate" as const,
+      receipt: receipt(existing[0]!),
+    };
+  }
+  const occurredAt = Date.parse(submission.event.occurred_at);
+  const expiresAt = Date.parse(submission.event.expires_at);
+  if (submission.event.source !== "agent" || expiresAt <= occurredAt)
+    throw new HouseholdEventError("invalid_event");
+  if (expiresAt <= Date.now()) throw new HouseholdEventError("expired");
+  if (occurredAt > Date.now() + 60_000)
+    throw new HouseholdEventError("future_event");
+  if ((await tx.$count(householdEvents)) >= 50_000)
+    throw new HouseholdEventError("capacity_exceeded");
+  assertCurrent();
+  const [inserted] = await tx
+    .insert(householdEvents)
+    .values({
+      id: submission.event.id,
+      producerId: submission.producer_id,
+      sourceEventId: submission.source_event_id,
+      eventType: submission.event.event_type,
+      deviceId: submission.event.device_id,
+      occurredAt: new Date(submission.event.occurred_at),
+      expiresAt: new Date(submission.event.expires_at),
+      submission,
+      acceptedAt: new Date(),
+    })
+    .onConflictDoNothing()
+    .returning();
+  if (!inserted) throw new HouseholdEventError("conflict");
+  await validate?.(tx, submission.event);
+  assertCurrent();
+  return { status: "accepted" as const, receipt: receipt(inserted) };
+}
+
 export function createHouseholdEventRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
-  const within = (identity: Parameters<typeof access>[0]) =>
-    and(
-      eq(householdEvents.accountId, identity.accountId),
-      eq(householdEvents.homeId, identity.homeId ?? ""),
-    );
-  async function acceptInTransaction(
-    tx: Transaction,
-    identity: Parameters<typeof access>[0],
-    submission: ReturnType<typeof householdEventSubmissionSchema.parse>,
-    assertCurrent: () => void,
-    validate?: (
-      tx: Transaction,
-      event: typeof submission.event,
-    ) => Promise<void>,
-  ) {
-    submission = householdEventSubmissionSchema.parse(submission);
-    if (Buffer.byteLength(JSON.stringify(submission)) > 64 * 1024)
-      throw new HouseholdEventError("capacity_exceeded");
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${JSON.stringify(["household-events", identity.accountId, identity.homeId])}, 0))`,
-    );
-    const existing = await tx
-      .select()
-      .from(householdEvents)
-      .where(
-        and(
-          within(identity),
-          or(matches({ id: submission.event.id }), matches(submission)),
-        ),
-      )
-      .limit(2);
-    if (existing.length) {
-      if (
-        existing.length !== 1 ||
-        !isDeepStrictEqual(existing[0]!.submission, submission)
-      )
-        throw new HouseholdEventError("conflict");
-      return {
-        status: "duplicate" as const,
-        receipt: receipt(existing[0]!),
-      };
-    }
-    const occurredAt = Date.parse(submission.event.occurred_at);
-    const expiresAt = Date.parse(submission.event.expires_at);
-    if (submission.event.source !== "agent" || expiresAt <= occurredAt)
-      throw new HouseholdEventError("invalid_event");
-    if (expiresAt <= Date.now()) throw new HouseholdEventError("expired");
-    if (occurredAt > Date.now() + 60_000)
-      throw new HouseholdEventError("future_event");
-    if ((await tx.$count(householdEvents, within(identity))) >= 50_000)
-      throw new HouseholdEventError("capacity_exceeded");
-    assertCurrent();
-    const [inserted] = await tx
-      .insert(householdEvents)
-      .values({
-        id: submission.event.id,
-        accountId: identity.accountId,
-        homeId: identity.homeId ?? "",
-        producerId: submission.producer_id,
-        sourceEventId: submission.source_event_id,
-        eventType: submission.event.event_type,
-        deviceId: submission.event.device_id,
-        occurredAt: new Date(submission.event.occurred_at),
-        expiresAt: new Date(submission.event.expires_at),
-        submission,
-        acceptedAt: new Date(),
-      })
-      .onConflictDoNothing()
-      .returning();
-    if (!inserted) throw new HouseholdEventError("conflict");
-    await validate?.(tx, submission.event);
-    assertCurrent();
-    return { status: "accepted" as const, receipt: receipt(inserted) };
-  }
   return {
     acceptInTransaction,
     async accept(
       identity: Parameters<typeof access>[0],
       submission: ReturnType<typeof householdEventSubmissionSchema.parse>,
       assertCurrent: () => void,
-      validate?: Parameters<typeof acceptInTransaction>[4],
+      validate?: Parameters<typeof acceptInTransaction>[3],
     ) {
       return access(identity, assertCurrent, (tx) =>
-        acceptInTransaction(tx, identity, submission, assertCurrent, validate),
+        acceptInTransaction(tx, submission, assertCurrent, validate),
       );
     },
     async find(
@@ -124,7 +109,7 @@ export function createHouseholdEventRepository(db: Database) {
         const [row] = await tx
           .select()
           .from(householdEvents)
-          .where(and(within(identity), matches(key)))
+          .where(matches(key))
           .limit(1);
         return row ? receipt(row) : null;
       });
@@ -141,7 +126,6 @@ export function createHouseholdEventRepository(db: Database) {
           .from(householdEvents)
           .where(
             and(
-              within(identity),
               query.event_type
                 ? eq(householdEvents.eventType, query.event_type)
                 : undefined,

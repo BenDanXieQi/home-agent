@@ -35,7 +35,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 | `GET /api/config`                                   | 读取连接配置及可写状态                                                              |
 | `PUT /api/config`                                   | 校验并保存完整连接配置                                                              |
 | `GET /api/services/status`                          | 检查 Agent 与 go2rtc 的接口是否可用                                                 |
-| `POST /api/chat`                                    | 向 Agent 转发单条消息并校验 JSON 回答，不保存会话                                   |
+| `POST /api/chat`                                    | 向 Agent 转发聊天 SSE，校验过程与最终回答，不保存会话                               |
 | `GET /api/agent/context/stream`                     | 向 Agent 推送当前家庭、设备状态、成员、出现记录和整体感知数据                       |
 | `POST /api/agent/context/history`                   | 按区间与对象读取设备报告、成员出现或仍保留的完整感知窗口                            |
 | `GET /api/perception`                               | 本地检测、人宠跟踪、人物身份与音频的健康及最新观测                                  |
@@ -62,7 +62,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 `AccountMaintenance` 调度完整账号会话的恢复续期，通过回调交由 `MijiaService` 保存并启用新会话。`DeviceDiscovery` 维护设备快照、合并并发刷新与周期设备发现，`MediaSession` 维护 go2rtc 地址巡检、绑定重试、媒体运行标识和相机／观看资源；`Go2RtcAdapter` 维护独立的 go2rtc 运行时会话和心跳租约。米家会话续期与 go2rtc 租约续期是两种不同操作。媒体运行标识 `revision` 在媒体失效时更换，用于拒绝旧播放请求；它不用于配置并发修改检测。源注册失败的重试由 `CameraSourceManager` 管理，媒体收包监测和取流恢复由 go2rtc 管理，网页出帧检测由浏览器管理。
 
-聊天请求最多 32 KiB，超时由 `BACKEND_REQUEST_TIMEOUT_MS` 控制，默认 130 秒；客户端取消会传递到 Agent。代理只提交本次消息，校验并返回 JSON 回答，不提供会话历史、检查点或 SSE。响应读取最多 512 KiB，非本项目格式的上游响应转换为安全错误。
+聊天请求最多 32 KiB。聊天和 Workflow 操作流的总期限为 20 分钟，Workflow 外层转发使用同一期限；普通读取及其他 Backend 请求继续使用 `BACKEND_REQUEST_TIMEOUT_MS`，默认 130 秒。客户端取消会传递到 Agent。代理只提交本次消息，通过 SSE 转发本次回答文本和工具状态，校验最终 `result`；不提供会话历史或检查点。流消费复用共享操作协议，非本项目格式的上游响应转换为安全错误。
 
 收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
 
@@ -70,7 +70,7 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 成员资料与出现记录实际新增或修订在数据库确认提交后通知；提交确认丢失时，在同一家庭绑定与成员锁内核实已保存内容，不直接重放写入。暂时不能确认时，仓库独立后台确认，间隔从 1 秒退避到最多 30 秒，每次只允许一个在途确认；期间拒绝新修改，家庭资格改变后在同锁确认原事务结束并隔离旧结果。成员通知先于参考文件清理，清理失败不会漏发已经提交的变化，无变化与回滚不通知；迟到确认回滚会恢复参考快照并清理，关闭仓库停止计时器并等待串行队列结束。感知通知覆盖窗口内容与媒体状态，迟到声音、转写更新原窗口，生成完成、失败、过期及撤销只触发刷新，不额外申请编码。每个来源最多一个在途读取，通知合并后续刷新；读取失败清空对应来源并有界退避，其他来源继续交付；统一观察的来源状态分别保留，窗口承载声音和变化线索，成员记录以 ID 关联，不推断说话人。未配置或未启用的来源保持明确的不可用状态。
 
-统一观察推送包含索引、引用、成员出现归因修订号及轻量窗口材料摘要，成员正文与完整窗口详情保留在各自来源。`POST /api/agent/context/material` 按 scope、kind 和 ID 只读解析单个引用，校验家庭资格与响应大小，过期或移除返回 404；允许可信本机 Web 和 Agent 访问，不触发媒体生成。
+统一观察推送包含索引、引用、成员出现归因修订号及轻量窗口材料摘要，成员正文与完整窗口详情保留在各自来源。`POST /api/agent/context/material` 按 kind 和 ID 只读解析当前绑定下的单个引用，校验家庭资格与响应大小，过期或移除返回 404；允许可信本机 Web 和 Agent 访问，不触发媒体生成。
 
 `GET /api/agent/receipts`、`/api/agent/receipts/:id` 与 `/api/agent/receipts/current` 将 Web 只读请求转发到配置的 Agent 服务，校验响应并限制大小与超时，沿用可信本机 Web 访问限制，不用 Backend 发布缓存替代接收结果。
 
@@ -86,6 +86,8 @@ Agent 启动后独立接收，不要求模型配置或聊天请求；本机 `GET
 
 ## 数据库
 
+业务数据统一属于当前实例绑定的家庭。设备清单缓存使用唯一的 `id=1` 记录；自动化、事件、材料与窗口历史不按账号或家庭分区。绑定校验集中在绑定访问模块，清空家庭时由统一数据生命周期清理业务表；运行期取消和记录版本校验分别阻止迟到任务提交与并发覆盖。
+
 使用 Drizzle ORM + Postgres.js 连接 PostgreSQL / TimescaleDB。数据库地址由 `DATABASE_URL` 指定，由启动入口创建连接并注入凭据存储；未配置时，米家授权操作返回存储错误。backend 进程启动不自动初始化数据库；根目录 `dev` 在启动应用前自动准备、初始化并检查数据库。
 
 ```sh
@@ -99,7 +101,7 @@ docker compose stop db                   # 只停止数据库容器，保留数�
 
 本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
 
-当前 `drizzle/` 只有一份[初始化基线](drizzle/0000_initialize_database.sql)及其元数据，建立完整业务表、索引和 TimescaleDB 配置，不包含旧数据转换。`db:init` 与 `db:migrate` 均由原生 Drizzle 应用 SQL，再运行数据库检查；已经登记应用的文件不重复执行。结构变更使用原生 `db:generate` 生成、`db:migrate` 应用。使用外部数据库时，执行 `bun run --cwd apps/backend db:migrate`，随后执行 `bun run --cwd apps/backend db:check`。
+数据库结构由 `drizzle/` 中的[初始化基线](drizzle/0000_initialize_database.sql)、后续迁移及对应元数据定义，包含业务表、索引和 TimescaleDB 配置。`db:init` 与 `db:migrate` 均由原生 Drizzle 应用 SQL，再运行数据库检查；已经登记应用的文件不重复执行。结构变更使用原生 `db:generate` 生成、`db:migrate` 应用。使用外部数据库时，执行 `bun run --cwd apps/backend db:migrate`，随后执行 `bun run --cwd apps/backend db:check`。
 
 backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文件哈希和 TimescaleDB 扩展，不写入数据，不检查完整表结构、记录内容或写权限。缺少登记时运行 `db:init` 或 `db:migrate`；已应用 SQL 的哈希与仓库不一致时，恢复对应文件，并将结构变更写入新 SQL。
 
@@ -111,14 +113,15 @@ backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文�
 
 新建或更换绑定来源时校验当前设备清单：摄像头必须填写设备声明的镜头，普通设备不填镜头，`device_id` 不建立设备表外键。来源暂时不可用时，保留原来源的绑定仍可修改说明、目标、启停或删除。启停只控制说明的采用，不控制设备采集。外键阻止删除仍被通道或绑定引用的目标，停用绑定仍保留引用。
 
-接口要求本机访问，使用 JSON，响应禁用缓存，请求体最多 16 KiB。以下路径均以 `/api/spatial` 为前缀，字段与响应见[共享契约](../../packages/api/README.md#空间资料契约)，字段校验以[spatial.ts](../../packages/api/src/contracts/spatial.ts)为准。
+接口要求本机访问，使用 JSON，响应禁用缓存；整体保存布局的请求体最多 256 KiB，其余请求最多 16 KiB。以下路径均以 `/api/spatial` 为前缀，字段与响应见[共享契约](../../packages/api/README.md#空间资料契约)，字段校验以[spatial.ts](../../packages/api/src/contracts/spatial.ts)为准。
 
-| 方法与路径                                                                          | 用途                                                   |
-| ----------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `POST /read`                                                                        | 返回绑定标识及空间、通道、绑定的完整资料，包含停用绑定 |
-| `POST /spaces/save`、`POST /passages/save`、`POST /observation-bindings/save`       | 新建或编辑，返回保存后的记录                           |
-| `POST /observation-bindings/enabled`                                                | 仅修改绑定启用状态，返回更新后的记录                   |
-| `POST /spaces/delete`、`POST /passages/delete`、`POST /observation-bindings/delete` | 删除记录或返回阻止删除的直接引用                       |
+| 方法与路径                                                                          | 用途                                                 |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `POST /read`                                                                        | 返回空间、通道、绑定的完整资料，包含停用绑定         |
+| `POST /spaces/save`、`POST /passages/save`、`POST /observation-bindings/save`       | 新建或编辑，返回保存后的记录                         |
+| `POST /layout/apply`                                                                | 按规划依据的版本，在一个事务中整体保存空间与通道布局 |
+| `POST /observation-bindings/enabled`                                                | 仅修改绑定启用状态，返回更新后的记录                 |
+| `POST /spaces/delete`、`POST /passages/delete`、`POST /observation-bindings/delete` | 删除记录或返回阻止删除的直接引用                     |
 
 ### 家庭上下文表
 
@@ -172,10 +175,10 @@ backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文�
 
 ## Agent 专项任务调用
 
-`POST /api/workflows` 复用本机访问限制，接受 `{ scope_epoch, workflow: "automation-generation", input: { text, definition? } }`，返回 `{ workflow, result: { definition, behavior, clarifications } }`。Backend 从当前家庭的已加载规格生成设备能力，不接受调用方提供的 capabilities，通过已配置的 Agent 地址调用公共任务入口。请求取消和服务关闭会取消在途调用；返回前再次校验家庭资格及草稿引用的当前设备能力，失效结果不作为可用草稿交付。
+`POST /api/workflows` 复用本机访问限制，接受 `{ scope_epoch, workflow: "automation-generation", input: { text, definition? } }`，通过 SSE 的 `result` 事件返回 `{ workflow, result: { definition, behavior, clarifications } }`。Backend 从当前家庭的已加载规格生成设备能力，不接受调用方提供的 capabilities，通过已配置的 Agent 地址调用公共任务入口。请求取消和服务关闭会取消在途调用；返回前再次校验家庭资格及草稿引用的当前设备能力，失效结果不作为可用草稿交付。
 
 该 workflow 只生成草稿，不保存、启用或执行规则。自动化页面已接入；固定动作支持米家属性写入、设备动作及执行记录中的网页通知。家庭事件生产者尚未接入，事件类型为空；通知能力为 true。AI 复核与动作选择尚未启用，含这些配置的规则不能启用。输入与结果复用 Agent 所属的 workflow 契约，调用期限由 Backend 请求配置和 Agent 执行配置控制。调用链通过现有 `tracedFetch` 传播追踪上下文；配置见[可观测性](../../packages/observability/README.md)。真实家庭与模型的完整生成链路尚未验收。
 
 ## 家庭自动化
 
-同一 `POST /api/workflows` 也接受 `{ scope_epoch, workflow: "spatial-planning", input }`，转发 `start/message/read/close` 到 Agent。Backend 将当前账号、家庭和运行代次作为可信 `scope` 传入 Agent，返回前再次核对范围；浏览器只提交 `scope_epoch`。Agent 拥有会话范围与资源，在家庭范围撤销或变化时关闭旧会话。等待使用服务配置的预算，沿用取消检查，只返回待核对草稿，不写入空间数据库，也不采集摄像头画面。会话协议见[Agent 会话契约](../../apps/agent/README.md#空间规划会话契约)。
+所有 Workflow 均使用 `POST /api/workflows` 返回 SSE；空间规划的 `message` 与 `close` 共用这一入口，请求为 `{ scope_epoch, workflow: "spatial-planning", input }`。消息过程与最终结果通过 SSE 转发，过程事件为 `{ workflow, progress }`，结果事件为 `{ workflow, result }`，流契约由 Agent 从各 Workflow 的输入、进度和结果 Schema 生成；没有过程内容的操作直接交付最终结果。Backend 使用浏览器提交的 `scope_epoch` 检查请求有效性，直接转发规划输入，每次交付过程更新和最终结果前再次校验。Agent 的家庭上下文接收器在上下文撤销或替换时统一清空全部规划会话、对话和草稿，规划本身只管理会话 ID 与资源。等待使用服务配置的预算，沿用取消检查，只返回待核对草稿，不写入空间数据库，也不采集摄像头画面。会话协议见[Agent 会话契约](../../apps/agent/README.md#空间规划会话契约)。

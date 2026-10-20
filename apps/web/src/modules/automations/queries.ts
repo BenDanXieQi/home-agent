@@ -1,6 +1,8 @@
 import type { InferRequestType } from "hono/client";
-import type { BackendClient } from "@home-agent/backend-client";
-import { agentWorkflowResultSchema } from "@home-agent/agent/workflows";
+import {
+  agentWorkflowStreamContracts,
+  type BackendClient,
+} from "@home-agent/backend-client";
 import { queryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -12,8 +14,11 @@ import {
   type automationEvaluateRequestSchema,
   type automationSaveRequestSchema,
 } from "@home-agent/api/automations";
-import { requestEmpty, requestJson } from "../../api/client";
-import { RequestError } from "../../api/errors";
+import {
+  requestEmpty,
+  requestJson,
+  requestOperationStream,
+} from "../../api/client";
 
 type AutomationGenerationRequest = Extract<
   InferRequestType<BackendClient["api"]["workflows"]["$post"]>["json"],
@@ -112,7 +117,7 @@ export async function generateAutomation(
     AutomationGenerationRequest["input"],
 ) {
   const { scope_epoch, ...request } = input;
-  const response = await requestJson(
+  const response = await requestOperationStream(
     (api, options) =>
       api.api.workflows.$post(
         {
@@ -124,10 +129,7 @@ export async function generateAutomation(
         },
         options,
       ),
-    agentWorkflowResultSchema,
-    { timeoutMs: null },
+    agentWorkflowStreamContracts["automation-generation"],
   );
-  if (response.workflow !== "automation-generation")
-    throw new RequestError({ code: "invalid_response" });
   return response.result;
 }

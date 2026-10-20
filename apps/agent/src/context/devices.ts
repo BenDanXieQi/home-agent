@@ -9,22 +9,13 @@ export function createAgentDeviceMetadata(
 ) {
   const data = household?.status === "ready" ? household.data : undefined;
   const devices = new Map(
-    Object.values(data?.device ?? {}).map((item) => [
-      JSON.stringify([item.account_id, item.device_id]),
-      item,
-    ]),
+    Object.values(data?.device ?? {}).map((item) => [item.device_id, item]),
   );
   function device(
-    identity: Pick<
-      z.infer<typeof agentDevicePropertySchema>,
-      "account_id" | "device_id"
-    >,
+    identity: Pick<z.infer<typeof agentDevicePropertySchema>, "device_id">,
   ) {
-    const found = devices.get(
-      JSON.stringify([identity.account_id, identity.device_id]),
-    );
+    const found = devices.get(identity.device_id);
     return {
-      account_id: identity.account_id,
       device_id: identity.device_id,
       device_name: found?.name ?? null,
       room_name: found?.room_name ?? null,
@@ -33,12 +24,10 @@ export function createAgentDeviceMetadata(
   function resolveProperty(
     address: Pick<
       z.infer<typeof agentDevicePropertySchema>,
-      "account_id" | "device_id" | "siid" | "piid"
+      "device_id" | "siid" | "piid"
     >,
   ) {
-    const found = devices.get(
-      JSON.stringify([address.account_id, address.device_id]),
-    );
+    const found = devices.get(address.device_id);
     const capability = found?.spec_id
       ? data?.specs[found.spec_id]?.spec[`prop.${address.siid}.${address.piid}`]
       : undefined;

@@ -24,14 +24,14 @@ if (config.AGENT_MODEL?.provider !== "xiaomi-token-plan-cn")
   throw new Error(
     "This small evaluation requires a MiMo China Token Plan model",
   );
-const models = builtinModels();
-const model = models.getModel(
+const modelCollection = builtinModels();
+const model = modelCollection.getModel(
   config.AGENT_MODEL.provider,
   config.AGENT_MODEL.modelId,
 );
 if (!model || model.api !== "openai-completions")
   throw new Error("The evaluation model must use OpenAI completions");
-const auth = await models.getAuth(config.AGENT_MODEL.provider);
+const auth = await modelCollection.getAuth(config.AGENT_MODEL.provider);
 if (!auth?.auth.apiKey)
   throw new Error("MiMo China Token Plan API key is required");
 const endpoint = new URL(

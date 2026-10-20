@@ -233,15 +233,9 @@ perception.start().catch((error: unknown) => {
 const spatialRepository = database
   ? createSpatialRepository(database.db)
   : undefined;
-const spatialService = createSpatialService(spatialRepository, (scope) => {
-  const snapshot = household.snapshot();
-  const current = snapshot.projection.household.household;
-  return household.ready &&
-    scope?.account_id === current.account_id &&
-    scope?.home_id === current.home_id
-    ? Object.values(snapshot.projection.device)
-    : [];
-});
+const spatialService = createSpatialService(spatialRepository, () =>
+  household.ready ? Object.values(household.snapshot().projection.device) : [],
+);
 const agentContext = createAgentContextService({
   commands,
   household,

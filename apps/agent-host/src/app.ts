@@ -1,11 +1,19 @@
+import { createHost } from "@earendil-works/chord";
 import { createContextSource } from "./context-source";
 import { memo as once, sift } from "radash";
-import { createAssistant } from "@home-agent/agent/assistant";
+import { configureAssistant } from "@home-agent/agent/assistant";
+import {
+  AgentRuntime,
+  getServiceInstance,
+  registerAgentRuntime,
+} from "@home-agent/agent/runtime";
+import { createSpatialPlanningExtension } from "@home-agent/agent/workflows/spatial-planning/extension";
 import { createAgentRoutes } from "@home-agent/agent/routes";
 import type { loadConfig } from "./config";
 import { createContextReceiver } from "@home-agent/agent/context/receiver";
+import { createContextReader } from "@home-agent/agent/context/reader";
 import { configureWorkflows } from "@home-agent/agent/workflows/runtime";
-import { initializeModels } from "@home-agent/agent/models";
+import { AgentModels, registerAgentModels } from "@home-agent/agent/models";
 
 export async function createApp(
   config: ReturnType<typeof loadConfig>,
@@ -20,43 +28,58 @@ export async function createApp(
     ...workflowConfiguration.modelRefs,
     ...(config.AGENT_SUBAGENT_MODELS ?? []),
   ]);
-  const budget = {
-    timeoutMs: config.AGENT_RUN_TIMEOUT_MS,
-    maxTokens: config.AGENT_MAX_OUTPUT_TOKENS,
-  };
-  const modelCatalog = await initializeModels({
-    modelRefs,
-    timeoutMs: budget.timeoutMs,
-    signal,
-  });
+  const services = appResources.adopt(
+    createHost({ name: "home-agent" }),
+    (host) => host.close(),
+  );
+  registerAgentModels(services, { modelRefs, signal });
+  const models = services.get(AgentModels, {});
+  appResources.defer(() => models.release());
+  await models.ready;
   signal.throwIfAborted();
+  const modelRuntime = getServiceInstance(models);
 
   const contextSource = createContextSource(config.BACKEND_URL);
-  const assistant = appResources.use(
-    await createAssistant({
-      modelCatalog,
-      modelRef: config.AGENT_MODEL,
-      subagentModelRefs: config.AGENT_SUBAGENT_MODELS,
-      budget,
-      signal,
-    }),
+  const receiver = createContextReceiver({
+    client: contextSource,
+    onReset: () => workflows.reset(),
+  });
+  const contextReader = createContextReader({
+    client: contextSource,
+    receiver,
+  });
+  const assistantConfiguration = configureAssistant({
+    modelRuntime,
+    modelRef: config.AGENT_MODEL,
+    subagentModelRefs: config.AGENT_SUBAGENT_MODELS,
+  });
+  registerAgentRuntime(services, {
+    extensions: [
+      ...assistantConfiguration.extensions,
+      createSpatialPlanningExtension().SpatialPlanningExtension,
+    ],
+    signal,
+  });
+  const runtimeHandle = services.get(AgentRuntime, {});
+  appResources.defer(() => runtimeHandle.release());
+  const assistantHandle = assistantConfiguration.register(services, signal);
+  const workflowHandle = workflowConfiguration.register(
+    services,
+    contextReader,
   );
+  appResources.defer(() => assistantHandle.release());
+  appResources.defer(() => workflowHandle.release());
+  await services.ready();
   signal.throwIfAborted();
+  const assistant = assistantHandle.instance;
+  const workflows = getServiceInstance(workflowHandle);
 
-  const workflows = appResources.use(
-    workflowConfiguration.create({ modelCatalog, budget }),
-  );
-  const receiver = appResources.use(
-    createContextReceiver({
-      client: contextSource,
-      onScopeChange: workflows.retainScope,
-    }),
-  );
+  appResources.use(receiver);
   const app = createAgentRoutes({
     port: config.AGENT_PORT,
     context: receiver,
     assistant,
-    budget,
+    harness: getServiceInstance(runtimeHandle).harness,
     workflows,
   });
   receiver.start();

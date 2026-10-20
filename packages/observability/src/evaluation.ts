@@ -4,71 +4,71 @@ import {
   type Context,
   type Span,
 } from "@opentelemetry/api";
-import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { telemetryStatus } from "./telemetry";
-import { genAiMessages, genAiToolDefinitions } from "./messages";
 
 const key = createContextKey("home-agent.evaluation");
 
 class Evaluation {
-  private readonly generations: Array<{
-    span_id: string;
-    messages: ReturnType<typeof genAiMessages>;
-    tool_definitions: ReturnType<typeof genAiToolDefinitions>;
-  }> = [];
+  readonly span;
+  private finished = false;
+  private readonly generations: { span_id: string; input: unknown }[] = [];
   private readonly tools = new Map<
     string,
     { name: string; arguments: unknown; result?: unknown; status: string }
   >();
 
-  constructor(
-    readonly span: Span,
-    input: unknown,
-  ) {
+  constructor(span: Span, input: unknown) {
+    this.span = span;
     span.setAttribute("langfuse.internal.is_app_root", true);
     if (telemetryStatus().includeContent)
       span.setAttribute("langfuse.observation.input", JSON.stringify(input));
   }
 
-  private publish() {
-    if (!this.span.isRecording() || !telemetryStatus().includeContent) return;
-    this.span.setAttribute(
-      "langfuse.observation.metadata",
-      JSON.stringify({
-        evaluation_context: {
-          generations: this.generations,
-          tools: [...this.tools].map(([id, tool]) => ({ id, ...tool })),
-        },
-      }),
+  private get recording() {
+    return (
+      !this.finished &&
+      this.span.isRecording() &&
+      telemetryStatus().includeContent
     );
   }
 
-  model(transcript: TranscriptContext, spanId: string) {
-    if (!this.span.isRecording() || !telemetryStatus().includeContent) return;
-    this.generations.push({
-      span_id: spanId,
-      messages: genAiMessages(transcript.messages),
-      tool_definitions: genAiToolDefinitions(transcript.messages),
-    });
-    this.publish();
+  finish() {
+    if (this.finished) return;
+    try {
+      if (this.recording && (this.generations.length || this.tools.size))
+        this.span.setAttribute(
+          "langfuse.observation.metadata",
+          JSON.stringify({
+            evaluation_context: {
+              generations: this.generations,
+              tools: [...this.tools].map(([id, tool]) => ({ id, ...tool })),
+            },
+          }),
+        );
+    } catch {
+      console.error("Agent tracing: evaluation context serialization failed");
+    } finally {
+      this.finished = true;
+      this.generations.length = 0;
+      this.tools.clear();
+    }
   }
 
-  tool(
-    id: string,
-    value: {
-      name: string;
-      arguments: unknown;
-      result?: unknown;
-      status: string;
-    },
-  ) {
-    if (!this.span.isRecording() || !telemetryStatus().includeContent) return;
+  model(input: unknown, spanId: string) {
+    if (!this.recording) return;
+    this.generations.push({
+      span_id: spanId,
+      input,
+    });
+  }
+
+  tool(id: string, value: Parameters<Evaluation["tools"]["set"]>[1]) {
+    if (!this.recording) return;
     this.tools.set(id, value);
-    this.publish();
   }
 
   output(value: unknown) {
-    if (this.span.isRecording() && telemetryStatus().includeContent)
+    if (this.recording)
       this.span.setAttribute(
         "langfuse.observation.output",
         JSON.stringify(value),
@@ -77,7 +77,10 @@ class Evaluation {
 }
 
 class EvaluationTargets {
-  constructor(readonly values: Evaluation[]) {}
+  readonly values;
+  constructor(values: Evaluation[]) {
+    this.values = values;
+  }
 }
 
 class CombinedEvaluationTargets extends EvaluationTargets {}
@@ -109,20 +112,40 @@ export function hasEvaluationContext(parent: Context) {
   return targets(parent).length > 0;
 }
 
-export function withEvaluation<T>(span: Span, input: unknown, run: () => T) {
-  return context.with(evaluationContext(span, input, context.active()), run);
+export function finishEvaluation(span: Span, parent: Context) {
+  targets(parent)
+    .find((target) => target.span === span)
+    ?.finish();
+}
+
+export function withEvaluation<T>(
+  span: Span,
+  input: unknown,
+  run: () => Promise<T>,
+) {
+  const parent = evaluationContext(span, input, context.active());
+  return context.with(parent, async () => {
+    try {
+      return await run();
+    } finally {
+      finishEvaluation(span, parent);
+    }
+  });
 }
 
 export function recordEvaluationOutput(output: unknown) {
   targets(context.active()).at(-1)?.output(output);
 }
 
-export function recordEvaluationModel(
-  transcript: TranscriptContext,
-  span: Span,
-) {
+export function recordEvaluationIncomplete(parent: Context) {
+  for (const target of targets(parent))
+    if (target.span.isRecording())
+      target.span.setAttribute("pi.durable.observation_incomplete", true);
+}
+
+export function recordEvaluationModel(input: unknown, span: Span) {
   for (const target of targets(context.active()))
-    target.model(transcript, span.spanContext().spanId);
+    target.model(input, span.spanContext().spanId);
 }
 
 export function recordEvaluationTool(...args: Parameters<Evaluation["tool"]>) {

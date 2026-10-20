@@ -168,6 +168,7 @@ const agentContextRoute = createRoute({
 const spacesRoute = createRoute({
   getParentRoute: () => publicWorkspaceRoute,
   path: "/spaces",
+  staticData: { contentLayout: "viewport" },
   component: lazyRouteComponent(() => import("./pages/spaces/index")),
 });
 const manualSpacesRoute = createRoute({

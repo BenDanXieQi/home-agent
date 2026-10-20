@@ -7,7 +7,7 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
-    "dev": "bun --env-file=../../.env --watch scripts/dev.ts",
+    "dev": "bun --env-file=../../.env --watch --no-clear-screen scripts/dev.ts",
     "build": "bun run check-types && bun build src/main.ts --target=bun --packages=external --outdir=dist --sourcemap=external",
     "start": "bun --env-file=../../.env dist/main.js",
     "check-types": "tsc --noEmit",
@@ -19,6 +19,7 @@
     "@home-agent/backend-client": "workspace:*",
     "@home-agent/observability": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
+    "@earendil-works/chord": "catalog:",
     "radash": "12.1.1",
     "zod": "catalog:"
   },

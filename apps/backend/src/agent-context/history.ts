@@ -56,11 +56,6 @@ export function createAgentHistoryReader(options: {
   ) => {
     const { household, sightings, perception } = options;
     const access = accessHousehold(household, household.epoch);
-    if (
-      access.identity.accountId !== input.account_id ||
-      access.identity.homeId !== input.home_id
-    )
-      throw new HouseholdError("stale_session");
     if (!sightings) throw new HouseholdError("home_storage");
     const signal = AbortSignal.any([
       requestSignal,
@@ -132,8 +127,8 @@ export function createAgentHistoryReader(options: {
       let more = false;
       const envelope = {
         kind: input.kind,
-        account_id: input.account_id,
-        home_id: input.home_id,
+        account_id: access.identity.accountId,
+        home_id: access.identity.homeId,
         start: input.start,
         end: input.end,
         retention:

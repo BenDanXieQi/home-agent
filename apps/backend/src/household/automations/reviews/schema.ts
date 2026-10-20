@@ -21,8 +21,6 @@ export const automationReviews = pgTable(
   "automation_reviews",
   {
     id: uuid("id").primaryKey(),
-    accountId: text("account_id").notNull(),
-    homeId: text("home_id").notNull(),
     revision: integer("revision").notNull(),
     automationId: uuid("automation_id")
       .notNull()
@@ -43,7 +41,6 @@ export const automationReviews = pgTable(
       table.automationId,
       table.nodeId,
     ),
-    index("automation_reviews_household_idx").on(table.accountId, table.homeId),
   ],
 );
 

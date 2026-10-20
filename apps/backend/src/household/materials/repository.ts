@@ -22,12 +22,10 @@ type ReadScope = Pick<Scope, "identity" | "assertCurrent">;
 export function createMaterialRepository(db: Database) {
   const access = createHouseholdBindingAccess(db);
   const table = contextRecords;
-  const ownership = (scope: ReadScope) =>
+  const retainedMaterials = () =>
     and(
       sql`${table.kind} = 'observation'`,
       inArray(table.topic, materialTopicSchema.options),
-      sql`${table.data}->>'account_id' = ${scope.identity.accountId}`,
-      sql`${table.data}->>'home_id' = ${scope.identity.homeId}`,
       sql`${table.expiresAt} > now()`,
     );
   return {
@@ -43,11 +41,6 @@ export function createMaterialRepository(db: Database) {
       const data = supplierMaterialSchema.parse(submission.data);
       if (jsonBytes(data) > provenancePolicy.recordBytes)
         throw new HouseholdError("capacity_exceeded");
-      if (
-        data.account_id !== scope.identity.accountId ||
-        data.home_id !== scope.identity.homeId
-      )
-        throw new HouseholdError("stale_session");
       const providerIdentity =
         data.topic === "xiaoai_conversation"
           ? [data.speaker_id, data.request_id]
@@ -57,12 +50,7 @@ export function createMaterialRepository(db: Database) {
               ? [data.device_id, data.source.endpoint, data.record_id]
               : null;
       const sourceKey = providerIdentity
-        ? JSON.stringify([
-            data.account_id,
-            data.home_id,
-            data.topic,
-            ...providerIdentity,
-          ])
+        ? JSON.stringify([data.topic, ...providerIdentity])
         : null;
       return access(scope.identity, scope.assertCurrent, async (tx) => {
         const inserted = await tx
@@ -133,7 +121,7 @@ export function createMaterialRepository(db: Database) {
       scope: ReadScope,
       input: ReturnType<typeof provenanceQuerySchema.parse>,
     ) {
-      const queryHash = provenanceQueryHash("materials", scope, input);
+      const queryHash = provenanceQueryHash("materials", input);
       return access(scope.identity, scope.assertCurrent, async (tx) => {
         const time =
           input.time_basis === "source"
@@ -162,7 +150,7 @@ export function createMaterialRepository(db: Database) {
           .from(table)
           .where(
             and(
-              ownership(scope),
+              retainedMaterials(),
               sql`${time} >= ${input.start}::timestamptz and ${time} < ${input.end}::timestamptz`,
               input.topic ? eq(table.topic, input.topic) : undefined,
               input.device_id
@@ -232,7 +220,7 @@ export function createMaterialRepository(db: Database) {
         const [row] = await tx
           .select()
           .from(table)
-          .where(and(ownership(scope), eq(table.id, id)))
+          .where(and(retainedMaterials(), eq(table.id, id)))
           .limit(1);
         return row
           ? materialRecordSchema.parse({

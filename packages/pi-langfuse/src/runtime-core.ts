@@ -16,12 +16,15 @@ export interface LangfuseRuntimeInternal extends LangfuseRuntime {
 const runtimes = new WeakMap<LangfuseRuntime, LangfuseRuntimeInternal>();
 
 class ManagedLangfuseRuntime implements LangfuseRuntimeInternal {
+  readonly backend;
   private state: "open" | "closing" | "closed" = "open";
   private readonly sessionDisposers = new Set<RuntimeSessionDisposer>();
   private flushQueue = Promise.resolve();
   private shutdownPromise: Promise<void> | undefined;
 
-  constructor(readonly backend: TraceBackend) {}
+  constructor(backend: TraceBackend) {
+    this.backend = backend;
+  }
 
   get closed() {
     return this.state !== "open";

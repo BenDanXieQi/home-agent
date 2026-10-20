@@ -37,10 +37,6 @@ export const errorDefinitions = {
     status: 409,
     message: "The spatial record has changed. Reload before editing.",
   },
-  spatial_scope_changed: {
-    status: 409,
-    message: "The household binding has changed. Reload spatial data.",
-  },
   spatial_record_exists: {
     status: 409,
     message: "The spatial record already exists.",
@@ -48,6 +44,11 @@ export const errorDefinitions = {
   spatial_reference_invalid: {
     status: 400,
     message: "Select existing, valid spatial references.",
+  },
+  spatial_layout_referenced: {
+    status: 409,
+    message:
+      "Spaces or passages removed from the layout are still referenced by observation bindings.",
   },
   spatial_source_invalid: {
     status: 400,

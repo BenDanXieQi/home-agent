@@ -19,16 +19,11 @@ import { createHouseholdBindingAccess } from "../binding-repository";
 import type { accessHousehold } from "../access";
 
 type Scope = ReturnType<typeof accessHousehold>;
-const householdWhere = (scope: Scope) =>
-  and(
-    eq(automations.accountId, scope.identity.accountId),
-    eq(automations.homeId, scope.identity.homeId),
-  );
-async function find(tx: Transaction, scope: Scope, id: string) {
+async function find(tx: Transaction, id: string) {
   const [row] = await tx
     .select()
     .from(automations)
-    .where(and(householdWhere(scope), eq(automations.id, id)))
+    .where(eq(automations.id, id))
     .for("update");
   return row;
 }
@@ -76,20 +71,18 @@ export function createAutomationRepository(db: Database) {
         tx
           .select()
           .from(automations)
-          .where(householdWhere(scope))
           .orderBy(desc(automations.updatedAt))
           .limit(101),
       );
     },
     get(scope: Scope, id: string) {
-      return transaction(scope, (tx) => find(tx, scope, id));
+      return transaction(scope, (tx) => find(tx, id));
     },
     async discardPending(scope: Scope) {
       await transaction(scope, async (tx) => {
         const rows = await tx
           .select({ id: automations.id })
           .from(automations)
-          .where(householdWhere(scope))
           .for("update");
         if (rows.length)
           await tx
@@ -120,7 +113,7 @@ export function createAutomationRepository(db: Database) {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended('automation-definitions', 0))`,
         );
-        const old = await find(tx, scope, input.id);
+        const old = await find(tx, input.id);
         if (
           old &&
           old.revision === input.expected_revision + 1 &&
@@ -136,13 +129,10 @@ export function createAutomationRepository(db: Database) {
           const count = await tx
             .select({ id: automations.id })
             .from(automations)
-            .where(householdWhere(scope))
             .limit(100);
           if (count.length >= 100) throw new AppError("request_too_large");
         }
         const data = {
-          accountId: scope.identity.accountId,
-          homeId: scope.identity.homeId,
           definition: input.definition,
           enabled: input.enabled,
           revision: input.expected_revision + 1,
@@ -165,7 +155,7 @@ export function createAutomationRepository(db: Database) {
     },
     async remove(scope: Scope, id: string, revision: number) {
       return transaction(scope, async (tx) => {
-        const row = await find(tx, scope, id);
+        const row = await find(tx, id);
         if (!row) return;
         if (row.revision !== revision)
           throw new AppError("invalid_request", {
@@ -181,7 +171,7 @@ export function createAutomationRepository(db: Database) {
     ) {
       const recordingStartedAt = new Date().toISOString();
       const recorded = await transaction(scope, async (tx) => {
-        if (!(await find(tx, scope, execution.run.automationId))) return false;
+        if (!(await find(tx, execution.run.automationId))) return false;
         await tx
           .insert(automationRuns)
           .values({
@@ -217,8 +207,6 @@ export function createAutomationRepository(db: Database) {
               select r.id, r.expires_at, r.created_at,
                 row_number() over (partition by r.automation_id order by r.created_at desc) as position
               from automation_runs r
-              join automations a on a.id = r.automation_id
-              where a.account_id = ${scope.identity.accountId} and a.home_id = ${scope.identity.homeId}
             ) history
             where expires_at < now()
               and (position > 1000 or created_at < now() - interval '7 days')
@@ -234,18 +222,15 @@ export function createAutomationRepository(db: Database) {
             decision: automationDecisions,
           })
           .from(automationRuns)
-          .innerJoin(
-            automations,
-            eq(automationRuns.automationId, automations.id),
-          )
           .leftJoin(
             automationDecisions,
             eq(automationDecisions.id, automationRuns.id),
           )
           .where(
             and(
-              householdWhere(scope),
-              automationId ? eq(automations.id, automationId) : undefined,
+              automationId
+                ? eq(automationRuns.automationId, automationId)
+                : undefined,
               sql`(exists (select 1 from ${automationActions} where ${automationActions.runId} = ${automationRuns.id}) or ${automationDecisions.id} is not null)`,
             ),
           )

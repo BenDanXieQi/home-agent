@@ -90,6 +90,7 @@
   },
   "patchedDependencies": {
     "piscina@5.3.2": "patches/piscina@5.3.2.patch",
-    "@earendil-works/pi-durable@1.2.0": "patches/@earendil-works%2Fpi-durable@1.2.0.patch"
+    "@earendil-works/pi-durable@1.2.0": "patches/@earendil-works%2Fpi-durable@1.2.0.patch",
+    "@earendil-works/pi-ai@1.2.0": "patches/@earendil-works%2Fpi-ai@1.2.0.patch"
   }
 }

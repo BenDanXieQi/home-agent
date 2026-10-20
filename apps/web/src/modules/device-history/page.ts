@@ -60,11 +60,7 @@ export function applyHistoryChange(
   previous: HistoryResponse,
   change: ReturnType<typeof deviceHistoryChangeSchema.parse>,
 ) {
-  if (
-    previous.account_id !== change.account_id ||
-    previous.home_id !== change.home_id ||
-    previous.start !== change.start
-  )
+  if (previous.start !== change.start)
     throw new RequestError({ code: "invalid_response" });
   const { record_ids: _ids, removed_ids: _removed, ...page } = change;
   return shareHistoryPage(previous, {
@@ -88,11 +84,7 @@ export function appendHistoryPage(
   previous: HistoryResponse,
   page: HistoryResponse,
 ) {
-  if (
-    previous.account_id !== page.account_id ||
-    previous.home_id !== page.home_id ||
-    previous.start !== page.start
-  )
+  if (previous.start !== page.start)
     throw new RequestError({ code: "invalid_response" });
   return { ...page, records: appendRecords(previous.records, page.records) };
 }

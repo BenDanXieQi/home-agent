@@ -10,7 +10,7 @@ import {
   type StreamOptions,
 } from "@earendil-works/pi-ai";
 import { recordFailure, SpanKind, withSpan } from "./spans";
-import { genAiMessages, genAiToolDefinitions } from "./messages";
+import { genAiMessages } from "./messages";
 import { telemetryStatus } from "./telemetry";
 import { recordEvaluationModel } from "./evaluation";
 import { z } from "zod";
@@ -97,68 +97,62 @@ const reasoningEffort = z.enum([
   "max",
   "auto",
 ]);
+function lenient<T extends z.ZodType>(schema: T) {
+  return schema.optional().catch(undefined);
+}
 const modelParametersSchema = z.object({
-  max_tokens: z.number().int().nonnegative().optional().catch(undefined),
-  max_completion_tokens: z
-    .number()
-    .int()
-    .nonnegative()
-    .optional()
-    .catch(undefined),
-  max_output_tokens: tokenCount.optional().catch(undefined),
-  temperature: z.number().optional().catch(undefined),
-  top_p: z.number().optional().catch(undefined),
-  top_k: z.number().optional().catch(undefined),
-  min_p: z.number().optional().catch(undefined),
-  repetition_penalty: z.number().optional().catch(undefined),
-  frequency_penalty: z.number().optional().catch(undefined),
-  presence_penalty: z.number().optional().catch(undefined),
-  seed: z.number().int().optional().catch(undefined),
-  reasoning_effort: reasoningEffort.optional().catch(undefined),
-  thinking: z
-    .union([
+  max_tokens: lenient(tokenCount),
+  max_completion_tokens: lenient(tokenCount),
+  max_output_tokens: lenient(tokenCount),
+  temperature: lenient(z.number()),
+  top_p: lenient(z.number()),
+  top_k: lenient(z.number()),
+  min_p: lenient(z.number()),
+  repetition_penalty: lenient(z.number()),
+  frequency_penalty: lenient(z.number()),
+  presence_penalty: lenient(z.number()),
+  seed: lenient(z.number().int()),
+  reasoning_effort: lenient(reasoningEffort),
+  thinking: lenient(
+    z.union([
       reasoningEffort,
       z.object({
         type: z.enum(["enabled", "disabled", "adaptive"]),
-        budget_tokens: z.number().int().nonnegative().optional(),
+        budget_tokens: tokenCount.optional(),
         clear_thinking: z.boolean().optional(),
       }),
-    ])
-    .optional()
-    .catch(undefined),
-  reasoning: z
-    .object({
+    ]),
+  ),
+  reasoning: lenient(
+    z.object({
       effort: reasoningEffort.optional(),
       summary: z.enum(["auto", "concise", "detailed"]).optional(),
       enabled: z.boolean().optional(),
       exclude: z.boolean().optional(),
-      max_tokens: z.number().int().nonnegative().optional(),
-    })
-    .optional()
-    .catch(undefined),
-  text: z
-    .object({ verbosity: z.enum(["low", "medium", "high"]).optional() })
-    .optional()
-    .catch(undefined),
-  enable_thinking: z.boolean().optional().catch(undefined),
-  service_tier: z
-    .enum(["auto", "default", "flex", "priority"])
-    .optional()
-    .catch(undefined),
-  thinking_token_budget: z
-    .number()
-    .int()
-    .nonnegative()
-    .optional()
-    .catch(undefined),
-  chat_template_kwargs: z
-    .object({
+      max_tokens: tokenCount.optional(),
+    }),
+  ),
+  text: lenient(
+    z.object({ verbosity: z.enum(["low", "medium", "high"]).optional() }),
+  ),
+  enable_thinking: lenient(z.boolean()),
+  service_tier: lenient(z.enum(["auto", "default", "flex", "priority"])),
+  thinking_token_budget: lenient(tokenCount),
+  chat_template_kwargs: lenient(
+    z.object({
       enable_thinking: z.boolean().optional(),
       preserve_thinking: z.boolean().optional(),
-    })
-    .optional()
-    .catch(undefined),
+    }),
+  ),
 });
+const standardRequestParameters = new Set([
+  "temperature",
+  "top_p",
+  "top_k",
+  "frequency_penalty",
+  "presence_penalty",
+  "seed",
+]);
 export function observeProvider(provider: Provider) {
   return {
     ...provider,
@@ -167,26 +161,33 @@ export function observeProvider(provider: Provider) {
       context: TranscriptContext,
       options?: ApiStreamOptions<TApi>,
     ) =>
-      observeModelStream(model, context, options ?? {}, (observers) =>
-        provider.stream(model, context, Object.assign({}, options, observers)),
-      ),
+      telemetryStatus().enabled
+        ? observeModelStream(model, options ?? {}, (observers) =>
+            provider.stream(
+              model,
+              context,
+              Object.assign({}, options, observers),
+            ),
+          )
+        : provider.stream(model, context, options),
     streamSimple: (
       model: Model<Api>,
       context: TranscriptContext,
       options: SimpleStreamOptions = {},
     ) =>
-      observeModelStream(model, context, options, (observers) =>
-        provider.streamSimple(model, context, {
-          ...options,
-          ...observers,
-        }),
-      ),
+      telemetryStatus().enabled
+        ? observeModelStream(model, options, (observers) =>
+            provider.streamSimple(model, context, {
+              ...options,
+              ...observers,
+            }),
+          )
+        : provider.streamSimple(model, context, options),
   } satisfies Provider;
 }
 
 function observeModelStream(
   model: Model<Api>,
-  context: TranscriptContext,
   options: StreamOptions,
   start: (
     observers: Required<
@@ -195,6 +196,12 @@ function observeModelStream(
   ) => ReturnType<Provider["stream"]>,
 ) {
   const output = createAssistantMessageEventStream();
+  const fail = async (error: unknown) => {
+    const failed = lazyStream(model, async () => {
+      throw error;
+    });
+    for await (const event of failed) output.push(event);
+  };
   withSpan(
     `chat ${model.id}`,
     {
@@ -204,17 +211,6 @@ function observeModelStream(
       "gen_ai.request.stream": true,
     },
     async (span) => {
-      recordEvaluationModel(context, span);
-      if (span.isRecording() && telemetryStatus().includeContent) {
-        span.setAttributes({
-          "gen_ai.input.messages": JSON.stringify(
-            genAiMessages(context.messages),
-          ),
-          "gen_ai.tool.definitions": JSON.stringify(
-            genAiToolDefinitions(context.messages),
-          ),
-        });
-      }
       try {
         let reportedUsage = false;
         let completionStarted = false;
@@ -226,10 +222,25 @@ function observeModelStream(
               payload,
               requestModel,
             );
+            const request = replacement === undefined ? payload : replacement;
+            if (telemetryStatus().includeContent) {
+              try {
+                const serialized = JSON.stringify(request);
+                if (serialized !== undefined) {
+                  const input: unknown = JSON.parse(serialized);
+                  recordEvaluationModel(input, span);
+                  if (span.isRecording())
+                    span.setAttribute("langfuse.observation.input", serialized);
+                }
+              } catch {
+                console.error(
+                  "Agent tracing: model input serialization failed",
+                );
+              }
+            }
+
             if (span.isRecording()) {
-              const parameters = modelParametersSchema.safeParse(
-                replacement === undefined ? payload : replacement,
-              );
+              const parameters = modelParametersSchema.safeParse(request);
               if (parameters.success) {
                 const {
                   max_tokens,
@@ -251,14 +262,7 @@ function observeModelStream(
                     Object.entries(sampling)
                       .filter(([, value]) => value !== undefined)
                       .map(([key, value]) => [
-                        [
-                          "temperature",
-                          "top_p",
-                          "top_k",
-                          "frequency_penalty",
-                          "presence_penalty",
-                          "seed",
-                        ].includes(key)
+                        standardRequestParameters.has(key)
                           ? `gen_ai.request.${key}`
                           : `home_agent.request.${key}`,
                         typeof value === "object"
@@ -279,7 +283,8 @@ function observeModelStream(
                 (performance.now() - startedAt) / 1_000,
               );
             }
-            const chunkReportedUsage = reportsUsage(model.api, data);
+            const chunkReportedUsage =
+              !reportedUsage && reportsUsage(model.api, data);
             await options.onProviderStreamEvent?.(data, requestModel);
             if (chunkReportedUsage) reportedUsage = true;
           },
@@ -344,11 +349,13 @@ function observeModelStream(
               span.isRecording() &&
               telemetryStatus().includeContent &&
               (event.type === "done" || response.content.length > 0)
-            )
-              span.setAttribute(
-                "gen_ai.output.messages",
-                JSON.stringify(genAiMessages([response])),
-              );
+            ) {
+              const serialized = JSON.stringify(genAiMessages([response]));
+              span.setAttributes({
+                "gen_ai.output.messages": serialized,
+                "langfuse.observation.output": serialized,
+              });
+            }
             if (event.type === "error")
               recordFailure(
                 span,
@@ -369,18 +376,10 @@ function observeModelStream(
       } catch (error) {
         span.setAttribute("gen_ai.response.finish_reasons", ["error"]);
         recordFailure(span, error);
-        const failed = lazyStream(model, async () => {
-          throw error;
-        });
-        for await (const event of failed) output.push(event);
+        await fail(error);
       }
     },
     { kind: SpanKind.CLIENT },
-  ).catch(async (error: unknown) => {
-    const failed = lazyStream(model, async () => {
-      throw error;
-    });
-    for await (const event of failed) output.push(event);
-  });
+  ).catch(fail);
   return output;
 }

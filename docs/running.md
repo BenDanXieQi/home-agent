@@ -8,7 +8,9 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
-`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。数据库结构由 Drizzle 当前初始化基线建立，已登记应用的 SQL 不重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。数据库结构由 Drizzle 当前迁移集合建立，已登记应用的 SQL 不重复执行。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+
+新启动的应用使用带服务名前缀的连续日志输出，Agent 重载保留已有日志。启动命令等待 Web `/`、backend `/api/health` 和 Agent `/health` 返回成功响应，逐项显示就绪；120 秒内仍未就绪时，列出失败应用及最近的探测错误，以非零退出码结束，并停止本次新启动的应用、移除对应进程记录，保留已有应用与依赖。此检查只确认启动时的 HTTP 接口可用，不代表模型、米家或摄像头就绪。运行中修改代码导致错误时，监听进程可能继续等待修正，须查看对应服务的错误日志；命令仍在运行不表示服务仍然健康。
 
 两种模式都需要 Docker，分别用于数据库和 go2rtc 构建／运行，无需本机安装 Go。首次构建需联网。模式切换由启动命令管理，会中断现有播放；不要同时手工启动另一套 go2rtc。
 
@@ -141,6 +143,6 @@ bun run build
 
 单独启动应用不会管理依赖，也不纳入 `bun run stop` 的进程管理。
 
-仅开发 backend 感知时，先准备 go2rtc、已初始化的 backend 数据库、米家授权、FFmpeg 和感知配置，再运行 `bun run --cwd apps/backend dev`；需要页面时按下方 Web 启动命令运行。根目录 `db:init` 应用当前初始化基线并检查 backend 数据库，`db:migrate` 同样使用原生 Drizzle 应用和检查；Agent 不需要数据库初始化。
+仅开发 backend 感知时，先准备 go2rtc、已初始化的 backend 数据库、米家授权、FFmpeg 和感知配置，再运行 `bun run --cwd apps/backend dev`；需要页面时按下方 Web 启动命令运行。根目录 `db:init` 应用当前迁移集合并检查 backend 数据库，`db:migrate` 同样使用原生 Drizzle 应用和检查；Agent 不需要数据库初始化。
 
 `bun run check` 执行格式、lint 和类型检查，覆盖各 workspace 及根目录 `scripts/`。共享 lint 与 TypeScript 配置分别由 `@home-agent/oxlint-config` 和 `@home-agent/typescript-config` 提供，各包通过 workspace 依赖引用；Turbo 负责检查任务和构建依赖，前端构建先完成类型检查。

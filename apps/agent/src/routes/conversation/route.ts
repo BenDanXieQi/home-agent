@@ -3,38 +3,32 @@ import { chatInputSchema, chatResponseSchema } from "../../assistant/contracts";
 import { AppError } from "@home-agent/api/errors";
 import { validateJson } from "@home-agent/api/errors/hono";
 import { createConversationInteraction } from "../../assistant/conversation";
+import { streamOperation } from "@home-agent/api/http/stream-operation";
 
 export function createRoutes({
   assistant,
-  budget,
-}: Pick<RouteContext, "assistant" | "budget">) {
+  harness,
+}: Pick<RouteContext, "assistant" | "harness">) {
   const conversation = assistant
-    ? createConversationInteraction(assistant.root, {
-        sessionId: assistant.sessionId,
-        tracing: assistant.tracing,
-        timeoutMs: budget.timeoutMs,
-      })
+    ? createConversationInteraction(assistant, harness)
     : undefined;
 
-  return createRouteApp().post(
-    "/chat",
-    validateJson(chatInputSchema),
-    async (c) => {
-      if (!conversation) throw new AppError("model_not_configured");
+  return createRouteApp().post("/chat", validateJson(chatInputSchema), (c) => {
+    if (!conversation) throw new AppError("model_not_configured");
 
-      c.env.timeout(c.req.raw, 0);
+    c.env.timeout(c.req.raw, 0);
+    return streamOperation(c, async (signal, receive) => {
       const answer = await conversation.submitAndWait(
         c.req.valid("json").message,
-        c.req.raw.signal,
+        signal,
+        receive,
       );
-
       const response = chatResponseSchema.safeParse({ answer });
       if (!response.success)
         throw new AppError("agent_execution_failed", {
           cause: response.error,
         });
-
-      return c.json(response.data);
-    },
-  );
+      return response.data;
+    });
+  });
 }

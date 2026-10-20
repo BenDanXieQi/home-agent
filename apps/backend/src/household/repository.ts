@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   directorySchema,
   deviceSchema,
@@ -18,7 +18,10 @@ import {
   type Transaction,
 } from "../db/transaction-outcome";
 
-import { householdBindingLock } from "./binding-repository";
+import {
+  householdBindingLock,
+  assertHouseholdBinding,
+} from "./binding-repository";
 
 const storedDirectorySchema = directorySchema.extend({
   device: z.record(
@@ -35,12 +38,6 @@ const storedDirectorySchema = directorySchema.extend({
   ),
 });
 const directoryLockKey = "household_directory";
-function directoryIdentity(accountId: string, homeId: string) {
-  return and(
-    eq(householdDirectories.accountId, accountId),
-    eq(householdDirectories.homeId, homeId),
-  );
-}
 export function createHouseholdRepository(db: Database) {
   const bindingTransaction = createLockedTransactions(
     db,
@@ -54,13 +51,11 @@ export function createHouseholdRepository(db: Database) {
     });
   async function readStored(
     tx: Parameters<Parameters<typeof transaction>[1]>[0],
-    accountId: string,
-    homeId: string,
   ) {
     const [row] = await tx
       .select()
       .from(householdDirectories)
-      .where(directoryIdentity(accountId, homeId));
+      .where(eq(householdDirectories.id, 1));
     return row
       ? {
           directory: storedDirectorySchema.parse(row.directory),
@@ -70,9 +65,9 @@ export function createHouseholdRepository(db: Database) {
   }
   const write = createConfirmedWriter(transaction);
   return {
-    async read(accountId: string, homeId: string) {
+    async read() {
       const row = await transaction(directoryLockKey, (tx) =>
-        readStored(tx, accountId, homeId),
+        readStored(tx),
       ).catch(() => {
         throw new HouseholdError("home_storage");
       });
@@ -121,13 +116,12 @@ export function createHouseholdRepository(db: Database) {
           directoryLockKey,
           async (tx, beforeWrite) => {
             assertCurrent();
-            const [binding] = await tx
+            const bindings = await tx
               .select()
               .from(mijiaHomeSelections)
-              .limit(1);
-            if (binding?.accountKey !== accountId || binding.homeId !== homeId)
-              throw new HouseholdError("stale_session");
-            const row = await readStored(tx, accountId, homeId);
+              .limit(2);
+            assertHouseholdBinding({ accountId, homeId }, bindings);
+            const row = await readStored(tx);
             assertCurrent();
             if (row && isDeepStrictEqual(row.directory, data))
               return row.savedAt;
@@ -135,8 +129,7 @@ export function createHouseholdRepository(db: Database) {
             beforeWrite();
             if (!row) {
               await tx.insert(householdDirectories).values({
-                accountId,
-                homeId,
+                id: 1,
                 directory: data,
                 updatedAt,
               });
@@ -162,13 +155,13 @@ export function createHouseholdRepository(db: Database) {
               await tx
                 .update(householdDirectories)
                 .set({ directory: expression, updatedAt })
-                .where(directoryIdentity(accountId, homeId));
+                .where(eq(householdDirectories.id, 1));
             }
             assertCurrent();
             return updatedAt.toISOString();
           },
           async (tx) => {
-            const row = await readStored(tx, accountId, homeId);
+            const row = await readStored(tx);
             return row && isDeepStrictEqual(row.directory, data)
               ? { committed: true, value: row.savedAt }
               : { committed: false };

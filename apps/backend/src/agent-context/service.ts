@@ -358,15 +358,10 @@ export function createAgentContextService(options: {
       throw new HouseholdError("capacity_exceeded");
     return ready(data, data.records.length < candidates.length);
   });
-  const spatialLane = lane("spatial", async ({ identity, assertCurrent }) => {
+  const spatialLane = lane("spatial", async ({ assertCurrent }) => {
     if (!spatial) return unavailable("storage_unavailable");
     const result = await spatial.read();
     assertCurrent();
-    if (
-      result.scope?.account_id !== identity.accountId ||
-      result.scope?.home_id !== identity.homeId
-    )
-      throw new HouseholdError("stale_session");
     return ready(agentContextDataSchemas.spatial.parse(result));
   });
   const householdLane = lane("household", async ({ snapshot }) => {

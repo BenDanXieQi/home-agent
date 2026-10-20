@@ -1,11 +1,13 @@
+import { consumeOperationStream } from "@home-agent/api/http/operation-stream";
+import { AppError } from "@home-agent/api/errors";
 import type { z } from "zod";
 import {
   chatInputSchema,
-  chatResponseSchema,
+  chatStreamContract,
 } from "@home-agent/agent/assistant/contracts";
 import {
   agentWorkflowInputSchema,
-  agentWorkflowResultSchema,
+  agentWorkflowStreamContract,
 } from "@home-agent/agent/workflows";
 import {
   agentReceiptIndexSchema,
@@ -14,24 +16,24 @@ import {
   agentReceiptQuerySchema,
 } from "@home-agent/agent/context/contracts";
 import { requestJson } from "@home-agent/api/http/request-json";
-import { tracedFetch, withAgentTrace } from "@home-agent/observability";
+import {
+  bindTraceSession,
+  tracedFetch,
+  withAgentTrace,
+} from "@home-agent/observability";
+
+export const AGENT_OPERATION_TIMEOUT_MS = 20 * 60_000;
 
 export function createAgentClient(options: {
   readAgentUrl: () => Promise<string>;
   timeoutMs: number;
 }) {
-  function request<T>(
-    path: string,
-    schema: z.ZodType<T>,
-    signal: AbortSignal,
-    init: Pick<RequestInit, "method" | "body" | "headers"> = {},
-  ) {
+  function request<T>(path: string, schema: z.ZodType<T>, signal: AbortSignal) {
     return requestJson(
       async (requestSignal) => {
         const url = new URL(path, await options.readAgentUrl());
         requestSignal.throwIfAborted();
         return tracedFetch({ from: "backend", to: "agent" }, url, {
-          ...init,
           redirect: "error",
           signal: requestSignal,
         });
@@ -45,27 +47,83 @@ export function createAgentClient(options: {
     );
   }
 
+  function operation<Progress, Result>(
+    path: string,
+    contract: { progress: z.ZodType<Progress>; result: z.ZodType<Result> },
+    input: unknown,
+    requestSignal: AbortSignal,
+    receive?: (progress: Progress, signal: AbortSignal) => void | Promise<void>,
+  ) {
+    return withAgentTrace(async () => {
+      const timeout = AbortSignal.timeout(AGENT_OPERATION_TIMEOUT_MS);
+      const signal = AbortSignal.any([requestSignal, timeout]);
+      try {
+        signal.throwIfAborted();
+        return await consumeOperationStream(
+          contract,
+          async (streamSignal) => {
+            const url = new URL(path, await options.readAgentUrl());
+            streamSignal.throwIfAborted();
+            return tracedFetch({ from: "backend", to: "agent" }, url, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(input),
+              signal: streamSignal,
+              redirect: "error",
+            });
+          },
+          signal,
+          async (progress) => {
+            await receive?.(progress, signal);
+          },
+        );
+      } catch (cause) {
+        if (requestSignal.aborted)
+          throw new AppError("request_cancelled", { cause });
+        if (timeout.aborted) throw new AppError("agent_timeout", { cause });
+        if (cause instanceof AppError) throw cause;
+        throw new AppError("agent_unavailable", { cause });
+      }
+    });
+  }
+
   return {
-    chat(input: z.output<typeof chatInputSchema>, signal: AbortSignal) {
-      return withAgentTrace(() =>
-        request("/api/chat", chatResponseSchema, signal, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(input),
-        }),
+    chat(
+      input: z.output<typeof chatInputSchema>,
+      signal: AbortSignal,
+      receive?: (
+        progress: z.output<typeof chatStreamContract.progress>,
+        signal: AbortSignal,
+      ) => void | Promise<void>,
+    ) {
+      return operation(
+        "/api/chat",
+        chatStreamContract,
+        input,
+        signal,
+        async (progress, operationSignal) => {
+          bindTraceSession(progress.session_id);
+          await receive?.(progress, operationSignal);
+        },
       );
     },
     workflow(
       input: z.output<typeof agentWorkflowInputSchema>,
       signal: AbortSignal,
+      receive?: (
+        progress: z.output<typeof agentWorkflowStreamContract.progress>,
+        signal: AbortSignal,
+      ) => void | Promise<void>,
     ) {
-      const body = JSON.stringify(input);
-      return withAgentTrace(() =>
-        request("/api/workflows", agentWorkflowResultSchema, signal, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body,
-        }),
+      return operation(
+        "/api/workflows",
+        agentWorkflowStreamContract,
+        input,
+        signal,
+        async (progress, operationSignal) => {
+          bindTraceSession(progress.progress.session_id);
+          await receive?.(progress, operationSignal);
+        },
       );
     },
     receipts(

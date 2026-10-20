@@ -1,15 +1,21 @@
 import { useEffect, useRef, useState } from "react";
-import { chatResponseSchema } from "@home-agent/agent/assistant/contracts";
-import { requestJson } from "../../api/client";
+import type { z } from "zod";
+import { chatStreamContract } from "@home-agent/backend-client";
+import { requestOperationStream } from "../../api/client";
 import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
-import { MarkdownAnswer } from "./MarkdownAnswer";
+import { MarkdownAnswer } from "../../components/agent/MarkdownAnswer";
+import { StreamingAnswer } from "../../components/agent/StreamingAnswer";
 
 export default function AgentPage() {
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [startedAt, setStartedAt] = useState(0);
+  const [progress, setProgress] = useState<z.infer<
+    typeof chatStreamContract.progress
+  > | null>(null);
   const pending = useRef<AbortController | null>(null);
   useEffect(
     () => () => {
@@ -21,15 +27,17 @@ export default function AgentPage() {
     if (pending.current || !message.trim()) return;
     const controller = new AbortController();
     pending.current = controller;
+    setStartedAt(Date.now());
+    setProgress(null);
     setBusy(true);
     setAnswer("");
     setError("");
     try {
-      const result = await requestJson(
+      const result = await requestOperationStream(
         (client, options) =>
           client.api.chat.$post({ json: { message } }, options),
-        chatResponseSchema,
-        { signal: controller.signal, timeoutMs: null },
+        chatStreamContract,
+        { signal: controller.signal, receive: setProgress },
       );
       if (!controller.signal.aborted) setAnswer(result.answer);
     } catch {
@@ -76,19 +84,17 @@ export default function AgentPage() {
           >
             发送
           </Button>
-          {busy ? (
-            <Button
-              type="button"
-              onClick={() => {
-                pending.current?.abort();
-              }}
-            >
-              停止等待
-            </Button>
-          ) : null}
         </div>
       </form>
-      {busy ? <output className="text-sm text-muted">正在回答…</output> : null}
+      {busy ? (
+        <StreamingAnswer
+          progress={progress}
+          startedAt={startedAt}
+          onStop={() => pending.current?.abort()}
+          pendingLabel="正在回答"
+          stopLabel="停止等待"
+        />
+      ) : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {answer ? (
         <div aria-live="polite">

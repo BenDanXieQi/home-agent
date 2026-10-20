@@ -46,6 +46,7 @@
       "name": "@home-agent/agent-host",
       "version": "0.0.0",
       "dependencies": {
+        "@earendil-works/chord": "catalog:",
         "@earendil-works/pi-ai": "catalog:",
         "@home-agent/agent": "workspace:*",
         "@home-agent/backend-client": "workspace:*",
@@ -183,6 +184,7 @@
       "name": "@home-agent/backend-client",
       "version": "0.0.0",
       "dependencies": {
+        "@home-agent/agent": "workspace:*",
         "hono": "catalog:",
       },
       "devDependencies": {
@@ -193,6 +195,7 @@
         "oxlint": "catalog:",
         "oxlint-tsgolint": "catalog:",
         "typescript": "catalog:",
+        "vite": "catalog:",
       },
     },
     "packages/observability": {
@@ -260,6 +263,7 @@
   },
   "patchedDependencies": {
     "@earendil-works/pi-durable@1.2.0": "patches/@earendil-works%2Fpi-durable@1.2.0.patch",
+    "@earendil-works/pi-ai@1.2.0": "patches/@earendil-works%2Fpi-ai@1.2.0.patch",
     "piscina@5.3.2": "patches/piscina@5.3.2.patch",
   },
   "catalog": {

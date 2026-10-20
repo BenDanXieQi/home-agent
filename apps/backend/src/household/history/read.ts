@@ -14,7 +14,6 @@ export function createDeviceHistoryReader(
   timeoutMs: number,
 ) {
   async function withinRequest<T>(
-    input: ReturnType<typeof deviceHistoryQuerySchema.parse>,
     requestSignal: AbortSignal,
     run: (
       operation: NonNullable<typeof query>,
@@ -22,11 +21,6 @@ export function createDeviceHistoryReader(
     ) => Promise<T>,
   ) {
     const access = accessHousehold(household, household.epoch);
-    if (
-      access.identity.accountId !== input.account_id ||
-      access.identity.homeId !== input.home_id
-    )
-      throw new HouseholdError("stale_session");
     if (!query) throw new HouseholdError("home_storage");
     const signal = AbortSignal.any([
       requestSignal,
@@ -70,7 +64,7 @@ export function createDeviceHistoryReader(
     requestSignal: AbortSignal,
     transportBytes: Parameters<ReturnType<typeof createDeviceHistoryQuery>>[2],
   ) => {
-    return withinRequest(input, requestSignal, (operation, context) =>
+    return withinRequest(requestSignal, (operation, context) =>
       operation(context, input, transportBytes),
     );
   };
@@ -80,7 +74,7 @@ export function createDeviceHistoryReader(
       requestSignal: AbortSignal,
       receive: Parameters<NonNullable<typeof query>["export"]>[3],
     ) {
-      return withinRequest(input, requestSignal, (operation, context) =>
+      return withinRequest(requestSignal, (operation, context) =>
         operation.export(context, input, jsonBytes, receive),
       );
     },

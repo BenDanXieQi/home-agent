@@ -1,10 +1,7 @@
 const pending = new Set<Promise<void>>();
 
 export function beginOperation() {
-  let resolve!: () => void;
-  const operation = new Promise<void>((done) => {
-    resolve = done;
-  });
+  const { promise: operation, resolve } = Promise.withResolvers<void>();
   pending.add(operation);
   return () => {
     pending.delete(operation);

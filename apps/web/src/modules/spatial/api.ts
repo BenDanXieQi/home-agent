@@ -1,6 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
 import {
-  sameSpatialScope,
   spaceSchema,
   passageSchema,
   observationBindingSchema,
@@ -11,8 +10,10 @@ import {
   type observationBindingSaveSchema,
   type observationBindingEnabledSchema,
   type spatialDeleteSchema,
+  type spatialLayoutApplySchema,
 } from "@home-agent/api/spatial";
 import { requestJson } from "../../api/client";
+import { RequestError } from "../../api/errors";
 
 export function spatialQueryOptions(scope: string) {
   return queryOptions({
@@ -28,6 +29,31 @@ export function spatialQueryOptions(scope: string) {
   });
 }
 export type SpatialSnapshot = ReturnType<typeof spatialSnapshotSchema.parse>;
+
+export function applySpatialLayout(
+  input: ReturnType<typeof spatialLayoutApplySchema.parse>,
+) {
+  return requestJson(
+    (api, options) =>
+      api.api.spatial.layout.apply.$post({ json: input }, options),
+    spatialSnapshotSchema,
+  );
+}
+
+/** Whether a failed write may still have been applied and needs a re-read. */
+export function unconfirmedWrite(error: unknown) {
+  return (
+    error instanceof RequestError &&
+    ((error.status !== undefined && error.status >= 500) ||
+      [
+        "network_error",
+        "request_timeout",
+        "request_cancelled",
+        "invalid_response",
+        "spatial_storage_unavailable",
+      ].includes(error.details.code))
+  );
+}
 export type SpatialSaveCommand =
   | { resource: "space"; input: ReturnType<typeof spaceSaveSchema.parse> }
   | { resource: "passage"; input: ReturnType<typeof passageSaveSchema.parse> }
@@ -133,8 +159,6 @@ export function confirmSpatialCommand(
   command: SpatialCommand,
   snapshot: SpatialSnapshot,
 ) {
-  if (!sameSpatialScope(command.input.scope, snapshot.scope))
-    return "scope-changed" as const;
   const records =
     command.resource === "space"
       ? snapshot.spaces
@@ -150,8 +174,7 @@ export function confirmSpatialCommand(
         ? { enabled: command.input.enabled }
         : Object.fromEntries(
             Object.entries(command.input).filter(
-              ([key]) =>
-                !["scope", "operation", "expected_updated_at"].includes(key),
+              ([key]) => !["operation", "expected_updated_at"].includes(key),
             ),
           );
     const values = new Map(Object.entries(actual));

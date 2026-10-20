@@ -54,14 +54,13 @@ export const mijiaHomeSelections = pgTable("mijia_home_selections", {
 export const householdDirectories = pgTable(
   "household_directories",
   {
-    accountId: text("account_id").notNull(),
-    homeId: text("home_id").notNull(),
+    id: integer("id").primaryKey().default(1),
     directory: jsonb("directory").notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (table) => [primaryKey({ columns: [table.accountId, table.homeId] })],
+  (table) => [check("household_directories_singleton", sql`${table.id} = 1`)],
 );
 
 export const spaces = pgTable(
@@ -227,22 +226,8 @@ export const contextRecords = pgTable(
     index("context_records_material_source_time_idx")
       .on(table.topic, table.sourceOccurredAt, table.id)
       .where(sql`${table.kind} = 'observation'`),
-    index("context_records_material_scope_source_time_idx")
-      .on(
-        sql`(${table.data}->>'account_id')`,
-        sql`(${table.data}->>'home_id')`,
-        table.sourceOccurredAt,
-        table.id,
-      )
-      .where(sql`${table.kind} = 'observation'`),
-    index("context_records_material_scope_time_idx")
-      .on(
-        sql`(${table.data}->>'account_id')`,
-        sql`(${table.data}->>'home_id')`,
-        table.topic,
-        table.occurredAt,
-        table.id,
-      )
+    index("context_records_material_time_idx")
+      .on(table.topic, table.occurredAt, table.id)
       .where(sql`${table.kind} = 'observation'`),
     index("context_records_topic_expiry_idx").on(table.topic, table.expiresAt),
     index("context_records_occurred_at_id_idx").on(table.occurredAt, table.id),
@@ -511,26 +496,18 @@ export const deviceObservations = pgTable(
   ],
 );
 
-export const automations = pgTable(
-  "automations",
-  {
-    id: uuid("id").primaryKey(),
-    accountId: text("account_id").notNull(),
-    homeId: text("home_id").notNull(),
-    revision: integer("revision").notNull(),
-    enabled: boolean("enabled").notNull(),
-    definition: jsonb("definition").$type<AutomationDefinition>().notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
-  },
-  (table) => [
-    index("automations_household_idx").on(table.accountId, table.homeId),
-  ],
-);
+export const automations = pgTable("automations", {
+  id: uuid("id").primaryKey(),
+  revision: integer("revision").notNull(),
+  enabled: boolean("enabled").notNull(),
+  definition: jsonb("definition").$type<AutomationDefinition>().notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
 
 export const automationRuns = pgTable(
   "automation_runs",
@@ -608,19 +585,11 @@ export const automationModelAdmissions = pgTable(
   "automation_model_admissions",
   {
     id: uuid("id").primaryKey(),
-    accountId: text("account_id").notNull(),
-    homeId: text("home_id").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
-  (table) => [
-    index("automation_model_budget_idx").on(
-      table.accountId,
-      table.homeId,
-      table.createdAt,
-    ),
-  ],
+  (table) => [index("automation_model_budget_idx").on(table.createdAt)],
 );
 
 export {

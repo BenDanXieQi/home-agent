@@ -151,8 +151,6 @@ export function createWindowHistory(options: {
       .filter(
         (item) =>
           item.summary.run.scopeEpoch === household.epoch &&
-          item.access.identity.accountId === grant.identity.accountId &&
-          item.access.identity.homeId === grant.identity.homeId &&
           item.summary.summaryUntil > Date.now() &&
           authorized(item.summary),
       )

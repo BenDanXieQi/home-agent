@@ -51,8 +51,6 @@ export const deviceHistoryReportSchema = z.discriminatedUnion("kind", [
 ]);
 export const deviceHistoryQuerySchema = z
   .strictObject({
-    account_id: z.string().min(1).max(512),
-    home_id: z.string().min(1).max(128),
     properties: z
       .array(deviceHistoryPropertySchema)
       .min(1)
@@ -97,8 +95,8 @@ export const deviceHistoryObservationSchema = z.discriminatedUnion("kind", [
   online.extend(observation.shape),
 ]);
 const response = z.object({
-  account_id: deviceHistoryQuerySchema.shape.account_id,
-  home_id: deviceHistoryQuerySchema.shape.home_id,
+  account_id: z.string().min(1).max(512),
+  home_id: z.string().min(1).max(128),
   start: deviceHistoryQuerySchema.shape.start,
   end: deviceHistoryQuerySchema.shape.end,
   retention_days: z.literal(deviceHistoryPolicy.retentionDays),

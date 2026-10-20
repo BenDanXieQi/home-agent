@@ -165,7 +165,7 @@ function ObservationReference({
   >["data"]["records"][number];
   scope: z.infer<typeof agentContextScopeSchema>;
 }) {
-  const materials = useObservationMaterials(scope, record);
+  const materials = useObservationMaterials(scope.scope_epoch, record);
   const available = materials.flatMap(({ query }) =>
     query.isSuccess ? [query.data] : [],
   );

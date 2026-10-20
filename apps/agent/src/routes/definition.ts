@@ -1,5 +1,4 @@
 import { createFactory } from "hono/factory";
-import type { createAssistant } from "../assistant/assistant";
 import type { createConversationInteraction } from "../assistant/conversation";
 import type { createContextReceiver } from "../context/receiver";
 import type { configureWorkflows } from "../workflows";
@@ -12,18 +11,12 @@ export type RouteContext = {
     ReturnType<typeof createContextReceiver>,
     "snapshot" | "receiptIndex" | "journalId" | "receipt"
   >;
-  assistant:
-    | Pick<
-        NonNullable<Awaited<ReturnType<typeof createAssistant>>>,
-        "root" | "sessionId" | "tracing"
-      >
-    | undefined;
-  budget: Pick<
-    Parameters<typeof createConversationInteraction>[1],
-    "timeoutMs"
-  >;
+  assistant: Parameters<typeof createConversationInteraction>[0] | undefined;
+  harness: Parameters<typeof createConversationInteraction>[1];
   workflows: Pick<
-    ReturnType<ReturnType<typeof configureWorkflows>["create"]>,
+    NonNullable<
+      ReturnType<ReturnType<typeof configureWorkflows>["register"]>["instance"]
+    >,
     "run"
   >;
 };

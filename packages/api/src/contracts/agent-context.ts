@@ -67,8 +67,8 @@ export const agentContextPolicy = {
   historyTimeoutMs: 30_000,
 } as const;
 export const agentContextScopeSchema = z.strictObject({
-  account_id: deviceHistoryQuerySchema.shape.account_id,
-  home_id: deviceHistoryQuerySchema.shape.home_id,
+  account_id: deviceHistoryResponseSchema.shape.account_id,
+  home_id: deviceHistoryResponseSchema.shape.home_id,
   scope_epoch: stateVersionSchema.shape.scope_epoch,
 });
 export const memberSightingRecordSchema = z.object({
@@ -183,7 +183,7 @@ export const agentContextDataSchemas = {
     records: z.array(commandRecordSchema),
     complete_audit: z.literal(false),
   }),
-  spatial: spatialSnapshotSchema.omit({ scope: true }),
+  spatial: spatialSnapshotSchema,
   household: projectionSchema
     .pick({ household: true, home: true, room: true, device: true })
     .extend({ specs: z.record(z.string(), specSchema) }),
@@ -340,8 +340,6 @@ const sources = z
     ),
   );
 const history = z.strictObject({
-  account_id: deviceHistoryQuerySchema.shape.account_id,
-  home_id: deviceHistoryQuerySchema.shape.home_id,
   start: deviceHistoryQuerySchema.shape.start,
   end: deviceHistoryQuerySchema.shape.end,
   limit: deviceHistoryQuerySchema.shape.limit,
@@ -370,13 +368,17 @@ export const perceptionWindowsHistoryQuerySchema = history
     message: "start must precede end",
   });
 export const agentHistoryQuerySchema = z.discriminatedUnion("kind", [
-  deviceHistoryQuerySchema.safeExtend({ kind: z.literal("device_reports") }),
+  deviceHistoryQuerySchema.safeExtend({
+    kind: z.literal("device_reports"),
+  }),
   memberSightingsHistoryQuerySchema,
   perceptionWindowsHistoryQuerySchema,
 ]);
-const historyResponse = history
-  .omit({ limit: true, cursor: true })
-  .extend({ next_cursor: z.string().nullable() });
+const historyResponse = history.omit({ limit: true, cursor: true }).extend({
+  account_id: deviceHistoryResponseSchema.shape.account_id,
+  home_id: deviceHistoryResponseSchema.shape.home_id,
+  next_cursor: z.string().nullable(),
+});
 export const memberSightingsRetention = {
   storage: "database",
   attribution: "current_revision",
@@ -420,18 +422,15 @@ export const agentHistoryResponseSchema = z.discriminatedUnion("kind", [
 ]);
 
 export const agentMaterialQuerySchema = z.strictObject({
-  scope: agentContextScopeSchema,
   kind: z.enum(["member_sighting", "perception_window"]),
   id: z.uuid(),
 });
 export const agentMaterialResponseSchema = z.discriminatedUnion("kind", [
   z.object({
-    scope: agentContextScopeSchema,
     kind: z.literal("member_sighting"),
     record: memberSightingRecordSchema,
   }),
   z.object({
-    scope: agentContextScopeSchema,
     kind: z.literal("perception_window"),
     window: windowDetailSchema,
   }),

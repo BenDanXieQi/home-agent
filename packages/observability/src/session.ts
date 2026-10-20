@@ -23,25 +23,48 @@ export function traceSessionId(value: unknown) {
 class RequestSession {
   id: string | undefined;
   private closed = false;
+  private readonly spans = new Set<Span>();
+  completion: Promise<void> | undefined;
 
-  constructor(private span: Span | undefined) {}
+  constructor(span: Span | undefined) {
+    if (span) this.spans.add(span);
+  }
+
+  attach(span: Span) {
+    this.spans.add(span);
+    if (this.id) span.setAttribute("session.id", this.id);
+  }
+
+  detach(span: Span) {
+    this.spans.delete(span);
+  }
+
+  holdUntil(completion: Promise<void>) {
+    this.completion = completion;
+  }
 
   bind(id: string) {
     if (this.closed) return;
     if (this.id !== undefined && this.id !== id) return;
     this.id = id;
-    if (this.span?.isRecording()) this.span.setAttribute("session.id", id);
+    for (const span of this.spans)
+      if (span.isRecording()) span.setAttribute("session.id", id);
   }
 
   close() {
     this.closed = true;
-    this.span = undefined;
+    this.spans.clear();
   }
 }
 
 export function requestSession(parent = context.active()) {
   const value = parent.getValue(key);
   return value instanceof RequestSession ? value : undefined;
+}
+
+/** A finite response stream keeps its request session alive until the producer settles. */
+export function trackHttpStream(completion: Promise<void>) {
+  requestSession()?.holdUntil(completion);
 }
 
 export function currentTraceSessionId(parent = context.active()) {

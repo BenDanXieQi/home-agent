@@ -5,5 +5,6 @@ export type {
   Observation,
   ObservationAttributes,
   ObservationType,
+  ObservationSource,
   TraceBackend,
 } from "./tracing";

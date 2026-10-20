@@ -41,7 +41,7 @@ export function watchModules(
   let generation = Promise.resolve();
   const watchers = directories.map((directory) =>
     watch(directory, { recursive: true }, (_event, filename) => {
-      if (filename?.endsWith("registry.generated.ts")) return;
+      if (filename?.endsWith(".generated.ts")) return;
       generation = generation.then(generate).catch((error) => {
         console.error("Failed to regenerate modules", error);
         process.exit(1);

@@ -1,15 +1,29 @@
-import { spatialPlanningInputSchema } from "@home-agent/agent/workflows/spatial-planning";
-import { agentWorkflowResultSchema } from "@home-agent/agent/workflows";
-import { requestJson } from "../../api/client";
+import type { z } from "zod";
+import type { InferRequestType } from "hono/client";
+import {
+  agentWorkflowStreamContracts,
+  type BackendClient,
+} from "@home-agent/backend-client";
+import { requestOperationStream } from "../../api/client";
 import { RequestError } from "../../api/errors";
 
 export async function runSpatialPlanning(
   scope: string,
-  input: ReturnType<typeof spatialPlanningInputSchema.parse>,
+  input: Exclude<
+    Extract<
+      InferRequestType<BackendClient["api"]["workflows"]["$post"]>["json"],
+      { workflow: "spatial-planning" }
+    >["input"],
+    { action: "close" }
+  >,
   signal: AbortSignal,
-  requestOptions: { keepalive?: boolean } = {},
+  receive?: (
+    progress: z.infer<
+      (typeof agentWorkflowStreamContracts)["spatial-planning"]["progress"]
+    >["progress"],
+  ) => void | Promise<void>,
 ) {
-  const response = await requestJson(
+  const response = await requestOperationStream(
     (api, options) =>
       api.api.workflows.$post(
         {
@@ -17,20 +31,32 @@ export async function runSpatialPlanning(
         },
         options,
       ),
-    agentWorkflowResultSchema,
-    { signal, timeoutMs: null, ...requestOptions },
+    agentWorkflowStreamContracts["spatial-planning"],
+    {
+      signal,
+      receive: receive ? ({ progress }) => receive(progress) : undefined,
+    },
   );
-  if (response.workflow !== "spatial-planning")
+  if (response.result.status === "closed")
     throw new RequestError({ code: "invalid_response" });
   return response.result;
 }
 
 export async function closeSpatialPlanning(scope: string, sessionId: string) {
   try {
-    await runSpatialPlanning(
-      scope,
-      { action: "close", session_id: sessionId },
-      new AbortController().signal,
+    await requestOperationStream(
+      (api, options) =>
+        api.api.workflows.$post(
+          {
+            json: {
+              scope_epoch: scope,
+              workflow: "spatial-planning",
+              input: { action: "close", session_id: sessionId },
+            },
+          },
+          options,
+        ),
+      agentWorkflowStreamContracts["spatial-planning"],
       { keepalive: true },
     );
   } catch (cause) {
@@ -43,9 +69,16 @@ export async function closeSpatialPlanning(scope: string, sessionId: string) {
   }
 }
 
+export const planningImageTypes = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+] as const;
+export const planningImageLimit = 4;
+
 export async function readPlanningImage(file: File) {
-  if (!["image/jpeg", "image/png", "image/webp"].includes(file.type))
-    throw new Error("请选择 JPEG、PNG 或 WebP 图片。");
+  const mimeType = planningImageTypes.find((type) => type === file.type);
+  if (!mimeType) throw new Error("请选择 JPEG、PNG 或 WebP 图片。");
   const url = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.addEventListener(
@@ -63,12 +96,8 @@ export async function readPlanningImage(file: File) {
     );
     reader.readAsDataURL(file);
   });
-  const image = spatialPlanningInputSchema.options[1].shape.images
-    .unwrap()
-    .element.parse({
-      type: "image",
-      mime_type: file.type,
-      data: url.slice(url.indexOf(",") + 1),
-    });
+  const data = url.slice(url.indexOf(",") + 1);
+  if (!data) throw new Error("图片读取失败。");
+  const image = { type: "image" as const, mime_type: mimeType, data };
   return { name: file.name, preview: url, image };
 }

@@ -12,13 +12,20 @@ import { basename, resolve as resolvePath } from "node:path";
 import { root, runtime } from "./go2rtc-runtime";
 
 const applications = [
-  { name: "Web", package: "web", host: "127.0.0.1", port: 5173 },
+  {
+    name: "Web",
+    package: "web",
+    host: "127.0.0.1",
+    port: 5173,
+    healthPath: "/",
+  },
   // oxlint-disable-next-line turbo/no-undeclared-env-vars
   {
     name: "backend",
     package: "backend",
     host: process.env.BACKEND_HOST || "127.0.0.1",
     port: Number(process.env.BACKEND_PORT || 3000),
+    healthPath: "/api/health",
   },
   // oxlint-disable-next-line turbo/no-undeclared-env-vars
   {
@@ -26,6 +33,7 @@ const applications = [
     package: "agent-host",
     host: process.env.AGENT_HOST || "127.0.0.1",
     port: Number(process.env.AGENT_PORT || 1811),
+    healthPath: "/health",
   },
 ];
 
@@ -158,6 +166,48 @@ export async function pendingApplications() {
   return pending;
 }
 
+async function waitForApplications(
+  apps: (typeof applications)[number][],
+  signal: AbortSignal,
+) {
+  const pending = new Map(apps.map((app) => [app, "尚未响应"]));
+  const deadline = performance.now() + 120_000;
+  while (pending.size > 0) {
+    signal.throwIfAborted();
+    await Promise.all(
+      Array.from(pending.keys(), async (app) => {
+        const url = new URL(app.healthPath, `http://${app.host}:${app.port}`);
+        try {
+          const response = await fetch(url, {
+            signal: AbortSignal.any([signal, AbortSignal.timeout(1000)]),
+            redirect: "error",
+          });
+          await response.body?.cancel();
+          if (!response.ok) {
+            pending.set(app, `HTTP ${response.status}`);
+            return;
+          }
+          pending.delete(app);
+          console.info(`${app.name} (${url.toString()}) 已就绪。`);
+        } catch (error) {
+          signal.throwIfAborted();
+          pending.set(
+            app,
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }),
+    );
+    signal.throwIfAborted();
+    if (pending.size === 0) return;
+    if (performance.now() >= deadline)
+      throw new Error(
+        `开发应用启动失败，120 秒内未就绪：${Array.from(pending, ([app, reason]) => `${app.name} (${app.host}:${app.port})：${reason}`).join("；")}。请检查上方对应服务的错误日志。`,
+      );
+    await Bun.sleep(500);
+  }
+}
+
 const ownersDirectory = resolvePath(runtime, "dev-processes");
 const launcher = resolvePath(root, "node_modules/.bin/turbo");
 
@@ -226,18 +276,30 @@ export async function startDev(
   await mkdir(ownersDirectory, { recursive: true, mode: 0o700 });
   const child = spawn(
     launcher,
-    ["run", "dev", ...apps.map((app) => `--filter=@home-agent/${app.package}`)],
+    [
+      "run",
+      "dev",
+      "--ui=stream",
+      "--log-order=stream",
+      ...apps.map((app) => `--filter=@home-agent/${app.package}`),
+    ],
     {
       cwd: root,
       stdio: "inherit",
       detached: true,
     },
   );
+  const stopped = new AbortController();
   const done = new Promise<number>((resolve, reject) => {
     child.once("error", reject);
-    child.once("exit", (code, signal) =>
-      resolve(code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1)),
-    );
+    child.once("exit", (code, signal) => {
+      stopped.abort(
+        new Error(
+          `开发进程已退出（${signal ?? `退出码 ${code}`}），请检查上方错误日志。`,
+        ),
+      );
+      resolve(code ?? (signal === "SIGTERM" || signal === "SIGINT" ? 0 : 1));
+    });
   });
   const terminate = () => {
     if (child.exitCode === null && child.signalCode === null && child.pid)
@@ -250,8 +312,13 @@ export async function startDev(
           throw error;
       }
   };
-  process.on("SIGINT", terminate);
-  process.on("SIGTERM", terminate);
+  let interrupted = false;
+  const interrupt = () => {
+    interrupted = true;
+    terminate();
+  };
+  process.on("SIGINT", interrupt);
+  process.on("SIGTERM", interrupt);
   try {
     await new Promise<void>((resolve, reject) => {
       child.once("spawn", resolve);
@@ -277,11 +344,16 @@ export async function startDev(
       JSON.stringify(owner),
       { mode: 0o600 },
     );
+    await waitForApplications(apps, stopped.signal);
   } catch (error) {
     terminate();
-    await done.catch(() => {});
-    process.off("SIGINT", terminate);
-    process.off("SIGTERM", terminate);
+    await Promise.allSettled([done]);
+    process.off("SIGINT", interrupt);
+    process.off("SIGTERM", interrupt);
+    await rm(resolvePath(ownersDirectory, `${child.pid}.json`), {
+      force: true,
+    });
+    if (interrupted) return undefined;
     throw error;
   }
   return async () => {
@@ -289,8 +361,8 @@ export async function startDev(
       return await done;
     } finally {
       terminate();
-      process.off("SIGINT", terminate);
-      process.off("SIGTERM", terminate);
+      process.off("SIGINT", interrupt);
+      process.off("SIGTERM", interrupt);
       await rm(resolvePath(ownersDirectory, `${child.pid}.json`), {
         force: true,
       });

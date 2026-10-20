@@ -136,6 +136,9 @@ export function initializeTelemetry(serviceName: string) {
       resourceFromAttributes({ "service.name": serviceName }),
     ),
     spanProcessors,
+    // This integration exports traces only; disable SDK-default OTLP signals.
+    metricReaders: [],
+    logRecordProcessors: [],
   });
   sdk.start();
   flush = async () => {

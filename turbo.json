@@ -79,7 +79,8 @@
       "dependsOn": ["@home-agent/backend-client#build"],
       "with": [
         "@home-agent/backend#dev:rpc",
-        "@home-agent/backend-client#dev:types"
+        "@home-agent/backend-client#dev:types",
+        "@home-agent/backend-client#dev:runtime"
       ],
       "cache": false,
       "persistent": true
@@ -169,7 +170,8 @@
       ],
       "with": [
         "@home-agent/backend#dev:rpc",
-        "@home-agent/backend-client#dev:types"
+        "@home-agent/backend-client#dev:types",
+        "@home-agent/backend-client#dev:runtime"
       ]
     },
     "@home-agent/agent-host#check-types": {
@@ -181,6 +183,11 @@
     "@home-agent/agent-host#lint:fix": {
       "dependsOn": ["@home-agent/backend-client#build"],
       "cache": false
+    },
+    "@home-agent/backend-client#dev:runtime": {
+      "dependsOn": ["build"],
+      "cache": false,
+      "persistent": true
     }
   },
   "globalPassThroughEnv": [
@@ -199,9 +206,7 @@
     "LANGFUSE_SECRET_KEY",
     "LANGFUSE_BASE_URL",
     "LANGFUSE_TRACING_ENABLED",
-    "AGENT_RUN_TIMEOUT_MS",
     "AGENT_CONTEXT_BYTES",
-    "AGENT_MAX_OUTPUT_TOKENS",
     "PERCEPTION_FFMPEG_PATH",
     "BACKEND_HOST",
     "BACKEND_PORT",

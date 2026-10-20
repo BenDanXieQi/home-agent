@@ -34,8 +34,9 @@ export function httpTracing(
   });
   return createMiddleware(async (c, next) => {
     let originalError: Error | undefined;
+    const responseReady = Promise.withResolvers<void>();
     try {
-      await instrument(c, async () => {
+      const instrumented = instrument(c, async () => {
         const execution = isAgentExecution(c.req);
         await withRequestSession(!execution, async (session) => {
           const url = new URL(c.req.url);
@@ -54,8 +55,14 @@ export function httpTracing(
             delete safeError.stack;
             c.error = safeError;
           }
+          if (session.completion) {
+            // Return headers now; keep the instrumentation's scope open for the producer.
+            responseReady.resolve();
+            await session.completion;
+          }
         });
       });
+      await Promise.race([instrumented, responseReady.promise]);
     } finally {
       if (originalError) c.error = originalError;
     }
@@ -90,11 +97,13 @@ export function tracedFetch(
     },
     async (span) => {
       const finishOperation = beginOperation();
+      session?.attach(span);
       let ended = false;
       const finish = () => {
         if (ended) return;
         ended = true;
         request.signal.removeEventListener("abort", onAbort);
+        session?.detach(span);
         span.end();
         finishOperation();
       };
@@ -161,7 +170,7 @@ export function tracedFetch(
             }
           },
           async cancel(reason) {
-            recordCancellation(reason);
+            if (reason !== undefined) recordCancellation(reason);
             try {
               await reader.cancel(reason);
             } finally {

@@ -65,12 +65,6 @@ export function createWindowHistoryRepository(db: Database) {
       throw error;
     }
   };
-  const within = (identity: Parameters<typeof access>[0]) =>
-    and(
-      eq(records.accountId, identity.accountId),
-      eq(records.homeId, identity.homeId ?? ""),
-      gt(records.expiresAt, Date.now()),
-    );
   return {
     save(
       identity: Parameters<typeof access>[0],
@@ -98,8 +92,6 @@ export function createWindowHistoryRepository(db: Database) {
           .insert(records)
           .values({
             id: summary.id,
-            ...identity,
-            homeId: identity.homeId ?? "",
             deviceId: summary.run.deviceId,
             channel: summary.run.channel,
             startedAt: summary.startedAt,
@@ -124,7 +116,7 @@ export function createWindowHistoryRepository(db: Database) {
         const [row] = await tx
           .select({ summary: records.summary })
           .from(records)
-          .where(and(within(identity), eq(records.id, id)))
+          .where(and(gt(records.expiresAt, Date.now()), eq(records.id, id)))
           .limit(1);
         return row && windowSummarySchema.parse(row.summary);
       });
@@ -140,7 +132,7 @@ export function createWindowHistoryRepository(db: Database) {
           .from(records)
           .where(
             and(
-              within(identity),
+              gt(records.expiresAt, Date.now()),
               eq(records.deviceId, query.deviceId),
               eq(records.channel, query.channel),
               query.start === undefined
@@ -178,7 +170,7 @@ export function createWindowHistoryRepository(db: Database) {
           .from(records)
           .where(
             and(
-              within(identity),
+              gt(records.expiresAt, Date.now()),
               input.sources
                 ? or(
                     ...input.sources.map((source) =>

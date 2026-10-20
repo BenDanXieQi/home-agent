@@ -28,7 +28,6 @@ export function requireReadyContext(snapshot: ReceivedContext) {
     operations,
   } = snapshot.parts;
   if (
-    !snapshot.scope ||
     !operations ||
     household?.status !== "ready" ||
     device_state?.status !== "ready" ||
@@ -38,11 +37,10 @@ export function requireReadyContext(snapshot: ReceivedContext) {
   ) {
     throw new ModelContextError(
       "not_ready",
-      "Model context requires a household scope and five ready parts and a received operations part",
+      "Model context requires five ready parts and a received operations part",
     );
   }
   return {
-    scope: snapshot.scope,
     household: household.data,
     state: device_state.data,
     members: members.data.members,

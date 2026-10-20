@@ -1,6 +1,7 @@
 import {
   observationBindingEnabledSchema,
   spatialDeleteSchema,
+  spatialLayoutApplySchema,
   spaceSaveSchema,
   passageSaveSchema,
   observationBindingSaveSchema,
@@ -11,9 +12,7 @@ import { SpatialError } from "./errors";
 
 export function createSpatialService(
   repository: ReturnType<typeof createSpatialRepository> | undefined,
-  readDevices: (
-    scope: ReturnType<typeof spaceSaveSchema.parse>["scope"],
-  ) => ReturnType<typeof inventoryDeviceSchema.parse>[],
+  readDevices: () => ReturnType<typeof inventoryDeviceSchema.parse>[],
 ) {
   function storage() {
     if (!repository) throw new SpatialError("storage_unavailable");
@@ -22,6 +21,9 @@ export function createSpatialService(
   return {
     read() {
       return storage().read();
+    },
+    applyLayout(input: ReturnType<typeof spatialLayoutApplySchema.parse>) {
+      return storage().applyLayout(spatialLayoutApplySchema.parse(input));
     },
     saveSpace(input: ReturnType<typeof spaceSaveSchema.parse>) {
       return storage().saveSpace(spaceSaveSchema.parse(input));
@@ -39,7 +41,7 @@ export function createSpatialService(
           existing.channel === command.channel
         )
           return;
-        const device = readDevices(command.scope).find(
+        const device = readDevices().find(
           (candidate) => candidate.id === command.device_id,
         );
         if (

@@ -1,4 +1,3 @@
-import { sameSpatialScope } from "@home-agent/api/spatial";
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RequestError } from "../../api/errors";
@@ -6,6 +5,7 @@ import {
   spatialQueryOptions,
   executeSpatialCommand,
   confirmSpatialCommand,
+  unconfirmedWrite,
   type SpatialCommand,
   type SpatialSnapshot,
 } from "./api";
@@ -45,11 +45,7 @@ export function useSpatialCommands(
         setMessage("重新读取后未发现这次更改，输入已保留，可核对后再次提交。");
       } else {
         setBlocked(true);
-        setMessage(
-          result === "scope-changed"
-            ? "家庭绑定已变化，请读取当前家庭资料后继续。"
-            : "这条资料已变化，输入已保留。请读取最新记录后重新编辑。",
-        );
+        setMessage("这条资料已变化，输入已保留。请读取最新记录后重新编辑。");
       }
     } catch (error) {
       setConfirmationError(error);
@@ -69,12 +65,7 @@ export function useSpatialCommands(
       client.setQueryData(
         options.queryKey,
         (current: SpatialSnapshot | undefined) => {
-          if (
-            !current ||
-            !sameSpatialScope(command.input.scope, current.scope) ||
-            result.status === "referenced"
-          )
-            return current;
+          if (!current || result.status === "referenced") return current;
           if (result.status === "saved") {
             if (result.resource === "space")
               return {
@@ -121,16 +112,7 @@ export function useSpatialCommands(
     },
     onError: async (error, command) => {
       if (!(error instanceof RequestError)) return;
-      if (
-        (error.status !== undefined && error.status >= 500) ||
-        [
-          "network_error",
-          "request_timeout",
-          "request_cancelled",
-          "invalid_response",
-          "spatial_storage_unavailable",
-        ].includes(error.details.code)
-      ) {
+      if (unconfirmedWrite(error)) {
         setUnconfirmed(command);
         setMessage("响应未能确认操作结果，正在重新读取…");
         await confirm(command);
@@ -138,7 +120,6 @@ export function useSpatialCommands(
         [
           "spatial_record_changed",
           "spatial_record_exists",
-          "spatial_scope_changed",
           "not_found",
         ].includes(error.details.code)
       ) {

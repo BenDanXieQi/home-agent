@@ -68,14 +68,11 @@ export function collectReceiptChanges(
     }
     const oldOnline = new Map(
       previousDeviceState?.status === "ready"
-        ? previousDeviceState.data.online.map((d) => [
-            JSON.stringify([d.account_id, d.device_id]),
-            d,
-          ])
+        ? previousDeviceState.data.online.map((d) => [d.device_id, d])
         : [],
     );
     for (const next of currentDeviceState.data.online) {
-      const key = JSON.stringify([next.account_id, next.device_id]);
+      const key = next.device_id;
       const old = oldOnline.get(key);
       oldOnline.delete(key);
       if (old?.online !== next.online)

@@ -1,5 +1,6 @@
 import type {
   AgentEvent,
+  ConversationId,
   EntryId,
   EntryRecord,
   SnapshotEvent,
@@ -9,14 +10,14 @@ import type {
 import {
   durableAttributes,
   durableContent,
-  durableDiagnosticCount,
+  durableToolDiagnostics,
   durableUsage,
 } from "./durable-projection.js";
 import { sanitizeTraceValue } from "./sanitizer.js";
 import type {
   Observation,
   ObservationAttributes,
-  ObservationType,
+  ObservationSource,
   TraceBackend,
 } from "./tracing.js";
 
@@ -27,7 +28,7 @@ export interface DurableCorrelation {
 }
 
 export interface DurableRecorderOptions extends DurableCorrelation {
-  conversationId: number;
+  conversationId: ConversationId;
   sessionId?: string;
   traceName?: string;
   captureContent?: boolean;
@@ -96,10 +97,13 @@ interface RunSpan {
   generationActive: boolean;
   generation?: Span | undefined;
   tools: Map<string, Span>;
+  toolArguments: Map<string, unknown>;
   completedTools: Set<string>;
 }
 
 export class DurableRecorder {
+  private readonly backend;
+  private readonly options;
   private readonly root: Span;
   private run: RunSpan | undefined;
   private readonly submissions = new Map<SubmissionId, SubmissionSpan>();
@@ -113,26 +117,20 @@ export class DurableRecorder {
   private disposed = false;
   private gaps = 0;
 
-  constructor(
-    private readonly backend: TraceBackend,
-    private readonly options: DurableRecorderOptions,
-  ) {
-    this.root = this.start(
-      options.traceName ?? "pi.durable.conversation",
-      "agent",
-      undefined,
-      {
-        metadata: {
-          ...this.customMetadata(),
-          "pi.runtime": "durable",
-          "pi.durable.schema_version": "1",
-          "pi.durable.conversation_id": options.conversationId,
-          ...(options.applicationId
-            ? { "pi.application.id": options.applicationId }
-            : {}),
-        },
+  constructor(backend: TraceBackend, options: DurableRecorderOptions) {
+    this.backend = backend;
+    this.options = options;
+    this.root = this.start({ kind: "conversation" }, undefined, {
+      metadata: {
+        ...this.customMetadata(),
+        "pi.runtime": "durable",
+        "pi.durable.schema_version": "1",
+        "pi.durable.conversation_id": options.conversationId,
+        ...(options.applicationId
+          ? { "pi.application.id": options.applicationId }
+          : {}),
       },
-    );
+    });
     this.safe(() => {
       this.root.observation?.updateTrace?.(
         durableAttributes({
@@ -191,8 +189,7 @@ export class DurableRecorder {
   }
 
   private start(
-    name: string,
-    type: ObservationType,
+    source: ObservationSource,
     parent?: Span,
     attributes: ObservationAttributes = {},
   ) {
@@ -204,7 +201,8 @@ export class DurableRecorder {
     );
     this.safe(() => {
       span.observation = this.backend.start(
-        String(sanitizeTraceValue(name, true)),
+        this.options.conversationId,
+        source,
         durableAttributes({
           version: "durable-1",
           sessionId:
@@ -214,10 +212,6 @@ export class DurableRecorder {
           ...attributes,
           metadata: { ...inherited.metadata, ...attributes.metadata },
         }),
-        {
-          asType: type,
-          ...(parent?.observation ? { parent: parent.observation } : {}),
-        },
       );
     });
     if (!span.observation) span.ended = true;
@@ -315,15 +309,19 @@ export class DurableRecorder {
         ...correlation,
       });
       state = {
-        span: this.start("pi.durable.submission", "span", this.root, {
-          ...this.correlationAttributes(ids),
-          metadata: {
-            ...this.correlationAttributes(ids).metadata,
-            "pi.durable.submission_id": record.id,
-            "pi.durable.submission_type": record.type,
-            "pi.durable.snapshot_observation": snapshot,
+        span: this.start(
+          { kind: "submission", id: record.id, requestId: ids.requestId },
+          this.root,
+          {
+            ...this.correlationAttributes(ids),
+            metadata: {
+              ...this.correlationAttributes(ids).metadata,
+              "pi.durable.submission_id": record.id,
+              "pi.durable.submission_type": record.type,
+              "pi.durable.snapshot_observation": snapshot,
+            },
           },
-        }),
+        ),
         correlation: ids,
         terminal: false,
         content: {},
@@ -449,7 +447,7 @@ export class DurableRecorder {
     if (this.run) this.closeRun("Unexpected run replacement.");
     const correlation = this.submissions.get(primary)?.correlation ?? {};
     this.run = {
-      span: this.start("pi.durable.run", "agent", this.root, {
+      span: this.start({ kind: "run", primary }, this.root, {
         ...this.correlationAttributes(correlation),
         metadata: {
           ...this.correlationAttributes(correlation).metadata,
@@ -464,6 +462,7 @@ export class DurableRecorder {
       round: 0,
       generationActive: false,
       tools: new Map(),
+      toolArguments: new Map(),
       completedTools: new Set(),
     };
   }
@@ -475,6 +474,7 @@ export class DurableRecorder {
     run.generationActive = false;
     for (const tool of run.tools.values()) this.interrupted(tool, reason);
     run.tools.clear();
+    run.toolArguments.clear();
   }
 
   private closeRun(reason?: string) {
@@ -524,9 +524,13 @@ export class DurableRecorder {
       run.round += 1;
       run.generationActive = true;
       if (this.options.generations !== "provider")
-        run.generation = this.start("pi.durable.llm", "generation", run.span, {
-          metadata: { "pi.durable.observed_generation_index": run.round },
-        });
+        run.generation = this.start(
+          { kind: "generation", primary: run.primary },
+          run.span,
+          {
+            metadata: { "pi.durable.observed_generation_index": run.round },
+          },
+        );
     }
     return run.generation;
   }
@@ -549,6 +553,17 @@ export class DurableRecorder {
         this.entries.add(entry.id);
         const message = entry.model?.[0];
         if (message?.role !== "assistant") break;
+
+        if (this.run && this.options.captureContent !== false) {
+          for (const block of message.content) {
+            if (block.type === "toolCall")
+              this.run.toolArguments.set(
+                block.id,
+                sanitizeTraceValue(block.arguments, true),
+              );
+          }
+        }
+
         const generation = this.generation();
         if (this.run) {
           this.run.generation = undefined;
@@ -588,8 +603,11 @@ export class DurableRecorder {
         this.run.tools.set(
           event.toolCallId,
           this.start(
-            "pi.durable.tool",
-            "tool",
+            {
+              kind: "tool",
+              primary: this.run.primary,
+              call: event,
+            },
             (event.parentToolCallId &&
               this.run.tools.get(event.parentToolCallId)) ||
               this.run.span,
@@ -625,11 +643,18 @@ export class DurableRecorder {
         const tool =
           run.tools.get(event.toolCallId) ??
           this.start(
-            "pi.durable.tool",
-            "tool",
+            {
+              kind: "tool",
+              primary: run.primary,
+              call: event,
+            },
             (event.parentToolCallId && run.tools.get(event.parentToolCallId)) ||
               run.span,
             {
+              input:
+                this.options.captureContent === false
+                  ? "[content capture disabled]"
+                  : run.toolArguments.get(event.toolCallId),
               metadata: {
                 "pi.durable.start_not_observed": true,
                 "pi.durable.tool_call_id": event.toolCallId,
@@ -647,31 +672,55 @@ export class DurableRecorder {
         const hasResult = event.entry !== undefined || result !== undefined;
         const isError = result?.isError ?? toolMessage?.isError;
         const details = result?.details ?? toolMessage?.details;
+        const diagnostics =
+          result?.diagnostics ?? durableToolDiagnostics(event.entry);
+        const errorMessage =
+          diagnostics
+            .filter((diagnostic) => diagnostic.severity === "error")
+            .map((diagnostic) => diagnostic.message)
+            .join("\n") ||
+          toolMessage?.content
+            .filter((block) => block.type === "text")
+            .map((block) => block.text)
+            .join("\n") ||
+          (typeof result?.structuredOutput === "string"
+            ? result.structuredOutput
+            : undefined);
+
         this.end(tool, {
           output: result
             ? this.options.captureContent === false
               ? "[content capture disabled]"
-              : result.isError
-                ? "[tool error content omitted]"
-                : sanitizeTraceValue(result.structuredOutput, true)
+              : sanitizeTraceValue(result.structuredOutput, true)
             : durableContent(
                 event.entry?.model,
                 this.options.captureContent ?? true,
-                durableDiagnosticCount(event.entry),
               ),
           ...durableUsage(result?.usage ?? toolMessage?.usage),
           level: isError ? "ERROR" : hasResult ? "DEFAULT" : "WARNING",
+          ...(isError && this.options.captureContent !== false && errorMessage
+            ? { statusMessage: errorMessage }
+            : {}),
           metadata: {
             "pi.durable.result_entry_id": event.entry?.id,
             "pi.durable.result_missing": !hasResult,
             "pi.durable.tool_duration_ms":
               result?.durationMs ?? toolMessage?.durationMs,
+            ...(this.options.captureContent !== false && diagnostics.length > 0
+              ? {
+                  "pi.durable.tool_diagnostics": sanitizeTraceValue(
+                    diagnostics,
+                    true,
+                  ),
+                }
+              : {}),
             ...(this.options.captureContent !== false && details !== undefined
               ? { "pi.durable.tool_details": sanitizeTraceValue(details, true) }
               : {}),
           },
         });
         run.tools.delete(event.toolCallId);
+        run.toolArguments.delete(event.toolCallId);
         break;
       }
       case "auto_retry_start":

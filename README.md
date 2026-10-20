@@ -50,6 +50,8 @@ bun install --frozen-lockfile
 bun run setup
 ```
 
+安装依赖时，Bun 会应用仓库中的 [pi-ai 补丁](patches/@earendil-works%252Fpi-ai@1.2.0.patch)，为 MiMo 普通接口及 CN／SGP／AMS Token Plan 模型设置 `supportsDeveloperRole: false`，使 Pi 将系统指令发送为 `system`。其他供应商仍使用 Pi 自身的协议配置；升级 pi-ai 时须核对并保留这项行为。
+
 编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_MODEL`（`provider/modelId`）和所选提供商的认证，原生凭据与模型清单说明见[Agent 模型配置](apps/agent/README.md#模型配置)。
 
 ```sh

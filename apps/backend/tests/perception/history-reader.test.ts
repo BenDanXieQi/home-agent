@@ -261,16 +261,9 @@ for (const cancellation of ["request", "shutdown", "timeout"] as const) {
       shutdown.signal,
       cancellation === "timeout" ? 25 : 1000,
     );
-    const household =
-      value.household.runtime.snapshot().projection.household.household;
     const result = readMaterial(
       {
         kind: "perception_window",
-        scope: {
-          scope_epoch: value.household.runtime.epoch,
-          account_id: household.account_id!,
-          home_id: household.home_id!,
-        },
         id: value.window.id,
       },
       request.signal,

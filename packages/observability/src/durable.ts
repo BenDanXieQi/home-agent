@@ -17,9 +17,9 @@ import {
   type HookApi,
   type ToolHookCall,
   type ToolExecutionApi,
-  type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
 import {
+  awaitWithContext,
   BACKGROUND_CONTEXT,
   type Context as ExecutionContext,
 } from "@earendil-works/chord/context";
@@ -36,39 +36,61 @@ import {
 } from "@opentelemetry/api";
 import { telemetryStatus, flushTelemetry } from "./telemetry";
 import { beginOperation } from "./lifecycle";
-import { recordFailure, withSpan } from "./spans";
+import { tracer, withSpan } from "./spans";
 import { withGenAiContext } from "./gen-ai";
 import { agentTraceContext } from "./agent-trace";
 import { withoutRequestSession } from "./session";
 import {
   combineEvaluationContexts,
   evaluationContext,
+  finishEvaluation,
   hasEvaluationContext,
+  recordEvaluationIncomplete,
   recordEvaluationOutput,
   recordEvaluationTool,
 } from "./evaluation";
 
-export { observeDurableRegistry } from "./durable-compaction";
+export { createObservedHarnessOptions } from "./durable-execution";
 
 type CompactionInvocation = Parameters<
   typeof CompactionTask.definition.phases.summarize
 >;
 
 class DurableObservation {
+  readonly span;
+  readonly kind;
+  readonly correlation;
+  public parent;
   ended = false;
   readonly inputIds = new Set<SubmissionId>();
   private readonly links = new Set<string>();
   private readonly finish: (() => void) | undefined;
+  private readonly onEnd:
+    | ((observation: DurableObservation) => void)
+    | undefined;
+  private readonly ownsEvaluation: boolean;
+  private readonly call:
+    | { id: string; name: string; arguments: unknown }
+    | undefined;
   constructor(
-    readonly span: Span | undefined,
-    readonly kind: ObservationType,
-    readonly correlation: Attributes,
-    public parent: Context,
-    private readonly onEnd?: (observation: DurableObservation) => void,
-    readonly call?: { id: string; name: string; arguments: unknown },
-    private readonly ownsEvaluation = false,
+    span: Span | undefined,
+    kind: ObservationType,
+    correlation: Attributes,
+    parent: Context,
+    options: {
+      onEnd?: (observation: DurableObservation) => void;
+      call?: { id: string; name: string; arguments: unknown };
+      ownsEvaluation?: boolean;
+    } = {},
   ) {
+    this.span = span;
+    this.kind = kind;
+    this.correlation = correlation;
+    this.parent = parent;
     this.finish = span ? beginOperation() : undefined;
+    this.onEnd = options.onEnd;
+    this.call = options.call;
+    this.ownsEvaluation = options.ownsEvaluation ?? false;
   }
 
   get traceId() {
@@ -120,6 +142,27 @@ class DurableObservation {
         context.with(this.parent, () =>
           recordEvaluationOutput(attributes.output),
         );
+
+      const call = this.call;
+      if (call) {
+        if (attributes.input !== undefined) call.arguments = attributes.input;
+        if (attributes.input !== undefined || attributes.level !== undefined)
+          context.with(this.parent, () =>
+            recordEvaluationTool(call.id, {
+              name: call.name,
+              arguments: call.arguments,
+              result: attributes.output,
+              status:
+                attributes.level === undefined
+                  ? "running"
+                  : attributes.level === "ERROR"
+                    ? "error"
+                    : attributes.level === "WARNING"
+                      ? "interrupted"
+                      : "done",
+            }),
+          );
+      }
     }
     if (attributes.level !== undefined)
       span.setAttribute("langfuse.observation.level", attributes.level);
@@ -146,6 +189,8 @@ class DurableObservation {
   end(endTime?: number) {
     if (this.ended) return this;
     this.ended = true;
+    if (this.ownsEvaluation && this.span)
+      finishEvaluation(this.span, this.parent);
     this.span?.end(endTime);
     this.finish?.();
     this.onEnd?.(this);
@@ -257,6 +302,7 @@ export function withDurableModelTrace<T>(
   transcript: TranscriptContext,
   run: () => T,
 ) {
+  if (!telemetryStatus().enabled) return run();
   const parent = signal ? modelParents.get(signal) : undefined;
   return context.with(parent?.executionContext() ?? ROOT_CONTEXT, () =>
     withGenAiContext(
@@ -268,40 +314,14 @@ export function withDurableModelTrace<T>(
     ),
   );
 }
-export async function withDurableToolTrace<T extends ToolExecutionResult>(
+export async function withDurableToolTrace<T>(
   api: ToolExecutionApi,
   run: () => Promise<T>,
 ) {
   if (!telemetryStatus().enabled) return run();
   const observation = (await ownerFor(api, BACKGROUND_CONTEXT))?.tool(api);
   return context.with(observation?.executionContext() ?? ROOT_CONTEXT, () =>
-    withGenAiContext(observation?.correlation ?? {}, async () => {
-      try {
-        const result = await run();
-        if (observation?.call)
-          recordEvaluationTool(observation.call.id, {
-            name: observation.call.name,
-            arguments: observation.call.arguments,
-            result: result.isError
-              ? "[tool error content omitted]"
-              : (result.structuredOutput ?? result.output),
-            status: result.isError ? "error" : "done",
-          });
-        return result;
-      } catch (error) {
-        if (observation?.span) recordFailure(observation.span, error);
-        if (observation?.call)
-          recordEvaluationTool(observation.call.id, {
-            name: observation.call.name,
-            arguments: observation.call.arguments,
-            status:
-              error instanceof Error && error.name === "AbortError"
-                ? "interrupted"
-                : "error",
-          });
-        throw error;
-      }
-    }),
+    withGenAiContext(observation?.correlation ?? {}, run),
   );
 }
 
@@ -341,9 +361,11 @@ export function createDurableTracing(harness: Harness, agentName: string) {
         "pi.durable.primary_submission_id": primary,
         "pi.durable.inputs": JSON.stringify(inputs),
       };
-      const span = trace
-        .getTracer("home-agent")
-        .startSpan(`invoke_agent ${agentName}`, { attributes }, parent);
+      const span = tracer.startSpan(
+        `invoke_agent ${agentName}`,
+        { attributes },
+        parent,
+      );
       let evaluation = combineEvaluationContexts(parents, parent);
       const ownsEvaluation = !hasEvaluationContext(evaluation);
       if (ownsEvaluation)
@@ -352,12 +374,9 @@ export function createDurableTracing(harness: Harness, agentName: string) {
           { submission_ids: inputs },
           evaluation,
         );
-      run = new DurableObservation(
-        span,
-        "agent",
-        attributes,
-        evaluation,
-        (ended) => {
+      run = new DurableObservation(span, "agent", attributes, evaluation, {
+        ownsEvaluation,
+        onEnd: (ended) => {
           runs.delete(key);
           for (const [toolKey, tool] of tools) {
             if (
@@ -371,9 +390,7 @@ export function createDurableTracing(harness: Harness, agentName: string) {
           }
           for (const input of ended.inputIds) inputParents.delete(input);
         },
-        undefined,
-        ownsEvaluation,
-      );
+      });
       runs.set(key, run);
     } else run.parent = combineEvaluationContexts(parents, run.parent);
     for (const input of inputs) run.inputIds.add(input);
@@ -399,21 +416,28 @@ export function createDurableTracing(harness: Harness, agentName: string) {
     }
     return ensureRun(id, inputs);
   }
+  function toolParent(
+    id: ConversationId,
+    run: DurableObservation,
+    parentCall: ToolHookCall["parent"],
+  ) {
+    return parentCall
+      ? (tools.get(`${id}:${parentCall.taskId}:${parentCall.callId}`) ?? run)
+      : run;
+  }
   function ensureTool(
     id: ConversationId,
-    taskId: number,
+    taskId: number | undefined,
     callId: string,
     toolName: string,
     args: unknown,
     run: DurableObservation,
-    parentCall?: ToolHookCall["parent"],
+    parentCall: ToolHookCall["parent"],
   ) {
-    const key = `${id}:${taskId}:${callId}`;
-    let observation = tools.get(key);
+    const key = taskId === undefined ? undefined : `${id}:${taskId}:${callId}`;
+    let observation = key === undefined ? undefined : tools.get(key);
     if (observation) return observation;
-    const parent = parentCall
-      ? (tools.get(`${id}:${parentCall.taskId}:${parentCall.callId}`) ?? run)
-      : run;
+    const parent = toolParent(id, run, parentCall);
     const attributes = {
       ...run.correlation,
       "gen_ai.operation.name": "execute_tool",
@@ -422,107 +446,96 @@ export function createDurableTracing(harness: Harness, agentName: string) {
       "gen_ai.tool.call.id": callId,
       "pi.durable.task_id": taskId,
     };
-    const span = trace
-      .getTracer("home-agent")
-      .startSpan(
-        `execute_tool ${toolName}`,
-        { attributes },
-        parent.executionContext(),
-      );
+    const span = tracer.startSpan(
+      `execute_tool ${toolName}`,
+      { attributes },
+      parent.executionContext(),
+    );
     observation = new DurableObservation(
       span,
       "tool",
       attributes,
       parent.executionContext(),
-      undefined,
-      { id: key, name: toolName, arguments: args },
+      {
+        call: {
+          id: key ?? span.spanContext().spanId,
+          name: toolName,
+          arguments: args,
+        },
+      },
     ).update({ input: args });
-    tools.set(key, observation);
-    context.with(observation.executionContext(), () =>
-      recordEvaluationTool(key, {
-        name: toolName,
-        arguments: args,
-        status: "running",
-      }),
-    );
+    if (key !== undefined) tools.set(key, observation);
     return observation;
   }
   const backend = {
-    start(name, attributes, options) {
-      const metadata = attributes.metadata ?? {};
-      const inherited =
-        options.parent instanceof DurableObservation
-          ? options.parent
-          : undefined;
-      const numericId =
-        metadata["pi.durable.conversation_id"] ??
-        inherited?.correlation["pi.durable.conversation_id"];
-      if (typeof numericId !== "number")
-        throw new Error("Durable observation has no conversation ID");
-      const id = [...conversations.keys()].find(
-        (candidate) => candidate === numericId,
-      );
-      if (id === undefined)
+    start(id, source, attributes) {
+      if (!conversations.has(id))
         throw new Error("Durable conversation is not attached");
-      if (name === agentName)
+      if (source.kind === "conversation")
         return new DurableObservation(
           undefined,
           "span",
           correlation(id),
           ROOT_CONTEXT,
         );
-      if (name === "pi.durable.run") {
-        const primary = metadata["pi.durable.primary_submission_id"];
-        if (typeof primary !== "number")
-          throw new Error("Durable run has no primary submission ID");
-        const run = runs.get(`${id}:${primary}`);
+      if (source.kind !== "submission") {
+        const run = runs.get(`${id}:${source.primary}`);
         if (!run) throw new Error("Durable run was not prepared");
-        return run.update(attributes);
-      }
-      if (options.asType === "tool" && inherited) {
-        const taskId = metadata["pi.durable.task_id"],
-          callId = metadata["pi.durable.tool_call_id"],
-          toolName = metadata["pi.durable.tool_name"];
-        if (
-          typeof taskId === "number" &&
-          typeof callId === "string" &&
-          typeof toolName === "string"
-        )
+        if (source.kind === "run") return run.update(attributes);
+        const parentCall =
+          source.kind === "tool" &&
+          source.call.parentTaskId !== undefined &&
+          source.call.parentToolCallId !== undefined
+            ? {
+                taskId: source.call.parentTaskId,
+                callId: source.call.parentToolCallId,
+              }
+            : undefined;
+        if (source.kind === "tool")
           return ensureTool(
             id,
-            taskId,
-            callId,
-            toolName,
+            source.call.taskId,
+            source.call.toolCallId,
+            source.call.toolName,
             attributes.input,
-            inherited,
+            run,
+            parentCall,
           ).update(attributes);
+        const parent = toolParent(id, run, parentCall).executionContext();
+        const span = tracer.startSpan(
+          "pi.durable.llm",
+          { attributes: correlation(id) },
+          parent,
+        );
+        return new DurableObservation(
+          span,
+          source.kind,
+          correlation(id),
+          parent,
+        ).update(attributes);
       }
-      const requestId = metadata["pi.request.id"];
-      const origin =
-        typeof requestId === "string" ? origins.get(requestId) : undefined;
-      const inputId = metadata["pi.durable.submission_id"];
-      const parent =
-        origin ?? [...inputParents].find(([input]) => input === inputId)?.[1];
+      const { requestId } = source;
       const nativeParent =
-        parent ?? inherited?.executionContext() ?? ROOT_CONTEXT;
-      const span = trace.getTracer("home-agent").startSpan(
-        name,
-        {
-          attributes: correlation(id),
-          ...(options.startTime ? { startTime: options.startTime } : {}),
-        },
+        (requestId === undefined ? undefined : origins.get(requestId)) ??
+        inputParents.get(source.id) ??
+        ROOT_CONTEXT;
+      const span = tracer.startSpan(
+        "pi.durable.submission",
+        { attributes: correlation(id) },
         nativeParent,
       );
       return new DurableObservation(
         span,
-        options.asType,
+        "span",
         correlation(id),
         nativeParent,
-        typeof requestId === "string"
-          ? () => {
-              origins.delete(requestId);
+        requestId !== undefined
+          ? {
+              onEnd: () => {
+                origins.delete(requestId);
+              },
             }
-          : undefined,
+          : {},
       ).update(attributes);
     },
     forceFlush: flushTelemetry,
@@ -533,6 +546,23 @@ export function createDurableTracing(harness: Harness, agentName: string) {
     ConversationId,
     ReturnType<typeof createPiLangfuseDurableConversation>
   >();
+  function endObservations(id?: ConversationId) {
+    for (const observations of [tools, runs])
+      for (const [key, observation] of observations) {
+        if (
+          id !== undefined &&
+          observation.correlation["pi.durable.conversation_id"] !== id
+        )
+          continue;
+        observation
+          .update({
+            level: "WARNING",
+            metadata: { "pi.durable.observation_incomplete": true },
+          })
+          .end();
+        observations.delete(key);
+      }
+  }
   const owner = {
     async attach(id: ConversationId, sessionId: string, identity = String(id)) {
       const provider = await harness.snapshot(
@@ -577,13 +607,37 @@ export function createDurableTracing(harness: Harness, agentName: string) {
       execution: ExecutionContext,
     ) {
       const requestId = input.requestId ?? randomUUID();
-      if (telemetryStatus().enabled)
-        origins.set(
-          requestId,
-          withoutRequestSession(agentTraceContext(context.active())),
-        );
+      if (!telemetryStatus().enabled)
+        return conversation.submit({ ...input, requestId }, execution);
+
+      const parent = context.active();
+      const span = trace.getSpan(parent);
+      const observer = await observers.get(conversation.id);
+      if (!observer)
+        throw new Error("Durable tracing observer is not attached");
+
+      origins.set(requestId, withoutRequestSession(agentTraceContext(parent)));
       try {
-        return await conversation.submit({ ...input, requestId }, execution);
+        const submission = await conversation.submit(
+          { ...input, requestId },
+          execution,
+        );
+        span?.setAttribute("home_agent.submission.id", String(submission.id));
+
+        const observed = observer.whenSubmissionObserved(submission.id);
+        const wait = submission.wait.bind(submission);
+        return Object.assign(submission, {
+          async wait(waitContext: Parameters<typeof wait>[0]) {
+            const result = await wait(waitContext);
+            const complete = await awaitWithContext(observed, waitContext);
+            if (!complete) {
+              if (span?.isRecording())
+                span.setAttribute("pi.durable.observation_incomplete", true);
+              recordEvaluationIncomplete(parent);
+            }
+            return result;
+          },
+        });
       } catch (error) {
         origins.delete(requestId);
         throw error;
@@ -635,29 +689,27 @@ export function createDurableTracing(harness: Harness, agentName: string) {
     async detach(id: ConversationId) {
       const observer = observers.get(id);
       observers.delete(id);
-      await (await observer)?.dispose();
-      const conversation = conversations.get(id);
-      if (conversation) owners.delete(conversation.providerId);
-      conversations.delete(id);
+      try {
+        await (await observer)?.dispose();
+      } finally {
+        endObservations(id);
+        const conversation = conversations.get(id);
+        if (conversation) owners.delete(conversation.providerId);
+        conversations.delete(id);
+      }
     },
     async close() {
-      await runtime.shutdown();
-      for (const run of runs.values())
-        run
-          .update({
-            level: "WARNING",
-            metadata: { "pi.durable.observation_incomplete": true },
-          })
-          .end();
-      for (const tool of tools.values()) tool.end();
-      for (const conversation of conversations.values())
-        owners.delete(conversation.providerId);
-      runs.clear();
-      tools.clear();
-      origins.clear();
-      inputParents.clear();
-      conversations.clear();
-      observers.clear();
+      try {
+        await runtime.shutdown();
+      } finally {
+        endObservations();
+        for (const conversation of conversations.values())
+          owners.delete(conversation.providerId);
+        origins.clear();
+        inputParents.clear();
+        conversations.clear();
+        observers.clear();
+      }
     },
   };
   return owner;

@@ -1,4 +1,4 @@
-import { getCurrentTools, type TranscriptContext } from "@earendil-works/pi-ai";
+import type { TranscriptContext } from "@earendil-works/pi-ai";
 
 function genAiParts(content: TranscriptContext["messages"][number]["content"]) {
   if (typeof content === "string") return [{ type: "text" as const, content }];
@@ -49,13 +49,4 @@ export function genAiMessages(
         : {}),
     };
   });
-}
-
-export function genAiToolDefinitions(messages: TranscriptContext["messages"]) {
-  return getCurrentTools(messages).map((tool) => ({
-    type: "function" as const,
-    name: tool.name,
-    description: tool.description,
-    parameters: tool.parameters,
-  }));
 }

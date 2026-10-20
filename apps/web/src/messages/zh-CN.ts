@@ -34,9 +34,10 @@ const errorMessages = {
   household_storage_unavailable:
     "家庭数据存储暂时不可用，请检查数据库连接后重试。",
   spatial_record_changed: "这条资料已被修改，请读取最新内容后重新编辑。",
-  spatial_scope_changed: "家庭绑定已变化，请重新读取当前家庭的空间资料。",
   spatial_record_exists: "该空间资料已存在，请刷新后编辑。",
   spatial_reference_invalid: "关联的空间或通道不存在，请刷新后重新选择。",
+  spatial_layout_referenced:
+    "草稿删除的空间或通道仍有观测绑定，请先在手动维护中解除这些绑定。",
   spatial_source_invalid: "请从当前设备清单选择设备及有效镜头。",
   spatial_storage_unavailable:
     "空间资料存储暂时不可用，请恢复连接并刷新确认保存结果后再重试。",

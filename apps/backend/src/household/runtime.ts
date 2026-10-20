@@ -410,7 +410,7 @@ export class HouseholdRuntime {
     const epoch = this.epoch;
     let storageDegraded = false;
     const stored = homeId
-      ? await this.repository?.read(accountId, homeId).catch(() => {
+      ? await this.repository?.read().catch(() => {
           storageDegraded = true;
           return undefined;
         })

@@ -11,7 +11,6 @@ import { Notice } from "../../components/Notice";
 
 type Snapshot = ReturnType<typeof spatialSnapshotSchema.parse>;
 type FormActions = { pending: boolean; onCancel: () => void };
-type Scope = Snapshot["scope"];
 
 function FormFrame({
   title,
@@ -104,12 +103,10 @@ function DescriptionField({ description }: { description: string }) {
 }
 
 export function SpaceForm({
-  scope,
   record,
   onSave,
   ...actions
 }: FormActions & {
-  scope: Scope;
   record: Snapshot["spaces"][number] | null;
   onSave: (input: ReturnType<typeof spaceSaveSchema.parse>) => void;
 }) {
@@ -123,7 +120,6 @@ export function SpaceForm({
       onSubmit={(data) => {
         const input = spaceSaveSchema.safeParse({
           id,
-          scope,
           ...(record
             ? { operation: "update", expected_updated_at: record.updated_at }
             : { operation: "create" }),
@@ -144,13 +140,11 @@ export function SpaceForm({
 }
 
 export function PassageForm({
-  scope,
   record,
   spaces,
   onSave,
   ...actions
 }: FormActions & {
-  scope: Scope;
   record: Snapshot["passages"][number] | null;
   spaces: Snapshot["spaces"];
   onSave: (input: ReturnType<typeof passageSaveSchema.parse>) => void;
@@ -176,7 +170,6 @@ export function PassageForm({
         }
         const input = passageSaveSchema.safeParse({
           id,
-          scope,
           ...(record
             ? { operation: "update", expected_updated_at: record.updated_at }
             : { operation: "create" }),
@@ -229,14 +222,12 @@ export function PassageForm({
 }
 
 export function BindingForm({
-  scope,
   record,
   snapshot,
   devices,
   onSave,
   ...actions
 }: FormActions & {
-  scope: Scope;
   record: Snapshot["observation_bindings"][number] | null;
   snapshot: Snapshot;
   devices: ReturnType<typeof inventoryDeviceSchema.parse>[];
@@ -278,7 +269,6 @@ export function BindingForm({
         ).split(":");
         const input = observationBindingSaveSchema.safeParse({
           id,
-          scope,
           ...(record
             ? { operation: "update", expected_updated_at: record.updated_at }
             : { operation: "create" }),

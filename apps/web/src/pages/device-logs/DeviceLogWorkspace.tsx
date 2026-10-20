@@ -35,13 +35,9 @@ const readNarrow = () => matchMedia(narrowQuery).matches;
 
 export function DeviceLogWorkspace({
   scope,
-  accountId,
-  homeId,
   ready,
 }: {
   scope: string;
-  accountId: string;
-  homeId: string;
   ready: boolean;
 }) {
   const devices = useAtomValue(devicesAtom);
@@ -72,8 +68,6 @@ export function DeviceLogWorkspace({
         ? [...selection.visibleIds]
         : undefined;
   const input = deviceHistoryQuerySchema.parse({
-    account_id: accountId,
-    home_id: homeId,
     ...range,
     kinds: view === "all" ? ["property", "online"] : [view],
     ...(ids?.length ? { device_ids: ids } : {}),

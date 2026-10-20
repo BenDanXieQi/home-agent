@@ -1,15 +1,18 @@
+import { streamOperation } from "@home-agent/api/http/stream-operation";
 import { createRouteApp, type RouteContext } from "../definition";
 import { validateJson } from "@home-agent/api/errors/hono";
-import { agentWorkflowInputSchema } from "../../workflows/contracts";
+import { agentWorkflowInputSchema } from "../../workflows/contracts.generated";
 
 export function createRoutes({ workflows }: Pick<RouteContext, "workflows">) {
   return createRouteApp().post(
     "/workflows",
     validateJson(agentWorkflowInputSchema),
-    async (c) => {
+    (c) => {
       c.env.timeout(c.req.raw, 0);
-
-      return c.json(await workflows.run(c.req.valid("json"), c.req.raw.signal));
+      const input = c.req.valid("json");
+      return streamOperation(c, (signal, receive) =>
+        workflows.run(input, signal, receive),
+      );
     },
   );
 }

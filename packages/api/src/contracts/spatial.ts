@@ -5,25 +5,6 @@ const timestamps = {
   created_at: z.iso.datetime(),
   updated_at: z.iso.datetime(),
 };
-export const spatialScopeSchema = z
-  .object({
-    account_id: z.string().min(1),
-    home_id: z.string().min(1),
-    updated_at: z.iso.datetime(),
-  })
-  .strict()
-  .nullable();
-export function sameSpatialScope(
-  left: z.infer<typeof spatialScopeSchema>,
-  right: z.infer<typeof spatialScopeSchema>,
-) {
-  return (
-    left?.account_id === right?.account_id &&
-    left?.home_id === right?.home_id &&
-    left?.updated_at === right?.updated_at
-  );
-}
-const scope = { scope: spatialScopeSchema };
 const spaceFields = {
   id: z.uuid(),
   name: z.string().trim().min(1),
@@ -39,8 +20,8 @@ const saveOperation = z.discriminatedUnion("operation", [
 export type SpatialSaveOperation = z.infer<typeof saveOperation>;
 function saveCommand<T extends z.ZodRawShape>(fields: T) {
   return z.discriminatedUnion("operation", [
-    saveOperation.options[0].extend({ ...fields, ...scope }).strict(),
-    saveOperation.options[1].extend({ ...fields, ...scope }).strict(),
+    saveOperation.options[0].extend(fields).strict(),
+    saveOperation.options[1].extend(fields).strict(),
   ]);
 }
 export const spaceSaveSchema = saveCommand(spaceFields);
@@ -65,6 +46,43 @@ export const passageSaveSchema = saveCommand(passageFields).refine(
 export const passageDefinitionSchema =
   passageFieldsSchema.refine(differentEndpoints);
 export const passageSchema = passageDefinitionSchema.safeExtend(timestamps);
+export const spatialLayoutSchema = z
+  .strictObject({
+    spaces: z.array(spaceDefinitionSchema),
+    passages: z.array(passageDefinitionSchema),
+  })
+  .superRefine((layout, ctx) => {
+    const spaces = new Set(layout.spaces.map((space) => space.id));
+    const passages = new Set(layout.passages.map((passage) => passage.id));
+    if (
+      spaces.size !== layout.spaces.length ||
+      passages.size !== layout.passages.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Layout record IDs must be unique.",
+      });
+    layout.passages.forEach((passage, index) => {
+      for (const endpoint of ["space_a_id", "space_b_id"] as const) {
+        if (!spaces.has(passage[endpoint]))
+          ctx.addIssue({
+            code: "custom",
+            path: ["passages", index, endpoint],
+            message: "Passage endpoints must refer to layout spaces.",
+          });
+      }
+    });
+  });
+const recordVersion = z.strictObject({
+  id: z.uuid(),
+  updated_at: timestamps.updated_at,
+});
+export const spatialLayoutApplySchema = spatialLayoutSchema.safeExtend({
+  expected: z.strictObject({
+    spaces: z.array(recordVersion),
+    passages: z.array(recordVersion),
+  }),
+});
 const bindingFields = {
   id: z.uuid(),
   device_id: inventoryDeviceSchema.shape.id.min(1),
@@ -90,21 +108,18 @@ export const observationBindingSaveSchema = saveCommand(bindingFields).refine(
 export const observationBindingSchema = bindingRecordSchema.refine(oneTarget);
 export const observationBindingEnabledSchema = z
   .object({
-    ...scope,
     id: z.uuid(),
     enabled: z.boolean(),
     expected_updated_at: timestamps.updated_at,
   })
   .strict();
 export const spatialSnapshotSchema = z.object({
-  ...scope,
   spaces: z.array(spaceSchema),
   passages: z.array(passageSchema),
   observation_bindings: z.array(observationBindingSchema),
 });
 export const spatialDeleteSchema = z
   .object({
-    ...scope,
     id: z.uuid(),
     expected_updated_at: timestamps.updated_at,
   })

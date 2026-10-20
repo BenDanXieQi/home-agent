@@ -133,16 +133,11 @@ export function reconcileFactScope(before: Projection, candidate: Projection) {
   )
     return candidate;
   return produce(candidate, (draft) => {
-    const scope = draft.household.household;
-    const stopped = scope.status === "stopping";
+    const stopped = draft.household.household.status === "stopping";
     for (const [key, fact] of Object.entries(draft.latest)) {
       const deviceKey = entityKey(fact.account_id, fact.device_id);
       const device = draft.device[deviceKey];
-      if (
-        !device ||
-        device.archived ||
-        device.account_id !== scope.account_id
-      ) {
+      if (!device || device.archived) {
         delete draft.latest[key];
         continue;
       }

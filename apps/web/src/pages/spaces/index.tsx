@@ -82,7 +82,6 @@ function SpacesQuery({ scope, manual }: { scope: string; manual: boolean }) {
       {query.data ? (
         manual ? (
           <SpatialWorkspace
-            key={JSON.stringify(query.data.scope)}
             scope={scope}
             snapshot={query.data}
             refresh={refresh}
@@ -98,7 +97,6 @@ function SpacesQuery({ scope, manual }: { scope: string; manual: boolean }) {
               </Link>
             </PageHeaderContent>
             <SpatialPlanning
-              key={JSON.stringify(query.data.scope)}
               scope={scope}
               snapshot={query.data}
               available={

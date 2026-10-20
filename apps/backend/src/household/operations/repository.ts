@@ -82,7 +82,7 @@ export function createCommandRepository(db: Database) {
       scope: Scope,
       input: ReturnType<typeof commandQuerySchema.parse>,
     ) {
-      const queryHash = provenanceQueryHash("commands", scope, input);
+      const queryHash = provenanceQueryHash("commands", input);
       return read(scope.identity, scope.assertCurrent, async (tx) => {
         const query = tx`
           select data from device_commands

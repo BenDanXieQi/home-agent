@@ -1,85 +1,50 @@
+import {
+  local,
+  opaque,
+  resource,
+  type Host,
+  type Handle,
+} from "@earendil-works/chord";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { memo } from "radash";
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
 } from "@earendil-works/chord/context";
-import { createModels, Type } from "@earendil-works/pi-ai";
+import { Type } from "@earendil-works/pi-ai";
 import {
   AssistantEntry,
   configure,
-  createRegistry,
   defineExtension,
   defineTool,
-  Harness,
-  GenerationTask,
-  hook,
-  MemoryStorage,
   section,
-  ToolTask,
-  wrapTool,
   type ModelRef,
 } from "@earendil-works/pi-durable";
 import { CodingTools } from "@earendil-works/pi-durable/tools";
-import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
-import {
-  createDurableTracing,
-  observeDurableRegistry,
-  prepareDurableGeneration,
-  prepareDurableTool,
-  withDurableModelTrace,
-  withDurableToolTrace,
-} from "@home-agent/observability/durable";
 
 import { readFinalAnswer } from "../utils/final-answer";
-import type { initializeModels } from "../models";
+import type { initializeModelRuntime } from "../models";
+import { AgentRuntime, getServiceInstance } from "../runtime";
 
-export async function createAssistant({
-  modelCatalog,
+export function configureAssistant({
+  modelRuntime,
   modelRef,
   subagentModelRefs,
-  budget,
-  signal,
 }: {
-  modelCatalog: Awaited<ReturnType<typeof initializeModels>>;
+  modelRuntime: Awaited<ReturnType<typeof initializeModelRuntime>>;
   modelRef: ModelRef | undefined;
   subagentModelRefs: readonly ModelRef[] | undefined;
-  budget: { timeoutMs: number; maxTokens: number };
-  signal: AbortSignal;
 }) {
-  signal.throwIfAborted();
-  const startupContext = withAbortSignal(signal, BACKGROUND_CONTEXT);
-  const model = modelCatalog.resolve(modelRef);
-  if (!model) return undefined;
+  const model = modelRuntime.findAvailableModel(modelRef);
 
-  const subagentModels = modelCatalog.select([
+  const subagentModels = modelRuntime.selectAvailableModels([
     modelRef,
     ...(subagentModelRefs ?? []),
   ]);
 
   const sessionId = randomUUID();
-  const timeoutMs = budget.timeoutMs;
-  const models = createModels();
-  for (const provider of modelCatalog.models.getProviders()) {
-    models.setProvider({
-      ...provider,
-      streamSimple: (requestModel, transcript, streamOptions) =>
-        withDurableModelTrace(streamOptions?.signal, transcript, () =>
-          provider.streamSimple(requestModel, transcript, {
-            ...streamOptions,
-            maxTokens: Math.min(
-              requestModel.maxTokens,
-              budget.maxTokens,
-              streamOptions?.maxTokens ?? budget.maxTokens,
-            ),
-          }),
-        ),
-    });
-  }
-  const Subagent = defineExtension({
+  let assistantRuntime: Parameters<typeof createAssistant>[0];
+
+  const subagentExtension = defineExtension({
     name: "subagent",
     tools: [
       defineTool({
@@ -98,6 +63,10 @@ export async function createAssistant({
         }),
         replay: "safe",
         execute: async (args, api, context) => {
+          const { harness } = assistantRuntime;
+          const childExtensions = (await api.agent(context)).extensions.filter(
+            (extension) => extension.name !== subagentExtension.name,
+          );
           const childId = await api.commit(async (tx) => {
             const existing = (
               await tx.scanConversations({ ownerTaskId: api.taskId }, 1)
@@ -121,17 +90,20 @@ export async function createAssistant({
                     },
                   }
                 : {}),
-              extensions: { remove: [Subagent] },
+              extensions: childExtensions,
             });
             return child.id;
           }, context);
-          await api.details({ conversationId: childId }, context);
           const child = await api.conversation(childId, context);
           if (!child)
             throw new Error("The delegated conversation is unavailable");
-          await tracing.attach(childId, sessionId);
-          const submission = await tracing.submit(
+          await using conversation = await harness.observeConversation(
             child,
+            { agentName: "household-assistant", sessionId },
+            context,
+          );
+          await api.details({ conversationId: childId }, context);
+          const submission = await conversation.submit(
             {
               type: "input",
               content: args.task,
@@ -158,105 +130,73 @@ export async function createAssistant({
       }),
     ],
   });
-  const registry = createRegistry();
-  registry.install(
-    defineExtension({
-      name: "execution-observations",
-      hooks: [
-        hook(GenerationTask, {
-          beforeRequest: async (_request, api, context) => {
-            await prepareDurableGeneration(api, context);
-          },
-        }),
-        hook(ToolTask, {
-          beforeTool: async (call, api, context) => {
-            await prepareDurableTool(call, api, context);
-          },
-        }),
-      ],
-    }),
-  );
-  registry.install(CodingTools);
-  registry.install(Subagent);
-  registry.install(
+  const extensions = [
+    CodingTools,
+    subagentExtension,
     defineExtension({
       name: "workspace",
       sections: [section("cwd", (prompt) => prompt.env?.cwd)],
     }),
-  );
-  registry.install(
-    defineExtension({
-      name: "tool-deadlines",
-      wraps: registry
-        .snapshot()
-        .tools()
-        .map(({ tool }) =>
-          wrapTool(tool, (original) => ({
-            ...original,
-            execute: (args, api, context) =>
-              withDurableToolTrace(api, async () => {
-                const toolSignal = AbortSignal.any([
-                  ...(context.abortSignal ? [context.abortSignal] : []),
-                  AbortSignal.timeout(timeoutMs),
-                ]);
-                const result = await original.execute(
-                  args,
-                  api,
-                  withAbortSignal(toolSignal, context),
-                );
-                toolSignal.throwIfAborted();
-                return result;
-              }),
-          })),
-        ),
-    }),
-  );
-  await using resources = new AsyncDisposableStack();
-  const workspacePath = resources.adopt(
-    await mkdtemp(join(tmpdir(), "home-agent-")),
-    (path) => rm(path, { recursive: true, force: true }),
-  );
-  signal.throwIfAborted();
-  const env = resources.adopt(
-    new NodeExecutionEnv({ cwd: workspacePath }),
-    (instance) => instance.cleanup(BACKGROUND_CONTEXT),
-  );
-  const observers = resources.use(new AsyncDisposableStack());
-  const harness = resources.adopt(
-    await Harness.open(
-      new MemoryStorage(),
-      {
-        models,
-        registry: observeDurableRegistry(registry),
-        env: () => env,
-        settings: {
-          stream: {
-            maxRetries: 0,
-            timeoutMs,
-          },
-          retry: { enabled: false, maxRetries: 0 },
-        },
+  ];
+
+  async function createAssistant(
+    runtime: NonNullable<Handle<typeof AgentRuntime>["instance"]>,
+    signal: AbortSignal,
+  ) {
+    signal.throwIfAborted();
+    if (!model) return undefined;
+    const startupContext = withAbortSignal(signal, BACKGROUND_CONTEXT);
+    const { harness, workspacePath } = runtime;
+    assistantRuntime = runtime;
+    return harness.root(startupContext, {
+      agentName: "household-assistant",
+      sessionId,
+      agent: {
+        model: { provider: model.provider, modelId: model.id },
+        instructions:
+          "你是家庭助手，使用用户的语言回答。目前未接入家庭资料、设备、感知、通知或持久记忆。不能声称知道实际家庭状态、已控制设备或已安排提醒。本服务运行期间复用同一主会话，可以结合已有对话继续处理；服务重启后会话清空。",
+        cwd: workspacePath,
+        extensions,
       },
-      startupContext,
-    ),
-    (instance) => instance.close(BACKGROUND_CONTEXT),
-  );
-  const tracing = observers.adopt(
-    createDurableTracing(harness, "household-assistant"),
-    (instance) => instance.close(),
-  );
-  const root = await harness.root(startupContext, {
-    agent: {
-      model: { provider: model.provider, modelId: model.id },
-      instructions:
-        "你是家庭助手，使用用户的语言回答。目前未接入家庭资料、设备、感知、通知或持久记忆。不能声称知道实际家庭状态、已控制设备或已安排提醒。本服务运行期间复用同一主会话，可以结合已有对话继续处理；服务重启后会话清空。",
-      cwd: workspacePath,
+    });
+  }
+
+  const Assistant = local("home.agent.assistant", {
+    version: 1,
+    input: Type.Object({}),
+    members: {
+      instance: opaque<Awaited<ReturnType<typeof createAssistant>>>(
+        "home.agent.assistant@1",
+      ),
     },
   });
-  signal.throwIfAborted();
-  await tracing.attach(root.id, sessionId);
-  signal.throwIfAborted();
-  const ownedResources = resources.move();
-  const close = memo(() => ownedResources.disposeAsync());
-  return { root, sessionId, tracing, close, [Symbol.asyncDispose]: close };
+  return {
+    extensions,
+    register(host: Host, startupSignal: AbortSignal) {
+      host.serve(
+        Assistant,
+        (_input, _principal, self) => {
+          const runtime = self.get(AgentRuntime, {});
+          const resources = self.resources({
+            assistant: resource({
+              rev: 1,
+              deps: [runtime],
+              open: ({ signal }) => {
+                return createAssistant(
+                  getServiceInstance(runtime),
+                  AbortSignal.any([signal, startupSignal]),
+                );
+              },
+              close: async (assistant) => {
+                await assistant?.close();
+              },
+            }),
+          });
+          return { instance: self.expose(resources.assistant) };
+        },
+        { eager: true },
+      );
+      return host.get(Assistant, {});
+    },
+  };
 }

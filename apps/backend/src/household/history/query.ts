@@ -72,6 +72,9 @@ function createPage(
   transportBytes: (
     response: z.infer<typeof deviceHistoryResponseSchema>,
   ) => number,
+  identity: Parameters<
+    ReturnType<typeof createDeviceHistoryRepository>["read"]
+  >[0]["identity"],
 ) {
   const records: z.infer<
     typeof deviceHistoryResponseSchema
@@ -79,8 +82,8 @@ function createPage(
   let last: string | null = null;
   const response = (more = false) =>
     deviceHistoryResponseSchema.parse({
-      account_id: input.account_id,
-      home_id: input.home_id,
+      account_id: identity.accountId,
+      home_id: identity.homeId,
       start: input.start,
       end: input.end,
       retention_days: deviceHistoryPolicy.retentionDays,
@@ -128,7 +131,7 @@ export function createDeviceHistoryQuery(
     const cursor = decodeCursor(input.cursor);
     if (cursor && cursor.query !== queryHash)
       throw new AppError("invalid_request");
-    const page = createPage(normalized, transportBytes);
+    const page = createPage(normalized, transportBytes, context.identity);
     let more = false;
     await repository.read(context, normalized, cursor, (candidate, binding) => {
       const next = Buffer.from(
@@ -180,7 +183,7 @@ export function createDeviceHistoryQuery(
             throw new AppError("device_history_export_too_large");
           await file.writeFile(line, { signal: context.signal });
         };
-        let page = createPage(normalized, transportBytes);
+        let page = createPage(normalized, transportBytes, context.identity);
         await repository.read(
           context,
           normalized,
@@ -188,7 +191,7 @@ export function createDeviceHistoryQuery(
           async (candidate) => {
             if (!page.append(candidate.record, null)) {
               await save(page.response());
-              page = createPage(normalized, transportBytes);
+              page = createPage(normalized, transportBytes, context.identity);
               page.append(candidate.record, null);
             }
             return true;

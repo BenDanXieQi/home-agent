@@ -7,14 +7,16 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
-    "build": "tsc --project tsconfig.build.json",
+    "build": "bun --bun vite build && tsc --project tsconfig.build.json",
     "dev:types": "tsc --project tsconfig.build.json --watch --preserveWatchOutput",
     "lint": "oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix .",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "dev:runtime": "bun --bun vite build --watch"
   },
   "dependencies": {
-    "hono": "catalog:"
+    "hono": "catalog:",
+    "@home-agent/agent": "workspace:*"
   },
   "devDependencies": {
     "@home-agent/typescript-config": "workspace:*",
@@ -23,12 +25,13 @@
     "oxlint-tsgolint": "catalog:",
     "typescript": "catalog:",
     "@home-agent/oxlint-config": "workspace:*",
-    "@home-agent/backend": "workspace:*"
+    "@home-agent/backend": "workspace:*",
+    "vite": "catalog:"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./src/index.ts"
+      "default": "./dist/index.js"
     }
   }
 }

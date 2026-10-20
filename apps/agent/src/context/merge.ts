@@ -9,13 +9,9 @@ export function mergeAgentContextSnapshot(
   previous: z.infer<typeof agentContextSnapshotSchema> | null,
   next: z.infer<typeof agentContextPublicationSchema>,
 ) {
-  const sameScope =
-    previous?.scope?.account_id === next.scope?.account_id &&
-    previous?.scope?.home_id === next.scope?.home_id &&
-    previous?.scope?.scope_epoch === next.scope?.scope_epoch;
   const { device_state: deviceState, ...otherParts } = next.parts;
   const parts: z.infer<typeof agentContextSnapshotSchema>["parts"] = {
-    ...(sameScope ? previous?.parts : {}),
+    ...previous?.parts,
     ...otherParts,
   };
   if (deviceState?.status === "delta") {

@@ -1,5 +1,8 @@
 import { createProvenanceRoutes } from "./household/records/routes";
-import type { createAgentClient } from "./agent-client";
+import {
+  AGENT_OPERATION_TIMEOUT_MS,
+  type createAgentClient,
+} from "./agent-client";
 import { createAutomationRoutes } from "./household/automations/routes";
 import type { AutomationService } from "./household/automations/service";
 import { createAgentReceiverRoutes } from "./agent-context/receiver-routes";
@@ -99,7 +102,7 @@ export function createApp({
   agent,
 }: AppDependencies) {
   const workflows = createHouseholdWorkflows({
-    timeoutMs: environment.BACKEND_REQUEST_TIMEOUT_MS,
+    timeoutMs: AGENT_OPERATION_TIMEOUT_MS,
     agent,
     household,
     shutdownSignal,

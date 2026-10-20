@@ -18,7 +18,9 @@ export async function consumeEventStream(
     silenceMs: number;
     onResponse?: (response: StreamResponse) => void;
   },
-  receive: (event: EventSourceMessage) => void | Promise<void>,
+  receive: (
+    event: EventSourceMessage,
+  ) => void | boolean | Promise<void | boolean>,
 ) {
   const controller = new AbortController();
   const signal = AbortSignal.any([options.signal, controller.signal]);
@@ -47,30 +49,25 @@ export async function consumeEventStream(
       throw new Error("Event stream unavailable");
     if (options.firstEventTimeoutMs !== undefined)
       arm(options.firstEventTimeoutMs);
-    await response.body
-      .pipeThrough(new TextDecoderStream())
+    const events = response.body
+      .pipeThrough(new TextDecoderStream(), { signal })
       .pipeThrough(
         new EventSourceParserStream({
           maxBufferSize: options.maxBufferSize,
           onError: "terminate",
         }),
-      )
-      .pipeTo(
-        new WritableStream<EventSourceMessage>({
-          async write(event) {
-            signal.throwIfAborted();
-            if (
-              options.maxEventBytes !== undefined &&
-              new TextEncoder().encode(event.data).byteLength >
-                options.maxEventBytes
-            )
-              throw new Error("Oversized event");
-            await receive(event);
-            arm(options.silenceMs);
-          },
-        }),
         { signal },
       );
+    for await (const event of events) {
+      signal.throwIfAborted();
+      if (
+        options.maxEventBytes !== undefined &&
+        new TextEncoder().encode(event.data).byteLength > options.maxEventBytes
+      )
+        throw new Error("Oversized event");
+      if ((await receive(event)) === false) break;
+      arm(options.silenceMs);
+    }
   } finally {
     clearTimeout(deadline);
     controller.abort();

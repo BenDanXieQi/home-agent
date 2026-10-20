@@ -1,129 +1,109 @@
-import { partial, tryit } from "radash";
+import { tryit } from "radash";
 import { AppError } from "@home-agent/api/errors";
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
 } from "@earendil-works/chord/context";
-import { AssistantEntry } from "@earendil-works/pi-durable";
-import {
-  telemetryStatus,
-  withEvaluation,
-  withGenAiContext,
-  withSpan,
-  recordEvaluationOutput,
-} from "@home-agent/observability";
+import { AssistantEntry, type EntryId } from "@earendil-works/pi-durable";
+import { observeConversationRequest } from "./observation";
 import { readFinalAnswer } from "../utils/final-answer";
-import type { createAssistant } from "./assistant";
+import type { configureAssistant } from "./assistant";
+import type { z } from "zod";
+import type { chatStreamContract } from "./contracts";
+import { withConversationProgress } from "../conversation/progress";
+
+type ReceiveProgress = (
+  progress: z.infer<typeof chatStreamContract.progress>,
+) => Promise<void>;
 
 export function createConversationInteraction(
-  conversation: NonNullable<
-    Awaited<ReturnType<typeof createAssistant>>
-  >["root"],
-  options: {
-    sessionId: string;
-    timeoutMs: number;
-    tracing: NonNullable<
-      Awaited<ReturnType<typeof createAssistant>>
-    >["tracing"];
-  },
+  conversation: Pick<
+    NonNullable<
+      ReturnType<ReturnType<typeof configureAssistant>["register"]>["instance"]
+    >,
+    "id" | "commit" | "sessionId" | "submit"
+  >,
+  harness: Parameters<typeof withConversationProgress>[0],
 ) {
-  async function readAndRecordAnswer(
-    submission: Awaited<ReturnType<typeof options.tracing.submit>>,
-    signal: AbortSignal,
-    span: Parameters<typeof withEvaluation>[0],
-  ) {
+  const { sessionId } = conversation;
+  async function readAnswer(answerId: EntryId, signal: AbortSignal) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
-    const settled = await submission.wait(context);
-    signal.throwIfAborted();
-    if (settled.status !== "done" || settled.type !== "input")
-      throw new Error("The agent execution did not complete");
     const entry = await conversation.commit(
-      (tx) => tx.entry(AssistantEntry, settled.answer),
+      (tx) => tx.entry(AssistantEntry, answerId),
       context,
     );
     const assistantMessage = entry?.model?.[0];
     const text = readFinalAnswer(
       assistantMessage?.role === "assistant" ? assistantMessage : undefined,
     );
+
     signal.throwIfAborted();
-    recordEvaluationOutput({ answer: text });
-    recordMessage(span, "assistant", text);
     return text;
   }
 
   async function submitAndReadAnswer(
     message: string,
     requestSignal: AbortSignal,
-    span: Parameters<typeof withEvaluation>[0],
+    receive?: ReceiveProgress,
   ) {
     requestSignal.throwIfAborted();
-    const signal = AbortSignal.any([
-      requestSignal,
-      AbortSignal.timeout(options.timeoutMs),
-    ]);
-    recordMessage(span, "user", message);
-
-    const submission = await options.tracing.submit(
-      conversation,
-      { type: "input", content: message },
-      BACKGROUND_CONTEXT,
-    );
-    span.setAttribute("home_agent.submission.id", String(submission.id));
-
-    return readAndRecordAnswer(submission, signal, span).catch(
-      async (error) => {
-        if (signal.aborted) await submission.abort(BACKGROUND_CONTEXT);
-        throw error;
-      },
-    );
-  }
-
-  async function run(message: string, requestSignal: AbortSignal) {
-    const runWithEvaluation = (span: Parameters<typeof withEvaluation>[0]) =>
-      withEvaluation(
-        span,
-        { task: message },
-        partial(submitAndReadAnswer, message, requestSignal, span),
-      );
-    const answer = await withGenAiContext(
+    return withConversationProgress(
+      harness,
       {
-        "session.id": options.sessionId,
-        "gen_ai.conversation.id": String(conversation.id),
+        conversation,
+        signal: requestSignal,
+        onProgress: receive,
       },
-      () =>
-        withSpan(
-          "household-assistant.run",
-          { "gen_ai.agent.name": "household-assistant" },
-          runWithEvaluation,
-        ),
+      async ({ signal, submit }) => {
+        signal.throwIfAborted();
+        const pending = await submit(
+          { type: "input", content: message },
+          BACKGROUND_CONTEXT,
+        );
+        try {
+          const settled = await pending.wait(
+            withAbortSignal(signal, BACKGROUND_CONTEXT),
+          );
+          if (settled.status !== "done" || settled.type !== "input")
+            throw new AppError("agent_execution_failed");
+          return await readAnswer(settled.answer, signal);
+        } catch (error) {
+          if (signal.aborted) await pending.abort(BACKGROUND_CONTEXT);
+          throw error;
+        }
+      },
     );
-    requestSignal.throwIfAborted();
-    return answer;
   }
 
-  async function submitAndWait(message: string, requestSignal: AbortSignal) {
-    const [cause, answer] = await tryit(run)(message, requestSignal);
+  async function submitAndWait(
+    message: string,
+    requestSignal: AbortSignal,
+    receive?: ReceiveProgress,
+  ) {
+    const [cause, answer] = await tryit(submitAndReadAnswer)(
+      message,
+      requestSignal,
+      receive,
+    );
     if (!cause) return answer;
     if (requestSignal.aborted)
       throw new AppError("request_cancelled", { cause });
-    if (cause instanceof DOMException && cause.name === "TimeoutError")
-      throw new AppError("run_timeout", { cause });
     throw new AppError("agent_execution_failed", { cause });
   }
 
-  return { submitAndWait };
-}
-
-function recordMessage(
-  span: Parameters<typeof withEvaluation>[0],
-  role: "user" | "assistant",
-  content: string,
-) {
-  if (!span.isRecording() || !telemetryStatus().includeContent) return;
-  const attribute =
-    role === "user" ? "gen_ai.input.messages" : "gen_ai.output.messages";
-  span.setAttribute(
-    attribute,
-    JSON.stringify([{ role, parts: [{ type: "text", content }] }]),
-  );
+  return {
+    submitAndWait: (
+      message: string,
+      signal: AbortSignal,
+      receive?: ReceiveProgress,
+    ) =>
+      observeConversationRequest(
+        {
+          message,
+          sessionId,
+          conversationId: conversation.id,
+        },
+        () => submitAndWait(message, signal, receive),
+      ),
+  };
 }

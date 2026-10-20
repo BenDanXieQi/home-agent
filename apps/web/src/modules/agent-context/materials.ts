@@ -2,13 +2,12 @@ import { queryOptions, useQueries } from "@tanstack/react-query";
 import type { z } from "zod";
 import {
   agentMaterialResponseSchema,
-  type agentContextScopeSchema,
   type agentObservationSchema,
 } from "@home-agent/api/agent-context";
 import { requestJson } from "../../api/client";
 
 export function useObservationMaterials(
-  scope: z.infer<typeof agentContextScopeSchema>,
+  contextEpoch: string,
   record: z.infer<typeof agentObservationSchema>,
 ) {
   const references = [
@@ -25,7 +24,7 @@ export function useObservationMaterials(
       queryOptions({
         queryKey: [
           "agent-observation-material",
-          scope,
+          contextEpoch,
           reference.kind,
           reference.id,
           reference.kind === "member_sighting"
@@ -36,7 +35,7 @@ export function useObservationMaterials(
           const response = await requestJson(
             (client, options) =>
               client.api.agent.context.material.$post(
-                { json: { scope, ...reference } },
+                { json: reference },
                 options,
               ),
             agentMaterialResponseSchema,
@@ -44,9 +43,6 @@ export function useObservationMaterials(
           );
           if (
             response.kind !== reference.kind ||
-            response.scope.scope_epoch !== scope.scope_epoch ||
-            response.scope.account_id !== scope.account_id ||
-            response.scope.home_id !== scope.home_id ||
             (response.kind === "member_sighting"
               ? response.record.id
               : response.window.id) !== reference.id

@@ -20,7 +20,7 @@ export function SpatialEditor({
   onCancel: () => void;
   onSave: (command: SpatialSaveCommand) => void;
 }) {
-  const actions = { pending, onCancel, scope: snapshot.scope };
+  const actions = { pending, onCancel };
   if (editor.resource === "space")
     return (
       <SpaceForm

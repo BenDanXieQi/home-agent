@@ -3,6 +3,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import {
   deviceHistoryQuerySchema,
+  deviceHistoryResponseSchema,
   deviceHistoryReportSchema,
   deviceHistoryPolicy,
   deviceHistoryTimeSchema,
@@ -44,8 +45,8 @@ const rowSchema = z.object({
   position: historyPositionSchema,
 });
 const bindingSchema = z.object({
-  accountKey: deviceHistoryQuerySchema.shape.account_id,
-  homeId: deviceHistoryQuerySchema.shape.home_id.nullable(),
+  accountKey: deviceHistoryResponseSchema.shape.account_id,
+  homeId: deviceHistoryResponseSchema.shape.home_id.nullable(),
   updated_at: deviceHistoryTimeSchema,
 });
 const parametersSchema = z.array(z.union([z.string(), z.number(), z.null()]));

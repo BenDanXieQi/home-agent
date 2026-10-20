@@ -9,7 +9,10 @@ import { bindTraceSession, sessionBaggageContext } from "./session";
 const attributesKey = createContextKey("home-agent.gen-ai");
 
 class GenAiContext {
-  constructor(readonly attributes: Attributes) {}
+  readonly attributes;
+  constructor(attributes: Attributes) {
+    this.attributes = attributes;
+  }
 }
 
 export function withGenAiContext<T>(attributes: Attributes, run: () => T) {

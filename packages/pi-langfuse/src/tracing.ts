@@ -1,3 +1,9 @@
+import type {
+  AgentEvent,
+  ConversationId,
+  SubmissionId,
+} from "@earendil-works/pi-durable";
+
 export interface ObservationAttributes {
   input?: unknown;
   output?: unknown;
@@ -25,15 +31,29 @@ export interface Observation {
 
 export type ObservationType = "agent" | "generation" | "span" | "tool";
 
+export type ObservationSource =
+  | { kind: "conversation" }
+  | { kind: "submission"; id: SubmissionId; requestId: string | undefined }
+  | { kind: "run"; primary: SubmissionId }
+  | { kind: "generation"; primary: SubmissionId }
+  | {
+      kind: "tool";
+      primary: SubmissionId;
+      call: Pick<
+        Extract<AgentEvent, { type: "tool_execution_start" }>,
+        | "taskId"
+        | "toolCallId"
+        | "toolName"
+        | "parentTaskId"
+        | "parentToolCallId"
+      >;
+    };
+
 export interface TraceBackend {
   start(
-    name: string,
+    conversationId: ConversationId,
+    source: ObservationSource,
     attributes: ObservationAttributes,
-    options: {
-      asType: ObservationType;
-      parent?: Observation;
-      startTime?: Date;
-    },
   ): Observation;
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;
