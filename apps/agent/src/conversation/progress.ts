@@ -25,7 +25,6 @@ type Conversation = Pick<
 
 type Submission = Awaited<ReturnType<Conversation["submit"]>>;
 
-/** Run an operation with submission-scoped progress; callers own cancellation and results. */
 export async function withConversationProgress<
   State extends JsonObject,
   Result,
@@ -64,7 +63,6 @@ export async function withConversationProgress<
   const pendingDeliveries = new Set<Promise<unknown>>();
   await using resources = new AsyncDisposableStack();
 
-  // Stop the watches first, then finish any callbacks already sending.
   resources.defer(async () => {
     await Promise.all(pendingDeliveries);
   });
@@ -78,7 +76,6 @@ export async function withConversationProgress<
     });
   }
 
-  // Watch before submitting so the first updates are not missed.
   const liveWatch = await watchDoc(LiveDoc);
   const stateWatch = stateDoc ? await watchDoc(stateDoc) : undefined;
   if (!liveWatch || (stateDoc && !stateWatch))
@@ -88,7 +85,6 @@ export async function withConversationProgress<
   const sendProgress = async () => {
     signal.throwIfAborted();
 
-    // Watches only notify; read and copy one current snapshot on the mutation line.
     const snapshot = await conversation.commit(async (tx) => {
       const liveState = await tx.doc(LiveDoc, conversation.id);
       if (!submission || !liveState.run?.inputs.includes(submission.id))

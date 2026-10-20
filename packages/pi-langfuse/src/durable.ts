@@ -176,7 +176,6 @@ export async function createPiLangfuseDurableConversation(
       ownsConversation = true;
       const internal = getLangfuseRuntimeInternal(runtime);
       releaseRuntime = internal.registerSession(dispose);
-      // Commits register new submissions before submit() returns, even while event delivery is queued.
       releaseCommits = options.harness.subscribeCommits((publication) => {
         for (const change of publication.changes) {
           if (

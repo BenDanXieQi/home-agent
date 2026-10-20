@@ -56,7 +56,6 @@ export function httpTracing(
             c.error = safeError;
           }
           if (session.completion) {
-            // Return headers now; keep the instrumentation's scope open for the producer.
             responseReady.resolve();
             await session.completion;
           }

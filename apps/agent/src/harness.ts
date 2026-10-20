@@ -63,7 +63,6 @@ export function createAgentHarness(
     if (conversationClosers.has(conversation.id))
       throw new Error("The conversation is already observed");
 
-    // Reserve the conversation before asynchronous setup to prevent duplicate observers.
     conversationClosers.set(conversation.id, undefined);
     await using resources = new AsyncDisposableStack();
     resources.defer(() => {
@@ -90,7 +89,6 @@ export function createAgentHarness(
     );
     resources.defer(() => tracing.detach(conversation.id));
 
-    // Tool handles inherit invocation cancellation; cleanup needs an unbound handle.
     const unboundConversation = await harness.conversation(
       conversation.id,
       BACKGROUND_CONTEXT,

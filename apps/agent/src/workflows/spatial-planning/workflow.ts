@@ -46,7 +46,6 @@ export const modelConfiguration = {
 } as const;
 
 export const observation = {
-  // Only planning messages are business operations; close keeps HTTP tracing.
   start: (input: z.infer<typeof spatialPlanningInputSchema>) => {
     if (input.action !== "message") return undefined;
     return {

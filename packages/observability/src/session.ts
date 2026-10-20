@@ -62,7 +62,6 @@ export function requestSession(parent = context.active()) {
   return value instanceof RequestSession ? value : undefined;
 }
 
-/** A finite response stream keeps its request session alive until the producer settles. */
 export function trackHttpStream(completion: Promise<void>) {
   requestSession()?.holdUntil(completion);
 }

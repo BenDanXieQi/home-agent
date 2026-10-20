@@ -9,14 +9,12 @@ type Span = Parameters<
 
 type ObservationProjection = {
   attributes?: Parameters<Span["setAttributes"]>[0];
-  // Built only when the span records message content.
   messages?: () => unknown;
 };
 
 export function observeWorkflowExecution<Input, Result>(
   name: string,
   observation: {
-    // Returning undefined leaves the call without a business operation span.
     start: (input: Input) => ObservationProjection | undefined;
     complete?: (result: Result) => ObservationProjection;
   },
