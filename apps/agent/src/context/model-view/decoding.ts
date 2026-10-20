@@ -13,14 +13,13 @@ import {
   operationsSchema,
 } from "./format";
 
-export const encodedContextSchema = z.object({
+export const encodedContextSchema = z.strictObject({
   schema: z
     .record(z.string(), z.unknown())
     .refine(
       (value) => isDeepStrictEqual(value, format),
       "Unrecognized context format",
     ),
-  instructions: z.record(z.string(), z.string()),
   meta: metaSchema,
   attention: attentionSchema.optional(),
   received_at: z.string().nullable(),
@@ -172,7 +171,6 @@ export function decodeHouseholdContext(input: unknown) {
   return {
     快照接收时间: encoded.received_at,
     ...encoded.meta,
-    说明: encoded.instructions,
     设备组: groups,
     状态报告: byDevice,
     最新观察: encoded.observations,

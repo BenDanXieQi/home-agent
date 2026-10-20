@@ -93,7 +93,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 ## Agent 家庭模型视图
 
-模型输入的能力筛选、视图转换、编码与解码由 Agent 拥有，通过 `@home-agent/agent/context/model-view` 及其子路径导出；Web 直接复用 Agent 实现。输入与筛选规则、查询及编码用法见 [Agent 家庭模型视图](../../apps/agent/README.md#家庭模型视图)。
+模型输入的能力筛选、视图转换、编码与解码由 Agent 拥有，通过 `@home-agent/agent/context/model-view` 及其子路径导出；Web 直接复用 Agent 实现。输出包含业务数据、编码列名和权限位映射，数据转换保持同步执行。
 
 ## 有限操作的流式传输
 

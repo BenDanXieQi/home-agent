@@ -1,10 +1,11 @@
 import { z } from "zod";
-import { memo as once } from "radash";
+import { memoize } from "es-toolkit";
 import { AppError } from "@home-agent/api/errors";
 import { genAiMessages } from "@home-agent/observability";
 import { optionalModelRefSchema } from "../../models";
 import { defineWorkflow } from "../definition";
 import { spatialLayoutSchema } from "@home-agent/api/spatial";
+import { SpatialPlanningExtension } from "./extension";
 import {
   createSpatialPlanningSession,
   spatialPlanningResultSchema,
@@ -39,6 +40,8 @@ export const contract = {
   progress: spatialPlanningProgressSchema,
   result: spatialPlanningResultSchema,
 };
+
+export const extensions = [SpatialPlanningExtension] as const;
 
 export const modelConfiguration = {
   key: "AGENT_SPATIAL_MODEL",
@@ -96,7 +99,9 @@ export function createWorkflow(context: Parameters<typeof defineWorkflow>[1]) {
 }
 
 function createSpatialPlanningWorkflow(
-  dependencies: Parameters<typeof createSpatialPlanningSession>[0],
+  dependencies: Parameters<
+    typeof createSpatialPlanningSession
+  >[0]["dependencies"],
 ) {
   type PlanningSession = Awaited<
     ReturnType<typeof createSpatialPlanningSession>
@@ -114,22 +119,22 @@ function createSpatialPlanningWorkflow(
     });
   }
 
-  async function replaceCurrentSession(
-    input: Parameters<PlanningSession["message"]>[0],
-    signal: AbortSignal,
-    receive: Parameters<PlanningSession["message"]>[2],
-  ) {
+  async function replaceCurrentSession({
+    input,
+    signal,
+    receive,
+  }: Parameters<PlanningSession["message"]>[0]) {
     const previous = currentSession;
     currentSession = undefined;
     await previous?.dispose();
     signal.throwIfAborted();
-    const session = await createSpatialPlanningSession(
+    const session = await createSpatialPlanningSession({
       dependencies,
-      input.draft,
+      initialDraft: input.draft,
       signal,
-    );
+    });
     try {
-      const snapshot = await session.message(input, signal, receive);
+      const snapshot = await session.message({ input, signal, receive });
       signal.throwIfAborted();
       currentSession = session;
       return snapshot;
@@ -142,7 +147,7 @@ function createSpatialPlanningWorkflow(
   async function handlePlanningRequest(
     input: z.infer<typeof spatialPlanningInputSchema>,
     requestSignal: AbortSignal,
-    receive?: Parameters<PlanningSession["message"]>[2],
+    receive?: Parameters<PlanningSession["message"]>[0]["receive"],
   ) {
     if (closed) throw new AppError("request_cancelled");
     requestSignal.throwIfAborted();
@@ -153,7 +158,9 @@ function createSpatialPlanningWorkflow(
       lifecycle.abort(new AppError("request_cancelled"));
       lifecycle = new AbortController();
       const signal = AbortSignal.any([requestSignal, lifecycle.signal]);
-      return trackSessionChange(replaceCurrentSession(input, signal, receive));
+      return trackSessionChange(
+        replaceCurrentSession({ input, signal, receive }),
+      );
     }
 
     const session = currentSession;
@@ -163,7 +170,7 @@ function createSpatialPlanningWorkflow(
 
     switch (input.action) {
       case "message":
-        return session.message(input, signal, receive);
+        return session.message({ input, signal, receive });
       case "close":
         currentSession = undefined;
         return trackSessionChange(session.close(signal));
@@ -184,7 +191,7 @@ function createSpatialPlanningWorkflow(
     if (!closed) lifecycle = new AbortController();
   }
 
-  const close = once(async () => {
+  const close = memoize(async () => {
     closed = true;
     lifecycle.abort(new AppError("request_cancelled"));
 

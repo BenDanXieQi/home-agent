@@ -18,6 +18,7 @@ export function configureWorkflows(
   });
   return {
     modelRefs: configuration.modelRefs,
+    extensions: configuration.extensions,
     register(host: Host, contextReader: WorkflowDependencies["contextReader"]) {
       host.serve(
         Workflows,

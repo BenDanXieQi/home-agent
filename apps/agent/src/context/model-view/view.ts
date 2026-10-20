@@ -200,12 +200,6 @@ export function createHouseholdModelView(
       .filter((h) => !h.archived)
       .map((h) => ({ 名称: h.name, id: h.home_id })),
     空间关系: source.spatial,
-    说明: {
-      范围: "完整展示领域规则允许的设备能力；spec/state仅接受该设备已列出的能力键，不能查询被规则排除的能力。报告仅列有值且含义明确的状态；已列出能力的配置值可通过state读取，规格详情通过spec读取",
-      能力键: "能力按权限、数据类型分组；语义键可直接传入查询命令；同名以服务名称消歧",
-      报告质量: "cloud_cache=云缓存、测量时间未知；unverified=待验证。在线不表示属性实时",
-      来源: "仅反映传入快照，不现场刷新或控制设备",
-    },
     设备组: groups,
     状态报告: reports,
     最新观察: latestObservations(source),

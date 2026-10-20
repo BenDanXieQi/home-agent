@@ -1,32 +1,28 @@
 import { withConversationProgress } from "../../conversation/progress";
 import { z } from "zod";
-import { memo as once, tryit } from "radash";
+import { attemptAsync, memoize } from "es-toolkit";
 import {
   BACKGROUND_CONTEXT,
   awaitWithContext,
   withAbortSignal,
   type Context,
 } from "@earendil-works/chord/context";
-import type { UserMessage } from "@earendil-works/pi-ai";
-import {
-  AssistantEntry,
-  ConversationBusy,
-  type EntryId,
-  LiveDoc,
-} from "@earendil-works/pi-durable";
+import { ConversationBusy, LiveDoc } from "@earendil-works/pi-durable";
 import { AppError } from "@home-agent/api/errors";
 import type { WorkflowDependencies } from "../definition";
-import { readFinalAnswer } from "../../utils/final-answer";
-import { createSpatialPlanningExtension } from "./extension";
-import { spatialPlanningContentSchema } from "./extension";
+import {
+  SpatialPlanningDoc,
+  SpatialPlanningExtension,
+  spatialPlanningStateSchema,
+  spatialPlanningPromptName,
+} from "./extension";
 import type { spatialPlanningInputSchema } from "./workflow";
 import { conversationProgressSchema } from "../../conversation/contracts";
 
-export const spatialPlanningSnapshotSchema =
-  spatialPlanningContentSchema.extend({
-    session_id: z.uuid(),
-    status: z.enum(["idle", "running"]),
-  });
+export const spatialPlanningSnapshotSchema = spatialPlanningStateSchema.extend({
+  session_id: z.uuid(),
+  status: z.enum(["idle", "running"]),
+});
 
 export const spatialPlanningResultSchema = z.discriminatedUnion("status", [
   spatialPlanningSnapshotSchema,
@@ -34,7 +30,7 @@ export const spatialPlanningResultSchema = z.discriminatedUnion("status", [
 ]);
 
 export const spatialPlanningProgressSchema = conversationProgressSchema.extend({
-  ...spatialPlanningContentSchema.omit({ reply: true }).shape,
+  ...spatialPlanningStateSchema.shape,
 });
 
 type PlanningMessage = Extract<
@@ -46,48 +42,42 @@ type ReceiveProgress = (
   progress: z.infer<typeof spatialPlanningProgressSchema>,
 ) => Promise<void>;
 
-function turnContent(
-  {
-    questions,
-    draft,
-  }: Pick<z.infer<typeof spatialPlanningContentSchema>, "questions" | "draft">,
-  input: PlanningMessage,
-) {
-  return [
-    {
-      type: "text",
-      text: `当前空间规划状态：\n${JSON.stringify({ questions, draft })}`,
-    },
-    {
-      type: "text",
-      text: input.text || "请分析这张图片中的空间和通道关系。",
-    },
-    ...input.images.map((image) => ({
-      type: "image" as const,
-      data: image.data,
-      mimeType: image.mime_type,
-    })),
-  ] satisfies Exclude<UserMessage["content"], string>;
-}
-
-export async function createSpatialPlanningSession(
-  {
-    harness,
-    model,
-    contextReader,
-  }: Pick<WorkflowDependencies, "harness" | "model" | "contextReader">,
-  initialDraft:
-    | z.infer<typeof spatialPlanningContentSchema>["draft"]
-    | undefined,
-  creationSignal: AbortSignal,
-) {
-  const mijiaRooms = (await contextReader.readRooms(creationSignal)).map((room) => room.name);
-  const { SpatialPlanningDoc, SpatialPlanningExtension } =
-    createSpatialPlanningExtension();
+export async function createSpatialPlanningSession({
+  dependencies: { harness, model, contextReader },
+  initialDraft,
+  signal: creationSignal,
+}: {
+  dependencies: Pick<
+    WorkflowDependencies,
+    "harness" | "model" | "contextReader"
+  >;
+  initialDraft?:
+    | z.infer<typeof spatialPlanningStateSchema>["draft"]
+    | undefined;
+  signal: AbortSignal;
+}) {
+  const mijiaRooms = (await contextReader.readRooms(creationSignal)).map(
+    (room) => room.name,
+  );
 
   const conversation = await harness.createConversation(
     {
       agentName: "spatial-planning",
+      prompt: {
+        name: spatialPlanningPromptName,
+        systemVariables: { mijia_rooms: JSON.stringify(mijiaRooms) },
+        userVariables: async (currentConversation, context) =>
+          currentConversation.commit(async (tx) => {
+            const state = await tx.doc(
+              SpatialPlanningDoc,
+              currentConversation.id,
+            );
+            return {
+              draft: JSON.stringify(state.draft),
+              questions: JSON.stringify(state.questions),
+            };
+          }, context),
+      },
       ownership: { kind: "ownerless" },
       agent: {
         model: { provider: model.provider, modelId: model.id },
@@ -95,7 +85,6 @@ export async function createSpatialPlanningSession(
       },
       init: async (tx, id) => {
         const state = await tx.doc(SpatialPlanningDoc, id);
-        state.mijiaRooms = mijiaRooms;
         if (initialDraft) state.draft = initialDraft;
       },
     },
@@ -104,25 +93,19 @@ export async function createSpatialPlanningSession(
   const { sessionId } = conversation;
   let closed = false;
   let messageInFlight = false;
-  const dispose = once(() => {
+  const dispose = memoize(() => {
     closed = true;
     return conversation.close();
   });
 
-  async function readState(context: Context, answerId: EntryId) {
+  async function readState(context: Context) {
     return conversation.commit(async (tx) => {
       const { questions, draft } = await tx.doc(
         SpatialPlanningDoc,
         conversation.id,
       );
-      const entry = await tx.entry(AssistantEntry, answerId);
-      const assistantMessage = entry?.model?.[0];
-      const reply = readFinalAnswer(
-        assistantMessage?.role === "assistant" ? assistantMessage : undefined,
-      );
       const live = await tx.doc(LiveDoc, conversation.id);
       return spatialPlanningSnapshotSchema.parse({
-        reply,
         questions,
         draft,
         session_id: sessionId,
@@ -139,57 +122,64 @@ export async function createSpatialPlanningSession(
     }: Parameters<Parameters<typeof withConversationProgress>[2]>[0],
   ) {
     const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
-    const content = await conversation.commit(async (tx) => {
-      const state = await tx.doc(SpatialPlanningDoc, conversation.id);
-      return turnContent(state, input);
-    }, context);
+    const content = [
+      { type: "text" as const, text: input.text },
+      ...input.images.map((image) => ({
+        type: "image" as const,
+        data: image.data,
+        mimeType: image.mime_type,
+      })),
+    ];
     if (closed) throw new AppError("not_found");
-    const [submitError, submission] = await tryit(() =>
+
+    const [submitError, submission] = await attemptAsync(() =>
       submit({ type: "input", content, whenBusy: "reject" }, context),
-    )();
-    if (submission === undefined) {
-      if (submitError instanceof ConversationBusy)
-        throw new AppError("workflow_busy");
-      throw submitError;
-    }
+    );
+    if (submitError instanceof ConversationBusy)
+      throw new AppError("workflow_busy");
+    if (submission === null) throw submitError;
+
     const completion = submission.wait(BACKGROUND_CONTEXT).then((settled) => {
       if (settled.status !== "done" || settled.type !== "input")
         throw new AppError("agent_execution_failed");
-      return readState(BACKGROUND_CONTEXT, settled.answer);
+      return readState(BACKGROUND_CONTEXT);
     });
     const drained = Promise.allSettled([completion]);
-    const [error, snapshot] = await tryit(awaitWithContext)(
-      completion,
-      context,
+    const [error, snapshot] = await attemptAsync(() =>
+      awaitWithContext(completion, context),
     );
-    if (signal.aborted) {
+    if (signal.aborted)
       await conversation.abort(BACKGROUND_CONTEXT).finally(() => drained);
-      if (snapshot !== undefined) signal.throwIfAborted();
-    }
-    if (snapshot === undefined) throw error;
+
+    if (snapshot === null) throw error;
+    signal.throwIfAborted();
     return snapshot;
   }
 
-  async function message(
-    input: PlanningMessage,
-    requestSignal: AbortSignal,
-    receive?: ReceiveProgress,
-  ) {
+  async function message({
+    input,
+    signal,
+    receive,
+  }: {
+    input: PlanningMessage;
+    signal: AbortSignal;
+    receive?: ReceiveProgress | undefined;
+  }) {
     if (closed) throw new AppError("not_found");
     if (messageInFlight) throw new AppError("workflow_busy");
     if (input.images.length > 0 && !model.input.includes("image"))
       throw new AppError("invalid_request");
+
     messageInFlight = true;
     try {
       return await withConversationProgress(
         harness,
         {
           conversation,
-          signal: requestSignal,
+          signal,
           stateDoc: SpatialPlanningDoc,
           onProgress: receive
             ? async (progress, state) => {
-                if (!state) throw new AppError("agent_execution_failed");
                 await receive({
                   questions: state.questions,
                   draft: state.draft,
@@ -213,11 +203,8 @@ export async function createSpatialPlanningSession(
 
   return {
     sessionId,
-    message: (
-      input: PlanningMessage,
-      signal: AbortSignal,
-      receive?: ReceiveProgress,
-    ) => conversation.withTraceContext(() => message(input, signal, receive)),
+    message: (options: Parameters<typeof message>[0]) =>
+      conversation.withTraceContext(() => message(options)),
     close: (signal: AbortSignal) =>
       conversation.withTraceContext(() => close(signal)),
     dispose,

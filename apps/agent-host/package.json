@@ -20,7 +20,7 @@
     "@home-agent/observability": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/chord": "catalog:",
-    "radash": "12.1.1",
+    "es-toolkit": "^1.52.0",
     "zod": "catalog:"
   },
   "devDependencies": {

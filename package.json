@@ -34,16 +34,17 @@
     "web:trust": "bun scripts/web-entry.ts trust"
   },
   "devDependencies": {
-    "@hono/cli": "^0.2.0-next.9",
-    "oxfmt": "catalog:",
-    "turbo": "catalog:",
-    "yaml": "catalog:",
-    "@types/bun": "catalog:",
-    "typescript": "catalog:",
     "@home-agent/oxlint-config": "workspace:*",
     "@home-agent/typescript-config": "workspace:*",
+    "@hono/cli": "^0.2.0-next.9",
+    "@langfuse/cli": "1.2.4",
+    "@types/bun": "catalog:",
+    "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:"
+    "oxlint-tsgolint": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "yaml": "catalog:"
   },
   "workspaces": {
     "packages": [

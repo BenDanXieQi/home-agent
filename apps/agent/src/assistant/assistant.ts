@@ -24,6 +24,9 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 import { readFinalAnswer } from "../utils/final-answer";
 import type { initializeModelRuntime } from "../models";
 import { AgentRuntime, getServiceInstance } from "../runtime";
+import { PromptBindingDoc } from "../prompts";
+
+const assistantPromptName = "household-assistant";
 
 export function configureAssistant({
   modelRuntime,
@@ -78,10 +81,24 @@ export function configureAssistant({
                 : subagentModels.get(args.model);
             if (args.model !== undefined && !childModel)
               throw new Error("The requested subagent model is not configured");
-            const child = await tx.createConversation({
+
+            const parentPromptState = await tx.doc(
+              PromptBindingDoc,
+              api.conversationId,
+            );
+            if (!parentPromptState.prompt)
+              throw new Error("The parent conversation has no managed prompt");
+
+            const childConversation = await tx.createConversation({
               ownership: { kind: "task", taskId: api.taskId },
             });
-            await configure(tx, child.id, {
+            const childPromptState = await tx.doc(
+              PromptBindingDoc,
+              childConversation.id,
+            );
+            childPromptState.prompt = parentPromptState.prompt;
+
+            await configure(tx, childConversation.id, {
               ...(childModel
                 ? {
                     model: {
@@ -92,16 +109,17 @@ export function configureAssistant({
                 : {}),
               extensions: childExtensions,
             });
-            return child.id;
+            return childConversation.id;
           }, context);
           const child = await api.conversation(childId, context);
           if (!child)
             throw new Error("The delegated conversation is unavailable");
-          await using conversation = await harness.observeConversation(
-            child,
-            { agentName: "household-assistant", sessionId },
+          await using conversation = await harness.prepareManagedConversation({
+            conversation: child,
+            agentName: "household-assistant",
+            sessionId,
             context,
-          );
+          });
           await api.details({ conversationId: childId }, context);
           const submission = await conversation.submit(
             {
@@ -134,7 +152,7 @@ export function configureAssistant({
     CodingTools,
     subagentExtension,
     defineExtension({
-      name: "workspace",
+      name: "household-assistant",
       sections: [section("cwd", (prompt) => prompt.env?.cwd)],
     }),
   ];
@@ -151,10 +169,9 @@ export function configureAssistant({
     return harness.root(startupContext, {
       agentName: "household-assistant",
       sessionId,
+      prompt: { name: assistantPromptName },
       agent: {
         model: { provider: model.provider, modelId: model.id },
-        instructions:
-          "你是家庭助手，使用用户的语言回答。目前未接入家庭资料、设备、感知、通知或持久记忆。不能声称知道实际家庭状态、已控制设备或已安排提醒。本服务运行期间复用同一主会话，可以结合已有对话继续处理；服务重启后会话清空。",
         cwd: workspacePath,
         extensions,
       },

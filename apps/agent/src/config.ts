@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { tryit } from "radash";
+import { attempt } from "es-toolkit";
 
 import {
   modelRefSchema,
@@ -7,14 +7,15 @@ import {
   blankAsUndefinedTextSchema,
 } from "./models";
 import { workflowConfigurationSchema } from "./workflows/registry.generated";
+import { promptConfigurationSchema } from "./prompts";
 
 const modelRefsJsonSchema = z
   .string()
   .transform((value, ctx) => {
-    const [error, parsed] = tryit(() => {
+    const [error, parsed] = attempt(() => {
       const json: unknown = JSON.parse(value);
       return json;
-    })();
+    });
 
     if (!error) return parsed;
 
@@ -27,6 +28,7 @@ const modelRefsJsonSchema = z
   .pipe(z.array(modelRefSchema).min(1));
 
 export const agentConfigurationSchema = z.object({
+  ...promptConfigurationSchema.shape,
   ...workflowConfigurationSchema.shape,
   AGENT_MODEL: optionalModelRefSchema,
   AGENT_SUBAGENT_MODELS: blankAsUndefinedTextSchema.pipe(

@@ -23,7 +23,7 @@
 | 设备事实与房间查询       | [设备事实](contracts/device-facts.md)                                                                                                                                                                                             | [事实模块](../apps/backend/src/household)                                                                                                                                            |
 | Agent 接收与历史查询     | [Agent 接收与只读客户端](../apps/agent/README.md)、[当前数据与材料历史](household-runtime.md#agent-当前数据与材料历史)、[共享契约](../packages/api/README.md#agent-数据交付契约)、[宿主与 RPC 适配](../apps/agent-host/README.md) | [接收模块](../apps/agent/src/context)、[Backend 专用通路](../apps/backend/src/agent-context)、[家庭领域](../apps/backend/src/household)                                              |
 | Agent 接收端观察         | [Web 接收数据观察](../apps/web/README.md#agent-接收数据观察)、[家庭运行时](household-runtime.md#web-接收端观察)                                                                                                                   | [Web 调试页面](../apps/web/src/pages/agent-context)、[接收记录查询](../apps/web/src/modules/agent-context)                                                                           |
-| Agent 观测适配与依赖升级 | [共享追踪说明](../packages/observability/README.md)、[观测维护决策](agent/observability-maintenance.md)                                                                                                                           | [观测适配](../packages/observability/src)、[Pi Durable 观察器](../packages/pi-langfuse)                                                                                              |
+| Agent 观测适配与依赖升级 | [共享追踪说明](../packages/observability/README.md)、[观测维护决策](agent/observability-maintenance.md)、[提示词版本管理](agent/prompt-management.md)                                                                             | [观测适配](../packages/observability/src)、[Pi Durable 观察器](../packages/pi-langfuse)                                                                                              |
 | 设备采集与历史查询       | [设备事实](contracts/device-facts.md)、[设备历史](household-runtime.md#设备状态历史)、[历史事件流](household-runtime.md#web-历史事件流)、[Web README](../apps/web/README.md)                                                      | [历史保存与读取](../apps/backend/src/household/history)、[数据库](../apps/backend/src/db)、[Web 历史模块](../apps/web/src/modules/device-history)                                    |
 
 源码用于核实实际行为，领域规则和来源契约用于判断应满足的约束，计划用于界定未交付工作。发生不一致时，先查清是实现缺陷、文档过时还是尚未交付，不能只改文档掩盖代码问题，也不能把计划接口当作现有能力调用。
@@ -40,7 +40,8 @@
 | [设备事实与房间快照](contracts/device-facts.md)          | 持续采集、当前值质量、本机策略、房间查询与读取                                                                                                                       |
 | [家庭自动化](automations.md)                             | 条件树、自然语言草稿、固定动作、执行记录，以及未启用的 AI 能力边界                                                                                                   |
 | [本地目标检测](perception.md)                            | 已实现图片／摄像头检测、人宠跟踪、人物身份分析与窗口历史快照、音频分析、猫狗声音捕获与语音转写、窗口筛选与短期媒体、后台分析与结果校验、计算资源、模型契约及验证范围 |
-| [Agent 观测维护决策](agent/observability-maintenance.md) | 工作区观察器、内置摘要阶段包装和 OTel 出口的责任、升级核对与替换条件，以及评测和恢复边界                                                                             |
+| [Agent 观测维护决策](agent/observability-maintenance.md) | 观测适配的保留理由、升级与替换原则及使用边界                                                                                                                         |
+| [Agent 提示词版本管理](agent/prompt-management.md)       | Langfuse 提示词配置、版本管理入口及使用限制                                                                                                                          |
 
 当前家庭运行时不等于完整家庭情景；目标检测不等于身份与活动识别。未来能力交付后，把实际用法和限制更新到所属功能文档，不把规划全文复制过来。
 
@@ -71,4 +72,4 @@ Agent 当前数据推送、独立接收和设备／成员／音视频历史读�
 | [米家来源契约](contracts/mijia.md)                   | 读取／推送的协议语义、时间质量及真实设备证据，不能从使用说明推导这些保证             |
 | [家庭运行时业务行为](contracts/household-runtime.md) | 可引用的业务规则编号和组合场景，供实现评审与已有测试追踪；规则存在不表示实机验收通过 |
 
-实现调用链与模块边界由源码及 CodeGraph 查询。契约保留不可由代码推出的来源保证、业务断言和验证限制，不复述类调用顺序或另存同一张参数表。验证结果与未覆盖范围集中在相应功能文档和来源契约；一次性日志与进度不进入共享文档。文件名按本项目职责命名，厂商或参考项目名仅用于确实属于该厂商的接入契约。
+文档只保留通用、最简的说明、必要用法与限制，以及源码入口；不复述代码实现、调用顺序或重复 schema 和字段定义。实现调用链与模块边界由源码及 CodeGraph 查询。契约保留不可由代码推出的来源保证、业务断言和验证限制，不复述类调用顺序或另存同一张参数表。验证结果与未覆盖范围集中在相应功能文档和来源契约；一次性日志与进度不进入共享文档。文件名按本项目职责命名，厂商或参考项目名仅用于确实属于该厂商的接入契约。

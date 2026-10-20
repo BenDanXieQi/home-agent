@@ -1,7 +1,7 @@
 import { createBackendClient } from "@home-agent/backend-client";
 import type { ContextSource } from "@home-agent/agent/context/source";
 import { tracedFetch } from "@home-agent/observability";
-import { partial } from "radash";
+import { partial } from "es-toolkit";
 
 export function createContextSource(backendUrl: string) {
   const api = createBackendClient(backendUrl, {

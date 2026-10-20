@@ -4,7 +4,7 @@ import { createModels } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { observeProvider } from "@home-agent/observability";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { sift, unique } from "radash";
+import { compact, uniq } from "es-toolkit";
 import { z } from "zod";
 
 export const blankAsUndefinedTextSchema = z.preprocess(
@@ -42,7 +42,7 @@ export async function initializeModelRuntime({
 
   const modelCollection = createModels();
   const builtinModelCollection = builtinModels();
-  const providerIds = unique(modelRefs.map(({ provider }) => provider));
+  const providerIds = uniq(modelRefs.map(({ provider }) => provider));
   for (const providerId of providerIds) {
     const provider = builtinModelCollection.getProvider(providerId);
 
@@ -76,7 +76,7 @@ export async function initializeModelRuntime({
     requestedModelRefs: readonly (ModelRef | undefined)[],
   ) =>
     new Map(
-      sift(requestedModelRefs.map(findAvailableModel)).map((model) => [
+      compact(requestedModelRefs.map(findAvailableModel)).map((model) => [
         modelKey(model.provider, model.id),
         model,
       ]),

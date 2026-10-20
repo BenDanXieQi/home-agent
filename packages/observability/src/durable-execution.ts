@@ -16,12 +16,15 @@ import {
 } from "./durable";
 import { observeDurableRegistry } from "./durable-compaction";
 
-export function createObservedHarnessOptions(
-  sourceModelCollection: Models,
+export function createObservedHarnessOptions({
+  sourceModelCollection,
+  extensions,
+}: {
+  sourceModelCollection: Models;
   extensions: readonly Parameters<
     ReturnType<typeof createRegistry>["install"]
-  >[0][],
-) {
+  >[0][];
+}) {
   const registry = createRegistry();
 
   for (const extension of extensions) {
@@ -35,6 +38,7 @@ export function createObservedHarnessOptions(
     models: createObservedModelCollection(sourceModelCollection),
     registry: observeDurableRegistry(registry),
     observationExtension,
+    extensionRegistry: registry,
   };
 }
 

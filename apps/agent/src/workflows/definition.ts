@@ -1,5 +1,4 @@
 import type { z } from "zod";
-import { tryit } from "radash";
 import { AppError } from "@home-agent/api/errors";
 import type {
   agentWorkflowInputSchema,
@@ -30,7 +29,7 @@ type ModelRuntime = NonNullable<Handle<typeof AgentModels>["instance"]>;
 
 export type WorkflowDependencies = Pick<
   NonNullable<Handle<typeof AgentRuntime>["instance"]>,
-  "harness" | "workspacePath"
+  "harness" | "workspacePath" | "prompts"
 > & {
   model: NonNullable<ReturnType<ModelRuntime["findAvailableModel"]>>;
   modelCollection: ModelRuntime["modelCollection"];
@@ -51,12 +50,13 @@ export function defineWorkflow<T extends WorkflowInstance>(
         getServiceInstance(models);
       const model = findAvailableModel(modelRef);
       if (!model) return { run: undefined };
-      const { harness, workspacePath } = getServiceInstance(runtime);
+      const { harness, workspacePath, prompts } = getServiceInstance(runtime);
       return create({
         model,
         modelCollection,
         harness,
         workspacePath,
+        prompts,
         contextReader,
       });
     },
@@ -80,7 +80,7 @@ export async function runWorkflow<Input, Result, Progress>(
   receive?: (progress: Progress) => Promise<void>,
 ) {
   if (signal.aborted) throw new AppError("request_cancelled");
-  const [cause, result] = await tryit(async () => {
+  try {
     if (!run) throw new AppError("model_not_configured");
     const output = contract.result.parse(
       await run(
@@ -95,11 +95,11 @@ export async function runWorkflow<Input, Result, Progress>(
     );
     signal.throwIfAborted();
     return output;
-  })();
-  if (!cause) return result;
-  if (signal.aborted) throw new AppError("request_cancelled", { cause });
-  if (cause instanceof AppError) throw cause;
-  throw new AppError("agent_execution_failed", { cause });
+  } catch (cause) {
+    if (signal.aborted) throw new AppError("request_cancelled", { cause });
+    if (cause instanceof AppError) throw cause;
+    throw new AppError("agent_execution_failed", { cause });
+  }
 }
 
 export type WorkflowRegistry = {

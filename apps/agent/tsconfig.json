@@ -6,6 +6,7 @@
   "include": [
     "src/**/*.ts",
     "scripts/format-context.ts",
+    "scripts/initialize-prompts.ts",
     "scripts/codegen/**/*.ts",
     "scripts/watch.ts"
   ],

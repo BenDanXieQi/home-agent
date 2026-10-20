@@ -12,8 +12,15 @@ export function observeDurableRegistry(registry: RegistryReader) {
     ...definition,
     phases: {
       ...definition.phases,
-      summarize: (...args: Parameters<typeof summarize>) =>
-        withDurableCompactionTrace(...args, () => summarize(...args)),
+      summarize: (...args: Parameters<typeof summarize>) => {
+        const [task, api, execution] = args;
+        return withDurableCompactionTrace({
+          task,
+          api,
+          execution,
+          run: () => summarize(...args),
+        });
+      },
     },
   });
   return {

@@ -54,7 +54,7 @@ import { observeWorkflowExecution } from "./observation";
 ${names
   .map(
     (name, index) =>
-      `import { contract as contract${index}, createWorkflow as createWorkflow${index}, modelConfiguration as modelConfiguration${index}, observation as observation${index} } from "./${name}/workflow";`,
+      `import { contract as contract${index}, createWorkflow as createWorkflow${index}, extensions as extensions${index}, modelConfiguration as modelConfiguration${index}, observation as observation${index} } from "./${name}/workflow";`,
   )
   .join("\n")}
 
@@ -66,6 +66,7 @@ export function configureWorkflowRegistry(config: Config) {
 ${names.map((_name, index) => `  const modelRef${index} = config[modelConfiguration${index}.key] ?? config.AGENT_MODEL;`).join("\n")}
   return {
     modelRefs: [${names.map((_name, index) => `modelRef${index}`).join(", ")}],
+    extensions: [${names.map((_name, index) => `...extensions${index}`).join(", ")}],
     createRegistry(self: Self, contextReader: WorkflowDependencies["contextReader"]) {
   const workflows = self.resources({
 ${names.map((name, index) => `    "${name}": createWorkflow${index}({ self, modelRef: modelRef${index}, contextReader }),`).join("\n")}

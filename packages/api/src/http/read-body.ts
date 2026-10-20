@@ -1,8 +1,9 @@
 export class ResponseBodyError extends Error {
-  constructor(
-    readonly code: "empty_response" | "response_too_large" | "invalid_json",
-  ) {
+  readonly code: "empty_response" | "response_too_large" | "invalid_json";
+
+  constructor(code: ResponseBodyError["code"]) {
     super(code);
+    this.code = code;
     this.name = "ResponseBodyError";
   }
 }

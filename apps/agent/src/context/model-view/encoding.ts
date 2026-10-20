@@ -120,7 +120,6 @@ export function encodeHouseholdContext(semantic: Semantic) {
   );
   return {
     schema: structuredClone(format),
-    instructions: structuredClone(semantic.说明),
     C: groups,
     S: sets,
     D: devices,

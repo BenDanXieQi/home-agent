@@ -34,9 +34,9 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 ## 可选的本地 Langfuse
 
-Langfuse 是模型与工具调用的追踪展示服务。它和 PostgreSQL、ClickHouse（追踪分析数据库）、Redis（任务队列）及 MinIO（对象存储）一起属于根目录的 `home-agent` Compose 项目，在 Docker Desktop 中显示于同一服务组。默认不启用，不下载或启动这些可选服务；内部各服务仍使用独立容器。需要 Docker Compose 2.20+ 的 `include` 能力。
+Langfuse 提供 Agent 提示词版本管理，并展示模型与工具调用的追踪。它和 PostgreSQL、ClickHouse（追踪分析数据库）、Redis（任务队列）及 MinIO（对象存储）一起属于根目录的 `home-agent` Compose 项目，在 Docker Desktop 中显示于同一服务组。默认不启用，不下载或启动这些可选服务；内部各服务仍使用独立容器。需要 Docker Compose 2.20+ 的 `include` 能力。
 
-Web 与 Worker 镜像统一固定为 `4.64.0`。更新时先备份 PostgreSQL、ClickHouse、对象存储和队列数据，再将两个镜像改为同一稳定版本并拉取、重建。服务启动会自动应用数据库迁移；升级依据见[官方升级说明](https://langfuse.com/self-hosting/upgrade)。
+Web 与 Worker 镜像统一固定为 `4.64.0`，Client SDK 固定为 `6.0.1`；SDK 6 要求服务端至少 `4.59.0`。更新时先备份 PostgreSQL、ClickHouse、对象存储和队列数据，再将两个镜像改为同一稳定版本并拉取、重建。服务启动会自动应用数据库迁移；升级依据见[官方升级说明](https://langfuse.com/self-hosting/upgrade)。
 
 ```sh
 docker compose pull langfuse-web langfuse-worker
@@ -64,7 +64,7 @@ OTEL_INCLUDE_CONTENT=true
 
 自动登录使用 Langfuse 当前的 NextAuth 登录接口（先取得防止跨站请求伪造的 CSRF 令牌，再提交固定账号），不修改 Langfuse 本身的认证。Langfuse 使用官方启动初始化能力创建 Home Agent 组织、项目和项目密钥；仅创建缺失资源，修改初始化字段不会重置已有账号、密码或项目密钥。自动登录要求配置与已有账号一致，不一致时入口明确返回错误，须在 Langfuse 管理已有账号后更新配置。
 
-填写两个项目密钥且省略 `OTEL_TRACES_EXPORTER` 时，Backend 与 Agent 自动启用 Langfuse 导出；本地 profile 将默认接收地址设为 `http://localhost:3001`。显式 `LANGFUSE_BASE_URL` 优先于本地默认地址；通用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 或 `OTEL_EXPORTER_OTLP_ENDPOINT` 用于独立 Collector，可与 Langfuse 同时启用。Langfuse 只接收 Agent 执行相关记录，通用导出保留 SDK 采样留下的常规追踪。`LANGFUSE_TRACING_ENABLED=false` 单独关闭 Langfuse 导出，`OTEL_TRACES_EXPORTER=none` 关闭全部导出；两者不关闭展示容器。配置及转发边界见[追踪说明](../packages/observability/README.md#配置)。修改配置后重启应用；已运行的应用不会因再次执行 `bun run dev` 自动重启。
+填写两个项目密钥且省略 `OTEL_TRACES_EXPORTER` 时，Backend 与 Agent 自动启用 Langfuse 导出；本地 profile 将默认接收地址设为 `http://localhost:${LANGFUSE_PORT}`，端口默认 `3001`。显式 `LANGFUSE_BASE_URL` 优先于本地默认地址；通用 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` 或 `OTEL_EXPORTER_OTLP_ENDPOINT` 用于独立 Collector，可与 Langfuse 同时启用。Langfuse 只接收 Agent 执行相关记录，通用导出保留 SDK 采样留下的常规追踪。`LANGFUSE_TRACING_ENABLED=false` 单独关闭 Langfuse 导出，`OTEL_TRACES_EXPORTER=none` 关闭全部导出；两者不关闭展示容器或提示词读取。`bun run dev` 会在启动应用前检查所需提示词，仅使用仓库初始文件创建缺失项；已有提示词保留，缺少所选标签时明确报错。手动部署也可单独运行初始化命令，用法见[提示词版本管理](agent/prompt-management.md)。配置及转发边界见[追踪说明](../packages/observability/README.md#配置)。修改配置后重启应用；已运行的应用不会因再次执行 `bun run dev` 自动重启。
 
 可通过 `LANGFUSE_PORT` 更改页面端口，通过 `LANGFUSE_MEDIA_PORT` 更改媒体存储端口（默认 9090）；自动接收地址及 Compose 的页面和媒体地址随之更新。只有自动登录入口及媒体端口绑定本机回环地址，Langfuse Web、内部数据库和队列不直接发布宿主端口，Langfuse 数据库与家庭上下文数据库独立。Langfuse 追踪不替代摄像头检测框和筛选片段展示，采集边界见[追踪说明](../packages/observability/README.md)。
 

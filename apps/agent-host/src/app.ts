@@ -1,13 +1,12 @@
 import { createHost } from "@earendil-works/chord";
 import { createContextSource } from "./context-source";
-import { memo as once, sift } from "radash";
+import { memoize, compact } from "es-toolkit";
 import { configureAssistant } from "@home-agent/agent/assistant";
 import {
   AgentRuntime,
   getServiceInstance,
   registerAgentRuntime,
 } from "@home-agent/agent/runtime";
-import { createSpatialPlanningExtension } from "@home-agent/agent/workflows/spatial-planning/extension";
 import { createAgentRoutes } from "@home-agent/agent/routes";
 import type { loadConfig } from "./config";
 import { createContextReceiver } from "@home-agent/agent/context/receiver";
@@ -23,7 +22,7 @@ export async function createApp(
   await using appResources = new AsyncDisposableStack();
 
   const workflowConfiguration = configureWorkflows(config);
-  const modelRefs = sift([
+  const modelRefs = compact([
     config.AGENT_MODEL,
     ...workflowConfiguration.modelRefs,
     ...(config.AGENT_SUBAGENT_MODELS ?? []),
@@ -54,9 +53,10 @@ export async function createApp(
     subagentModelRefs: config.AGENT_SUBAGENT_MODELS,
   });
   registerAgentRuntime(services, {
+    promptConfiguration: config,
     extensions: [
       ...assistantConfiguration.extensions,
-      createSpatialPlanningExtension().SpatialPlanningExtension,
+      ...workflowConfiguration.extensions,
     ],
     signal,
   });
@@ -87,6 +87,6 @@ export async function createApp(
   const ownedResources = appResources.move();
   return {
     fetch: app.fetch,
-    [Symbol.asyncDispose]: once(() => ownedResources.disposeAsync()),
+    [Symbol.asyncDispose]: memoize(() => ownedResources.disposeAsync()),
   };
 }

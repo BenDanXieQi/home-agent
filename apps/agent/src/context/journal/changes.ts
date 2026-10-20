@@ -1,4 +1,4 @@
-import { unique } from "radash";
+import { uniq } from "es-toolkit";
 import type {
   agentContextDataSchemas,
   agentObservationSourceSchema,
@@ -43,12 +43,12 @@ export function collectReceiptChanges(
         : {};
     const keys =
       publication.status === "delta"
-        ? unique(
+        ? uniq(
             publication.data.changes
               .filter((change) => change.entity === "latest")
               .map((change) => change.key),
           )
-        : unique([
+        : uniq([
             ...Object.keys(oldLatest),
             ...Object.keys(currentDeviceState.data.latest),
           ]);

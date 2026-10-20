@@ -241,6 +241,7 @@ try {
     }
     await prepareDatabase();
     await prepareLangfuse();
+    await runBun(["run", "--cwd", "apps/agent", "prompts:init"]);
     await writeFile(modeFile, mode + "\n", { mode: 0o600 });
     console.info(
       `go2rtc: ${mode} · http://127.0.0.1:1984（接口就绪不代表摄像头出帧）`,

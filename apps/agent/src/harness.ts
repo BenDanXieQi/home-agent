@@ -15,19 +15,38 @@ import {
   createDurableTracing,
   type createObservedHarnessOptions,
 } from "@home-agent/observability/durable";
-import { memo as once, tryit } from "radash";
+import { attemptAsync, memoize } from "es-toolkit";
+import {
+  createPromptExtension,
+  PromptBindingDoc,
+  promptGenerationAttributes,
+  compileConversationInput,
+  resolvePromptVariables,
+  validateConversationPrompt,
+  type createPromptResolver,
+  type PromptVariables,
+} from "./prompts";
 
-type ConversationObservationOptions = {
+type ManagedConversationOptions = {
   agentName: string;
   sessionId?: string | undefined;
 };
 
-export function createAgentHarness(
-  harness: Harness,
-  observationExtension: ReturnType<
+export function createAgentHarness({
+  harness,
+  frameworkExtensions,
+  extensionRegistry,
+  prompts,
+}: {
+  harness: Harness;
+  frameworkExtensions: ReturnType<
     typeof createObservedHarnessOptions
-  >["observationExtension"],
-) {
+  >["observationExtension"][];
+  extensionRegistry: ReturnType<
+    typeof createObservedHarnessOptions
+  >["extensionRegistry"];
+  prompts: ReturnType<typeof createPromptResolver>;
+}) {
   let closed = false;
   const pendingInitializations = new Set<Promise<unknown>>();
   const conversationClosers = new Map<
@@ -38,30 +57,54 @@ export function createAgentHarness(
     ConversationHandle,
     ConversationHandle["submit"]
   >();
+  type ManagedPromptOptions = {
+    prompt: Omit<Parameters<typeof prompts.resolve>[0], "context"> & {
+      userVariables?:
+        | PromptVariables<
+            [
+              conversation: Pick<
+                Awaited<ReturnType<Harness["createConversation"]>>,
+                "id" | "commit"
+              >,
+              context: Context,
+            ]
+          >
+        | undefined;
+    };
+  };
 
   async function initialize<T extends ConversationHandle>(
     open: () => Promise<T>,
   ) {
     if (closed) throw new AppError("request_cancelled");
 
-    const pending = tryit(open)();
+    const pending = attemptAsync(open);
     pendingInitializations.add(pending);
 
     const [error, conversation] = await pending;
     pendingInitializations.delete(pending);
 
-    if (conversation === undefined) throw error;
+    if (conversation === null) throw error;
     return conversation;
   }
 
-  async function observe<Conversation extends ConversationHandle>(
-    conversation: Conversation,
-    options: ConversationObservationOptions,
-    context: Context,
-    traceIdentitySource: "session" | "conversation",
-  ) {
+  async function prepareManagedConversation<
+    Conversation extends ConversationHandle,
+  >({
+    conversation,
+    agentName,
+    sessionId: requestedSessionId,
+    context,
+    traceIdentitySource,
+    userVariables,
+  }: ManagedConversationOptions & {
+    conversation: Conversation;
+    context: Context;
+    traceIdentitySource: "session" | "conversation";
+    userVariables?: ManagedPromptOptions["prompt"]["userVariables"];
+  }) {
     if (conversationClosers.has(conversation.id))
-      throw new Error("The conversation is already observed");
+      throw new Error("The conversation is already managed");
 
     conversationClosers.set(conversation.id, undefined);
     await using resources = new AsyncDisposableStack();
@@ -83,8 +126,21 @@ export function createAgentHarness(
       if (id) cleanupSessionResources(id);
     });
 
+    const promptState = await harness.snapshot(
+      PromptBindingDoc,
+      conversation.id,
+      context,
+    );
+    const prompt = promptState?.prompt;
+    if (!prompt) throw new Error("The conversation has no managed prompt");
+    validateConversationPrompt(prompt);
+
     const tracing = resources.adopt(
-      createDurableTracing(harness, options.agentName),
+      createDurableTracing({
+        harness,
+        agentName,
+        generationAttributes: promptGenerationAttributes(prompt),
+      }),
       (instance) => instance.close(),
     );
     resources.defer(() => tracing.detach(conversation.id));
@@ -94,17 +150,28 @@ export function createAgentHarness(
       BACKGROUND_CONTEXT,
     );
     if (!unboundConversation)
-      throw new Error("The observed conversation is unavailable");
+      throw new Error("The managed conversation is unavailable");
     resources.defer(() =>
       unboundConversation.abort(BACKGROUND_CONTEXT, { background: true }),
     );
 
     const agent = await unboundConversation.agent(context);
-    if (
-      !agent.extensions.some(({ name }) => name === observationExtension.name)
-    )
+    const promptExtension = createPromptExtension({
+      binding: prompt,
+      registry: extensionRegistry.snapshot(),
+      tools: [...agent.tools, ...agent.deferred, ...agent.callable],
+    });
+    if (!extensionRegistry.snapshot().extension(promptExtension.name))
+      extensionRegistry.install(promptExtension);
+
+    const requiredExtensions = [promptExtension, ...frameworkExtensions];
+    const missingExtensions = requiredExtensions.filter(
+      (extension) =>
+        !agent.extensions.some(({ name }) => name === extension.name),
+    );
+    if (missingExtensions.length)
       await unboundConversation.configure(
-        { extensions: [...agent.extensions, observationExtension] },
+        { extensions: [...missingExtensions, ...agent.extensions] },
         context,
       );
 
@@ -116,7 +183,7 @@ export function createAgentHarness(
     if (!provider) throw new Error("The conversation has no provider session");
 
     providerSessionId = provider.sessionId;
-    const sessionId = options.sessionId ?? providerSessionId;
+    const sessionId = requestedSessionId ?? providerSessionId;
     const traceConversationId =
       traceIdentitySource === "session" ? sessionId : String(conversation.id);
     bindTraceSession(sessionId);
@@ -126,7 +193,7 @@ export function createAgentHarness(
     if (closed) throw new AppError("request_cancelled");
 
     const ownedResources = resources.move();
-    const close = once(() => ownedResources.disposeAsync());
+    const close = memoize(() => ownedResources.disposeAsync());
     conversationClosers.set(conversation.id, close);
 
     function withTraceContext<T>(run: () => T) {
@@ -139,13 +206,28 @@ export function createAgentHarness(
       );
     }
 
+    const nativeSubmit =
+      nativeSubmitByHandle.get(conversation) ??
+      conversation.submit.bind(conversation);
+    nativeSubmitByHandle.set(conversation, nativeSubmit);
+
+    function assertCanSubmit(execution: Context) {
+      execution.abortSignal?.throwIfAborted();
+      if (ownedResources.disposed || closed)
+        throw new AppError("request_cancelled");
+    }
+
     const submissionTarget = {
       id: conversation.id,
-      submit:
-        nativeSubmitByHandle.get(conversation) ??
-        conversation.submit.bind(conversation),
+      submit(...args: Parameters<ConversationHandle["submit"]>) {
+        assertCanSubmit(args[1]);
+        return nativeSubmit(...args);
+      },
     };
-    nativeSubmitByHandle.set(conversation, submissionTarget.submit);
+    const variableConversation = {
+      id: conversation.id,
+      commit: unboundConversation.commit.bind(unboundConversation),
+    };
 
     return Object.assign(conversation, {
       sessionId,
@@ -153,11 +235,24 @@ export function createAgentHarness(
         input: Parameters<Conversation["submit"]>[0],
         execution: Context,
       ) {
-        if (ownedResources.disposed || closed)
-          throw new AppError("request_cancelled");
+        assertCanSubmit(execution);
 
+        let prepared = input;
+        if (input.type === "input") {
+          const variables = await resolvePromptVariables(
+            userVariables,
+            variableConversation,
+            execution,
+          );
+          assertCanSubmit(execution);
+
+          prepared = {
+            ...input,
+            content: compileConversationInput(prompt, input.content, variables),
+          };
+        }
         return withTraceContext(() =>
-          tracing.submit(submissionTarget, input, execution),
+          tracing.submit(submissionTarget, prepared, execution),
         );
       },
       withTraceContext,
@@ -166,7 +261,37 @@ export function createAgentHarness(
     });
   }
 
-  const close = once(async () => {
+  async function prepareConversation<
+    Options extends Pick<ConversationCreateOptions, "agent" | "init">,
+  >({ prompt, ...options }: Options & ManagedPromptOptions, context: Context) {
+    if (options.agent?.thinkingLevel !== undefined)
+      throw new Error("A managed prompt owns conversation thinkingLevel");
+
+    const resolved = await prompts.resolve({
+      ...prompt,
+      context,
+    });
+    validateConversationPrompt(resolved.binding);
+    context.abortSignal?.throwIfAborted();
+    if (closed) throw new AppError("request_cancelled");
+
+    return {
+      ...options,
+      agent: {
+        ...options.agent,
+        thinkingLevel: resolved.config.thinkingLevel,
+      },
+      init: async (
+        ...[tx, id]: Parameters<NonNullable<ConversationCreateOptions["init"]>>
+      ) => {
+        const state = await tx.doc(PromptBindingDoc, id);
+        state.prompt = resolved.binding;
+        await options.init?.(tx, id);
+      },
+    };
+  }
+
+  const close = memoize(async () => {
     closed = true;
     await Promise.allSettled(pendingInitializations);
 
@@ -190,17 +315,24 @@ export function createAgentHarness(
         agentName,
         sessionId,
         ...options
-      }: ConversationObservationOptions & ConversationCreateOptions,
+      }: ManagedConversationOptions &
+        ConversationCreateOptions &
+        ManagedPromptOptions,
       context: Context,
     ) {
       return initialize(async () => {
-        const conversation = await harness.createConversation(options, context);
-        return observe(
-          conversation,
-          { agentName, sessionId },
+        const conversation = await harness.createConversation(
+          await prepareConversation(options, context),
           context,
-          "session",
         );
+        return prepareManagedConversation({
+          conversation,
+          agentName,
+          sessionId,
+          context,
+          traceIdentitySource: "session",
+          userVariables: options.prompt.userVariables,
+        });
       });
     },
     root(
@@ -209,26 +341,38 @@ export function createAgentHarness(
         agentName,
         sessionId,
         ...options
-      }: ConversationObservationOptions &
-        NonNullable<Parameters<Harness["root"]>[1]>,
+      }: ManagedConversationOptions &
+        NonNullable<Parameters<Harness["root"]>[1]> &
+        ManagedPromptOptions,
     ) {
       return initialize(async () => {
-        const conversation = await harness.root(context, options);
-        return observe(
-          conversation,
-          { agentName, sessionId },
+        const conversation = await harness.root(
           context,
-          "conversation",
+          await prepareConversation(options, context),
         );
+        return prepareManagedConversation({
+          conversation,
+          agentName,
+          sessionId,
+          context,
+          traceIdentitySource: "conversation",
+          userVariables: options.prompt.userVariables,
+        });
       });
     },
-    observeConversation<Conversation extends ConversationHandle>(
-      conversation: Conversation,
-      options: ConversationObservationOptions,
-      context: Context,
+    prepareManagedConversation<Conversation extends ConversationHandle>(
+      options: ManagedConversationOptions & {
+        conversation: Conversation;
+        context: Context;
+        prompt?: Pick<ManagedPromptOptions["prompt"], "userVariables">;
+      },
     ) {
       return initialize(() =>
-        observe(conversation, options, context, "conversation"),
+        prepareManagedConversation({
+          ...options,
+          userVariables: options.prompt?.userVariables,
+          traceIdentitySource: "conversation",
+        }),
       );
     },
     close,

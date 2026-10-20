@@ -9,7 +9,7 @@ import { Type } from "typebox";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { memo as once } from "radash";
+import { memoize } from "es-toolkit";
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
@@ -19,6 +19,7 @@ import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createObservedHarnessOptions } from "@home-agent/observability/durable";
 import { AgentModels, type initializeModelRuntime } from "./models";
 import { createAgentHarness } from "./harness";
+import { createPromptResolver } from "./prompts";
 
 export function getServiceInstance<T>(service: {
   readonly instance: T | undefined;
@@ -37,15 +38,21 @@ export function getServiceInstance<T>(service: {
 async function createAgentRuntime({
   modelRuntime,
   extensions,
+  promptConfiguration,
   signal,
 }: {
   modelRuntime: Awaited<ReturnType<typeof initializeModelRuntime>>;
-  extensions: Parameters<typeof createObservedHarnessOptions>[1];
+  extensions: Parameters<typeof createObservedHarnessOptions>[0]["extensions"];
+  promptConfiguration: Parameters<typeof createPromptResolver>[0];
   signal: AbortSignal;
 }) {
   signal.throwIfAborted();
 
   await using resources = new AsyncDisposableStack();
+  const prompts = resources.adopt(
+    createPromptResolver(promptConfiguration),
+    (instance) => instance.close(),
+  );
   const workspacePath = resources.adopt(
     await mkdtemp(join(tmpdir(), "home-agent-")),
     (path) => rm(path, { recursive: true, force: true }),
@@ -55,16 +62,23 @@ async function createAgentRuntime({
     (instance) => instance.cleanup(BACKGROUND_CONTEXT),
   );
 
-  const { observationExtension, ...harnessOptions } =
-    createObservedHarnessOptions(modelRuntime.modelCollection, extensions);
+  const { observationExtension, extensionRegistry, ...harnessOptions } =
+    createObservedHarnessOptions({
+      sourceModelCollection: modelRuntime.modelCollection,
+      extensions,
+    });
+  const frameworkExtensions = [observationExtension];
   const piHarness = resources.adopt(
     await Harness.open(
       new MemoryStorage(),
       {
         ...harnessOptions,
         env: () => env,
+        onReport: (error) => {
+          console.error("Agent runtime report:", error);
+        },
         settings: {
-          extensions: [observationExtension],
+          extensions: frameworkExtensions,
           stream: { maxRetries: 0 },
           retry: { enabled: false, maxRetries: 0 },
         },
@@ -75,17 +89,23 @@ async function createAgentRuntime({
   );
 
   const harness = resources.use(
-    createAgentHarness(piHarness, observationExtension),
+    createAgentHarness({
+      harness: piHarness,
+      frameworkExtensions,
+      extensionRegistry,
+      prompts,
+    }),
   );
 
   signal.throwIfAborted();
 
   const ownedResources = resources.move();
-  const close = once(() => ownedResources.disposeAsync());
+  const close = memoize(() => ownedResources.disposeAsync());
 
   return {
     workspacePath,
     harness,
+    prompts,
     close,
     [Symbol.asyncDispose]: close,
   };

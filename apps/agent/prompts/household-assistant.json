@@ -1,0 +1,47 @@
+{
+  "name": "household-assistant",
+  "type": "chat",
+  "prompt": [
+    {
+      "role": "system",
+      "content": "你是家庭助手，使用用户的语言回答。目前未接入家庭资料、设备、感知、通知或持久记忆。不能声称知道实际家庭状态、已控制设备或已安排提醒。本服务运行期间复用同一主会话，可以结合已有对话继续处理；服务重启后会话清空。"
+    },
+    {
+      "role": "user",
+      "content": "{{input}}"
+    }
+  ],
+  "config": {
+    "thinkingLevel": "off",
+    "tools": [
+      {
+        "name": "read",
+        "description": "Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete."
+      },
+      {
+        "name": "write",
+        "description": "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories."
+      },
+      {
+        "name": "edit",
+        "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes."
+      },
+      {
+        "name": "bash",
+        "description": "Execute a bash command in the current working directory. Returns combined stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds."
+      },
+      {
+        "name": "subagent",
+        "description": "Delegate a self-contained task to a subagent and get its answer back. Supply all needed context in task."
+      }
+    ],
+    "sections": [
+      {
+        "key": "managed_prompt",
+        "tag": false
+      }
+    ]
+  },
+  "labels": ["latest", "production"],
+  "tags": []
+}

@@ -55,6 +55,11 @@ export { createObservedHarnessOptions } from "./durable-execution";
 type CompactionInvocation = Parameters<
   typeof CompactionTask.definition.phases.summarize
 >;
+type CompactionTraceInput = {
+  task: CompactionInvocation[0];
+  api: CompactionInvocation[1];
+  execution: CompactionInvocation[2];
+};
 
 class DurableObservation {
   readonly span;
@@ -229,16 +234,18 @@ export async function prepareDurableTool(
   if (!telemetryStatus().enabled) return;
   await (await ownerFor(api, execution))?.prepareTool(call, api, execution);
 }
-export async function withDurableCompactionTrace<T>(
-  task: CompactionInvocation[0],
-  api: CompactionInvocation[1],
-  execution: CompactionInvocation[2],
-  run: () => Promise<T>,
-) {
+export async function withDurableCompactionTrace<T>({
+  task,
+  api,
+  execution,
+  run,
+}: CompactionTraceInput & {
+  run: () => Promise<T>;
+}) {
   if (!telemetryStatus().enabled) return run();
   const owner = await ownerFor(api, execution);
   if (!owner) return run();
-  const prepared = await owner.prepareCompaction(task, api, execution);
+  const prepared = await owner.prepareCompaction({ task, api, execution });
   return context.with(prepared.parent, () =>
     withGenAiContext(prepared.correlation, () =>
       withSpan(
@@ -325,7 +332,15 @@ export async function withDurableToolTrace<T>(
   );
 }
 
-export function createDurableTracing(harness: Harness, agentName: string) {
+export function createDurableTracing({
+  harness,
+  agentName,
+  generationAttributes = {},
+}: {
+  harness: Harness;
+  agentName: string;
+  generationAttributes?: Attributes;
+}) {
   const conversations = new Map<
     ConversationId,
     { sessionId: string; identity: string; providerId: string }
@@ -648,18 +663,19 @@ export function createDurableTracing(harness: Harness, agentName: string) {
       if (!live?.run) throw new Error("Model request has no Durable run");
       const run = await prepareRun(api.conversationId, live.run.inputs);
       run.span?.setAttribute("home_agent.task.id", String(api.taskId));
-      if (execution.abortSignal) modelParents.set(execution.abortSignal, run);
+      if (execution.abortSignal)
+        modelParents.set(execution.abortSignal, {
+          correlation: { ...run.correlation, ...generationAttributes },
+          executionContext: () => run.executionContext(),
+        });
     },
-    async prepareCompaction(
-      task: CompactionInvocation[0],
-      api: CompactionInvocation[1],
-      execution: CompactionInvocation[2],
-    ) {
+    async prepareCompaction({ task, api, execution }: CompactionTraceInput) {
       const live = await api.snapshot(LiveDoc, api.conversationId, execution);
       const run =
         task.owner !== undefined && live?.run?.taskId === task.owner
           ? await prepareRun(api.conversationId, live.run.inputs)
           : undefined;
+
       return {
         parent: run?.executionContext() ?? ROOT_CONTEXT,
         correlation: run?.correlation ?? correlation(api.conversationId),

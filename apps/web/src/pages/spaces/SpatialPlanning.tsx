@@ -65,7 +65,12 @@ type Round = {
   progress:
     | Parameters<NonNullable<Parameters<typeof runSpatialPlanning>[3]>>[0]
     | null;
-  outcome: (Pick<Session, "reply" | "questions"> & { change: string }) | null;
+  outcome:
+    | (Pick<Session, "questions"> & {
+        reply: NonNullable<Round["progress"]>["reply"] | undefined;
+        change: string;
+      })
+    | null;
 };
 
 const planningStateAtom = atom((get) => {
@@ -345,7 +350,7 @@ export function SpatialPlanning({
                 ...item,
                 progress: null,
                 outcome: {
-                  reply: next.reply,
+                  reply: item.progress?.reply,
                   questions: next.questions,
                   change: describeLayoutChange(previous, next.draft),
                 },
@@ -702,7 +707,9 @@ function RoundView({
       </div>
       {outcome ? (
         <div className="grid gap-3">
-          <MarkdownAnswer>{outcome.reply}</MarkdownAnswer>
+          {outcome.reply ? (
+            <MarkdownAnswer>{outcome.reply}</MarkdownAnswer>
+          ) : null}
           {outcome.questions.length ? (
             <div
               className={`rounded-xl px-4 py-3 ${latest ? "bg-warning/7" : "bg-surface"}`}

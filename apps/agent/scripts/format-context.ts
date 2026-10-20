@@ -2,7 +2,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { isDeepStrictEqual, parseArgs } from "node:util";
-import { sum } from "radash";
+import { sumBy } from "es-toolkit";
 import { agentCurrentContextSchema } from "../src/context/contracts";
 import {
   attentionSchema,
@@ -106,9 +106,9 @@ async function main() {
       context_sha256: createHash("sha256").update(text).digest("hex"),
       semantic_bytes: Buffer.byteLength(JSON.stringify(view.semantic)),
       devices: encoded.D.length,
-      capabilities: sum(encoded.D, (d) => encoded.S[d[4]]?.length ?? 0),
-      reports: sum(encoded.states, (r) =>
-        sum(r.reports, (group) => group[1].length),
+      capabilities: sumBy(encoded.D, (d) => encoded.S[d[4]]?.length ?? 0),
+      reports: sumBy(encoded.states, (r) =>
+        sumBy(r.reports, (group) => group[1].length),
       ),
       characters: Array.from(text).length,
       bytes: Buffer.byteLength(text),

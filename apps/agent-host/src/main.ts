@@ -1,6 +1,6 @@
 import { serve } from "bun";
 import { once as onceEvent } from "node:events";
-import { memo as once, tryit } from "radash";
+import { attemptAsync, memoize } from "es-toolkit";
 import { initializeTelemetry } from "@home-agent/observability";
 import { cleanupSessionResources } from "@earendil-works/pi-ai";
 import { loadConfig } from "./config";
@@ -19,8 +19,8 @@ async function main() {
   );
   processResources.defer(cleanupSessionResources);
 
-  const [error, app] = await tryit(createApp)(config, signal);
-  if (error) {
+  const [error, app] = await attemptAsync(() => createApp(config, signal));
+  if (app === null) {
     if (signal.aborted && error === signal.reason) return;
     throw error;
   }
@@ -45,7 +45,7 @@ function createProcessLifecycle(timeoutMs: number) {
   const signals = ["SIGINT", "SIGTERM"] as const;
   let shutdownTimer: ReturnType<typeof setTimeout> | undefined;
 
-  const startShutdownDeadline = once(() => {
+  const startShutdownDeadline = memoize(() => {
     shutdownTimer = setTimeout(() => {
       console.error(
         `Home Agent shutdown exceeded ${timeoutMs}ms; forcing exit`,

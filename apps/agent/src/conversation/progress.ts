@@ -4,17 +4,18 @@ import {
 } from "@earendil-works/chord/context";
 import { contentText } from "@earendil-works/pi-ai";
 import type { Draft } from "@earendil-works/chord";
-import { cloneDeep } from "es-toolkit";
+import { cloneDeep, pick } from "es-toolkit";
 import {
+  AssistantEntry,
   LiveDoc,
   type ConversationDocToken,
   type JsonObject,
 } from "@earendil-works/pi-durable";
 import { AppError } from "@home-agent/api/errors";
-import { pick, tryit } from "radash";
 import type { z } from "zod";
 import type { createAgentHarness } from "../harness";
 import type { conversationProgressSchema } from "./contracts";
+import { readFinalAnswer } from "../utils/final-answer";
 
 type Conversation = Pick<
   Awaited<
@@ -25,6 +26,11 @@ type Conversation = Pick<
 
 type Submission = Awaited<ReturnType<Conversation["submit"]>>;
 
+type ReceiveProgress<State extends unknown[]> = (
+  progress: z.infer<typeof conversationProgressSchema>,
+  ...state: State
+) => Promise<void>;
+
 export async function withConversationProgress<
   State extends JsonObject,
   Result,
@@ -33,14 +39,16 @@ export async function withConversationProgress<
   options: {
     conversation: Conversation;
     signal: AbortSignal;
-    stateDoc?: ConversationDocToken<State>;
-    onProgress?:
-      | ((
-          progress: z.infer<typeof conversationProgressSchema>,
-          state: Readonly<Draft<State>> | undefined,
-        ) => Promise<void>)
-      | undefined;
-  },
+  } & (
+    | {
+        stateDoc: ConversationDocToken<State>;
+        onProgress?: ReceiveProgress<[Readonly<Draft<State>>]> | undefined;
+      }
+    | {
+        stateDoc?: undefined;
+        onProgress?: ReceiveProgress<[]> | undefined;
+      }
+  ),
   execute: (execution: {
     signal: AbortSignal;
     submit: Conversation["submit"];
@@ -55,6 +63,16 @@ export async function withConversationProgress<
   }
 
   if (!onProgress) return execute({ signal: requestSignal, submit });
+
+  const deliverProgress = async (
+    progress: z.infer<typeof conversationProgressSchema>,
+    state: Readonly<Draft<State>> | undefined,
+  ) => {
+    if (!stateDoc) return onProgress(progress);
+    if (state === undefined) throw new AppError("agent_execution_failed");
+
+    return onProgress(progress, state);
+  };
 
   const deliveryController = new AbortController();
   const signal = AbortSignal.any([requestSignal, deliveryController.signal]);
@@ -108,16 +126,17 @@ export async function withConversationProgress<
     }, context);
     if (!snapshot) return null;
 
-    await onProgress(snapshot.progress, snapshot.state);
+    await deliverProgress(snapshot.progress, snapshot.state);
     return snapshot.progress;
   };
 
   async function onDocumentChange() {
-    const sending = tryit(sendProgress)();
+    const sending = sendProgress().catch((error: unknown) => {
+      deliveryController.abort(error);
+    });
     pendingDeliveries.add(sending);
 
-    const [error, progress] = await sending;
-    if (progress === undefined) deliveryController.abort(error);
+    await sending;
     pendingDeliveries.delete(sending);
   }
 
@@ -131,13 +150,39 @@ export async function withConversationProgress<
         context,
       )
     : undefined;
-  await onProgress(
+  await deliverProgress(
     { session_id: conversation.sessionId, reply: "", tools: [] },
     initialState,
   );
 
   const result = await execute({ signal, submit });
   await resources.disposeAsync();
+  signal.throwIfAborted();
+
+  if (!submission) return result;
+  const settled = await submission.wait(context);
+  if (settled.type !== "input" || settled.status !== "done") return result;
+
+  const snapshot = await conversation.commit(async (tx) => {
+    const entry = await tx.entry(AssistantEntry, settled.answer);
+    const message = entry?.model?.[0];
+    return {
+      reply: readFinalAnswer(
+        message?.role === "assistant" ? message : undefined,
+      ),
+      state: stateDoc
+        ? cloneDeep(await tx.doc(stateDoc, conversation.id))
+        : undefined,
+    };
+  }, context);
+  await deliverProgress(
+    {
+      session_id: conversation.sessionId,
+      reply: snapshot.reply,
+      tools: [],
+    },
+    snapshot.state,
+  );
   signal.throwIfAborted();
 
   return result;

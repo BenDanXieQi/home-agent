@@ -7,6 +7,7 @@
     "bun": ">=1.4.2"
   },
   "scripts": {
+    "prompts:init": "bun --env-file=../../.env scripts/initialize-prompts.ts",
     "context:format": "bun scripts/format-context.ts",
     "lint": "bun run generate && oxlint --type-aware --max-warnings 0 .",
     "lint:fix": "bun run generate && oxlint --type-aware --max-warnings 0 --fix .",
@@ -19,9 +20,9 @@
     "@earendil-works/pi-durable": "catalog:",
     "@home-agent/api": "workspace:*",
     "@home-agent/observability": "workspace:*",
+    "@langfuse/client": "6.0.1",
     "es-toolkit": "^1.52.0",
     "hono": "catalog:",
-    "radash": "12.1.1",
     "typebox": "catalog:",
     "zod": "catalog:"
   },
@@ -38,7 +39,6 @@
     "./workflows": "./src/workflows/contracts.generated.ts",
     "./workflows/automation-generation": "./src/workflows/automation-generation/workflow.ts",
     "./workflows/spatial-planning": "./src/workflows/spatial-planning/workflow.ts",
-    "./workflows/spatial-planning/extension": "./src/workflows/spatial-planning/extension.ts",
     "./workflows/speech-interpretation": "./src/workflows/speech-interpretation/workflow.ts",
     "./assistant": "./src/assistant/assistant.ts",
     "./assistant/contracts": "./src/assistant/contracts.ts",

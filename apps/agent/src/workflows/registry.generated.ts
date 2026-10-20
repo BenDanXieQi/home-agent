@@ -15,18 +15,21 @@ import { observeWorkflowExecution } from "./observation";
 import {
   contract as contract0,
   createWorkflow as createWorkflow0,
+  extensions as extensions0,
   modelConfiguration as modelConfiguration0,
   observation as observation0,
 } from "./automation-generation/workflow";
 import {
   contract as contract1,
   createWorkflow as createWorkflow1,
+  extensions as extensions1,
   modelConfiguration as modelConfiguration1,
   observation as observation1,
 } from "./spatial-planning/workflow";
 import {
   contract as contract2,
   createWorkflow as createWorkflow2,
+  extensions as extensions2,
   modelConfiguration as modelConfiguration2,
   observation as observation2,
 } from "./speech-interpretation/workflow";
@@ -43,6 +46,7 @@ export function configureWorkflowRegistry(config: Config) {
   const modelRef2 = config[modelConfiguration2.key] ?? config.AGENT_MODEL;
   return {
     modelRefs: [modelRef0, modelRef1, modelRef2],
+    extensions: [...extensions0, ...extensions1, ...extensions2],
     createRegistry(
       self: Self,
       contextReader: WorkflowDependencies["contextReader"],
