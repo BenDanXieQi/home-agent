@@ -118,7 +118,6 @@ async function main() {
     const outputs = {
       "context.json": text,
       "context.pretty.json": formatted,
-      "context.formatted.json": formatted,
       "context.decoded.json": `${JSON.stringify(decoded, null, 2)}\n`,
       "capability-audit.json": `${JSON.stringify(view.audit, null, 2)}\n`,
       "manifest.json": `${JSON.stringify(manifest, null, 2)}\n`,
