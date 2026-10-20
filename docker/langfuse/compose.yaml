@@ -68,7 +68,7 @@ services:
       retries: 10
   langfuse-web:
     <<: *langfuse-service
-    image: docker.langfuse.com/langfuse/langfuse:4
+    image: docker.langfuse.com/langfuse/langfuse:4.64.0
     depends_on: *langfuse-dependencies
     environment:
       <<: *langfuse-environment
@@ -98,7 +98,7 @@ services:
       start_period: 60s
   langfuse-worker:
     <<: *langfuse-service
-    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    image: docker.langfuse.com/langfuse/langfuse-worker:4.64.0
     depends_on: *langfuse-dependencies
     environment: *langfuse-environment
   langfuse-db:

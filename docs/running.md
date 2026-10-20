@@ -36,6 +36,15 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 
 Langfuse 是模型与工具调用的追踪展示服务。它和 PostgreSQL、ClickHouse（追踪分析数据库）、Redis（任务队列）及 MinIO（对象存储）一起属于根目录的 `home-agent` Compose 项目，在 Docker Desktop 中显示于同一服务组。默认不启用，不下载或启动这些可选服务；内部各服务仍使用独立容器。需要 Docker Compose 2.20+ 的 `include` 能力。
 
+Web 与 Worker 镜像统一固定为 `4.64.0`。更新时先备份 PostgreSQL、ClickHouse、对象存储和队列数据，再将两个镜像改为同一稳定版本并拉取、重建。服务启动会自动应用数据库迁移；升级依据见[官方升级说明](https://langfuse.com/self-hosting/upgrade)。
+
+```sh
+docker compose pull langfuse-web langfuse-worker
+docker compose up -d --wait --wait-timeout 180 langfuse-entry langfuse-worker
+```
+
+重建后核对实际镜像版本、Web 的 `/api/public/health?failIfDatabaseUnavailable=true`、Worker 的 `:3030/api/health` 及后台迁移状态。只改镜像标签或 SDK 版本不表示运行中的服务已升级。备份保存在 Git 忽略的本地目录，并限制为当前用户可读；升级保留原数据卷。
+
 在根目录 `.env` 填写以下配置：
 
 ```dotenv
