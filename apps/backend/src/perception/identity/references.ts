@@ -24,11 +24,7 @@ export function createReferences(
       typeof identityReferenceSnapshotSchema
     >["members"][number]["className"],
   ) {
-    return members.filter((member) =>
-      className === "human"
-        ? member.className === "human"
-        : member.className !== "human",
-    );
+    return members.filter((member) => member.className === className);
   }
   return {
     hasCandidates(className: Parameters<typeof candidates>[0]) {
@@ -71,11 +67,7 @@ export function createReferences(
           }),
         )
         .toSorted(
-          (a, b) =>
-            b.score - a.score ||
-            Number(b.className === className) -
-              Number(a.className === className) ||
-            a.label.localeCompare(b.label),
+          (a, b) => b.score - a.score || a.label.localeCompare(b.label),
         );
     },
   };

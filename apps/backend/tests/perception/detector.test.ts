@@ -15,6 +15,19 @@ function modelOutput(rows: number[][]) {
   return new originalOrt.Tensor("float32", data, [1, 9, rows.length]);
 }
 
+function detectionRow(
+  classId: number,
+  confidence: number,
+  box = [2.5, 2, 0.5, 0.5],
+) {
+  return [
+    ...box,
+    ...Array.from({ length: 5 }, (_, index) =>
+      index === classId ? confidence : 0,
+    ),
+  ];
+}
+
 const release = mock(async () => {});
 const run = mock(
   async (_feeds: Record<string, InstanceType<typeof originalOrt.Tensor>>) => ({
@@ -311,5 +324,217 @@ test.each([NaN, Infinity, -Infinity, -0.1, 1.1])(
         );
       });
     }
+  },
+);
+
+const petClasses = [
+  { className: "cat", classId: 1 },
+  { className: "dog", classId: 2 },
+];
+
+test.each(petClasses)(
+  "retains a weak $className when its mirrored local view has a candidate at the 0.1 floor",
+  async ({ className, classId }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.55)]),
+      })
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.1, [2, 2, 2, 2])]),
+      });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className, x: 72, y: 24, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(0.55);
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+  },
+);
+
+test.each(petClasses)(
+  "retains a $className when the full mirrored view supports its restored position at 0.5",
+  async ({ className, classId }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.55)]),
+      })
+      .mockResolvedValueOnce({ output0: modelOutput([]) })
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.5, [1.5, 2, 0.5, 0.5])]),
+      });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className, x: 72, y: 24, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(0.55);
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+  },
+);
+
+test.each(petClasses)(
+  "removes an unsupported $className only after both review views fail",
+  async ({ classId }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.55)]),
+      })
+      .mockResolvedValueOnce({ output0: modelOutput([]) })
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.3, [1.5, 2, 0.5, 0.5])]),
+      });
+    await withDetector(async (detector) => {
+      expect((await detector.detect(frame(128, 64))).detections).toEqual([]);
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+  },
+);
+
+test.each(petClasses)(
+  "retains the original $className when a stronger different pet class appears in the mirrored local view",
+  async ({ className, classId }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, 0.55)]),
+      })
+      .mockResolvedValueOnce({
+        output0: modelOutput([
+          detectionRow(classId === 1 ? 2 : 1, 0.9, [2, 2, 2, 2]),
+        ]),
+      });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className, x: 72, y: 24, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(0.55);
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+  },
+);
+
+test.each(petClasses)(
+  "keeps unrelated original boxes when removing a $className and does not exceed three inferences",
+  async ({ className, classId }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([
+          detectionRow(classId, 0.55),
+          detectionRow(classId, 0.7, [0.75, 2, 0.5, 0.5]),
+          detectionRow(4, 0.9, [0.25, 1.5, 0.5, 0.5]),
+        ]),
+      })
+      .mockResolvedValueOnce({ output0: modelOutput([]) })
+      .mockResolvedValueOnce({ output0: modelOutput([]) });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className: "face", x: 0, y: 8, w: 16, h: 16 },
+        { className, x: 16, y: 24, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(0.9);
+      expect(detections[1]?.confidence).toBeCloseTo(0.7);
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+  },
+);
+
+test.each(petClasses)(
+  "does not spend review inference on edge-clipped or strong $className detections",
+  async ({ className, classId }) => {
+    run.mockResolvedValueOnce({
+      output0: modelOutput([
+        detectionRow(classId, 0.55, [0.25, 2, 0.5, 0.5]),
+        detectionRow(classId, 0.8),
+      ]),
+    });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className, x: 72, y: 24, w: 16, h: 16 },
+        { className, x: 0, y: 24, w: 16, h: 16 },
+      ]);
+      expect(run).toHaveBeenCalledTimes(1);
+    });
+  },
+);
+
+test("finishes both human reviews before considering a weaker pet and preserves human-to-pet correction", async () => {
+  run
+    .mockResolvedValueOnce({
+      output0: modelOutput([
+        detectionRow(0, 0.6),
+        detectionRow(0, 0.65, [0.75, 2, 0.5, 0.5]),
+        detectionRow(1, 0.51, [1.5, 2, 0.5, 0.5]),
+      ]),
+    })
+    .mockResolvedValueOnce({
+      output0: modelOutput([detectionRow(2, 0.9, [2, 2, 2, 2])]),
+    })
+    .mockResolvedValueOnce({
+      output0: modelOutput([detectionRow(0, 0.7, [2, 2, 2, 2])]),
+    });
+  await withDetector(async (detector) => {
+    const { detections } = await detector.detect(frame(128, 64));
+    expect(detections).toMatchObject([
+      { className: "dog", x: 72, y: 24, w: 16, h: 16 },
+      { className: "human", x: 16, y: 24, w: 16, h: 16 },
+      { className: "cat", x: 40, y: 24, w: 16, h: 16 },
+    ]);
+    expect(detections[0]?.confidence).toBeCloseTo(0.9);
+    expect(detections[1]?.confidence).toBeCloseTo(0.65);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+});
+
+test("keeps the human mirror review and its weak support ahead of pet review", async () => {
+  run
+    .mockResolvedValueOnce({
+      output0: modelOutput([
+        detectionRow(0, 0.6),
+        detectionRow(1, 0.51, [0.75, 2, 0.5, 0.5]),
+      ]),
+    })
+    .mockResolvedValueOnce({ output0: modelOutput([]) })
+    .mockResolvedValueOnce({
+      output0: modelOutput([detectionRow(0, 0.2, [1.5, 2, 0.5, 0.5])]),
+    });
+  await withDetector(async (detector) => {
+    const { detections } = await detector.detect(frame(128, 64));
+    expect(detections).toMatchObject([
+      { className: "human", x: 72, y: 24, w: 16, h: 16 },
+      { className: "cat", x: 16, y: 24, w: 16, h: 16 },
+    ]);
+    expect(detections[0]?.confidence).toBeCloseTo(0.6);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+});
+
+test.each([0.85, 0.95])(
+  "deduplicates a human-to-dog correction against an existing dog at confidence %s",
+  async (existingConfidence) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([
+          detectionRow(0, 0.6),
+          detectionRow(2, existingConfidence),
+        ]),
+      })
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(2, 0.9, [2, 2, 2, 2])]),
+      });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className: "dog", x: 72, y: 24, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(
+        Math.max(0.9, existingConfidence),
+      );
+      expect(run).toHaveBeenCalledTimes(2);
+    });
   },
 );

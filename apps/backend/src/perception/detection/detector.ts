@@ -8,7 +8,7 @@ import { iou } from "../tracking/assignment";
 import { detectionLabels } from "@home-agent/api/contracts";
 import { detectionModelPath } from "./model";
 
-const humanReviewConfidenceCeiling = 0.8;
+const reviewConfidenceCeiling = 0.8;
 
 export async function createDetector(minimumConfidence = 0.5) {
   const threshold = z.number().min(0.1).max(1).parse(minimumConfidence);
@@ -65,30 +65,60 @@ export async function createDetector(minimumConfidence = 0.5) {
       sharpConcurrency: sharp.concurrency(),
       intraOpNumThreads: detectionComputeBudget.ortIntraOpThreads,
     };
-    const infer = async (frame: z.infer<typeof frameSchema>) => {
+    const prepare = async (
+      frame: z.infer<typeof frameSchema>,
+      region?: Parameters<ReturnType<typeof sharp>["extract"]>[0],
+    ) => {
       const started = performance.now();
-      const scale = Math.min(width / frame.width, height / frame.height);
-      const resizedWidth = Math.max(1, Math.trunc(frame.width * scale));
-      const resizedHeight = Math.max(1, Math.trunc(frame.height * scale));
+      const frameWidth = region?.width ?? frame.width;
+      const frameHeight = region?.height ?? frame.height;
+      const scale = Math.min(width / frameWidth, height / frameHeight);
+      const resizedWidth = Math.max(1, Math.trunc(frameWidth * scale));
+      const resizedHeight = Math.max(1, Math.trunc(frameHeight * scale));
       const padX = Math.floor((width - resizedWidth) / 2);
       const padY = Math.floor((height - resizedHeight) / 2);
-      const resized = await sharp(frame.rgb, {
+      const image = sharp(frame.rgb, {
         raw: { width: frame.width, height: frame.height, channels: 3 },
-      })
+      });
+      if (region) image.extract(region);
+      const rgb = await image
         .resize(resizedWidth, resizedHeight, {
           fit: "fill",
           kernel: "linear",
         })
         .raw()
         .toBuffer();
+      return {
+        width: frameWidth,
+        height: frameHeight,
+        resizedWidth,
+        resizedHeight,
+        scale,
+        padX,
+        padY,
+        rgb,
+        preprocessMs: performance.now() - started,
+      };
+    };
+    const infer = async (
+      frame: Awaited<ReturnType<typeof prepare>>,
+      mirrored = false,
+      confidenceFloor = threshold,
+    ) => {
+      const started = performance.now();
+      const { resizedWidth, resizedHeight, padX, padY } = frame;
       const pixels = width * height;
       const data = new Float32Array(3 * pixels).fill(114 / 255);
+      const sourceStep = mirrored ? -3 : 3;
       for (let y = 0; y < resizedHeight; y++) {
+        let source = (y * resizedWidth + (mirrored ? resizedWidth - 1 : 0)) * 3;
+        let target = (y + padY) * width + padX;
         for (let x = 0; x < resizedWidth; x++) {
-          for (let channel = 0; channel < 3; channel++) {
-            data[channel * pixels + (y + padY) * width + x + padX] =
-              resized[(y * resizedWidth + x) * 3 + channel]! / 255;
-          }
+          data[target] = frame.rgb[source]! / 255;
+          data[target + pixels] = frame.rgb[source + 1]! / 255;
+          data[target + 2 * pixels] = frame.rgb[source + 2]! / 255;
+          source += sourceStep;
+          target++;
         }
       }
       const prepared = performance.now();
@@ -118,10 +148,10 @@ export async function createDetector(minimumConfidence = 0.5) {
           result.dims[2]!,
           frame.width,
           frame.height,
-          scale,
+          frame.scale,
           padX,
           padY,
-          threshold,
+          confidenceFloor,
         );
         return {
           detections,
@@ -138,34 +168,37 @@ export async function createDetector(minimumConfidence = 0.5) {
     };
     const detect = async (frame: z.infer<typeof frameSchema>) => {
       const started = performance.now();
-      const result = await infer(frame);
-      let preprocessMs = result.timing.preprocessMs;
+      const prepared = await prepare(frame);
+      const result = await infer(prepared);
+      let preprocessMs = prepared.preprocessMs + result.timing.preprocessMs;
       let inferenceMs = result.timing.inferenceMs;
-      const humans = result.detections.filter(
-        (box) => box.className === "human",
-      );
-      const corrections = new Map<
-        (typeof humans)[number],
-        (typeof humans)[number]
-      >();
-      const reviews = humans
-        .filter((box) => box.confidence < humanReviewConfidenceCeiling)
-        .toSorted((a, b) => a.confidence - b.confidence);
       let reviewed = 0;
-
-      for (const box of reviews) {
-        if (reviewed >= detectionComputeBudget.humanReviewsPerTask) break;
+      const recheck = async (
+        reviewFrame: typeof prepared,
+        mirrored = false,
+        confidenceFloor = threshold,
+      ) => {
+        reviewed++;
+        const review = await infer(reviewFrame, mirrored, confidenceFloor);
+        preprocessMs += review.timing.preprocessMs;
+        inferenceMs += review.timing.inferenceMs;
+        return review.detections;
+      };
+      const cropForReview = async (
+        box: (typeof result.detections)[number],
+        requireContext = false,
+        contextScale = 2,
+      ) => {
         const side = Math.min(
           frame.width,
           frame.height,
-          Math.ceil(Math.max(box.w, box.h) * 2),
+          Math.ceil(Math.max(box.w, box.h) * contextScale),
         );
         if (
           side < Math.max(box.w, box.h) ||
           (side === frame.width && side === frame.height)
         )
-          continue;
-        reviewed++;
+          return null;
         const left = Math.min(
           frame.width - side,
           Math.max(0, Math.floor(box.x + box.w / 2 - side / 2)),
@@ -174,27 +207,59 @@ export async function createDetector(minimumConfidence = 0.5) {
           frame.height - side,
           Math.max(0, Math.floor(box.y + box.h / 2 - side / 2)),
         );
+        const hasContext =
+          left < box.x &&
+          top < box.y &&
+          left + side > box.x + box.w &&
+          top + side > box.y + box.h;
+        if (requireContext && !hasContext) return null;
 
-        const cropStarted = performance.now();
-        const rgb = await sharp(frame.rgb, {
-          raw: { width: frame.width, height: frame.height, channels: 3 },
-        })
-          .extract({ left, top, width: side, height: side })
-          .raw()
-          .toBuffer();
-        preprocessMs += performance.now() - cropStarted;
-        const review = await infer({ width: side, height: side, rgb });
-        preprocessMs += review.timing.preprocessMs;
-        inferenceMs += review.timing.inferenceMs;
+        const crop = await prepare(frame, {
+          left,
+          top,
+          width: side,
+          height: side,
+        });
+        preprocessMs += crop.preprocessMs;
+        return {
+          left,
+          top,
+          hasContext,
+          frame: crop,
+        };
+      };
 
-        const corresponding = review.detections
+      const humans = result.detections.filter(
+        (box) => box.className === "human",
+      );
+      const corrections = new Map<
+        (typeof humans)[number],
+        (typeof humans)[number] | null
+      >();
+      const reviews = humans
+        .filter((box) => box.confidence < reviewConfidenceCeiling)
+        .toSorted((a, b) => a.confidence - b.confidence);
+      const emptyReviews: typeof humans = [];
+
+      for (const box of reviews) {
+        if (reviewed >= detectionComputeBudget.humanReviewsPerTask) break;
+        const crop = await cropForReview(box);
+        if (!crop) continue;
+        const review = await recheck(crop.frame);
+
+        if (!review.length && crop.hasContext) {
+          emptyReviews.push(box);
+          continue;
+        }
+
+        const corresponding = review
           .filter((candidate) =>
             ["human", "cat", "dog"].includes(candidate.className),
           )
           .map((candidate) => ({
             ...candidate,
-            x: candidate.x + left,
-            y: candidate.y + top,
+            x: candidate.x + crop.left,
+            y: candidate.y + crop.top,
           }))
           .map((candidate) => ({ candidate, overlap: iou(box, candidate) }))
           .filter(
@@ -217,11 +282,66 @@ export async function createDetector(minimumConfidence = 0.5) {
           corrections.set(box, corresponding);
       }
 
+      if (
+        emptyReviews.length &&
+        reviewed < detectionComputeBudget.humanReviewsPerTask
+      ) {
+        const mirrored = await recheck(prepared, true, 0.1);
+        for (const box of emptyReviews) {
+          if (
+            !mirrored.some(
+              (candidate) =>
+                iou(box, {
+                  ...candidate,
+                  x: frame.width - candidate.x - candidate.w,
+                }) >= 0.5,
+            )
+          )
+            corrections.set(box, null);
+        }
+      }
+
+      const pets = result.detections
+        .filter(
+          (box) =>
+            (box.className === "cat" || box.className === "dog") &&
+            box.confidence < reviewConfidenceCeiling,
+        )
+        .toSorted((a, b) => a.confidence - b.confidence);
+      for (const box of pets) {
+        if (reviewed + 2 > detectionComputeBudget.reviewsPerTask) break;
+        const crop = await cropForReview(box, true, 3);
+        if (!crop) continue;
+        const mirroredLocal = await recheck(crop.frame, true, 0.1);
+        if (
+          mirroredLocal.some(
+            (candidate) =>
+              candidate.className === "cat" || candidate.className === "dog",
+          )
+        )
+          continue;
+
+        const mirrored = await recheck(prepared, true);
+        if (
+          !mirrored.some(
+            (candidate) =>
+              iou(box, {
+                ...candidate,
+                x: frame.width - candidate.x - candidate.w,
+              }) >= 0.5,
+          )
+        )
+          corrections.set(box, null);
+      }
+
       let detections = result.detections;
       if (corrections.size) {
         const corrected = new Set(corrections.values());
         const candidates = detections
-          .map((box) => corrections.get(box) ?? box)
+          .flatMap((box) => {
+            const correction = corrections.get(box);
+            return correction === null ? [] : [correction ?? box];
+          })
           .toSorted((a, b) => b.confidence - a.confidence);
         detections = [];
         for (const candidate of candidates) {

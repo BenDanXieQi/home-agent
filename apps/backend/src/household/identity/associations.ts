@@ -49,7 +49,7 @@ export function createMemberAssociations(
           const directAssociation = direct.find(
             (item) =>
               item.trackId === track.trackId &&
-              (item.className === "human") === (track.className === "human"),
+              item.className === track.className,
           );
           if (
             directAssociation &&

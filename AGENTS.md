@@ -16,6 +16,8 @@
 
 12. Before answering questions about correctness, architecture, layering, encapsulation, or reuse, inspect the relevant implementation, callers, lifecycle, and dependency contracts needed for a complete judgment within the user's requested scope. Complete that investigation before replying; do not substitute a narrow reassurance followed by an unsolicited caveat that it says nothing about the rest, or an offer to investigate later. Give a direct conclusion with its supporting reasoning and any concrete issues found. If a necessary source is inaccessible, identify the specific missing evidence and how it affects the conclusion instead of adding generic disclaimers.
 
+13. Keep real household member names and nicknames, personal media, device inventories, room-to-device mappings, security coverage, credentials, and machine-specific paths out of tracked files, commit messages, and shared documentation. Use fictional examples or general capability requirements; keep private deployment details in Git-ignored local files. Public third-party materials must retain their source and must not be presented as this household's records.
+
 ## Documentation navigation
 
 Start with [docs/README.md](docs/README.md) to select documents and existing code entry points for the task. Current feature documentation, implementation plans, and technical references have different roles; planned interfaces and modules are not implemented capabilities. Follow the document ownership boundaries there and update affected references when moving a document.
