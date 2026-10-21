@@ -92,18 +92,18 @@ Agent 启动后独立接收，不要求模型配置或聊天请求；本机 `GET
 
 ```sh
 bun run db:init                          # 自动启动本机数据库、初始化并检查
-bun run db:migrate                       # 自动准备本机数据库、应用结构变更并检查
+bun run db:migrate                       # 自动准备本机数据库、应用当前初始化基线并检查
 bun run --cwd apps/backend db:check      # 只读检查应用登记、SQL 哈希和 TimescaleDB
-bun run --cwd apps/backend db:generate   # 使用原生 Drizzle 生成结构变更 SQL
+bun run --cwd apps/backend db:generate   # 准备结构变更 SQL，最终更新初始化基线
 bun run --cwd apps/backend db:studio     # 数据库管理界面
 docker compose stop db                   # 只停止数据库容器，保留数据卷
 ```
 
 本地账号配置见根目录 `.env.example`。`POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码需一致，URL 中的特殊字符需编码；修改环境变量不会更改已有数据库卷中的账号密码。
 
-数据库结构由 `drizzle/` 中的[初始化基线](drizzle/0000_initialize_database.sql)、后续迁移及对应元数据定义，包含业务表、索引和 TimescaleDB 配置。`db:init` 与 `db:migrate` 均由原生 Drizzle 应用 SQL，再运行数据库检查；已经登记应用的文件不重复执行。结构变更使用原生 `db:generate` 生成、`db:migrate` 应用。使用外部数据库时，执行 `bun run --cwd apps/backend db:migrate`，随后执行 `bun run --cwd apps/backend db:check`。
+数据库只维护[当前初始化基线](drizzle/0000_initialize_database.sql)及对应元数据，包含业务表、索引和 TimescaleDB 配置。结构变更直接更新基线和唯一的 `0000_snapshot.json`，保留 TimescaleDB 初始化配置；`db:generate` 生成的差异用于准备 SQL，最终合并回基线，不保留后续编号的迁移和快照。`db:init` 与 `db:migrate` 均由原生 Drizzle 应用基线，再运行数据库检查；已经登记应用的基线不重复执行。基线变化后，已有数据库需重建，再按当前基线初始化。使用外部数据库时，执行 `bun run --cwd apps/backend db:migrate`，随后执行 `bun run --cwd apps/backend db:check`。
 
-backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文件哈希和 TimescaleDB 扩展，不写入数据，不检查完整表结构、记录内容或写权限。缺少登记时运行 `db:init` 或 `db:migrate`；已应用 SQL 的哈希与仓库不一致时，恢复对应文件，并将结构变更写入新 SQL。
+backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文件哈希和 TimescaleDB 扩展，不写入数据，不检查完整表结构、记录内容或写权限。空数据库运行 `db:init` 或 `db:migrate`；已有数据库与当前基线不一致时，重建数据库后按当前基线初始化。启动和检查命令不会自动清空数据库。
 
 `mijia_home_selections` 表保存按区域和米家用户身份关联的家庭选择；未选择家庭时不暴露工作设备或接入摄像头。家庭列表与选择 API 见[家庭范围](../../docs/mijia.md#家庭房间与设备能力)。
 

@@ -26,8 +26,6 @@ CREATE TABLE "automation_decisions" (
 --> statement-breakpoint
 CREATE TABLE "automation_model_admissions" (
 	"id" uuid PRIMARY KEY NOT NULL,
-	"account_id" text NOT NULL,
-	"home_id" text NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -46,8 +44,6 @@ CREATE TABLE "automation_review_runs" (
 --> statement-breakpoint
 CREATE TABLE "automation_reviews" (
 	"id" uuid PRIMARY KEY NOT NULL,
-	"account_id" text NOT NULL,
-	"home_id" text NOT NULL,
 	"revision" integer NOT NULL,
 	"automation_id" uuid NOT NULL,
 	"node_id" text NOT NULL,
@@ -73,8 +69,6 @@ CREATE TABLE "automation_runs" (
 --> statement-breakpoint
 CREATE TABLE "automations" (
 	"id" uuid PRIMARY KEY NOT NULL,
-	"account_id" text NOT NULL,
-	"home_id" text NOT NULL,
 	"revision" integer NOT NULL,
 	"enabled" boolean NOT NULL,
 	"definition" jsonb NOT NULL,
@@ -172,17 +166,14 @@ CREATE TABLE "device_property_definitions" (
 );
 --> statement-breakpoint
 CREATE TABLE "household_directories" (
-	"account_id" text NOT NULL,
-	"home_id" text NOT NULL,
+	"id" integer PRIMARY KEY DEFAULT 1 NOT NULL,
 	"directory" jsonb NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "household_directories_account_id_home_id_pk" PRIMARY KEY("account_id","home_id")
+	CONSTRAINT "household_directories_singleton" CHECK ("household_directories"."id" = 1)
 );
 --> statement-breakpoint
 CREATE TABLE "household_events" (
 	"id" uuid PRIMARY KEY NOT NULL,
-	"account_id" text NOT NULL,
-	"home_id" text NOT NULL,
 	"producer_id" text NOT NULL,
 	"source_event_id" text NOT NULL,
 	"event_type" text NOT NULL,
@@ -191,7 +182,7 @@ CREATE TABLE "household_events" (
 	"expires_at" timestamp with time zone NOT NULL,
 	"submission" jsonb NOT NULL,
 	"accepted_at" timestamp with time zone NOT NULL,
-	CONSTRAINT "household_events_source_identity" UNIQUE("account_id","home_id","producer_id","source_event_id"),
+	CONSTRAINT "household_events_source_identity" UNIQUE("producer_id","source_event_id"),
 	CONSTRAINT "household_events_valid_interval" CHECK ("household_events"."expires_at" > "household_events"."occurred_at")
 );
 --> statement-breakpoint
@@ -221,7 +212,8 @@ CREATE TABLE "identity_samples" (
 	"quality" jsonb NOT NULL,
 	"model_version" text NOT NULL,
 	"processing_version" text NOT NULL,
-	"feature" jsonb NOT NULL,
+	"feature" jsonb,
+	"appearance" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "identity_samples_image_key_unique" UNIQUE("image_key"),
 	CONSTRAINT "identity_samples_member_sha256_unique" UNIQUE("member_id","sha256"),
@@ -263,8 +255,6 @@ CREATE TABLE "passages" (
 --> statement-breakpoint
 CREATE TABLE "perception_windows" (
 	"id" uuid PRIMARY KEY NOT NULL,
-	"account_id" text NOT NULL,
-	"home_id" text NOT NULL,
 	"device_id" text NOT NULL,
 	"channel" integer NOT NULL,
 	"started_at" bigint NOT NULL,
@@ -298,16 +288,13 @@ ALTER TABLE "observation_bindings" ADD CONSTRAINT "observation_bindings_passage_
 ALTER TABLE "passages" ADD CONSTRAINT "passages_space_a_id_spaces_id_fk" FOREIGN KEY ("space_a_id") REFERENCES "public"."spaces"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "passages" ADD CONSTRAINT "passages_space_b_id_spaces_id_fk" FOREIGN KEY ("space_b_id") REFERENCES "public"."spaces"("id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "automation_actions_run_idx" ON "automation_actions" USING btree ("run_id");--> statement-breakpoint
-CREATE INDEX "automation_model_budget_idx" ON "automation_model_admissions" USING btree ("account_id","home_id","created_at");--> statement-breakpoint
+CREATE INDEX "automation_model_budget_idx" ON "automation_model_admissions" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "automation_review_runs_history_idx" ON "automation_review_runs" USING btree ("review_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "automation_reviews_node_idx" ON "automation_reviews" USING btree ("automation_id","node_id");--> statement-breakpoint
-CREATE INDEX "automation_reviews_household_idx" ON "automation_reviews" USING btree ("account_id","home_id");--> statement-breakpoint
 CREATE INDEX "automation_runs_history_idx" ON "automation_runs" USING btree ("automation_id","created_at");--> statement-breakpoint
-CREATE INDEX "automations_household_idx" ON "automations" USING btree ("account_id","home_id");--> statement-breakpoint
 CREATE INDEX "context_entities_entity_idx" ON "context_entities" USING btree ("entity_type","entity_id","context_id");--> statement-breakpoint
 CREATE INDEX "context_records_material_source_time_idx" ON "context_records" USING btree ("topic","source_occurred_at","id") WHERE "context_records"."kind" = 'observation';--> statement-breakpoint
-CREATE INDEX "context_records_material_scope_source_time_idx" ON "context_records" USING btree (("data"->>'account_id'),("data"->>'home_id'),"source_occurred_at","id") WHERE "context_records"."kind" = 'observation';--> statement-breakpoint
-CREATE INDEX "context_records_material_scope_time_idx" ON "context_records" USING btree (("data"->>'account_id'),("data"->>'home_id'),"topic","occurred_at","id") WHERE "context_records"."kind" = 'observation';--> statement-breakpoint
+CREATE INDEX "context_records_material_time_idx" ON "context_records" USING btree ("topic","occurred_at","id") WHERE "context_records"."kind" = 'observation';--> statement-breakpoint
 CREATE INDEX "context_records_topic_expiry_idx" ON "context_records" USING btree ("topic","expires_at");--> statement-breakpoint
 CREATE INDEX "context_records_occurred_at_id_idx" ON "context_records" USING btree ("occurred_at","id");--> statement-breakpoint
 CREATE INDEX "context_records_sighting_first_id_idx" ON "context_records" USING btree ((("data"->>'firstObservedAt')::numeric),"id") WHERE "context_records"."topic" = 'member_sighting';--> statement-breakpoint
@@ -320,15 +307,15 @@ CREATE INDEX "device_commands_expiry_idx" ON "device_commands" USING btree ("exp
 CREATE INDEX "device_observations_device_kind_time_idx" ON "device_observations" USING btree ("device_id","kind","received_at","scope_epoch","input_sequence","observation_id");--> statement-breakpoint
 CREATE INDEX "device_observations_definition_time_idx" ON "device_observations" USING btree ("definition_id","received_at","scope_epoch","input_sequence","observation_id");--> statement-breakpoint
 CREATE INDEX "device_property_definitions_property_idx" ON "device_property_definitions" USING btree ("device_id","siid","piid");--> statement-breakpoint
-CREATE INDEX "household_events_query_idx" ON "household_events" USING btree ("account_id","home_id","accepted_at","id");--> statement-breakpoint
-CREATE INDEX "household_events_type_idx" ON "household_events" USING btree ("account_id","home_id","event_type","occurred_at");--> statement-breakpoint
+CREATE INDEX "household_events_query_idx" ON "household_events" USING btree ("accepted_at","id");--> statement-breakpoint
+CREATE INDEX "household_events_type_idx" ON "household_events" USING btree ("event_type","occurred_at");--> statement-breakpoint
 CREATE INDEX "identity_samples_member_idx" ON "identity_samples" USING btree ("member_id");--> statement-breakpoint
 CREATE INDEX "observation_bindings_space_idx" ON "observation_bindings" USING btree ("space_id");--> statement-breakpoint
 CREATE INDEX "observation_bindings_passage_idx" ON "observation_bindings" USING btree ("passage_id");--> statement-breakpoint
 CREATE INDEX "passages_space_a_idx" ON "passages" USING btree ("space_a_id");--> statement-breakpoint
 CREATE INDEX "passages_space_b_idx" ON "passages" USING btree ("space_b_id");--> statement-breakpoint
-CREATE INDEX "perception_windows_source_time" ON "perception_windows" USING btree ("account_id","home_id","device_id","channel","started_at","id");--> statement-breakpoint
-CREATE INDEX "perception_windows_history_time" ON "perception_windows" USING btree ("account_id","home_id","started_at","id");--> statement-breakpoint
+CREATE INDEX "perception_windows_source_time" ON "perception_windows" USING btree ("device_id","channel","started_at","id");--> statement-breakpoint
+CREATE INDEX "perception_windows_history_time" ON "perception_windows" USING btree ("started_at","id");--> statement-breakpoint
 CREATE INDEX "perception_windows_observed_range" ON "perception_windows" USING gist (numrange("observed_start_at", "observed_end_at", '[]'));--> statement-breakpoint
 CREATE INDEX "perception_windows_expiry" ON "perception_windows" USING btree ("expires_at");
 --> statement-breakpoint

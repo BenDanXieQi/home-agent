@@ -1,5 +1,5 @@
 {
-  "id": "4930039a-4f5d-4990-ac4c-4e0ed7444f83",
+  "id": "e1d48120-aed3-4348-a49c-1a4cd14cd7a3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -75,12 +75,8 @@
           "name": "automation_actions_run_id_automation_runs_id_fk",
           "tableFrom": "automation_actions",
           "tableTo": "automation_runs",
-          "columnsFrom": [
-            "run_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["run_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -140,12 +136,8 @@
           "name": "automation_decisions_id_automation_runs_id_fk",
           "tableFrom": "automation_decisions",
           "tableTo": "automation_runs",
-          "columnsFrom": [
-            "id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -166,18 +158,6 @@
           "primaryKey": true,
           "notNull": true
         },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "home_id": {
-          "name": "home_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -190,18 +170,6 @@
         "automation_model_budget_idx": {
           "name": "automation_model_budget_idx",
           "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
             {
               "expression": "created_at",
               "isExpression": false,
@@ -317,12 +285,8 @@
           "name": "automation_review_runs_review_id_automation_reviews_id_fk",
           "tableFrom": "automation_review_runs",
           "tableTo": "automation_reviews",
-          "columnsFrom": [
-            "review_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["review_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -341,18 +305,6 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "home_id": {
-          "name": "home_id",
-          "type": "text",
-          "primaryKey": false,
           "notNull": true
         },
         "revision": {
@@ -427,27 +379,6 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
-        },
-        "automation_reviews_household_idx": {
-          "name": "automation_reviews_household_idx",
-          "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
         }
       },
       "foreignKeys": {
@@ -455,12 +386,8 @@
           "name": "automation_reviews_automation_id_automations_id_fk",
           "tableFrom": "automation_reviews",
           "tableTo": "automations",
-          "columnsFrom": [
-            "automation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["automation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -566,12 +493,8 @@
           "name": "automation_runs_automation_id_automations_id_fk",
           "tableFrom": "automation_runs",
           "tableTo": "automations",
-          "columnsFrom": [
-            "automation_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["automation_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -590,18 +513,6 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "home_id": {
-          "name": "home_id",
-          "type": "text",
-          "primaryKey": false,
           "notNull": true
         },
         "revision": {
@@ -637,29 +548,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "automations_household_idx": {
-          "name": "automations_household_idx",
-          "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
@@ -730,12 +619,8 @@
           "name": "context_entities_context_id_context_records_id_fk",
           "tableFrom": "context_entities",
           "tableTo": "context_records",
-          "columnsFrom": [
-            "context_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["context_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -743,12 +628,7 @@
       "compositePrimaryKeys": {
         "context_entities_context_id_entity_type_entity_id_role_pk": {
           "name": "context_entities_context_id_entity_type_entity_id_role_pk",
-          "columns": [
-            "context_id",
-            "entity_type",
-            "entity_id",
-            "role"
-          ]
+          "columns": ["context_id", "entity_type", "entity_id", "role"]
         }
       },
       "uniqueConstraints": {},
@@ -878,55 +758,9 @@
           "method": "btree",
           "with": {}
         },
-        "context_records_material_scope_source_time_idx": {
-          "name": "context_records_material_scope_source_time_idx",
+        "context_records_material_time_idx": {
+          "name": "context_records_material_time_idx",
           "columns": [
-            {
-              "expression": "(\"data\"->>'account_id')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "(\"data\"->>'home_id')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "source_occurred_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"context_records\".\"kind\" = 'observation'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "context_records_material_scope_time_idx": {
-          "name": "context_records_material_scope_time_idx",
-          "columns": [
-            {
-              "expression": "(\"data\"->>'account_id')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "(\"data\"->>'home_id')",
-              "asc": true,
-              "isExpression": true,
-              "nulls": "last"
-            },
             {
               "expression": "topic",
               "isExpression": false,
@@ -1107,9 +941,7 @@
         "context_records_source_key_unique": {
           "name": "context_records_source_key_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "source_key"
-          ]
+          "columns": ["source_key"]
         }
       },
       "policies": {},
@@ -1314,10 +1146,7 @@
       "compositePrimaryKeys": {
         "device_history_state_device_id_item_pk": {
           "name": "device_history_state_device_id_item_pk",
-          "columns": [
-            "device_id",
-            "item"
-          ]
+          "columns": ["device_id", "item"]
         }
       },
       "uniqueConstraints": {},
@@ -1494,12 +1323,8 @@
           "name": "device_observations_definition_id_device_property_definitions_id_fk",
           "tableFrom": "device_observations",
           "tableTo": "device_property_definitions",
-          "columnsFrom": [
-            "definition_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["definition_id"],
+          "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"
         }
@@ -1507,10 +1332,7 @@
       "compositePrimaryKeys": {
         "device_observations_received_at_observation_id_pk": {
           "name": "device_observations_received_at_observation_id_pk",
-          "columns": [
-            "received_at",
-            "observation_id"
-          ]
+          "columns": ["received_at", "observation_id"]
         }
       },
       "uniqueConstraints": {},
@@ -1627,17 +1449,12 @@
       "name": "household_directories",
       "schema": "",
       "columns": {
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "home_id": {
-          "name": "home_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "default": 1
         },
         "directory": {
           "name": "directory",
@@ -1655,18 +1472,15 @@
       },
       "indexes": {},
       "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "household_directories_account_id_home_id_pk": {
-          "name": "household_directories_account_id_home_id_pk",
-          "columns": [
-            "account_id",
-            "home_id"
-          ]
-        }
-      },
+      "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "household_directories_singleton": {
+          "name": "household_directories_singleton",
+          "value": "\"household_directories\".\"id\" = 1"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.household_events": {
@@ -1677,18 +1491,6 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "home_id": {
-          "name": "home_id",
-          "type": "text",
-          "primaryKey": false,
           "notNull": true
         },
         "producer_id": {
@@ -1745,18 +1547,6 @@
           "name": "household_events_query_idx",
           "columns": [
             {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
               "expression": "accepted_at",
               "isExpression": false,
               "asc": true,
@@ -1777,18 +1567,6 @@
         "household_events_type_idx": {
           "name": "household_events_type_idx",
           "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
             {
               "expression": "event_type",
               "isExpression": false,
@@ -1814,12 +1592,7 @@
         "household_events_source_identity": {
           "name": "household_events_source_identity",
           "nullsNotDistinct": false,
-          "columns": [
-            "account_id",
-            "home_id",
-            "producer_id",
-            "source_event_id"
-          ]
+          "columns": ["producer_id", "source_event_id"]
         }
       },
       "policies": {},
@@ -1911,12 +1684,8 @@
           "name": "identity_members_member_id_household_subjects_id_fk",
           "tableFrom": "identity_members",
           "tableTo": "household_subjects",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1995,7 +1764,13 @@
           "name": "feature",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "appearance": {
+          "name": "appearance",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
         },
         "created_at": {
           "name": "created_at",
@@ -2027,12 +1802,8 @@
           "name": "identity_samples_member_id_identity_members_member_id_fk",
           "tableFrom": "identity_samples",
           "tableTo": "identity_members",
-          "columnsFrom": [
-            "member_id"
-          ],
-          "columnsTo": [
-            "member_id"
-          ],
+          "columnsFrom": ["member_id"],
+          "columnsTo": ["member_id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2042,17 +1813,12 @@
         "identity_samples_image_key_unique": {
           "name": "identity_samples_image_key_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "image_key"
-          ]
+          "columns": ["image_key"]
         },
         "identity_samples_member_sha256_unique": {
           "name": "identity_samples_member_sha256_unique",
           "nullsNotDistinct": false,
-          "columns": [
-            "member_id",
-            "sha256"
-          ]
+          "columns": ["member_id", "sha256"]
         }
       },
       "policies": {},
@@ -2196,12 +1962,8 @@
           "name": "observation_bindings_space_id_spaces_id_fk",
           "tableFrom": "observation_bindings",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2209,12 +1971,8 @@
           "name": "observation_bindings_passage_id_passages_id_fk",
           "tableFrom": "observation_bindings",
           "tableTo": "passages",
-          "columnsFrom": [
-            "passage_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["passage_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2325,12 +2083,8 @@
           "name": "passages_space_a_id_spaces_id_fk",
           "tableFrom": "passages",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_a_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_a_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -2338,12 +2092,8 @@
           "name": "passages_space_b_id_spaces_id_fk",
           "tableFrom": "passages",
           "tableTo": "spaces",
-          "columnsFrom": [
-            "space_b_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["space_b_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -2371,18 +2121,6 @@
           "name": "id",
           "type": "uuid",
           "primaryKey": true,
-          "notNull": true
-        },
-        "account_id": {
-          "name": "account_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "home_id": {
-          "name": "home_id",
-          "type": "text",
-          "primaryKey": false,
           "notNull": true
         },
         "device_id": {
@@ -2439,18 +2177,6 @@
           "name": "perception_windows_source_time",
           "columns": [
             {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
               "expression": "device_id",
               "isExpression": false,
               "asc": true,
@@ -2483,18 +2209,6 @@
         "perception_windows_history_time": {
           "name": "perception_windows_history_time",
           "columns": [
-            {
-              "expression": "account_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "home_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
             {
               "expression": "started_at",
               "isExpression": false,
@@ -2607,48 +2321,27 @@
     "public.context_certainty": {
       "name": "context_certainty",
       "schema": "public",
-      "values": [
-        "supported",
-        "tentative",
-        "unknown",
-        "conflicting"
-      ]
+      "values": ["supported", "tentative", "unknown", "conflicting"]
     },
     "public.context_entity_role": {
       "name": "context_entity_role",
       "schema": "public",
-      "values": [
-        "subject",
-        "participant",
-        "location",
-        "source"
-      ]
+      "values": ["subject", "participant", "location", "source"]
     },
     "public.context_entity_type": {
       "name": "context_entity_type",
       "schema": "public",
-      "values": [
-        "person",
-        "pet",
-        "room",
-        "device"
-      ]
+      "values": ["person", "pet", "room", "device"]
     },
     "public.context_kind": {
       "name": "context_kind",
       "schema": "public",
-      "values": [
-        "observation",
-        "assessment"
-      ]
+      "values": ["observation", "assessment"]
     },
     "public.household_subject_kind": {
       "name": "household_subject_kind",
       "schema": "public",
-      "values": [
-        "person",
-        "pet"
-      ]
+      "values": ["person", "pet"]
     }
   },
   "schemas": {},
