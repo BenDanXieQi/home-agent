@@ -1,23 +1,23 @@
+import { identityClassSchema } from "../../household/identity/contracts";
 import { z } from "zod";
-import {
-  trackingObservationSchema,
-  identityClassSchema,
-} from "@home-agent/api/contracts";
+import { trackingObservationSchema } from "@home-agent/api/contracts";
 import { identityLimits } from "./config";
 import { enrollmentResultSchema } from "./enrollment-protocol";
 import { identityEvidenceSchema } from "./evidence";
 import profile from "./profile.json";
 
-export const identityPrepareSchema = z.object({
-  kind: z.literal("prepare"),
-  classes: z.array(identityClassSchema).min(1).max(3),
-});
+export const identityPrepareSchema = z
+  .object({
+    kind: z.literal("prepare"),
+    classes: z.array(identityClassSchema).max(3),
+    attributes: z.boolean().optional(),
+  })
+  .refine((request) => request.classes.length > 0 || request.attributes);
 
 const pixels = z.object({
   rgb: z
     .instanceof(Uint8Array)
     .refine((bytes) => bytes.byteLength === profile.width * profile.height * 3),
-  minimumSharpness: z.number().nonnegative(),
 });
 const measuredTracks = z
   .array(
@@ -32,6 +32,10 @@ const measuredTracks = z
 export const identityRequestSchema = z.discriminatedUnion("kind", [
   pixels.extend({
     kind: z.literal("tracking"),
+    attributeTargets: z
+      .array(z.int().positive())
+      .max(identityLimits.targetsPerFrame)
+      .optional(),
     tracks: measuredTracks,
     targets: z.array(z.int().positive()).max(identityLimits.targetsPerFrame),
   }),
@@ -52,6 +56,8 @@ export const identityResponseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("unavailable"), error: z.string().max(4096) }),
   z.object({
     kind: z.literal("prepared"),
+    attributesAvailable: z.boolean().optional(),
+    attributeError: z.string().max(4096).optional(),
     available: z.array(identityClassSchema).max(3),
     failures: z
       .array(
@@ -65,6 +71,7 @@ export const identityResponseSchema = z.discriminatedUnion("kind", [
   enrollmentResultSchema,
   identityEvidenceSchema.extend({
     kind: z.literal("result"),
+    attributeError: z.string().max(4096).optional(),
     failures: z
       .array(
         z.object({

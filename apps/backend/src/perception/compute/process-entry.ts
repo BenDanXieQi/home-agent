@@ -73,7 +73,8 @@ async function run(task: z.infer<typeof commandSchema>) {
         createModel: createReidProcess,
         fatal: fail,
 
-        reserveCompute: () => pool!.reserveTracking(),
+        reserveCompute: (waitForCapacity) =>
+          pool!.reserveTracking(waitForCapacity),
         releaseCompute: () => {
           pool!.releaseTracking();
         },

@@ -1,8 +1,8 @@
+import { type identityReferenceSnapshotSchema } from "./contracts";
 import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
 import {
   identityReferenceVersionsSchema,
-  type identityReferenceSnapshotSchema,
   type identityObservationSchema,
 } from "@home-agent/api/contracts";
 

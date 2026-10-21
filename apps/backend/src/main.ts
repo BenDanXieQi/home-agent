@@ -13,7 +13,10 @@ import { createDeviceHistoryQuery } from "./household/history/query";
 import { createDeviceHistoryRepository } from "./household/history/repository";
 import { createDeviceHistoryService } from "./household/history/service";
 import { createAutomationService } from "./household/automations/service";
-import { createAppearanceIdentity } from "./household/identity/appearance";
+import {
+  defaultAppearancePolicy,
+  createAppearanceIdentity,
+} from "./household/identity/appearance";
 import { createReferenceEnrollment } from "./household/identity/enrollment";
 import { createMemberActivityRepository } from "./household/identity/activity-repository";
 import { createMemberActivityService } from "./household/identity/activity-service";
@@ -204,6 +207,7 @@ const perception = createPerceptionService({
     ? {
         appearance: createAppearanceIdentity({
           matching: identityReferences.matching,
+          policy: defaultAppearancePolicy,
         }),
       }
     : {}),

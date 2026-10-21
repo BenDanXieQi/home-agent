@@ -7,6 +7,7 @@ import { z } from "zod";
 import identityCapacity from "./identity-capacity.json";
 export { identityCapacity };
 import { stateVersionSchema } from "./household";
+import { personGenderSchema } from "./household-members";
 
 export const imageLimits = {
   maxFileBytes: 32 * 1024 * 1024,
@@ -116,6 +117,26 @@ export const trackingObservationSchema = z.object({
     )
     .max(16),
 });
+export const personAttributeEvidenceSchema = trackingObservationSchema
+  .pick({
+    run: true,
+    sequence: true,
+    receivedAt: true,
+    sampledAt: true,
+    mediaTime: true,
+    ageMs: true,
+    width: true,
+    height: true,
+    coordinateBasis: true,
+  })
+  .extend({
+    trackId: z.int().positive(),
+    measuredBox: trackingBox,
+    gender: personGenderSchema,
+    score: z.number().min(0).max(1),
+    modelVersion: z.string().min(1).max(128),
+    processingVersion: z.string().min(1).max(128),
+  });
 const identityTrackSchema = z.object({
   trackId: z.int().positive(),
   state: z.enum(["unknown", "candidate", "confirmed", "conflict"]),
@@ -147,6 +168,7 @@ const identityTrackSchema = z.object({
     .max(identityCapacity.samplesPerTrack),
   confirmedAt: z.number().nullable(),
   expiresAt: z.number().nullable(),
+  attributes: personAttributeEvidenceSchema.optional(),
 });
 export const identityObservationSchema = trackingObservationSchema
   .pick({
@@ -171,6 +193,7 @@ export const identityObservationSchema = trackingObservationSchema
       "unavailable",
     ]),
     error: z.string().max(4096).optional(),
+    attributeError: z.string().max(4096).optional(),
     referenceVersions: identityReferenceVersionsSchema.nullable(),
     model: z
       .object({
@@ -219,16 +242,28 @@ export const appearanceSummarySchema = trackingObservationSchema
     modelVersion: z.string().min(1).max(128),
     processingVersion: z.string().min(1).max(128),
   });
-export const appearanceReferenceSchema = z.object({
-  referenceId: z.uuid(),
-  sourceTargetKey: z.string().min(1).max(1024),
-  memberId: z.uuid(),
-  face: identityTrackSchema.shape.evidence.element,
-  referenceVersions: identityReferenceVersionsSchema,
-  appearance: appearanceSummarySchema,
-  observedAt: z.number(),
-  expiresAt: z.number(),
-});
+export const appearanceReferenceSchema = z.union([
+  z.object({
+    referenceId: z.uuid(),
+    sourceTargetKey: z.string().min(1).max(1024),
+    memberId: z.uuid(),
+    face: identityTrackSchema.shape.evidence.element,
+    referenceVersions: identityReferenceVersionsSchema,
+    appearance: appearanceSummarySchema,
+    observedAt: z.number(),
+    expiresAt: z.number(),
+  }),
+  z.object({
+    kind: z.literal("registered"),
+    referenceId: z.uuid(),
+    memberId: z.uuid(),
+    referenceVersions: identityReferenceVersionsSchema,
+    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    modelVersion: z.string().min(1).max(128),
+    processingVersion: z.string().min(1).max(128),
+    expiresAt: z.null(),
+  }),
+]);
 const associationTarget = z.object({
   run,
   mediaGeneration: z.string().min(1).max(256),
@@ -240,6 +275,14 @@ const associationTarget = z.object({
   expiresAt: z.number(),
 });
 export const memberAssociationSchema = z.discriminatedUnion("basis", [
+  associationTarget.extend({
+    basis: z.literal("attributes"),
+    memberKind: z.literal("person"),
+    className: z.literal("human"),
+    state: z.literal("inferred"),
+    gender: personGenderSchema,
+    evidence: z.array(personAttributeEvidenceSchema).length(1),
+  }),
   associationTarget.extend({
     basis: z.literal("species"),
     memberKind: z.literal("pet"),

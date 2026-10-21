@@ -17,6 +17,18 @@
 
 构建后的 `dist/perception/tracking/reid-entry.js` 使用同一份资产；运行时不下载。加载失败只使人体外观特征不可用，基础检测继续运行。
 
+## 人体可见属性模型
+
+人体属性使用 [PP-Human 官方轻量模型](https://github.com/PaddlePaddle/PaddleDetection/blob/release/2.9/deploy/pipeline/docs/tutorials/pphuman_attribute.md) `PPLCNet_x1_0_person_attribute_945_infer`。随 backend 携带 `person-attributes/model.onnx`、`profile.json` 和 [Apache-2.0 许可证](person-attributes/LICENSE)，运行时不下载或安装 Python；模型和许可证在加载时校验指纹。用途与限制见[人物属性唯一归因](../../../docs/perception.md#人物属性唯一归因)。
+
+需要重新生成 ONNX 资产时，在独立 Python 3.12 环境安装 `paddlepaddle==3.3.0`、`paddle2onnx==1.3.1`，下载[官方固定模型包](https://bj.bcebos.com/v1/paddledet/models/pipeline/PPLCNet_x1_0_person_attribute_945_infer.zip)，运行：
+
+```sh
+python apps/backend/models/person-attributes/export.py /path/to/PPLCNet_x1_0_person_attribute_945_infer.zip
+```
+
+转换脚本校验来源包与转换结果的 SHA-256，不改写预处理参数或输出标签。
+
 ## 人声检测模型
 
 源码及构建后的 `dist/perception/audio/process-entry.js` 使用同一份资产。运行时不下载；模型缺失、哈希不符或推理失败只将 VAD（语音活动检测）报告为不可用，音频能量与视频检测继续运行。

@@ -1,6 +1,5 @@
 import { StreamingAnswer } from "../../components/agent/StreamingAnswer";
 import {
-  createRef,
   useEffect,
   useEffectEvent,
   useLayoutEffect,
@@ -8,9 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { atom, useAtom, useAtomValue } from "jotai";
-import { householdScopeEpochAtom } from "../../modules/household/state";
-import { Link } from "@tanstack/react-router";
+import { useAtom, useAtomValue } from "jotai";
 import { AlertDialog } from "radix-ui";
 import {
   useIsMutating,
@@ -19,6 +16,10 @@ import {
 } from "@tanstack/react-query";
 import { Check, LoaderCircle, Plus } from "lucide-react";
 import { Button } from "../../components/Button";
+import {
+  listenForImageDrop,
+  imageUploadTypes,
+} from "../../modules/media/images";
 import { Notice, StatusNotice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import { RequestError } from "../../api/errors";
@@ -27,7 +28,6 @@ import {
   runSpatialPlanning,
   closeSpatialPlanning,
   planningImageLimit as imageLimit,
-  planningImageTypes,
 } from "../../modules/spatial/planning";
 import {
   applySpatialLayout,
@@ -50,47 +50,12 @@ import {
   ImageViewer,
   type PlanningImage,
 } from "./planning/ImageViewer";
+import { planningStateAtom, type Round, type Session } from "./planning/state";
 
 const planningToolLabels = {
   update_spatial_draft: "更新空间和通道",
   update_spatial_questions: "整理待确认问题",
 };
-
-type Session = Awaited<ReturnType<typeof runSpatialPlanning>>;
-type Round = {
-  id: string;
-  images: PlanningImage[];
-  text: string;
-  startedAt: number;
-  progress:
-    | Parameters<NonNullable<Parameters<typeof runSpatialPlanning>[3]>>[0]
-    | null;
-  outcome:
-    | (Pick<Session, "questions"> & {
-        reply: NonNullable<Round["progress"]>["reply"] | undefined;
-        change: string;
-      })
-    | null;
-};
-
-const planningStateAtom = atom((get) => {
-  get(householdScopeEpochAtom);
-  return {
-    text: atom(""),
-    images: atom<PlanningImage[]>([]),
-    rounds: atom<Round[]>([]),
-    session: atom<Session | null>(null),
-    base: atom<SpatialSnapshot | null>(null),
-    busy: atom(false),
-    reading: atom(false),
-    error: atom(""),
-    notice: atom(""),
-    expanded: atom(false),
-    saved: atom<SpatialSnapshot | null>(null),
-    pending: createRef<AbortController>(),
-    sessionId: createRef<string>(),
-  };
-});
 
 const stopped = "本轮分析已停止，图片和说明已放回输入框，可调整后重新发送。";
 
@@ -120,7 +85,6 @@ export function SpatialPlanning({
   const [expanded, setExpanded] = useAtom(state.expanded);
   const [restarting, setRestarting] = useState(false);
   const [finalizing, setFinalizing] = useState(false);
-  const [saved, setSaved] = useAtom(state.saved);
   const saveKey = ["spatial-planning-save", scope];
   const saving = useIsMutating({ mutationKey: saveKey }) > 0;
   const [viewing, setViewing] = useState<{
@@ -128,8 +92,8 @@ export function SpatialPlanning({
     id: string;
   } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const { pending, sessionId } = state;
   const root = useRef<HTMLElement>(null);
+  const { pending, sessionId } = state;
   const thread = useRef<HTMLDivElement>(null);
   const picker = useRef<HTMLInputElement>(null);
 
@@ -159,46 +123,13 @@ export function SpatialPlanning({
     if (!available) pending.current?.abort();
   }, [available, pending]);
 
-  const disabled = busy || reading || saving || !available || !!saved;
+  const disabled = busy || reading || saving || !available;
 
-  // Files can be dropped anywhere on the planning page.
   const dropFiles = useEffectEvent((files: File[]) => add(files));
   useEffect(() => {
     const element = root.current;
     if (!element) return undefined;
-    let depth = 0;
-    const hasFiles = (event: DragEvent) =>
-      !!event.dataTransfer?.types.includes("Files");
-    const enter = (event: DragEvent) => {
-      if (!hasFiles(event)) return;
-      depth++;
-      setDragging(true);
-    };
-    const over = (event: DragEvent) => {
-      if (hasFiles(event)) event.preventDefault();
-    };
-    const leave = (event: DragEvent) => {
-      if (!hasFiles(event)) return;
-      depth = Math.max(0, depth - 1);
-      if (!depth) setDragging(false);
-    };
-    const drop = (event: DragEvent) => {
-      if (!hasFiles(event)) return;
-      event.preventDefault();
-      depth = 0;
-      setDragging(false);
-      dropFiles([...(event.dataTransfer?.files ?? [])]);
-    };
-    element.addEventListener("dragenter", enter);
-    element.addEventListener("dragover", over);
-    element.addEventListener("dragleave", leave);
-    element.addEventListener("drop", drop);
-    return () => {
-      element.removeEventListener("dragenter", enter);
-      element.removeEventListener("dragover", over);
-      element.removeEventListener("dragleave", leave);
-      element.removeEventListener("drop", drop);
-    };
+    return listenForImageDrop(element, dropFiles, setDragging);
   }, []);
 
   // Follow growing content until the user scrolls up, then align the completed
@@ -249,7 +180,7 @@ export function SpatialPlanning({
   function add(files: File[]) {
     if (disabled || !files.length) return;
     const supported = files.filter((file) =>
-      planningImageTypes.some((type) => type === file.type),
+      imageUploadTypes.some((type) => type === file.type),
     );
     const unsupported =
       supported.length < files.length ? "已跳过不支持的文件。" : "";
@@ -421,22 +352,19 @@ export function SpatialPlanning({
     onSuccess: (next, { id }) => {
       client.setQueryData(options.queryKey, next);
       if (sessionId.current !== id) return;
-      endSession(id);
       setFinalizing(false);
-      setSaved(next);
+      restart(id);
     },
     onError: (cause, { id }) => {
       if (sessionId.current === id) setError(requestErrorMessage(cause));
     },
   });
 
-  function restart() {
-    if (saving) return;
-    endSession();
+  function restart(id = sessionId.current) {
+    endSession(id);
     setRestarting(false);
     finalize.reset();
     setRounds([]);
-    setSaved(null);
     setImages([]);
     setText("");
     setError("");
@@ -453,13 +381,9 @@ export function SpatialPlanning({
   const blocker = stale
     ? "空间资料在规划期间被修改过，这份草稿不能直接保存。请重新开始，基于最新资料规划。"
     : comparison?.referenced.length
-      ? `草稿删除的空间或通道仍有 ${comparison.referenced.length} 条观测绑定，请先在手动维护中解除。`
+      ? `草稿删除的空间或通道仍有 ${comparison.referenced.length} 条观测绑定，请先在手动设置中解除。`
       : null;
-  const stage = saved
-    ? "saved"
-    : session || rounds.length
-      ? "planning"
-      : "intro";
+  const stage = session || rounds.length ? "planning" : "intro";
   return (
     <section
       ref={root}
@@ -498,7 +422,7 @@ export function SpatialPlanning({
               <RoundView
                 key={round.id}
                 round={round}
-                latest={index === rounds.length - 1 && !saved}
+                latest={index === rounds.length - 1}
                 busy={busy}
                 viewing={viewing?.id ?? null}
                 onView={(id) => setViewing({ images: round.images, id })}
@@ -506,7 +430,6 @@ export function SpatialPlanning({
                 onShowDraft={() => setExpanded(true)}
               />
             ))}
-            {saved ? <SavedView saved={saved} onRestart={restart} /> : null}
           </ol>
         )}
       </div>
@@ -523,30 +446,28 @@ export function SpatialPlanning({
           {error}
         </Notice>
       ) : null}
-      {saved ? null : (
-        <Composer
-          started={!!session}
-          images={images}
-          text={text}
-          disabled={disabled}
-          reading={reading}
-          sending={busy}
-          viewing={viewing?.id ?? null}
-          picker={picker}
-          onText={setText}
-          onAdd={add}
-          onRemove={(id) =>
-            setImages((current) => current.filter((image) => image.id !== id))
-          }
-          onView={(id) => setViewing({ images, id })}
-          onSend={() => {
-            send().catch((cause: unknown) => {
-              setError(requestErrorMessage(cause));
-            });
-          }}
-          onStop={() => pending.current?.abort()}
-        />
-      )}
+      <Composer
+        started={!!session}
+        images={images}
+        text={text}
+        disabled={disabled}
+        reading={reading}
+        sending={busy}
+        viewing={viewing?.id ?? null}
+        picker={picker}
+        onText={setText}
+        onAdd={add}
+        onRemove={(id) =>
+          setImages((current) => current.filter((image) => image.id !== id))
+        }
+        onView={(id) => setViewing({ images, id })}
+        onSend={() => {
+          send().catch((cause: unknown) => {
+            setError(requestErrorMessage(cause));
+          });
+        }}
+        onStop={() => pending.current?.abort()}
+      />
       {dragging && !disabled ? (
         <div
           className="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-2xl border-2 border-dashed border-ink bg-paper/85 text-sm font-medium"
@@ -601,7 +522,12 @@ export function SpatialPlanning({
                 <Button>继续调整</Button>
               </AlertDialog.Cancel>
               <AlertDialog.Action asChild>
-                <Button variant="primary" onClick={restart}>
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    if (!saving) restart();
+                  }}
+                >
                   重新开始
                 </Button>
               </AlertDialog.Action>
@@ -764,34 +690,6 @@ function RoundView({
           ) : null}
         </StreamingAnswer>
       ) : null}
-    </li>
-  );
-}
-
-function SavedView({
-  saved,
-  onRestart,
-}: {
-  saved: SpatialSnapshot;
-  onRestart: () => void;
-}) {
-  return (
-    <li className="grid gap-3 rounded-2xl border border-line bg-white p-5">
-      <p className="flex items-center gap-2 text-sm font-medium">
-        <Check size={16} className="text-sage" aria-hidden="true" />
-        已保存 {saved.spaces.length} 个空间、{saved.passages.length} 条通道
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Link
-          to="/spaces/manual"
-          className="inline-flex min-h-8 items-center rounded-xl bg-ink px-3 py-1.5 text-xs font-medium text-white hover:bg-ink/85"
-        >
-          前往手动维护
-        </Link>
-        <Button size="small" onClick={onRestart}>
-          开始新的规划
-        </Button>
-      </div>
     </li>
   );
 }

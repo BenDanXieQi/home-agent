@@ -1,0 +1,11 @@
+{
+  "sha256": "59775411d59cf96e7bf93a1df4b8263378b18a34b98297b5d78f65df432e9443",
+  "licenseSha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+  "width": 192,
+  "height": 256,
+  "mean": [0.485, 0.456, 0.406],
+  "std": [0.229, 0.224, 0.225],
+  "minimumWidth": 32,
+  "minimumHeight": 64,
+  "minimumScore": 0.9
+}

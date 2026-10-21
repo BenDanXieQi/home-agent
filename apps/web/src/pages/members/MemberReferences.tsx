@@ -5,7 +5,7 @@ import { Camera, ImagePlus, Upload } from "lucide-react";
 import type { z } from "zod";
 import {
   identityCapacity,
-  imageLimits,
+  identityEnrollmentLimits,
   type referenceMemberSchema,
   type referencePreviewSchema,
 } from "@home-agent/api/contracts";
@@ -25,6 +25,8 @@ import {
   toggleIdentity,
 } from "../../modules/members/identity";
 import { ReferenceRecorder } from "./ReferenceRecorder";
+import { ImageFileInput, ImageDropZone } from "../../components/ImageUpload";
+import { imageUploadTypes } from "../../modules/media/images";
 
 export function MemberReferences({
   member,
@@ -49,6 +51,8 @@ export function MemberReferences({
   const [operationLabel, setOperationLabel] = useState("");
   const pending = useRef(false);
   const lifetime = useRef<AbortController | null>(null);
+  const [upload, setUpload] = useState<AbortController | null>(null);
+  const uploading = upload !== null;
   const active = useRef(preview);
   function updatePreview(next: typeof preview) {
     active.current = next;
@@ -98,6 +102,8 @@ export function MemberReferences({
   const full =
     (references.data?.samples.length ?? 0) >=
     identityCapacity.referencesPerMember;
+  const outdated =
+    references.data?.samples.filter((sample) => sample.outdated) ?? [];
   function perform(operation: () => Promise<unknown>, label: string) {
     if (pending.current || cameraBusy || !ready) return;
     pending.current = true;
@@ -105,10 +111,56 @@ export function MemberReferences({
     setOperationLabel(label);
     mutation.mutate(operation);
   }
+  const uploadDisabled = busy || camera || !!preview || modelBlocked || full;
+
+  function addPhotos(files: File[]) {
+    if (uploadDisabled || !files.length) return;
+    if (
+      files.some((file) => !imageUploadTypes.some((type) => type === file.type))
+    ) {
+      setError("请选择 JPEG、PNG 或 WebP 图片。");
+      return;
+    }
+    perform(async () => {
+      const controller = new AbortController();
+      const lifetimeSignal = lifetime.current?.signal;
+      if (!lifetimeSignal) return;
+      const signal = AbortSignal.any([controller.signal, lifetimeSignal]);
+      setUpload(controller);
+
+      try {
+        const result = await uploadReference(input, files, signal);
+        if (signal.aborted) {
+          await cancelReference({ ...input, sessionId: result.sessionId });
+          return;
+        }
+        updatePreview(result);
+        setCamera(false);
+      } catch (cause) {
+        if (lifetimeSignal.aborted) return;
+        if (
+          !controller.signal.aborted ||
+          !(
+            cause === signal.reason ||
+            (cause instanceof RequestError &&
+              cause.details.code === "request_cancelled")
+          )
+        )
+          throw cause;
+        setNotice("已取消上传，没有保存新的参考照片。可以重新选择照片。");
+      } finally {
+        setUpload((current) => (current === controller ? null : current));
+      }
+    }, `正在分析 ${files.length} 张照片，完成后请选择并保存…`);
+  }
+
   return (
-    <section
+    <ImageDropZone
       className="space-y-4 rounded-2xl bg-surface p-5"
-      aria-label={title}
+      label={title}
+      dropLabel="松开以添加参考照片"
+      disabled={uploadDisabled}
+      onFiles={addPhotos}
     >
       <header className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -129,7 +181,11 @@ export function MemberReferences({
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-white p-4">
           <div className="space-y-1">
             <p className="text-sm">
-              {references.data.enabled ? "成员识别已启用" : "成员识别未启用"}
+              {references.data.enableReason || modelBlocked
+                ? "成员识别暂不可用"
+                : references.data.enabled
+                  ? "成员识别已启用"
+                  : "成员识别未启用"}
             </p>
             <p className="text-xs leading-6 text-muted">
               {references.data.enableReason ||
@@ -162,6 +218,36 @@ export function MemberReferences({
             (references.data.model === "unconfigured"
               ? "尚未配置成员识别模型，请先在本机配置模型。"
               : "成员识别模型暂不可用，请检查模型配置后重试。")}
+        </Notice>
+      ) : null}
+      {outdated.length > 0 ? (
+        <Notice tone="warning">
+          <div className="space-y-3">
+            <p>
+              {outdated.length} 张参考已失效，无法用于当前识别。先删除失效参考，
+              再重新上传原照片或录制视频；其他参考会保留。
+            </p>
+            <Button
+              size="small"
+              variant="secondary"
+              disabled={busy || camera || !!preview}
+              onClick={() => {
+                const signal = lifetime.current?.signal;
+                perform(async () => {
+                  for (const sample of outdated) {
+                    signal?.throwIfAborted();
+                    await deleteReference(input, sample.id);
+                  }
+                  signal?.throwIfAborted();
+                  setNotice(
+                    `已删除 ${outdated.length} 张失效参考，请重新登记照片。`,
+                  );
+                }, "正在删除失效参考…");
+              }}
+            >
+              删除 {outdated.length} 张失效参考
+            </Button>
+          </div>
         </Notice>
       ) : null}
       {error || references.error ? (
@@ -213,39 +299,31 @@ export function MemberReferences({
               variant="secondary"
               icon={<Upload size={16} aria-hidden="true" />}
               className="border-line bg-white"
-              disabled={busy || camera || !!preview || modelBlocked || full}
+              disabled={!uploading && uploadDisabled}
+              status={uploading ? "pending" : "idle"}
+              pendingAction={{
+                label: "取消上传",
+                onClick: () => {
+                  upload?.abort();
+                  setOperationLabel("正在取消，等待当前处理和清理完成…");
+                },
+              }}
               onClick={() => fileInput.current?.click()}
             >
-              上传照片
+              上传照片（可多选）
             </Button>
           </div>
+          <p className="text-xs leading-6 text-muted">
+            支持多选或拖入 JPEG、PNG、WebP 图片，每批最多{" "}
+            {identityEnrollmentLimits.candidates} 张，总大小不超过 32 MiB。
+          </p>
         </div>
       ) : null}
-      <input
+      <ImageFileInput
         ref={fileInput}
-        aria-label={person ? "上传单人参考照片" : "上传宠物参考照片"}
-        type="file"
-        accept="image/jpeg,image/png,image/webp"
-        className="hidden"
-        disabled={busy || camera || !!preview || modelBlocked || full}
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          if (!file) return;
-          if (file.size > imageLimits.maxFileBytes) {
-            setError("文件超过上传容量限制");
-            return;
-          }
-          perform(async () => {
-            const result = await uploadReference(
-              input,
-              file,
-              lifetime.current?.signal,
-            );
-            updatePreview(result);
-            setCamera(false);
-          }, "正在分析照片，完成后请选择并保存…");
-        }}
+        label={person ? "上传单人参考照片" : "上传宠物参考照片"}
+        disabled={uploadDisabled}
+        onFiles={addPhotos}
       />
       {person && camera && !preview ? (
         <ReferenceRecorder
@@ -307,19 +385,24 @@ export function MemberReferences({
           {references.data?.samples.map((sample) => (
             <figure
               key={sample.id}
-              className="min-w-0 space-y-3 rounded-xl border border-line bg-white p-3"
+              className="flex min-w-0 flex-col gap-3 rounded-xl border border-line bg-white p-3"
             >
-              <img
-                className="aspect-square w-full rounded-lg bg-surface object-contain"
+              <ReferencePhoto
                 alt={`${member.name}的已保存参考照片`}
                 src={`/api/household-members/references/image/${sample.id}?${new URLSearchParams(input)}`}
               />
               <figcaption className="text-xs text-muted">
+                {sample.outdated ? (
+                  <span className="mb-1 block font-medium text-amber-700">
+                    参考已失效，请删除后重新登记
+                  </span>
+                ) : null}
                 {sample.source.kind === "upload"
                   ? "上传照片"
                   : `摄像头录像 · 镜头 ${sample.source.channel}`}
               </figcaption>
               <Button
+                className="mt-auto self-start"
                 size="small"
                 variant="secondary"
                 disabled={busy || camera || !!preview}
@@ -336,7 +419,7 @@ export function MemberReferences({
           ))}
         </div>
       ) : null}
-    </section>
+    </ImageDropZone>
   );
 }
 
@@ -388,6 +471,19 @@ function ReferencePreview({
         </p>
       </div>
       {preview.reason ? <Notice tone="warning">{preview.reason}</Notice> : null}
+      {preview.uploads.length ? (
+        <div className="space-y-2 text-xs" aria-label="本批照片处理结果">
+          {preview.uploads.map((file, index) => (
+            <p key={index} className="break-words leading-6">
+              <span className="font-medium">{file.fileName}</span>
+              {file.candidateIds.length
+                ? `：已提取 ${file.candidateIds.length} 张候选`
+                : "：未添加候选"}
+              {file.reason ? ` · ${file.reason}` : ""}
+            </p>
+          ))}
+        </div>
+      ) : null}
       {query.error && !expired ? (
         <Notice tone="error">
           {requestErrorMessage(query.error)}
@@ -410,14 +506,14 @@ function ReferencePreview({
               type="button"
               key={candidate.id}
               aria-pressed={selected}
-              aria-label={`选择候选照片 ${index + 1}`}
+              aria-label={`选择候选照片 ${index + 1}${candidate.fileName ? `：${candidate.fileName}` : ""}`}
               disabled={
                 busy ||
                 expired ||
                 !!query.error ||
                 (!selected && picked.length >= preview.remainingCapacity)
               }
-              className={`relative space-y-2 rounded-xl border-2 p-2 text-left disabled:opacity-50 ${selected ? "border-ink bg-surface" : "border-line"}`}
+              className={`relative flex min-w-0 flex-col gap-2 rounded-xl border-2 p-2 text-left disabled:opacity-50 ${selected ? "border-ink bg-surface" : "border-line"}`}
               onClick={() =>
                 pick((previous) =>
                   selected
@@ -426,18 +522,20 @@ function ReferencePreview({
                 )
               }
             >
-              <img
+              <ReferencePhoto
                 src={candidate.image}
                 alt={`候选照片 ${index + 1}`}
-                className="aspect-square w-full rounded-lg object-contain"
               />
-              <span className="flex items-center justify-between gap-1 text-xs">
-                <span>
+              <span className="mt-auto flex w-full items-center justify-between gap-2 text-xs">
+                <span
+                  className="min-w-0 truncate"
+                  title={candidate.fileName ?? undefined}
+                >
                   {preview.source
                     ? `录像约第 ${candidate.offsetMs / 1000 + 1} 秒`
-                    : "上传照片"}
+                    : candidate.fileName}
                 </span>
-                <span>{selected ? "✓ 已选" : "选择"}</span>
+                <span className="shrink-0">{selected ? "✓ 已选" : "选择"}</span>
               </span>
             </button>
           );
@@ -471,5 +569,18 @@ function ReferencePreview({
         仅保存你选中的参考照片，其余候选和临时录像会释放。保存完成后会显示登记完成提示。
       </p>
     </div>
+  );
+}
+
+function ReferencePhoto({ src, alt }: { src: string; alt: string }) {
+  return (
+    <span className="block aspect-[3/4] w-full shrink-0 overflow-hidden rounded-lg bg-surface">
+      <img
+        src={src}
+        alt={alt}
+        draggable={false}
+        className="size-full select-none object-contain"
+      />
+    </span>
   );
 }

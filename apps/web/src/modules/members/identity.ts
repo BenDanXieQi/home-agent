@@ -35,56 +35,107 @@ export function referenceListOptions(
     refetchInterval: 5000,
   });
 }
+async function receiveReferencePreview(
+  input: z.infer<typeof referenceSessionSchema>,
+  send: () => Promise<z.infer<typeof referencePreviewSchema>>,
+) {
+  try {
+    return await send();
+  } catch (cause) {
+    await cancelReference(input);
+    throw cause;
+  }
+}
 export async function uploadReference(
   input: z.infer<typeof referenceMemberSchema>,
-  file: File,
-  signal?: AbortSignal,
+  files: File[],
+  signal: AbortSignal,
 ) {
-  const prepared = await prepareAnalysisImage(
-    file,
-    signal ?? AbortSignal.timeout(45_000),
-  );
-  try {
-    return await requestJson(
+  if (!files.length || files.length > identityEnrollmentLimits.candidates)
+    throw new Error(
+      `每次请选择 1 至 ${identityEnrollmentLimits.candidates} 张照片。`,
+    );
+  if (
+    files.reduce((total, file) => total + file.size, 0) >
+    identityEnrollmentLimits.uploadBytes
+  )
+    throw new Error("每批照片总大小不能超过 32 MiB，请减少照片或先缩小图片。");
+
+  const operationSignal = AbortSignal.any([
+    signal,
+    AbortSignal.timeout(identityEnrollmentLimits.extractionMs),
+  ]);
+  const body = new FormData();
+  let total = 0;
+  for (const file of files) {
+    const prepared = await prepareAnalysisImage(file, operationSignal).catch(
+      (cause: unknown) => {
+        operationSignal.throwIfAborted();
+        throw new Error(
+          `「${file.name}」：${cause instanceof Error ? cause.message : "图片准备失败"}，本批照片尚未提交。`,
+          { cause },
+        );
+      },
+    );
+    try {
+      total += prepared.blob.size;
+      if (total > identityEnrollmentLimits.uploadBytes)
+        throw new Error(
+          "处理后的照片总大小超过 32 MiB，请减少照片或先缩小图片。",
+        );
+      body.append("images", prepared.blob, file.name);
+    } finally {
+      URL.revokeObjectURL(prepared.url);
+    }
+  }
+  operationSignal.throwIfAborted();
+  const session = { ...input, sessionId: crypto.randomUUID() };
+  return receiveReferencePreview(session, () =>
+    requestJson(
       (api, options) =>
         api.api["household-members"].references.upload.$post(
-          { query: input },
+          { query: session },
           {
             init: {
               ...options.init,
-              body: prepared.blob,
-              headers: {
-                "Content-Type": "image/png",
-              },
+              body,
             },
           },
         ),
       referencePreviewSchema,
-      { timeoutMs: 45_000, signal },
-    );
-  } finally {
-    URL.revokeObjectURL(prepared.url);
-  }
+      {
+        timeoutMs: identityEnrollmentLimits.extractionMs,
+        signal: operationSignal,
+      },
+    ),
+  );
 }
 export function extractRecording(
-  input: z.infer<typeof referenceRecordingSchema>,
+  input: Omit<z.infer<typeof referenceRecordingSchema>, "sessionId">,
   recording: Blob,
   signal: AbortSignal,
 ) {
-  return requestJson(
-    (api, options) =>
-      api.api["household-members"].references.recording.$post(
-        { query: { ...input, channel: String(input.channel) } },
-        {
-          init: {
-            ...options.init,
-            body: recording,
-            headers: { "Content-Type": recording.type },
+  const session = {
+    memberId: input.memberId,
+    scope_epoch: input.scope_epoch,
+    sessionId: crypto.randomUUID(),
+  };
+  return receiveReferencePreview(session, () =>
+    requestJson(
+      (api, options) =>
+        api.api["household-members"].references.recording.$post(
+          { query: { ...input, ...session, channel: String(input.channel) } },
+          {
+            init: {
+              ...options.init,
+              body: recording,
+              headers: { "Content-Type": recording.type },
+            },
           },
-        },
-      ),
-    referencePreviewSchema,
-    { signal, timeoutMs: identityEnrollmentLimits.extractionMs },
+        ),
+      referencePreviewSchema,
+      { signal, timeoutMs: identityEnrollmentLimits.extractionMs },
+    ),
   );
 }
 export function referencePreviewOptions(
@@ -115,7 +166,7 @@ export function cancelReference(input: z.infer<typeof referenceSessionSchema>) {
         options,
       ),
     referenceCancelledSchema,
-    { keepalive: true },
+    { keepalive: true, timeoutMs: identityEnrollmentLimits.extractionMs },
   );
 }
 export function confirmReference(

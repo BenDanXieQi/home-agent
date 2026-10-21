@@ -331,9 +331,14 @@ export const identitySamples = pgTable(
       .notNull(),
     modelVersion: text("model_version").notNull(),
     processingVersion: text("processing_version").notNull(),
-    feature: jsonb("feature")
-      .$type<z.infer<typeof referenceInputSchema>["feature"]>()
-      .notNull(),
+    feature:
+      jsonb("feature").$type<
+        NonNullable<z.infer<typeof referenceInputSchema>["feature"]>
+      >(),
+    appearance:
+      jsonb("appearance").$type<
+        z.infer<typeof referenceInputSchema>["appearance"]
+      >(),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

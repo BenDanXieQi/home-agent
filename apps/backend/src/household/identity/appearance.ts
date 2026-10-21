@@ -1,3 +1,4 @@
+import { type identityReferenceSnapshotSchema } from "./contracts";
 import { isDeepStrictEqual } from "node:util";
 import { appearanceScore } from "./appearance-score";
 import { z } from "zod";
@@ -23,7 +24,7 @@ export const appearanceLimits = {
   supportWindowMs: 5000,
   inferenceTtlMs: 5000,
 } as const;
-export const appearanceCalibrationSchema = z.strictObject({
+export const appearancePolicySchema = z.strictObject({
   policyVersion: z.string().min(1).max(128),
   threshold: z.number().min(-1).max(1),
   margin: z.number().min(0).max(2),
@@ -31,6 +32,15 @@ export const appearanceCalibrationSchema = z.strictObject({
   supportWindowMs: z.int().min(500).max(appearanceLimits.supportWindowMs),
   inferenceTtlMs: z.int().positive().max(appearanceLimits.inferenceTtlMs),
 });
+export const defaultAppearancePolicy = appearancePolicySchema.parse({
+  policyVersion: "real28-094-013-ref600-support5-inference5",
+  threshold: 0.94,
+  margin: 0.13,
+  referenceTtlMs: appearanceLimits.referenceTtlMs,
+  supportWindowMs: appearanceLimits.supportWindowMs,
+  inferenceTtlMs: appearanceLimits.inferenceTtlMs,
+});
+
 type Appearance = z.infer<typeof appearanceEvidenceSchema>;
 type Observation = z.infer<typeof identityObservationSchema>;
 type Face = Observation["tracks"][number]["evidence"][number];
@@ -135,7 +145,28 @@ function newSource(input: {
     maximumTrackId: 0,
   };
 }
-function referenceSummary(reference: ReturnType<typeof newReference>) {
+function newRegisteredReference(
+  sample: NonNullable<
+    z.infer<typeof identityReferenceSnapshotSchema>["appearanceReferences"]
+  >[number],
+  referenceVersions: Versions,
+) {
+  const { sampleId, vector, ...metadata } = sample;
+  return {
+    ...metadata,
+    kind: "registered" as const,
+    referenceId: sampleId,
+    referenceVersions,
+    vector,
+    expiresAt: null,
+    deadline: Infinity,
+  };
+}
+function referenceSummary(
+  reference:
+    | ReturnType<typeof newReference>
+    | ReturnType<typeof newRegisteredReference>,
+) {
   const { vector: _vector, deadline: _deadline, ...summary } = reference;
   return summary;
 }
@@ -269,14 +300,18 @@ export function createAppearanceIdentity(options: {
     ReturnType<typeof createIdentityMatching>,
     "snapshot" | "associate"
   >;
-  calibration?: z.infer<typeof appearanceCalibrationSchema>;
+  policy?: z.infer<typeof appearancePolicySchema>;
 }) {
-  const policy = options.calibration
-    ? appearanceCalibrationSchema.parse(options.calibration)
+  const policy = options.policy
+    ? appearancePolicySchema.parse(options.policy)
     : null;
   const sources = new Map<string, ReturnType<typeof newSource>>();
   const targets = new Map<string, ReturnType<typeof newTarget>>();
   const references = new Map<string, ReturnType<typeof newReference>>();
+  const registeredReferences = new Map<
+    string,
+    ReturnType<typeof newRegisteredReference>
+  >();
   const listeners = new Set<(event: Event) => void>();
   let versions: Versions | null = null;
   let revision = 0;
@@ -352,7 +387,9 @@ export function createAppearanceIdentity(options: {
       target.supports = target.supports.filter(
         (support) =>
           support.deadline > now &&
-          support.referenceIds.every((id) => references.has(id)),
+          support.referenceIds.every(
+            (id) => references.has(id) || registeredReferences.has(id),
+          ),
       );
       if (
         target.inferred &&
@@ -500,11 +537,17 @@ export function createAppearanceIdentity(options: {
         scores: Map<string, number>;
       }
     >();
-    for (const reference of references.values()) {
+    const candidates = new Map<
+      string,
+      | ReturnType<typeof newReference>
+      | ReturnType<typeof newRegisteredReference>
+    >([...references, ...registeredReferences]);
+    for (const reference of candidates.values()) {
+      const feature = "face" in reference ? reference.appearance : reference;
       if (
         reference.deadline <= now ||
-        reference.appearance.modelVersion !== evidence.modelVersion ||
-        reference.appearance.processingVersion !== evidence.processingVersion
+        feature.modelVersion !== evidence.modelVersion ||
+        feature.processingVersion !== evidence.processingVersion
       )
         continue;
       const score = appearanceScore(vector, reference.vector);
@@ -526,7 +569,7 @@ export function createAppearanceIdentity(options: {
     target.inferred = null;
     if (!best) {
       target.supports = [];
-      target.reason = references.size
+      target.reason = candidates.size
         ? "feature_version_mismatch"
         : "no_reference";
       return;
@@ -535,7 +578,7 @@ export function createAppearanceIdentity(options: {
     target.candidate = { memberId: best.memberId, score: best.score, margin };
     if (!policy) {
       target.supports = [];
-      target.reason = "uncalibrated_policy";
+      target.reason = "policy_unconfigured";
       return;
     }
     if (
@@ -591,7 +634,7 @@ export function createAppearanceIdentity(options: {
     const [referenceId] = common.toSorted(
       (a, b) => best.scores.get(b)! - best.scores.get(a)!,
     );
-    const reference = referenceId ? references.get(referenceId) : undefined;
+    const reference = referenceId ? candidates.get(referenceId) : undefined;
     if (
       !first ||
       target.supports.length < 2 ||
@@ -679,6 +722,12 @@ export function createAppearanceIdentity(options: {
       const removed = [...references.values()];
       removeReferences(removed);
       versions = next;
+      registeredReferences.clear();
+      if (next)
+        for (const sample of snapshot?.appearanceReferences ?? []) {
+          const reference = newRegisteredReference(sample, next);
+          registeredReferences.set(reference.referenceId, reference);
+        }
       for (const source of sources.values())
         source.confirmationCutoff = Math.max(
           source.confirmationCutoff,
@@ -1064,14 +1113,17 @@ export function createAppearanceIdentity(options: {
     snapshot() {
       return structuredClone({
         revision,
-        calibrated: policy !== null,
+        policyConfigured: policy !== null,
         policyVersion: policy?.policyVersion ?? null,
         statistics: {
           ...statistics,
           temporarySamples: temporaryCount(),
           targetCount: targets.size,
         },
-        references: [...references.values()].map(referenceSummary),
+        references: [
+          ...references.values(),
+          ...registeredReferences.values(),
+        ].map(referenceSummary),
         targets: [...targets.values()].map(targetSummary),
       });
     },

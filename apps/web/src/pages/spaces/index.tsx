@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, Navigate } from "@tanstack/react-router";
 import { useAtomValue } from "jotai";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, House, DoorOpen, ScanEye } from "lucide-react";
@@ -28,6 +28,8 @@ import { DeleteDialog } from "./DeleteDialog";
 import { createSpatialLabels } from "./labels";
 import type { Editor, Deletion } from "./types";
 import { SpatialPlanning } from "./SpatialPlanning";
+import { planningActiveAtom } from "./planning/state";
+import { ResetLayout } from "./ResetLayout";
 
 const areas = [
   {
@@ -57,6 +59,7 @@ function SpacesQuery({ scope, manual }: { scope: string; manual: boolean }) {
   const query = useQuery(spatialQueryOptions(scope));
   const household = useAtomValue(householdSnapshotAtom);
   const reliable = useAtomValue(householdReliableAtom);
+  const planning = useAtomValue(planningActiveAtom);
   async function refresh() {
     await query.refetch({ throwOnError: true });
   }
@@ -86,6 +89,9 @@ function SpacesQuery({ scope, manual }: { scope: string; manual: boolean }) {
             snapshot={query.data}
             refresh={refresh}
           />
+        ) : !planning &&
+          (query.data.spaces.length || query.data.passages.length) ? (
+          <Navigate to="/spaces/manual" replace />
         ) : (
           <>
             <PageHeaderContent slot="actions">
@@ -93,7 +99,7 @@ function SpacesQuery({ scope, manual }: { scope: string; manual: boolean }) {
                 to="/spaces/manual"
                 className="rounded-lg px-3 py-2 text-xs text-muted hover:bg-surface hover:text-ink"
               >
-                手动维护
+                手动设置
               </Link>
             </PageHeaderContent>
             <SpatialPlanning
@@ -217,6 +223,9 @@ function SpatialWorkspace({
   );
   return (
     <>
+      <PageHeaderContent slot="actions">
+        <ResetLayout scope={scope} snapshot={snapshot} />
+      </PageHeaderContent>
       <PageHeaderContent slot="details">
         <span className="text-xs text-muted">
           {snapshot.spaces.length} 个空间 · {snapshot.passages.length} 条通道 ·{" "}

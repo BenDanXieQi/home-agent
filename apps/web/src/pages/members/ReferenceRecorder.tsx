@@ -20,7 +20,10 @@ import {
   recordReferenceVideo,
   referenceRecordingSupported,
 } from "../../modules/members/record-reference-video";
-import { extractRecording } from "../../modules/members/identity";
+import {
+  cancelReference,
+  extractRecording,
+} from "../../modules/members/identity";
 import { RequestError } from "../../api/errors";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import { PlaybackStatus } from "../cameras/PlaybackStatus";
@@ -269,10 +272,17 @@ function RecorderPreview({
         operation.signal,
       );
       if (mounted.current && !operation.signal.aborted) onPreview(result);
+      else await cancelReference({ ...input, sessionId: result.sessionId });
     } catch (cause) {
       stopSpeech();
       if (!mounted.current) return;
-      if (operation.signal.aborted)
+      setNotice("");
+      if (
+        operation.signal.aborted &&
+        (cause === operation.signal.reason ||
+          (cause instanceof RequestError &&
+            cause.details.code === "request_cancelled"))
+      )
         setNotice(
           operation.signal.reason instanceof Error
             ? operation.signal.reason.message
@@ -402,11 +412,12 @@ function RecorderPreview({
         ) : null}
         {busy ? (
           <Button
-            onClick={() =>
+            onClick={() => {
+              setNotice("正在取消，等待当前处理和清理完成…");
               controller.current?.abort(
                 new Error("本次登记已取消，未保存照片。"),
-              )
-            }
+              );
+            }}
           >
             {stage === "recording" ? "取消录制" : "取消提取"}
           </Button>

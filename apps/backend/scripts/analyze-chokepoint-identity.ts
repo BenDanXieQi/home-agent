@@ -1,3 +1,4 @@
+import { identityReferenceSnapshotSchema } from "../src/household/identity/contracts";
 import { readFile, mkdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve, join } from "node:path";
@@ -5,7 +6,6 @@ import { parseArgs } from "node:util";
 import sharp from "sharp";
 import writeFileAtomic from "write-file-atomic";
 import {
-  identityReferenceSnapshotSchema,
   identityReferenceVersionsSchema,
   trackingObservationSchema,
   identityObservationSchema,
@@ -29,7 +29,10 @@ import {
   identityLimits,
 } from "../src/perception/identity/config";
 import { faceProcessingVersions } from "../src/perception/identity/processing-version";
-import { createAppearanceIdentity } from "../src/household/identity/appearance";
+import {
+  createAppearanceIdentity,
+  defaultAppearancePolicy,
+} from "../src/household/identity/appearance";
 import { appearanceEvidenceSchema } from "../src/household/identity/appearance-evidence";
 import { associateMembers } from "../src/household/identity/association";
 import { identityMatchingParameters } from "../src/household/identity/matching-parameters";
@@ -170,7 +173,6 @@ async function enroll(
     kind: "tracking",
     ...prepared,
     targets: prepared.tracks.map((track) => track.trackId).slice(0, 4),
-    minimumSharpness: config.minimumSharpness,
   });
   if (result.kind !== "result")
     throw new Error("Unexpected face enrollment response");
@@ -231,7 +233,7 @@ try {
   }
   const galleries = (["tune", "holdout"] as const).map((split) => {
     const referenceSnapshot = identityReferenceSnapshotSchema.parse({
-      ...faceProcessingVersions(config.minimumSharpness),
+      ...faceProcessingVersions(),
       revision: crypto.randomUUID(),
       members: [...references].flatMap(([identity, reference]) => {
         const member = members.get(identity)!;
@@ -262,6 +264,7 @@ try {
       ]),
     );
     const appearance = createAppearanceIdentity({
+      policy: defaultAppearancePolicy,
       matching: {
         snapshot: () => referenceSnapshot,
         associate: (observation, ttl, now) =>
@@ -536,7 +539,6 @@ try {
         kind: "tracking",
         ...prepared,
         targets,
-        minimumSharpness: config.minimumSharpness,
       });
       if (result.kind !== "result")
         throw new Error("Unexpected tracking face response");
@@ -758,7 +760,6 @@ try {
       faceConfig: {
         sampleIntervalMs: config.sampleIntervalMs,
         evidenceTtlMs: config.evidenceTtlMs,
-        minimumSharpness: config.minimumSharpness,
       },
       split:
         "sha256(chokepoint-face-split:identity); first 13 tune, last 12 holdout; first 9 per split enrolled",
@@ -806,7 +807,7 @@ try {
       face: {
         yunet: faceModels.models.yunet,
         sface: faceModels.models.sface,
-        ...faceProcessingVersions(config.minimumSharpness),
+        ...faceProcessingVersions(),
       },
       reid: reid.metadata,
       detectorSha256: await hashFile(detectionModelPath),

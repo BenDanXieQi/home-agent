@@ -88,23 +88,28 @@ export function createIdentityRoutes(options: {
     return { enrollment: options.enrollment, references: options.references };
   }
   const upload = createBoundedMediaUpload(
-    (path, signal, request) =>
+    (files, signal, request) =>
       services()
         .enrollment.upload(
-          referenceMemberSchema.parse(
+          referenceSessionSchema.parse(
             Object.fromEntries(new URL(request.url).searchParams),
           ),
-          path,
+          files,
           signal,
         )
         .catch((error) => {
           throw wireError(error);
         }),
     options.shutdown,
-    options.timeoutMs,
+    Math.min(options.timeoutMs, identityEnrollmentLimits.extractionMs),
     {
-      maxBytes: imageLimits.maxFileBytes,
+      maxBytes: identityEnrollmentLimits.uploadBytes + 64 * 1024,
       invalidCode: "perception_image_invalid",
+      multipart: {
+        maxFiles: identityEnrollmentLimits.candidates,
+        maxFileBytes: imageLimits.maxFileBytes,
+        maxTotalBytes: identityEnrollmentLimits.uploadBytes,
+      },
     },
   );
   const recordingQuery = referenceRecordingSchema.extend({
@@ -113,13 +118,13 @@ export function createIdentityRoutes(options: {
       .transform((value) => (value === "1" ? (1 as const) : (2 as const))),
   });
   const recording = createBoundedMediaUpload(
-    (path, signal, request) =>
+    ([file], signal, request) =>
       services()
         .enrollment.recording(
           recordingQuery.parse(
             Object.fromEntries(new URL(request.url).searchParams),
           ),
-          path,
+          file!.path,
           signal,
         )
         .catch((error) => {
@@ -132,6 +137,40 @@ export function createIdentityRoutes(options: {
       invalidCode: "identity_recording_invalid",
     },
   );
+  let extracting:
+    | {
+        input: z.infer<typeof referenceSessionSchema>;
+        controller: AbortController;
+        finished: Promise<void>;
+      }
+    | undefined;
+  async function receiveUpload(
+    input: z.infer<typeof referenceSessionSchema>,
+    request: Request,
+    receive: typeof upload,
+  ) {
+    if (extracting) throw new ReferenceEnrollmentError("busy");
+    const completion = Promise.withResolvers<void>();
+    const selected = {
+      input,
+      controller: new AbortController(),
+      finished: completion.promise,
+    };
+    extracting = selected;
+    try {
+      return await receive(
+        new Request(request, {
+          signal: AbortSignal.any([request.signal, selected.controller.signal]),
+        }),
+      );
+    } catch (cause) {
+      options.enrollment?.cancel(input);
+      throw cause;
+    } finally {
+      if (extracting === selected) extracting = undefined;
+      completion.resolve();
+    }
+  }
   const app = new Hono()
     .use(requireLocalAccess([options.port, 5173], { webEntry: true }))
     .use(async (c, next) => {
@@ -142,13 +181,15 @@ export function createIdentityRoutes(options: {
   return app
     .post(
       "/upload",
-      validator("query", (value) => parse(referenceMemberSchema, value)),
-      async (c) => c.json(await upload(c.req.raw)),
+      validator("query", (value) => parse(referenceSessionSchema, value)),
+      async (c) =>
+        c.json(await receiveUpload(c.req.valid("query"), c.req.raw, upload)),
     )
     .post(
       "/recording",
       validator("query", (value) => parse(recordingQuery, value)),
-      async (c) => c.json(await recording(c.req.raw)),
+      async (c) =>
+        c.json(await receiveUpload(c.req.valid("query"), c.req.raw, recording)),
     )
     .get(
       "/image/:sampleId",
@@ -182,13 +223,21 @@ export function createIdentityRoutes(options: {
     .post("/preview", validateJson(referenceSessionSchema), async (c) =>
       c.json(await services().enrollment.poll(c.req.valid("json"))),
     )
-    .post("/cancel", validateJson(referenceSessionSchema), (c) =>
-      c.json(
-        referenceCancelledSchema.parse(
-          services().enrollment.cancel(c.req.valid("json")),
-        ),
-      ),
-    )
+    .post("/cancel", validateJson(referenceSessionSchema), async (c) => {
+      const input = c.req.valid("json");
+      const selected = extracting;
+      if (
+        selected?.input.sessionId === input.sessionId &&
+        selected.input.memberId === input.memberId &&
+        selected.input.scope_epoch === input.scope_epoch
+      ) {
+        selected.controller.abort();
+        await selected.finished;
+      }
+      return c.json(
+        referenceCancelledSchema.parse(services().enrollment.cancel(input)),
+      );
+    })
     .post("/confirm", validateJson(referenceConfirmSchema), async (c) =>
       c.json(
         referenceSavedSchema.parse(

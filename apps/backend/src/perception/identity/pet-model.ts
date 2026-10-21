@@ -1,3 +1,4 @@
+import { identityFeatureSchema } from "../../household/identity/contracts";
 import { prepareOpenCv } from "./opencv-runtime";
 import { selectPetPhotoRegions } from "./pet-regions";
 import { InferenceSession, Tensor } from "onnxruntime-node";
@@ -7,10 +8,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
 import type { z } from "zod";
-import {
-  identityFeatureSchema,
-  identityCapacity,
-} from "@home-agent/api/contracts";
+import { identityCapacity } from "@home-agent/api/contracts";
 import type { identityRequestSchema } from "./protocol";
 import models from "./models.json";
 import frameProfile from "./profile.json";

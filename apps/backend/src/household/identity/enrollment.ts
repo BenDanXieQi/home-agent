@@ -1,3 +1,8 @@
+import sharp from "sharp";
+import type { UploadedMedia } from "../../media/upload";
+import { ImageProcessingError } from "../../perception/detection/image-request";
+import { DetectionPoolError } from "../../perception/compute/pool";
+import { frameLimits } from "@home-agent/api/contracts";
 import { isDeepStrictEqual } from "node:util";
 import { selectPetPhotoRegions } from "../../perception/identity/pet-regions";
 import { HouseholdError } from "../errors";
@@ -8,7 +13,6 @@ import {
 import { createHash } from "node:crypto";
 import type { z } from "zod";
 import type {
-  identityReferenceSnapshotSchema,
   referenceRecordingSchema,
   referenceMemberSchema,
   referenceSessionSchema,
@@ -23,6 +27,7 @@ import type { extractedReferenceSchema } from "../../perception/identity/enrollm
 import { extractReferenceFrames } from "../../perception/identity/recording";
 import { identityProcessingVersions } from "../../perception/identity/processing-version";
 import { ReferenceEnrollmentError } from "./errors";
+import type { identityReferenceSnapshotSchema } from "./contracts";
 
 export function createReferenceEnrollment(
   references: ReturnType<typeof createIdentityReferences>,
@@ -45,9 +50,13 @@ export function createReferenceEnrollment(
         expiresAt: number;
         deadline: number;
         reason: string | null;
+        uploads: z.infer<typeof referencePreviewSchema>["uploads"];
         candidates: (z.infer<typeof extractedReferenceSchema> & {
           id: string;
           offsetMs: number;
+          fileName: z.infer<
+            typeof referencePreviewSchema
+          >["candidates"][number]["fileName"];
         })[];
         remainingCapacity: number;
         versions: ReturnType<
@@ -117,22 +126,34 @@ export function createReferenceEnrollment(
       source: selected.source,
       expiresAt: selected.expiresAt,
       reason: selected.reason,
+      uploads: selected.uploads,
       remainingCapacity: selected.remainingCapacity,
       candidates: selected.candidates.map((candidate) => ({
         id: candidate.id,
         offsetMs: candidate.offsetMs,
+        fileName: candidate.fileName,
         quality: {
           sharpness: candidate.sharpness,
           detectionScore: candidate.detectionScore,
         },
+        features: [
+          ...(candidate.feature
+            ? [
+                selected.className === "human"
+                  ? ("face" as const)
+                  : ("pet" as const),
+              ]
+            : []),
+          ...(candidate.appearance ? ["body" as const] : []),
+        ],
         image: `data:image/jpeg;base64,${candidate.image}`,
       })),
     } satisfies z.infer<typeof referencePreviewSchema>;
   }
   async function extract(
-    input: z.infer<typeof referenceMemberSchema>,
+    input: z.infer<typeof referenceSessionSchema>,
     source: NonNullable<typeof session>["source"],
-    path: string,
+    files: UploadedMedia[],
     signal: AbortSignal,
   ) {
     signal.throwIfAborted();
@@ -153,7 +174,7 @@ export function createReferenceEnrollment(
       if (source && (!grant || grant.scopeEpoch !== input.scope_epoch))
         throw new ReferenceEnrollmentError("source_unavailable");
       selected = session = {
-        id: crypto.randomUUID(),
+        id: input.sessionId,
         member: input,
         className,
         source,
@@ -161,98 +182,175 @@ export function createReferenceEnrollment(
         expiresAt: 0,
         deadline: Infinity,
         reason: null,
+        uploads: [],
         candidates: [],
         remainingCapacity: Math.max(
           0,
           identityCapacity.referencesPerMember - listed.samples.length,
         ),
-        versions: identityProcessingVersions(config.minimumSharpness).adapters[
-          className
-        ],
+        versions: identityProcessingVersions().adapters[className],
       };
       const frames = source
-        ? await extractReferenceFrames(options.executable, path, signal).catch(
-            (cause: unknown) => {
+        ? (
+            await extractReferenceFrames(
+              options.executable,
+              files[0]!.path,
+              signal,
+            ).catch((cause: unknown) => {
               signal.throwIfAborted();
               console.warn("Reference recording decode failed", cause);
               throw new ReferenceEnrollmentError("invalid_recording");
-            },
-          )
-        : [{ path, offsetMs: 0 }];
-      const saved = new Set(listed.samples.map((sample) => sample.sha256));
+            })
+          ).map((frame) => ({ ...frame, name: "摄像头录像" }))
+        : files.map((file) => ({ ...file, offsetMs: 0 }));
+      const saved = new Map(
+        listed.samples.map((sample) => [sample.sha256, sample]),
+      );
       for (const frame of frames) {
-        signal.throwIfAborted();
-        assertSession(selected);
-        access(input.scope_epoch).assertCurrent();
-        const detection =
-          className === "human"
-            ? null
-            : await perception.detectImage({ path: frame.path }, signal);
-        signal.throwIfAborted();
-        assertSession(selected);
-        const detectedRegions =
-          detection?.detections.flatMap((item, index) =>
-            item.className === "cat" || item.className === "dog"
-              ? [
-                  {
-                    trackId: index + 1,
-                    className: item.className,
-                    measuredBox: {
-                      x: item.x,
-                      y: item.y,
-                      w: item.w,
-                      h: item.h,
+        const upload: (typeof selected.uploads)[number] | null = source
+          ? null
+          : {
+              fileName: frame.name,
+              candidateIds: [],
+              reason: null,
+            };
+        if (upload) selected.uploads.push(upload);
+        try {
+          signal.throwIfAborted();
+          assertSession(selected);
+          access(input.scope_epoch).assertCurrent();
+          const detection =
+            source && className === "human"
+              ? null
+              : await perception.detectImage({ path: frame.path }, signal);
+          signal.throwIfAborted();
+          assertSession(selected);
+          const detectedRegions =
+            detection?.detections.flatMap((item, index) =>
+              item.className === "human" ||
+              item.className === "cat" ||
+              item.className === "dog"
+                ? [
+                    {
+                      trackId: index + 1,
+                      className: item.className,
+                      measuredBox: {
+                        x: item.x,
+                        y: item.y,
+                        w: item.w,
+                        h: item.h,
+                      },
                     },
-                  },
-                ]
-              : [],
-          ) ?? [];
-        const petPhoto =
-          className === "human"
-            ? null
-            : selectPetPhotoRegions(detectedRegions, className);
-        if (petPhoto?.reason) {
-          selected.reason = petPhoto.reason;
-          continue;
-        }
-        const result = await perception.enrollment({
-          kind: "identity_extract",
-          config,
-          image: { path: frame.path },
-          mode: source ? "video_frame" : "photo",
-          className,
-          regions: petPhoto?.regions ?? [],
-        });
-        signal.throwIfAborted();
-        assertSession(selected);
-        if (result.kind !== "enrollment")
-          throw new Error("Unexpected extraction result");
-        if (result.reason) selected.reason = result.reason;
-        for (const face of result.candidates) {
+                  ]
+                : [],
+            ) ?? [];
           if (
-            saved.has(
-              createHash("sha256")
-                .update(Buffer.from(face.image, "base64"))
-                .digest("hex"),
-            )
+            !source &&
+            className === "human" &&
+            detectedRegions.filter((region) => region.className === "human")
+              .length > 1
           ) {
-            selected.reason =
-              "提取的照片已作为该成员的参考保存，重复照片已忽略";
+            if (upload)
+              upload.reason = "照片中有多个人，请上传仅包含一个人的照片";
             continue;
           }
-          if (
-            selected.candidates.some(
-              (candidate) => candidate.cropSha256 === face.cropSha256,
-            )
-          )
+          const petPhoto =
+            className === "human"
+              ? null
+              : selectPetPhotoRegions(detectedRegions, className);
+          if (petPhoto?.reason) {
+            if (upload) upload.reason = petPhoto.reason;
+            else selected.reason = petPhoto.reason;
             continue;
-          selected.candidates.push({
-            ...face,
-            id: crypto.randomUUID(),
-            offsetMs: frame.offsetMs,
+          }
+          const result = await perception.enrollment({
+            kind: "identity_extract",
+            config,
+            image: { path: frame.path },
+            mode: source ? "video_frame" : "photo",
+            className,
+            regions:
+              petPhoto?.regions ??
+              detectedRegions.filter((region) => region.className === "human"),
           });
-          selected.candidates.sort((a, b) => b.sharpness - a.sharpness);
-          selected.candidates.splice(identityEnrollmentLimits.candidates);
+          signal.throwIfAborted();
+          assertSession(selected);
+          if (result.kind !== "enrollment")
+            throw new Error("Unexpected extraction result");
+          if (upload) upload.reason = result.reason;
+          else if (result.reason) selected.reason = result.reason;
+
+          let photoImage: string | undefined;
+          if (upload && result.candidates.length) {
+            const bytes = await sharp(frame.path, {
+              limitInputPixels: frameLimits.maxPixels,
+            })
+              .rotate()
+              .resize({
+                width: 512,
+                height: 512,
+                fit: "inside",
+                withoutEnlargement: true,
+              })
+              .jpeg({ quality: 85 })
+              .toBuffer();
+            signal.throwIfAborted();
+            assertSession(selected);
+            if (bytes.length > identityEnrollmentLimits.candidateBytes) {
+              upload.reason = "展示图片超过容量限制，请缩小照片后重试。";
+              continue;
+            }
+            photoImage = bytes.toString("base64");
+          }
+
+          for (const face of result.candidates) {
+            const image = photoImage ?? face.image;
+            const duplicate = saved.get(
+              createHash("sha256")
+                .update(Buffer.from(image, "base64"))
+                .digest("hex"),
+            );
+            if (duplicate) {
+              const reason = duplicate.outdated
+                ? "这张照片对应的参考已失效，请先删除失效参考，再重新登记。"
+                : "提取的照片已作为该成员的参考保存，重复照片已忽略";
+              if (upload) upload.reason = reason;
+              else selected.reason = reason;
+              continue;
+            }
+            if (
+              selected.candidates.some(
+                (candidate) => candidate.cropSha256 === face.cropSha256,
+              )
+            ) {
+              if (upload)
+                upload.reason = "与本批其他照片的识别参考重复，已跳过。";
+              continue;
+            }
+            const id = crypto.randomUUID();
+            selected.candidates.push({
+              ...face,
+              image,
+              id,
+              fileName: upload?.fileName ?? null,
+              offsetMs: frame.offsetMs,
+            });
+            upload?.candidateIds.push(id);
+            selected.candidates.sort((a, b) => b.sharpness - a.sharpness);
+            selected.candidates.splice(identityEnrollmentLimits.candidates);
+          }
+        } catch (cause) {
+          signal.throwIfAborted();
+          if (
+            upload &&
+            (cause instanceof ImageProcessingError ||
+              (cause instanceof DetectionPoolError &&
+                cause.code === "invalid_image"))
+          ) {
+            upload.reason = "无法解码图片，请选择有效且支持的图片格式。";
+            continue;
+          }
+          throw cause;
         }
       }
       await validate(input);
@@ -260,8 +358,10 @@ export function createReferenceEnrollment(
       assertSession(selected);
       selected.reason = selected.candidates.length
         ? null
-        : (selected.reason ??
-          "没有提取到清晰人脸，请靠近摄像头并正对镜头重新录制");
+        : selected.uploads.length
+          ? "本批照片没有可保存的候选，请查看每张照片的处理结果。"
+          : (selected.reason ??
+            "没有提取到可登记的人脸，请确认画面中包含人脸后重新录制");
       selected.expiresAt = Date.now() + identityEnrollmentLimits.confirmationMs;
       selected.deadline =
         performance.now() + identityEnrollmentLimits.confirmationMs;
@@ -302,6 +402,8 @@ export function createReferenceEnrollment(
       const { listed } = await validate(input);
       const samples = listed.samples.map((sample) => ({
         id: sample.id,
+        outdated: sample.outdated,
+        features: sample.features,
         source: sample.source,
         quality: sample.quality,
         createdAt: sample.createdAt.toISOString(),
@@ -325,11 +427,11 @@ export function createReferenceEnrollment(
         });
       return {
         enabled: listed.enabled,
-        enableReason: references.matching
-          .snapshot()
-          ?.members.some((member) => member.memberId === input.memberId)
+        enableReason: listed.usable
           ? null
-          : "没有可用的识别参考，请添加清晰的人物或猫狗照片。",
+          : samples.some((sample) => sample.outdated)
+            ? "识别参考已失效，请先删除失效参考，再重新登记照片。"
+            : "没有可用的识别参考，请添加清晰的人物或猫狗照片。",
         model: perception.identityConfig()
           ? health.status
           : ("unconfigured" as const),
@@ -338,19 +440,26 @@ export function createReferenceEnrollment(
       };
     },
     upload(
-      input: z.infer<typeof referenceMemberSchema>,
-      path: string,
+      input: z.infer<typeof referenceSessionSchema>,
+      files: UploadedMedia[],
       signal: AbortSignal,
     ) {
-      return extract(input, null, path, signal);
+      if (!files.length || files.length > identityEnrollmentLimits.candidates)
+        throw new HouseholdError("capacity_exceeded");
+      return extract(input, null, files, signal);
     },
     recording(
       input: z.infer<typeof referenceRecordingSchema>,
       path: string,
       signal: AbortSignal,
     ) {
-      const { memberId, scope_epoch, ...source } = input;
-      return extract({ memberId, scope_epoch }, source, path, signal);
+      const { memberId, scope_epoch, sessionId, ...source } = input;
+      return extract(
+        { memberId, scope_epoch, sessionId },
+        source,
+        [{ path, name: "摄像头录像" }],
+        signal,
+      );
     },
     async poll(input: z.infer<typeof referenceSessionSchema>) {
       const selected = await current(input);
@@ -406,6 +515,9 @@ export function createReferenceEnrollment(
               },
               ...selected.versions,
               feature: candidate.feature,
+              ...(candidate.appearance
+                ? { appearance: candidate.appearance }
+                : {}),
               contentType: "image/jpeg" as const,
             },
             image: Buffer.from(candidate.image, "base64"),

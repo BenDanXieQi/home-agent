@@ -1,6 +1,9 @@
 import { useId, useState } from "react";
 import { Check, PawPrint, UserRound } from "lucide-react";
-import { memberProfileSchema } from "@home-agent/api/household-members";
+import {
+  memberProfileSchema,
+  personGenderSchema,
+} from "@home-agent/api/household-members";
 import type { Member } from "../../modules/members/queries";
 import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
@@ -44,6 +47,7 @@ export function MemberForm({
   const [name, setName] = useState(member?.name ?? "");
   const [species, setSpecies] = useState(member?.species ?? "");
   const [description, setDescription] = useState(member?.description ?? "");
+  const [gender, setGender] = useState(member?.gender ?? "");
   const [error, setError] = useState("");
   return (
     <form
@@ -55,10 +59,14 @@ export function MemberForm({
           kind,
           name,
           description,
-          ...(kind === "pet" ? { species } : {}),
+          ...(kind === "pet" ? { species } : { gender }),
         });
         if (!profile.success) {
-          setError("请填写名称；宠物还需要填写物种，并检查内容长度。");
+          setError(
+            kind === "person"
+              ? "请填写名称并选择性别，检查内容长度。"
+              : "请填写名称并选择猫或狗，检查内容长度。",
+          );
           return;
         }
         setError("");
@@ -130,9 +138,7 @@ export function MemberForm({
               </p>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
-              <label
-                className={`m-0 grid gap-2 text-xs ${kind === "person" ? "sm:col-span-2" : ""}`}
-              >
+              <label className="m-0 grid gap-2 text-xs">
                 {kind === "person" ? "姓名 / 称呼" : "宠物名字"}
                 <input
                   required
@@ -148,16 +154,38 @@ export function MemberForm({
               </label>
               {kind === "pet" ? (
                 <label className="m-0 grid gap-2 text-xs">
-                  物种
-                  <input
+                  种类
+                  <select
                     required
-                    maxLength={50}
-                    placeholder="例如：猫、狗"
                     value={species}
                     onChange={(event) => setSpecies(event.target.value)}
-                  />
+                  >
+                    <option value="" disabled>
+                      请选择种类
+                    </option>
+                    <option value="猫">猫</option>
+                    <option value="狗">狗</option>
+                  </select>
                 </label>
-              ) : null}
+              ) : (
+                <label className="m-0 grid gap-2 text-xs">
+                  性别
+                  <select
+                    required
+                    value={gender}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setGender(value ? personGenderSchema.parse(value) : "");
+                    }}
+                  >
+                    <option value="" disabled>
+                      请选择性别
+                    </option>
+                    <option value="male">男</option>
+                    <option value="female">女</option>
+                  </select>
+                </label>
+              )}
             </div>
           </div>
           <div className="grid gap-4 py-6 md:grid-cols-[128px_minmax(0,1fr)] md:gap-6">

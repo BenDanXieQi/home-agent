@@ -9,6 +9,7 @@ export const identityEnrollmentLimits = {
   candidateBytes: 256 * 1024,
   totalBytes: 3 * 1024 * 1024,
   recordingBytes: 32 * 1024 * 1024,
+  uploadBytes: 32 * 1024 * 1024,
   extractionMs: 90_000,
   intervalMs: 1000,
 } as const;
@@ -32,6 +33,8 @@ export const referenceQualitySchema = z.object({
 });
 export const referenceSampleSchema = z.object({
   id: z.uuid(),
+  features: z.array(z.enum(["face", "body", "pet"])).max(2),
+  outdated: z.boolean(),
   source: referenceSourceSchema,
   quality: referenceQualitySchema,
   createdAt: z.string(),
@@ -49,13 +52,13 @@ export const referenceDeleteSchema = referenceMemberSchema.extend({
 export const referenceToggleSchema = referenceMemberSchema.extend({
   enabled: z.boolean(),
 });
-export const referenceRecordingSchema = referenceMemberSchema.extend({
+export const referenceSessionSchema = referenceMemberSchema.extend({
+  sessionId: z.uuid(),
+});
+export const referenceRecordingSchema = referenceSessionSchema.extend({
   deviceId: referenceSourceSchema.options[1].shape.deviceId,
   channel: referenceSourceSchema.options[1].shape.channel,
   recordedAt: z.iso.datetime(),
-});
-export const referenceSessionSchema = referenceMemberSchema.extend({
-  sessionId: z.uuid(),
 });
 export const referenceConfirmSchema = referenceSessionSchema.extend({
   candidateIds: z
@@ -73,12 +76,25 @@ export const referencePreviewSchema = z.object({
   expiresAt: z.number(),
   remainingCapacity: z.int().min(0).max(identityCapacity.referencesPerMember),
   reason: z.string().nullable(),
+  uploads: z
+    .array(
+      z.object({
+        fileName: z.string().max(512),
+        candidateIds: z
+          .array(z.uuid())
+          .max(identityEnrollmentLimits.candidates),
+        reason: z.string().nullable(),
+      }),
+    )
+    .max(identityEnrollmentLimits.candidates),
   candidates: z
     .array(
       z.object({
         id: z.uuid(),
+        features: referenceSampleSchema.shape.features,
         quality: referenceQualitySchema,
         offsetMs: z.number().nonnegative(),
+        fileName: z.string().max(512).nullable(),
         image: z
           .string()
           .max(32 + Math.ceil(identityEnrollmentLimits.candidateBytes / 3) * 4),
@@ -99,56 +115,9 @@ export const identityModelVersionsSchema = z.object({
   modelVersion: z.string().min(1).max(256),
   processingVersion: z.string().min(1).max(256),
 });
-export const identityClassSchema = z.enum(["human", "cat", "dog"]);
-export const identityRuntimeVersionsSchema = identityModelVersionsSchema.extend(
-  {
-    adapters: z.object({
-      human: identityModelVersionsSchema,
-      cat: identityModelVersionsSchema,
-      dog: identityModelVersionsSchema,
-    }),
-  },
-);
 export const identityReferenceVersionsSchema =
   identityModelVersionsSchema.extend({
     revision: z.uuid(),
-  });
-export const identityFeatureSchema = z
-  .array(z.number())
-  .refine(
-    (vector) =>
-      vector.length === identityCapacity.featureDimensions ||
-      vector.length === identityCapacity.petFeatureDimensions,
-    "Unsupported identity feature dimensions",
-  )
-  .refine(
-    (vector) =>
-      Number.isFinite(Math.hypot(...vector)) && Math.hypot(...vector) > 1e-12,
-  );
-export const identityReferenceSnapshotSchema =
-  identityReferenceVersionsSchema.extend({
-    members: z
-      .array(
-        z.object({
-          memberId: z.uuid(),
-          className: identityClassSchema,
-          threshold: z.number().min(-1).max(1.000001),
-          margin: z.number().min(0).max(2),
-          enabled: z.boolean(),
-          references: z
-            .array(
-              z.object({
-                sampleId: z.uuid(),
-                sha256: z.string().regex(/^[a-f0-9]{64}$/),
-                feature: identityFeatureSchema,
-              }),
-            )
-            .min(1)
-            .max(identityCapacity.referencesPerMember),
-        }),
-      )
-      .min(1)
-      .max(identityCapacity.members),
   });
 export const identityMatchProvenanceSchema =
   identityReferenceVersionsSchema.extend({

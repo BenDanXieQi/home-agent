@@ -9,6 +9,7 @@ import type { frameSchema } from "../detection/frame";
 import type { observationSchema } from "../observations";
 import { createVideoSource } from "./source";
 import { createVideoScheduler } from "./scheduler";
+import { IdentityModelUnavailableError } from "../identity/process";
 
 export function createVideoRuntime(dependencies: {
   identity: ReturnType<typeof createIdentityRuntime>;
@@ -140,8 +141,95 @@ export function createVideoRuntime(dependencies: {
     ) => {
       dependencies.identity.replaceReferences(snapshot);
     },
-    enrollmentCommand: (command: z.infer<typeof enrollmentCommandSchema>) =>
-      dependencies.identity.enrollmentCommand(command),
+    async enrollmentCommand(command: z.infer<typeof enrollmentCommandSchema>) {
+      if (command.kind === "identity_status" && command.className === "human") {
+        const face = await dependencies.identity.enrollmentCommand(command);
+        if (face.kind !== "identity_status")
+          throw new Error("Unexpected identity status response");
+        const body = dependencies.tracking.referenceModelStatus();
+        const states = [face.status, body.status];
+        const status = states.includes("available")
+          ? ("available" as const)
+          : states.includes("not_checked")
+            ? ("not_checked" as const)
+            : ("unavailable" as const);
+        return {
+          kind: "identity_status" as const,
+          status,
+          reason:
+            status === "unavailable"
+              ? "人脸和人体外观模型暂不可用，请稍后重试"
+              : null,
+        };
+      }
+      if (
+        command.kind !== "identity_extract" ||
+        command.className !== "human" ||
+        command.mode !== "photo"
+      )
+        return dependencies.identity.enrollmentCommand(command);
+
+      let faceFailure: string | null = null;
+      const result = await dependencies.identity
+        .enrollmentCommand(command)
+        .catch((cause: unknown) => {
+          if (
+            !(
+              cause instanceof IdentityModelUnavailableError ||
+              cause instanceof ComputeBusyError
+            )
+          )
+            throw cause;
+          console.warn("Face reference extraction unavailable", cause);
+          faceFailure = "人脸参考提取暂不可用，请稍后重试";
+          return {
+            kind: "enrollment" as const,
+            ambiguous: false,
+            candidates: [],
+            reason: faceFailure,
+          };
+        });
+      if (result.kind !== "enrollment")
+        throw new Error("Unexpected reference extraction response");
+      if (result.ambiguous) return result;
+      const bodyResult = await dependencies.tracking
+        .extractReference(
+          command.image,
+          command.regions,
+          command.config.idleUnloadMs,
+        )
+        .catch((cause: unknown) => {
+          if (!(cause instanceof ComputeBusyError)) throw cause;
+          return {
+            kind: "enrollment" as const,
+            candidates: [],
+            reason: cause.message,
+          };
+        });
+      const body = bodyResult?.candidates[0];
+      const candidates =
+        result.candidates.length === 1
+          ? result.candidates.map((face) => ({
+              ...face,
+              ...(body ? { appearance: body.appearance } : {}),
+            }))
+          : body
+            ? [body]
+            : [];
+      const reason =
+        [
+          candidates.length ? faceFailure : (faceFailure ?? result.reason),
+          bodyResult?.reason,
+        ]
+          .filter(Boolean)
+          .join("；")
+          .slice(0, 256) || null;
+      return {
+        ...result,
+        reason,
+        candidates,
+      };
+    },
     retryTracking: () => dependencies.tracking.retry(),
     start(
       input: Pick<

@@ -87,6 +87,7 @@ export {
   appearanceSummarySchema,
   appearanceReferenceSchema,
   memberAssociationSchema,
+  personAttributeEvidenceSchema,
   attributionTriggerSchema,
   memberAttributionSnapshotSchema,
   memberActivityAttributionSchema,

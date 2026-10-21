@@ -6,6 +6,7 @@ import {
 } from "@home-agent/backend-client";
 import { requestOperationStream } from "../../api/client";
 import { RequestError } from "../../api/errors";
+import { imageUploadTypes } from "../media/images";
 
 export async function runSpatialPlanning(
   scope: string,
@@ -69,15 +70,10 @@ export async function closeSpatialPlanning(scope: string, sessionId: string) {
   }
 }
 
-export const planningImageTypes = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-] as const;
 export const planningImageLimit = 4;
 
 export async function readPlanningImage(file: File) {
-  const mimeType = planningImageTypes.find((type) => type === file.type);
+  const mimeType = imageUploadTypes.find((type) => type === file.type);
   if (!mimeType) throw new Error("请选择 JPEG、PNG 或 WebP 图片。");
   const url = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();

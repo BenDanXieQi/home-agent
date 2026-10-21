@@ -1,18 +1,21 @@
 import { z } from "zod";
 
+export const personGenderSchema = z.enum(["male", "female"]);
+
 export const memberProfileSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("person"),
       name: z.string().trim().min(1).max(100),
       description: z.string().trim().max(2000),
+      gender: personGenderSchema,
     })
     .strict(),
   z
     .object({
       kind: z.literal("pet"),
       name: z.string().trim().min(1).max(100),
-      species: z.string().trim().min(1).max(50),
+      species: z.enum(["猫", "狗"]),
       description: z.string().trim().max(2000),
     })
     .strict(),
@@ -36,6 +39,7 @@ export const memberListSchema = z.object({
       name: z.string(),
       species: z.string(),
       description: z.string(),
+      gender: personGenderSchema.optional(),
     }),
   ),
 });

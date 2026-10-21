@@ -3,9 +3,12 @@ import { InferenceSession, Tensor } from "onnxruntime-node";
 import { z } from "zod";
 import type { frameSchema } from "./frame";
 import { detectionComputeBudget } from "../compute/budget";
+import { iou } from "../tracking/assignment";
 
 import { detectionLabels } from "@home-agent/api/contracts";
 import { detectionModelPath } from "./model";
+
+const humanReviewConfidenceCeiling = 0.8;
 
 export async function createDetector(minimumConfidence = 0.5) {
   const threshold = z.number().min(0.1).max(1).parse(minimumConfidence);
@@ -62,7 +65,7 @@ export async function createDetector(minimumConfidence = 0.5) {
       sharpConcurrency: sharp.concurrency(),
       intraOpNumThreads: detectionComputeBudget.ortIntraOpThreads,
     };
-    const detect = async (frame: z.infer<typeof frameSchema>) => {
+    const infer = async (frame: z.infer<typeof frameSchema>) => {
       const started = performance.now();
       const scale = Math.min(width / frame.width, height / frame.height);
       const resizedWidth = Math.max(1, Math.trunc(frame.width * scale));
@@ -132,6 +135,120 @@ export async function createDetector(minimumConfidence = 0.5) {
         tensor.dispose();
         for (const value of Object.values(outputs)) value.dispose();
       }
+    };
+    const detect = async (frame: z.infer<typeof frameSchema>) => {
+      const started = performance.now();
+      const result = await infer(frame);
+      let preprocessMs = result.timing.preprocessMs;
+      let inferenceMs = result.timing.inferenceMs;
+      const humans = result.detections.filter(
+        (box) => box.className === "human",
+      );
+      const corrections = new Map<
+        (typeof humans)[number],
+        (typeof humans)[number]
+      >();
+      const reviews = humans
+        .filter((box) => box.confidence < humanReviewConfidenceCeiling)
+        .toSorted((a, b) => a.confidence - b.confidence);
+      let reviewed = 0;
+
+      for (const box of reviews) {
+        if (reviewed >= detectionComputeBudget.humanReviewsPerTask) break;
+        const side = Math.min(
+          frame.width,
+          frame.height,
+          Math.ceil(Math.max(box.w, box.h) * 2),
+        );
+        if (
+          side < Math.max(box.w, box.h) ||
+          (side === frame.width && side === frame.height)
+        )
+          continue;
+        reviewed++;
+        const left = Math.min(
+          frame.width - side,
+          Math.max(0, Math.floor(box.x + box.w / 2 - side / 2)),
+        );
+        const top = Math.min(
+          frame.height - side,
+          Math.max(0, Math.floor(box.y + box.h / 2 - side / 2)),
+        );
+
+        const cropStarted = performance.now();
+        const rgb = await sharp(frame.rgb, {
+          raw: { width: frame.width, height: frame.height, channels: 3 },
+        })
+          .extract({ left, top, width: side, height: side })
+          .raw()
+          .toBuffer();
+        preprocessMs += performance.now() - cropStarted;
+        const review = await infer({ width: side, height: side, rgb });
+        preprocessMs += review.timing.preprocessMs;
+        inferenceMs += review.timing.inferenceMs;
+
+        const corresponding = review.detections
+          .filter((candidate) =>
+            ["human", "cat", "dog"].includes(candidate.className),
+          )
+          .map((candidate) => ({
+            ...candidate,
+            x: candidate.x + left,
+            y: candidate.y + top,
+          }))
+          .map((candidate) => ({ candidate, overlap: iou(box, candidate) }))
+          .filter(
+            ({ candidate, overlap }) =>
+              overlap >= 0.5 &&
+              !humans.some(
+                (other) => other !== box && iou(other, candidate) >= overlap,
+              ),
+          )
+          .toSorted(
+            (a, b) =>
+              b.candidate.confidence - a.candidate.confidence ||
+              b.overlap - a.overlap,
+          )[0]?.candidate;
+        if (
+          corresponding &&
+          corresponding.className !== "human" &&
+          corresponding.confidence > box.confidence
+        )
+          corrections.set(box, corresponding);
+      }
+
+      let detections = result.detections;
+      if (corrections.size) {
+        const corrected = new Set(corrections.values());
+        const candidates = detections
+          .map((box) => corrections.get(box) ?? box)
+          .toSorted((a, b) => b.confidence - a.confidence);
+        detections = [];
+        for (const candidate of candidates) {
+          if (
+            detections.some(
+              (previous) =>
+                (corrected.has(candidate) || corrected.has(previous)) &&
+                previous.classId === candidate.classId &&
+                iou(previous, candidate) >= 0.7,
+            )
+          )
+            continue;
+          detections.push(candidate);
+        }
+      }
+
+      return {
+        detections,
+        timing: {
+          preprocessMs,
+          inferenceMs,
+          postprocessMs: Math.max(
+            0,
+            performance.now() - started - preprocessMs - inferenceMs,
+          ),
+        },
+      };
     };
     return { metadata, detect, close: () => session.release() };
   } catch (error) {

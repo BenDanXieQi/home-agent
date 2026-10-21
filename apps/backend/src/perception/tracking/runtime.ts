@@ -9,6 +9,13 @@ import type { observationSchema, runSchema } from "../observations";
 import { createHumanTracker } from "./tracker";
 import type { createReidProcess } from "./reid-process";
 import { frameLimits } from "../detection/frame";
+import { loadImage } from "../detection/image";
+import type { imageRequestSchema } from "../detection/image-request";
+import type { enrollmentCommandSchema } from "../identity/enrollment-protocol";
+import { ComputeBusyError } from "../compute/protocol";
+import sharp from "sharp";
+import { createHash } from "node:crypto";
+import { ImageProcessingError } from "../detection/image-request";
 
 const retainedPixelBytes = 2 * frameLimits.maxPixels * 3;
 
@@ -47,7 +54,7 @@ function createRunState() {
   };
 }
 export function createTrackingRuntime(options: {
-  reserveCompute: () => boolean;
+  reserveCompute: (waitForCapacity?: boolean) => boolean;
   releaseCompute: () => void;
   createModel: typeof createReidProcess;
   emit: (
@@ -60,16 +67,34 @@ export function createTrackingRuntime(options: {
   let model = options.createModel();
   let releasing: Promise<void> | undefined;
   const runs = new Map<string, ReturnType<typeof createRunState>>();
-  const pending = new Set<Promise<void>>();
+  const pending = new Set<Promise<unknown>>();
   const pixelTurns = new Map<string, number>();
   let retainedBytes = 0;
   let closed = false;
   let restarts = 0;
   let retryAt = 0;
   let healthySince: number | undefined;
+  let referencePending = false;
+  let idle: ReturnType<typeof setTimeout> | undefined;
+
+  function cancelIdleUnload() {
+    clearTimeout(idle);
+    idle = undefined;
+  }
+  function scheduleIdleUnload(milliseconds: number) {
+    cancelIdleUnload();
+    if (closed || runs.size || referencePending || releasing) return;
+    idle = setTimeout(() => {
+      idle = undefined;
+      if (!closed && !runs.size && !referencePending)
+        recycleModel().catch(options.fatal);
+    }, milliseconds);
+    idle.unref();
+  }
 
   function recycleModel() {
     if (releasing) return releasing;
+    cancelIdleUnload();
     const owned = model;
     releasing = (async () => {
       await owned.close();
@@ -91,14 +116,121 @@ export function createTrackingRuntime(options: {
   }
 
   return {
+    referenceModelStatus() {
+      return {
+        status: model.status.error
+          ? ("unavailable" as const)
+          : model.status.ready
+            ? ("available" as const)
+            : ("not_checked" as const),
+        reason: model.status.error ? "人体外观模型暂不可用" : null,
+      };
+    },
+    async extractReference(
+      image: z.infer<typeof imageRequestSchema>,
+      regions: Extract<
+        z.infer<typeof enrollmentCommandSchema>,
+        { kind: "identity_extract" }
+      >["regions"],
+      idleUnloadMs: number,
+    ) {
+      const humans = regions.filter((region) => region.className === "human");
+      if (humans.length !== 1 || !humans[0]?.measuredBox) return null;
+      recoverModel();
+      if (
+        closed ||
+        releasing ||
+        referencePending ||
+        performance.now() < retryAt ||
+        !options.reserveCompute(false)
+      )
+        throw new ComputeBusyError("人体外观模型忙，请稍后重试");
+      cancelIdleUnload();
+      referencePending = true;
+      const operation = (async () => {
+        await Promise.allSettled(pending);
+        model.start();
+        await model.prepare();
+        if (closed || releasing || model.status.busy)
+          throw new ComputeBusyError("人体外观模型忙，请稍后重试");
+        const { frame } = await loadImage(image);
+        const box = humans[0]!.measuredBox!;
+        const x = Math.max(0, Math.floor(box.x));
+        const y = Math.max(0, Math.floor(box.y));
+        const w = Math.min(frame.width - x, Math.ceil(box.x + box.w) - x);
+        const h = Math.min(frame.height - y, Math.ceil(box.y + box.h) - y);
+        if (w < 32 || h < 64)
+          return {
+            kind: "enrollment" as const,
+            candidates: [],
+            reason: "人体过小，未提取人体外观参考",
+          };
+        const [vector] = await model.extract(
+          {
+            frame,
+            boxes: [{ x, y, w, h }],
+          },
+          1500,
+        );
+        if (!vector) throw new Error("Missing reference body feature");
+        const crop = await sharp(frame.rgb, {
+          raw: { width: frame.width, height: frame.height, channels: 3 },
+        })
+          .extract({ left: x, top: y, width: w, height: h })
+          .resize({
+            width: 256,
+            height: 512,
+            fit: "inside",
+            withoutEnlargement: true,
+          })
+          .jpeg({ quality: 85 })
+          .toBuffer();
+        return {
+          kind: "enrollment" as const,
+          candidates: [
+            {
+              feature: null,
+              appearance: {
+                vector,
+                modelVersion: reidSha256,
+                processingVersion: reidProcessingVersion,
+              },
+              image: crop.toString("base64"),
+              cropSha256: createHash("sha256").update(crop).digest("hex"),
+              sharpness: 0,
+              detectionScore: null,
+            },
+          ],
+          reason: null,
+        };
+      })();
+      pending.add(operation);
+      try {
+        return await operation;
+      } catch (cause) {
+        if (cause instanceof ImageProcessingError) throw cause;
+        options.failure(cause);
+        recoverModel();
+        return {
+          kind: "enrollment" as const,
+          candidates: [],
+          reason: "人体外观参考提取暂不可用，请稍后重试",
+        };
+      } finally {
+        pending.delete(operation);
+        referencePending = false;
+        scheduleIdleUnload(idleUnloadMs);
+      }
+    },
     start(run: z.infer<typeof runSchema>) {
+      cancelIdleUnload();
       runs.set(run.runId, createRunState());
     },
     async stop(runId: string) {
       runs.get(runId)?.release?.();
       runs.delete(runId);
       pixelTurns.delete(runId);
-      if (runs.size) return;
+      if (runs.size || referencePending) return;
       await recycleModel();
       restarts = 0;
       retryAt = 0;
@@ -208,6 +340,7 @@ export function createTrackingRuntime(options: {
                   model.start();
                 if (
                   releasing ||
+                  referencePending ||
                   !rgb ||
                   !model.status.ready ||
                   model.status.busy
@@ -371,6 +504,7 @@ export function createTrackingRuntime(options: {
     },
     async close() {
       closed = true;
+      cancelIdleUnload();
       for (const entry of runs.values()) entry.release?.();
       runs.clear();
       pixelTurns.clear();

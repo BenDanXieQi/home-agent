@@ -54,8 +54,9 @@ export function createMemberActivityService(
     | "appearance"
     | "referenceVersions"
     | "petCandidates"
+    | "personCandidates"
   >,
-  repository: ReturnType<typeof createMemberActivityRepository>,
+  repository: Pick<ReturnType<typeof createMemberActivityRepository>, "save">,
 ) {
   const access = createMemberAccess(household);
   const queue = new PQueue({ concurrency: 1 });
@@ -156,6 +157,16 @@ export function createMemberActivityService(
   function attributionEligible(
     current: z.infer<typeof memberAttributionSnapshotSchema>,
   ) {
+    if (
+      current.kind === "known" &&
+      current.association.basis === "attributes"
+    ) {
+      const person = perception.personCandidates(current.association.gender);
+      return (
+        person?.members.length === 1 &&
+        person.members[0]?.memberId === current.association.memberId
+      );
+    }
     if (current.kind === "known" && current.association.basis === "species") {
       const pet = perception.petCandidates(current.association.className);
       return (
@@ -394,16 +405,19 @@ export function createMemberActivityService(
         }
         schedule(event.sourceTargetKey, entry);
       } else {
+        const inFlight =
+          entry.inFlight?.activity.record.data.attribution.current;
         if (
           entry.inFlight &&
-          activityReferences(
-            entry.inFlight.activity.record.data.attribution.current,
-          ).length
+          inFlight?.kind === "known" &&
+          (inFlight.association.basis === "appearance" ||
+            inFlight.association.basis === "attributes")
         )
           entry.inFlight.revoked = true;
         if (
           current.kind !== "known" ||
-          current.association.basis !== "appearance"
+          (current.association.basis !== "appearance" &&
+            current.association.basis !== "attributes")
         )
           return;
         accept(entry, {
@@ -415,8 +429,14 @@ export function createMemberActivityService(
           acceptedAt: Date.now(),
           trigger: attributionTriggerSchema.parse({
             sourceTargetKey: event.sourceTargetKey,
-            referenceIds: current.association.referenceIds,
-            references: current.association.references,
+            referenceIds:
+              current.association.basis === "appearance"
+                ? current.association.referenceIds
+                : [],
+            references:
+              current.association.basis === "appearance"
+                ? current.association.references
+                : [],
             reason: "target_face_conflict",
             trigger: event.update.trigger,
           }),

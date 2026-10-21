@@ -31,7 +31,10 @@ try {
           await (async () => {
             const preparation = identityPrepareSchema.safeParse(input);
             return preparation.success
-              ? model.prepare(preparation.data.classes)
+              ? model.prepare(
+                  preparation.data.classes,
+                  preparation.data.attributes,
+                )
               : model.extract(identityRequestSchema.parse(input));
           })(),
         ),

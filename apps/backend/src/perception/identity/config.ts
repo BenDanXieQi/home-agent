@@ -1,5 +1,4 @@
 import { identityCapacity } from "@home-agent/api/contracts";
-import profile from "./profile.json";
 import { z } from "zod";
 
 export const identityConfigSchema = z
@@ -8,11 +7,6 @@ export const identityConfigSchema = z
     sampleIntervalMs: z.int().min(500).max(10_000).default(1000),
     evidenceTtlMs: z.int().min(5000).max(120_000).default(30_000),
     idleUnloadMs: z.int().min(1000).max(300_000).default(30_000),
-    minimumSharpness: z
-      .number()
-      .nonnegative()
-      .max(10_000)
-      .default(profile.minimumSharpness),
   })
   .refine(
     (value) => value.evidenceTtlMs >= value.sampleIntervalMs * 3,

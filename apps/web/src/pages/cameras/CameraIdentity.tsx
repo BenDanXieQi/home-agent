@@ -75,7 +75,9 @@ function associationClock(
             .flatMap((association) => [
               association.expiresAt,
               ...(association.basis === "appearance"
-                ? association.references.map((reference) => reference.expiresAt)
+                ? association.references.flatMap((reference) =>
+                    reference.expiresAt === null ? [] : [reference.expiresAt],
+                  )
                 : []),
             ])
             .filter((expiry) => expiry > now),
@@ -97,6 +99,7 @@ export function CameraIdentity({
   frozen: boolean;
 }) {
   const identity = useAtomValue(source.identityAtom);
+  const attributeError = useAtomValue(source.attributeErrorAtom);
   const publishedAssociations = useAtomValue(source.associationsAtom);
   const clock = useMemo(
     () => associationClock(publishedAssociations),
@@ -107,7 +110,10 @@ export function CameraIdentity({
     (association) =>
       association.expiresAt > now &&
       (association.basis !== "appearance" ||
-        association.references.every((reference) => reference.expiresAt > now)),
+        association.references.every(
+          (reference) =>
+            reference.expiresAt === null || reference.expiresAt > now,
+        )),
   );
   const tracks = [
     ...(identity?.tracks ?? []),
@@ -138,6 +144,17 @@ export function CameraIdentity({
           ? "画面已定格；此面板仍实时更新，结果不属于定格画面。"
           : "实时后台结果，仅关联当前来源运行中的人宠轨迹。"}
       </p>
+      {attributeError && (
+        <div className="space-y-1 text-xs text-warning">
+          <output className="block">
+            人体外观属性识别暂不可用，正在等待后台恢复。
+          </output>
+          <details>
+            <summary className="cursor-pointer">查看原因</summary>
+            <p className="mt-1 break-words">{attributeError}</p>
+          </details>
+        </div>
+      )}
       {!identity && !associations.length ? (
         <p className="text-xs text-muted">{unavailableMessage}</p>
       ) : !tracks.length ? (

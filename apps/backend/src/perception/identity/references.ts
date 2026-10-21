@@ -1,5 +1,5 @@
+import { type identityReferenceSnapshotSchema } from "../../household/identity/contracts";
 import type { z } from "zod";
-import type { identityReferenceSnapshotSchema } from "@home-agent/api/contracts";
 
 function normalize(vector: number[]) {
   const norm = Math.hypot(...vector);

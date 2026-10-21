@@ -1,4 +1,4 @@
-import type { identityClassSchema } from "@home-agent/api/contracts";
+import { type identityClassSchema } from "../../household/identity/contracts";
 import models from "./models.json";
 import { createInferenceProcess } from "../compute/inference-process";
 import { faceEngine } from "./processing-version";
@@ -11,6 +11,7 @@ import {
 } from "./protocol";
 
 export class IdentityProcessExitError extends Error {}
+export class IdentityModelUnavailableError extends Error {}
 
 export async function createIdentityProcess(
   config: z.infer<typeof identityConfigSchema>,
@@ -78,9 +79,12 @@ export async function createIdentityProcess(
     get error() {
       return worker.status.error?.message;
     },
-    async prepare(classes: z.infer<typeof identityPrepareSchema>["classes"]) {
+    async prepare(
+      classes: z.infer<typeof identityPrepareSchema>["classes"],
+      attributes = false,
+    ) {
       const result = await worker.request(
-        { kind: "prepare", classes },
+        { kind: "prepare", classes, attributes },
         identityLimits.startupTimeoutMs,
       );
       if (result.kind !== "prepared")
@@ -123,7 +127,7 @@ export async function createIdentityProcess(
             error: result.error,
             retryAt: performance.now() + identityLimits.restartDelayMs,
           });
-        throw new Error(result.error);
+        throw new IdentityModelUnavailableError(result.error);
       }
       if (result.kind === "result")
         for (const failure of result.failures) {

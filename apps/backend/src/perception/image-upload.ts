@@ -11,9 +11,9 @@ export function createImageUpload(
   timeoutMs: number,
 ) {
   return createBoundedMediaUpload(
-    async (path, signal) =>
+    async ([file], signal) =>
       imageDetectionResponseSchema.parse(
-        await service.detectImage({ path }, signal),
+        await service.detectImage({ path: file!.path }, signal),
       ),
     shutdown,
     timeoutMs,

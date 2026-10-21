@@ -1,7 +1,8 @@
-import type { identityClassSchema } from "@home-agent/api/contracts";
+import { type identityClassSchema } from "../../household/identity/contracts";
 import type { identityEvidenceSchema } from "./evidence";
 import { createFaceModel } from "./face-model";
 import { createPetModel } from "./pet-model";
+import { createPersonAttributeModel } from "./person-attributes";
 import { identityLimits } from "./config";
 import { faceEngine } from "./processing-version";
 import type { z } from "zod";
@@ -11,6 +12,7 @@ function adapter(
   load: () => Promise<
     | Awaited<ReturnType<typeof createFaceModel>>
     | Awaited<ReturnType<typeof createPetModel>>
+    | Awaited<ReturnType<typeof createPersonAttributeModel>>
   >,
 ) {
   let model: Awaited<ReturnType<typeof load>> | undefined;
@@ -59,12 +61,16 @@ function adapter(
 export function createIdentityModel(directory: string) {
   const human = adapter(() => createFaceModel(directory));
   const pet = adapter(() => createPetModel(directory));
+  const attributes = adapter(createPersonAttributeModel);
   function forClass(className: z.infer<typeof identityClassSchema>) {
     return className === "human" ? human : pet;
   }
   return {
     metadata: faceEngine,
-    async prepare(classes: z.infer<typeof identityClassSchema>[]) {
+    async prepare(
+      classes: z.infer<typeof identityClassSchema>[],
+      includeAttributes = false,
+    ) {
       const statuses = new Map<
         typeof human,
         Awaited<ReturnType<typeof human.prepare>>
@@ -82,7 +88,16 @@ export function createIdentityModel(directory: string) {
         else
           failures.push({ className, error: status.error ?? "身份模型不可用" });
       }
-      return { kind: "prepared" as const, available, failures };
+      const attributeStatus = includeAttributes
+        ? await attributes.prepare()
+        : null;
+      return {
+        kind: "prepared" as const,
+        available,
+        failures,
+        attributesAvailable: attributeStatus?.available ?? false,
+        attributeError: attributeStatus?.error,
+      };
     },
     async extract(request: z.infer<typeof identityRequestSchema>) {
       if (request.kind !== "tracking")
@@ -108,10 +123,24 @@ export function createIdentityModel(directory: string) {
             failures.push({ className, error: result.error });
           }
       }
+      const attributeResult = request.attributeTargets?.length
+        ? await attributes.extract({
+            ...request,
+            targets: request.attributeTargets,
+          })
+        : null;
       return {
         kind: "result" as const,
         failures,
+        attributeError:
+          attributeResult?.kind === "unavailable"
+            ? attributeResult.error
+            : undefined,
         samples: results.flatMap((result) => result.samples),
+        attributes:
+          attributeResult?.kind === "result" && "attributes" in attributeResult
+            ? attributeResult.attributes
+            : [],
         qualityRejected: results.reduce(
           (sum, result) => sum + result.qualityRejected,
           0,
@@ -119,7 +148,7 @@ export function createIdentityModel(directory: string) {
       };
     },
     async close() {
-      await Promise.all([human.close(), pet.close()]);
+      await Promise.all([human.close(), pet.close(), attributes.close()]);
     },
   };
 }

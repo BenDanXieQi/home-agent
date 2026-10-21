@@ -1,10 +1,11 @@
+import { type identityReferenceSnapshotSchema } from "../../household/identity/contracts";
 import type { z } from "zod";
 import type {
-  identityReferenceSnapshotSchema,
   identityMatchProvenanceSchema,
   trackingObservationSchema,
   identityObservationSchema,
 } from "@home-agent/api/contracts";
+import { personAttributeEvidenceSchema } from "@home-agent/api/contracts";
 import { identityLimits, type identityConfigSchema } from "./config";
 import { createReferences } from "./references";
 import type { identityEvidenceSchema } from "./evidence";
@@ -64,6 +65,10 @@ function newTrack(trackId: number, clock: number, at: number) {
     confirmedAt: null as number | null,
     everConfirmed: false,
     conflict: false,
+    attributes: null as {
+      clock: number;
+      value: z.infer<typeof personAttributeEvidenceSchema>;
+    } | null,
   };
 }
 
@@ -73,6 +78,16 @@ export function createIdentityAnalysis(
 ) {
   let snapshot = initialReferences;
   let references = snapshot ? createReferences(snapshot) : null;
+  function hasCandidates(
+    className: z.infer<
+      typeof trackingObservationSchema
+    >["tracks"][number]["className"],
+  ) {
+    return (
+      references?.hasCandidates(className) ||
+      (className === "human" && (snapshot?.attributeGenders?.length ?? 0) > 0)
+    );
+  }
   const tracks = new Map<number, ReturnType<typeof newTrack>>();
   const recent: {
     clock: number;
@@ -94,6 +109,11 @@ export function createIdentityAnalysis(
   };
   function prune(clock: number) {
     for (const track of tracks.values()) {
+      if (
+        track.attributes &&
+        clock - track.attributes.clock >= config.evidenceTtlMs
+      )
+        track.attributes = null;
       track.samples = track.samples.filter(
         (sample) => clock - sample.clock < config.evidenceTtlMs,
       );
@@ -167,9 +187,13 @@ export function createIdentityAnalysis(
       })),
       confirmedAt: track.confirmedAt,
       expiresAt: latestSupport ? latestSupport.at + config.evidenceTtlMs : null,
+      ...(track.attributes ? { attributes: track.attributes.value } : {}),
     };
   }
   return {
+    hasPhotoCandidates(className: Parameters<typeof hasCandidates>[0]) {
+      return references?.hasCandidates(className) ?? false;
+    },
     replaceReferences(
       next: z.infer<typeof identityReferenceSnapshotSchema> | null,
     ) {
@@ -180,6 +204,7 @@ export function createIdentityAnalysis(
         track.confirmedLabel = null;
         track.confirmedAt = null;
         track.conflict = false;
+        track.attributes = null;
       }
       recent.length = 0;
     },
@@ -192,7 +217,7 @@ export function createIdentityAnalysis(
       statistics.frames++;
       const activeIds = new Set(
         input
-          .filter((track) => references?.hasCandidates(track.className))
+          .filter((track) => hasCandidates(track.className))
           .map((track) => track.trackId),
       );
       for (const [id, track] of tracks) {
@@ -203,7 +228,7 @@ export function createIdentityAnalysis(
       }
       for (const inputTrack of input) {
         if (
-          !references?.hasCandidates(inputTrack.className) ||
+          !hasCandidates(inputTrack.className) ||
           inputTrack.state !== "measured"
         )
           continue;
@@ -219,7 +244,7 @@ export function createIdentityAnalysis(
       return input
         .filter(
           (track) =>
-            references?.hasCandidates(track.className) &&
+            hasCandidates(track.className) &&
             track.state === "measured" &&
             track.measuredBox &&
             track.hits >= 2,
@@ -255,8 +280,32 @@ export function createIdentityAnalysis(
       clock: number,
       at: number,
     ) {
-      if (!snapshot) return;
       prune(clock);
+      for (const track of tracks.values()) {
+        if (track.attemptedAt === clock) track.attributes = null;
+      }
+      for (const attribute of result.attributes ?? []) {
+        const track = tracks.get(attribute.trackId);
+        const target = observation.tracks.find(
+          (item) => item.trackId === attribute.trackId,
+        );
+        if (
+          !track ||
+          target?.className !== "human" ||
+          target.state !== "measured" ||
+          !target.measuredBox
+        )
+          continue;
+        track.attributes = {
+          clock,
+          value: personAttributeEvidenceSchema.parse({
+            ...observation,
+            ...attribute,
+            measuredBox: target.measuredBox,
+          }),
+        };
+      }
+      if (!snapshot) return;
       statistics.qualityRejected += result.qualityRejected;
       for (const sample of result.samples) {
         const track = tracks.get(sample.trackId);

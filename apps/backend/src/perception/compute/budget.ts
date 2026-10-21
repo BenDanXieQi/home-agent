@@ -10,6 +10,7 @@ export const detectionComputeBudget = {
   tasksPerWorker: 1,
   sharpThreads: 1,
   ortIntraOpThreads: 1,
+  humanReviewsPerTask: 2,
 } as const;
 export const computeBudgetSchema = z
   .object({

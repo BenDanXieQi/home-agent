@@ -6,6 +6,7 @@ import opencv from "@techstark/opencv-js/package.json";
 import nudged from "nudged/package.json";
 import ort from "onnxruntime-node/package.json";
 import sharp from "sharp";
+import { reidSha256, reidProcessingVersion } from "../tracking/feature-version";
 
 export const faceEngine = {
   engine: "opencv-wasm-onnxruntime" as const,
@@ -28,14 +29,13 @@ export const faceImagePreparation = {
   photo: { fit: "contain", kernel: "lanczos3", background: "black" },
 } as const;
 
-export function faceProcessingVersions(minimumSharpness: number) {
+export function faceProcessingVersions() {
   return {
     modelVersion: `${models.models.yunet.sha256}:${models.models.sface.sha256}`,
     processingVersion: createHash("sha256")
       .update(
         JSON.stringify({
           profile,
-          minimumSharpness,
           image: faceImagePreparation,
           photoAutoOrientation: true,
           feature: "sface-rgb-float32-nchw",
@@ -85,17 +85,22 @@ function petProcessingVersions(className: "cat" | "dog") {
       .digest("hex"),
   };
 }
-export function identityProcessingVersions(minimumSharpness: number) {
-  const human = faceProcessingVersions(minimumSharpness);
+export function identityProcessingVersions() {
+  const human = faceProcessingVersions();
   const cat = petProcessingVersions("cat");
   const dog = petProcessingVersions("dog");
+  const appearance = {
+    modelVersion: reidSha256,
+    processingVersion: reidProcessingVersion,
+  };
   return {
     modelVersion: `${human.modelVersion}:${cat.modelVersion}`,
     processingVersion: createHash("sha256")
       .update(
-        `${human.processingVersion}:${cat.processingVersion}:${dog.processingVersion}`,
+        `${human.processingVersion}:${cat.processingVersion}:${dog.processingVersion}:${appearance.modelVersion}:${appearance.processingVersion}`,
       )
       .digest("hex"),
     adapters: { human, cat, dog },
+    appearance,
   };
 }

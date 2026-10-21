@@ -1,5 +1,13 @@
 import type { z } from "zod";
-import type { memberProfileSchema } from "@home-agent/api/household-members";
+import {
+  personGenderSchema,
+  type memberProfileSchema,
+} from "@home-agent/api/household-members";
+
+export function personGenderForSubject(value: unknown) {
+  const result = personGenderSchema.safeParse(value);
+  return result.success ? result.data : undefined;
+}
 
 export function identityClassForSubject(
   kind: z.infer<typeof memberProfileSchema>["kind"],

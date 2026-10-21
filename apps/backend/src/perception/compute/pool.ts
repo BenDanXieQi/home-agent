@@ -1,4 +1,5 @@
 import { type enrollmentCommandSchema } from "../identity/enrollment-protocol";
+import { identityLimits } from "../identity/config";
 import type { videoEventSchema } from "../video/events";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
@@ -528,7 +529,8 @@ export async function createDetectionPool(
       try {
         const result = await within(
           generation.submit(command),
-          40_000,
+          identityLimits.startupTimeoutMs * 2 +
+            identityLimits.requestTimeoutMs * 2,
           "Identity enrollment",
           stopping.signal,
         );
@@ -574,7 +576,7 @@ export async function createDetectionPool(
     },
     identityReferences(
       snapshot: z.infer<
-        typeof import("@home-agent/api/contracts").identityReferenceSnapshotSchema
+        typeof import("../../household/identity/contracts").identityReferenceSnapshotSchema
       > | null,
     ) {
       return videoControl({ kind: "identity_references", snapshot });

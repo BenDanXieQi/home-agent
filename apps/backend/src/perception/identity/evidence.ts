@@ -1,8 +1,23 @@
+import { identityFeatureSchema } from "../../household/identity/contracts";
 import { z } from "zod";
-import { identityCapacity } from "@home-agent/api/contracts";
+import {
+  identityCapacity,
+  personAttributeEvidenceSchema,
+} from "@home-agent/api/contracts";
 
-import { identityFeatureSchema } from "@home-agent/api/contracts";
 export const identityEvidenceSchema = z.object({
+  attributes: z
+    .array(
+      personAttributeEvidenceSchema.pick({
+        trackId: true,
+        gender: true,
+        score: true,
+        modelVersion: true,
+        processingVersion: true,
+      }),
+    )
+    .max(identityCapacity.targetsPerFrame)
+    .optional(),
   samples: z
     .array(
       z.object({

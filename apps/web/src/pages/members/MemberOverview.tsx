@@ -38,7 +38,7 @@ export function MemberOverview({
               <h3 className="break-words text-xl font-medium">{member.name}</h3>
               <p className="mt-2 text-xs text-muted">
                 {member.kind === "person"
-                  ? "人物"
+                  ? `人物 · ${member.gender === "male" ? "男" : member.gender === "female" ? "女" : "未填写性别"}`
                   : `宠物 · ${member.species || "未填写物种"}`}
               </p>
             </div>

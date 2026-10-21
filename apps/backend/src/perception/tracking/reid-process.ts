@@ -45,6 +45,10 @@ export function createReidProcess() {
         pid: worker?.status.processId,
       };
     },
+    async prepare() {
+      if (!worker || stopped) throw new Error("ReID unavailable");
+      await worker.initialize();
+    },
     extract(input: z.infer<typeof reidRequestSchema>, timeoutMs: number) {
       if (!worker || stopped)
         return Promise.reject(new Error("ReID unavailable"));

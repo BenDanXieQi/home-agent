@@ -1,8 +1,8 @@
+import { identityReferenceSnapshotSchema } from "../../src/household/identity/contracts";
 import { createAppearanceComparison } from "./appearance-comparison";
 import { createHash } from "node:crypto";
 import type { z } from "zod";
 import {
-  identityReferenceSnapshotSchema,
   identityReferenceVersionsSchema,
   trackingObservationSchema,
   identityObservationSchema,
@@ -18,7 +18,10 @@ import { faceProcessingVersions } from "../../src/perception/identity/processing
 import faceModels from "../../src/perception/identity/models.json";
 import { identityMatchingParameters } from "../../src/household/identity/matching-parameters";
 import { associateMembers } from "../../src/household/identity/association";
-import { createAppearanceIdentity } from "../../src/household/identity/appearance";
+import {
+  createAppearanceIdentity,
+  defaultAppearancePolicy,
+} from "../../src/household/identity/appearance";
 import { appearanceEvidenceSchema } from "../../src/household/identity/appearance-evidence";
 import {
   reidSha256,
@@ -53,7 +56,10 @@ export async function createVideoIdentityAnalysis(
       now: number,
     ) => associateMembers(gallery, names, observation, ttl, now),
   };
-  const appearance = createAppearanceIdentity({ matching });
+  const appearance = createAppearanceIdentity({
+    matching,
+    policy: defaultAppearancePolicy,
+  });
   const comparison = options.compareAppearance
     ? createAppearanceComparison(matching)
     : null;
@@ -143,7 +149,6 @@ export async function createVideoIdentityAnalysis(
           kind: "video_frame",
           className: "human",
           ...prepared,
-          minimumSharpness: config.minimumSharpness,
         });
         if (result.kind !== "enrollment")
           throw new Error("Unexpected registration response");
@@ -154,7 +159,7 @@ export async function createVideoIdentityAnalysis(
         if (candidate) {
           reference = referenceSummary(candidate, input, frameSha256);
           gallery = identityReferenceSnapshotSchema.parse({
-            ...faceProcessingVersions(config.minimumSharpness),
+            ...faceProcessingVersions(),
             revision: crypto.randomUUID(),
             members: [
               {
@@ -269,7 +274,6 @@ export async function createVideoIdentityAnalysis(
         kind: "tracking",
         ...prepared,
         targets,
-        minimumSharpness: config.minimumSharpness,
       });
       if (result.kind !== "result")
         throw new Error("Unexpected face tracking response");
@@ -406,7 +410,6 @@ export async function createVideoIdentityAnalysis(
           faceConfig: {
             sampleIntervalMs: config.sampleIntervalMs,
             evidenceTtlMs: config.evidenceTtlMs,
-            minimumSharpness: config.minimumSharpness,
           },
           matching: identityMatchingParameters.classes.human,
         },
@@ -418,7 +421,7 @@ export async function createVideoIdentityAnalysis(
         models: {
           yunet: faceModels.models.yunet,
           sface: faceModels.models.sface,
-          ...faceProcessingVersions(config.minimumSharpness),
+          ...faceProcessingVersions(),
         },
         limitations: [
           "single reference/one public scene; no independent identity holdout or multi-person error rate",

@@ -19,7 +19,7 @@ export function createMemberAssociations(
   matching:
     | Pick<
         ReturnType<typeof createIdentityMatching>,
-        "associate" | "member" | "petCandidates"
+        "associate" | "member" | "petCandidates" | "personCandidates"
       >
     | undefined,
   appearance: ReturnType<typeof createAppearanceIdentity> | undefined,
@@ -53,7 +53,7 @@ export function createMemberAssociations(
           );
           if (
             directAssociation &&
-            (directAssociation.state === "confirmed" ||
+            (directAssociation.state !== "inferred" ||
               directAssociation.basis === "pet")
           )
             return [memberAssociationSchema.parse(directAssociation)];
@@ -88,8 +88,6 @@ export function createMemberAssociations(
                 }),
               ];
           }
-          if (directAssociation)
-            return [memberAssociationSchema.parse(directAssociation)];
           const target = appearance?.target(
             JSON.stringify([
               run.scopeEpoch,
@@ -122,7 +120,51 @@ export function createMemberAssociations(
                 basis: "appearance",
               }),
             ];
-          return [];
+          const identityTrack =
+            source.identityValidity === "valid"
+              ? source.identity?.tracks.find(
+                  (item) => item.trackId === track.trackId,
+                )
+              : undefined;
+          const attributes = identityTrack?.attributes;
+          if (
+            track.className === "human" &&
+            track.state === "measured" &&
+            track.measuredBox &&
+            attributes &&
+            identityTrack?.state !== "conflict" &&
+            isDeepStrictEqual(attributes.run, run) &&
+            attributes.mediaTime.generation === generation &&
+            attributes.trackId === track.trackId &&
+            attributes.sequence <= tracking.sequence &&
+            attributes.receivedAt <= now &&
+            evidenceTtlMs !== undefined &&
+            attributes.receivedAt + evidenceTtlMs > now
+          ) {
+            const person = matching?.personCandidates(attributes.gender);
+            if (person?.members.length === 1)
+              return [
+                memberAssociationSchema.parse({
+                  run,
+                  sourceRunId: run.runId,
+                  mediaGeneration: generation,
+                  trackId: track.trackId,
+                  memberId: person.members[0]!.memberId,
+                  memberName: person.members[0]!.name,
+                  memberKind: "person",
+                  className: "human",
+                  basis: "attributes",
+                  state: "inferred",
+                  gender: attributes.gender,
+                  observedAt: attributes.receivedAt,
+                  expiresAt: attributes.receivedAt + evidenceTtlMs,
+                  evidence: [attributes],
+                }),
+              ];
+          }
+          return directAssociation
+            ? [memberAssociationSchema.parse(directAssociation)]
+            : [];
         });
         next.set(
           run.runId,

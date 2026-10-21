@@ -104,18 +104,63 @@ export function createIdentityReferences(
             source: identitySamples.source,
             quality: identitySamples.quality,
             createdAt: identitySamples.createdAt,
+            modelVersion: identitySamples.modelVersion,
+            processingVersion: identitySamples.processingVersion,
+            feature: identitySamples.feature,
+            appearance: identitySamples.appearance,
           })
           .from(identitySamples)
           .where(eq(identitySamples.memberId, memberId))
           .orderBy(identitySamples.createdAt, identitySamples.id);
+        const className = identityClassForSubject(
+          member.kind,
+          member.details.species,
+        );
+        const expected = className
+          ? matching.referenceVersions(className)
+          : null;
+
         return {
           kind: member.kind,
-          className: identityClassForSubject(
-            member.kind,
-            member.details.species,
-          ),
+          className,
           enabled: eligibility?.enabled ?? false,
-          samples,
+          usable: Boolean(
+            className &&
+            samples.some(
+              (sample) =>
+                matching.referenceFeatures(className, sample).length > 0,
+            ),
+          ),
+          samples: samples.map(
+            ({
+              modelVersion,
+              processingVersion,
+              feature,
+              appearance,
+              ...sample
+            }) => ({
+              ...sample,
+              features: [
+                ...(feature
+                  ? [
+                      className === "human"
+                        ? ("face" as const)
+                        : ("pet" as const),
+                    ]
+                  : []),
+                ...(appearance ? ["body" as const] : []),
+              ],
+              outdated:
+                expected !== null &&
+                className !== null &&
+                matching.referenceFeatures(className, {
+                  feature,
+                  appearance,
+                  modelVersion,
+                  processingVersion,
+                }).length === 0,
+            }),
+          ),
         };
       });
     },
@@ -164,6 +209,7 @@ export function createIdentityReferences(
               member.details.species,
             );
             const expected = className && matching.referenceVersions(className);
+            const appearanceVersions = matching.appearanceVersions();
             if (
               !className ||
               !expected ||
@@ -171,9 +217,17 @@ export function createIdentityReferences(
                 ({ data }) =>
                   data.modelVersion !== expected.modelVersion ||
                   data.processingVersion !== expected.processingVersion ||
-                  data.feature.length !==
-                    identityMatchingParameters.classes[className]
-                      .featureDimensions,
+                  (data.feature !== null &&
+                    data.feature.length !==
+                      identityMatchingParameters.classes[className]
+                        .featureDimensions) ||
+                  (data.appearance !== undefined &&
+                    (className !== "human" ||
+                      !appearanceVersions ||
+                      data.appearance.modelVersion !==
+                        appearanceVersions.modelVersion ||
+                      data.appearance.processingVersion !==
+                        appearanceVersions.processingVersion)),
               )
             )
               throw new HouseholdError("invalid_state");
@@ -230,6 +284,7 @@ export function createIdentityReferences(
                 modelVersion: data.modelVersion,
                 processingVersion: data.processingVersion,
                 feature: data.feature,
+                appearance: data.appearance,
               })),
             );
             return {

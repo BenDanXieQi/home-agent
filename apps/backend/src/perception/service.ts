@@ -35,6 +35,7 @@ export function createPerceptionService(options: {
         | "associate"
         | "member"
         | "petCandidates"
+        | "personCandidates"
       >
     | undefined;
   appearance?: ReturnType<typeof createAppearanceIdentity>;
@@ -535,9 +536,7 @@ export function createPerceptionService(options: {
         }
         if (!identityConfigured) {
           await options.identityReferences?.configure(
-            config.identity
-              ? identityProcessingVersions(config.identity.minimumSharpness)
-              : null,
+            config.identity ? identityProcessingVersions() : null,
           );
           referenceSnapshot = options.identityReferences?.snapshot() ?? null;
           identityConfigured = true;
@@ -660,6 +659,11 @@ export function createPerceptionService(options: {
         ReturnType<typeof createIdentityMatching>["petCandidates"]
       >[0],
     ) => options.identityReferences?.petCandidates(className) ?? null,
+    personCandidates: (
+      gender: Parameters<
+        ReturnType<typeof createIdentityMatching>["personCandidates"]
+      >[0],
+    ) => options.identityReferences?.personCandidates(gender) ?? null,
     referenceVersions: () =>
       referenceSnapshot
         ? identityReferenceVersionsSchema.parse(referenceSnapshot)

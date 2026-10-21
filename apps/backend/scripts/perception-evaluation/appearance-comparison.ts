@@ -29,7 +29,7 @@ export function createAppearanceComparison(
       };
       const domain = createAppearanceIdentity({
         matching,
-        calibration: policy,
+        policy,
       });
       return {
         policy,

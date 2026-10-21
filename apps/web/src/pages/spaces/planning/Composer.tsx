@@ -2,11 +2,9 @@ import { useRef, type RefObject } from "react";
 import { AnimatePresence, m } from "motion/react";
 import { ImagePlus, X } from "lucide-react";
 import { Button } from "../../../components/Button";
+import { ImageFileInput } from "../../../components/ImageUpload";
 import { ImageThumbnail, type PlanningImage } from "./ImageViewer";
-import {
-  planningImageLimit as imageLimit,
-  planningImageTypes,
-} from "../../../modules/spatial/planning";
+import { planningImageLimit as imageLimit } from "../../../modules/spatial/planning";
 
 export function Composer({
   started,
@@ -59,18 +57,11 @@ export function Composer({
         if (ready && !disabled) onSend();
       }}
     >
-      <input
+      <ImageFileInput
         ref={picker}
-        type="file"
-        multiple
-        accept={planningImageTypes.join(",")}
         disabled={disabled || full}
-        tabIndex={-1}
-        aria-hidden="true"
-        className="hidden"
-        onChange={(event) => {
-          const files = [...(event.target.files ?? [])];
-          event.target.value = "";
+        label="添加户型图"
+        onFiles={(files) => {
           onAdd(files);
           field.current?.focus();
         }}

@@ -1,3 +1,4 @@
+import { identityFeatureSchema } from "../../household/identity/contracts";
 import { prepareOpenCv } from "./opencv-runtime";
 import cv from "@techstark/opencv-js";
 import { estimate } from "nudged";
@@ -7,10 +8,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import {
-  identityCapacity,
-  identityFeatureSchema,
-} from "@home-agent/api/contracts";
+import { identityCapacity } from "@home-agent/api/contracts";
 import type { identityRequestSchema } from "./protocol";
 import models from "./models.json";
 import profile from "./profile.json";
@@ -119,14 +117,8 @@ export async function createFaceModel(directory: string) {
   async function extractFace(
     image: cv.Mat,
     face: Float32Array,
-    minimumSharpness: number,
     includeImage: boolean,
   ) {
-    if (
-      face[14]! < profile.detectorScore ||
-      Math.min(face[2]!, face[3]!) < profile.minimumFaceSide
-    )
-      return { face: null, reason: "人脸过小或检测置信度不足" };
     const transform = estimate({
       estimator: "TSR",
       domain: faceAlignment.landmarks.map((_, i) => ({
@@ -164,8 +156,8 @@ export async function createFaceModel(directory: string) {
       cv.Laplacian(gray, laplacian, cv.CV_64F, 1, 1, 0, cv.BORDER_DEFAULT);
       cv.meanStdDev(laplacian, mean, deviation);
       const sharpness = deviation.data64F[0]! ** 2;
-      if (!Number.isFinite(sharpness) || sharpness < minimumSharpness)
-        return { face: null, reason: "人脸模糊，请使用更清晰的画面" };
+      if (!Number.isFinite(sharpness))
+        throw new Error("Invalid face sharpness measurement");
       blob = cv.blobFromImage(
         aligned,
         1,
@@ -208,14 +200,11 @@ export async function createFaceModel(directory: string) {
             .toBuffer()
         : undefined;
       return {
-        face: {
-          feature,
-          sharpness,
-          detectionScore: face[14]!,
-          cropSha256: createHash("sha256").update(aligned.data).digest("hex"),
-          ...(encoded ? { image: encoded.toString("base64") } : {}),
-        },
-        reason: null,
+        feature,
+        sharpness,
+        detectionScore: face[14]!,
+        cropSha256: createHash("sha256").update(aligned.data).digest("hex"),
+        ...(encoded ? { image: encoded.toString("base64") } : {}),
       };
     } finally {
       blob?.delete();
@@ -250,26 +239,21 @@ export async function createFaceModel(directory: string) {
       if (request.kind !== "tracking") {
         if (!faces.length) return rejected("未检测到人脸");
         if (request.kind === "photo" && faces.length !== 1)
-          return rejected("照片中有多个人脸，请上传仅包含一个人的照片");
+          return {
+            ...rejected("照片中有多个人脸，请上传仅包含一个人的照片"),
+            ambiguous: true,
+          };
         const candidates = [];
-        let reason: string | null = null;
         for (const face of faces
           .toSorted((a, b) => b[14]! - a[14]!)
           .slice(0, identityCapacity.targetsPerFrame)) {
-          const result = await extractFace(
-            image,
-            face,
-            request.minimumSharpness,
-            true,
-          );
-          if (result.face?.image)
-            candidates.push({ ...result.face, image: result.face.image });
-          else reason = result.reason;
+          const result = await extractFace(image, face, true);
+          if (result.image) candidates.push({ ...result, image: result.image });
         }
         return {
           kind: "enrollment" as const,
           candidates,
-          reason: candidates.length ? null : reason,
+          reason: null,
         };
       }
       const samples = [];
@@ -277,32 +261,20 @@ export async function createFaceModel(directory: string) {
       let qualityRejected = 0;
       for (const face of faces.toSorted((a, b) => b[14]! - a[14]!)) {
         const targets = owners(face, request.tracks);
-        if (
-          face[14]! < profile.detectorScore ||
-          Math.min(face[2]!, face[3]!) < profile.minimumFaceSide ||
-          targets.length !== 1 ||
-          used.has(targets[0]!)
-        ) {
+        if (targets.length !== 1 || used.has(targets[0]!)) {
           qualityRejected++;
           continue;
         }
         const trackId = targets[0]!;
         used.add(trackId);
         if (!request.targets.includes(trackId)) continue;
-        const result = await extractFace(
-          image,
-          face,
-          request.minimumSharpness,
-          false,
-        );
-        if (!result.face) qualityRejected++;
-        else
-          samples.push({
-            trackId,
-            className: "human" as const,
-            faceBox: { x: face[0]!, y: face[1]!, w: face[2]!, h: face[3]! },
-            ...result.face,
-          });
+        const result = await extractFace(image, face, false);
+        samples.push({
+          trackId,
+          className: "human" as const,
+          faceBox: { x: face[0]!, y: face[1]!, w: face[2]!, h: face[3]! },
+          ...result,
+        });
       }
       return { kind: "result" as const, samples, qualityRejected };
     } finally {

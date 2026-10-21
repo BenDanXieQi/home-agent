@@ -217,14 +217,14 @@ export function createInferencePool(
   return {
     submit,
     close,
-    reserveTracking() {
+    reserveTracking(waitForCapacity = true) {
       if (closing || failure || !initialized || workers.length < 2)
         return false;
-      auxiliary.add("tracking");
-      return (
+      const available =
         workers.reduce((sum, worker) => sum + worker.active, 0) <=
-        workers.length - auxiliary.size
-      );
+        workers.length - auxiliary.size - (auxiliary.has("tracking") ? 0 : 1);
+      if (available || waitForCapacity) auxiliary.add("tracking");
+      return available;
     },
     releaseTracking() {
       auxiliary.delete("tracking");

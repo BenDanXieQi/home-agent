@@ -13,6 +13,7 @@ import {
   contextEntities,
   contextRecords,
   mijiaHomeSelections,
+  householdSubjects,
 } from "../../db/schema";
 import type { Transaction } from "../../db/transaction-outcome";
 import {
@@ -25,6 +26,7 @@ import {
   membersLock,
 } from "./repository";
 import type { memberActivity } from "./activity";
+import { personGenderForSubject } from "./subject";
 
 const memberSightingTopic = sql`${contextRecords.topic} = 'member_sighting'`;
 
@@ -282,15 +284,21 @@ export function createMemberActivityRepository(db: Database) {
           !correction ||
           correction.reason !== current.reason ||
           !isDeepStrictEqual(correction.after, current) ||
-          correction.before.kind !== "known" ||
-          correction.before.association.basis !== "appearance" ||
-          !current.trigger.referenceIds.some(
-            (id) =>
-              correction.before.kind === "known" &&
-              correction.before.association.basis === "appearance" &&
-              correction.before.association.referenceIds.includes(id),
-          )
+          correction.before.kind !== "known"
         )
+          throw new Error("Member activity revocation lacks domain evidence");
+        const before = correction.before.association;
+        const referenceSupported =
+          before.basis === "appearance" &&
+          current.trigger.referenceIds.some((id) =>
+            before.referenceIds.includes(id),
+          );
+        const attributeConflict =
+          before.basis === "attributes" &&
+          current.reason === "target_face_conflict" &&
+          current.trigger.referenceIds.length === 0 &&
+          current.trigger.references.length === 0;
+        if (!referenceSupported && !attributeConflict)
           throw new Error("Member activity revocation lacks domain evidence");
         if (current.reason === "target_face_conflict") {
           const trigger = current.trigger;
@@ -322,6 +330,28 @@ export function createMemberActivityRepository(db: Database) {
         identity,
         assertCurrent,
         async (tx, beforeWrite) => {
+          if (
+            current.kind === "known" &&
+            current.association.basis === "attributes"
+          ) {
+            const association = current.association;
+            const people = await tx
+              .select()
+              .from(householdSubjects)
+              .where(eq(householdSubjects.kind, "person"));
+            const candidates = people.filter(
+              (person) =>
+                personGenderForSubject(person.details.gender) ===
+                association.gender,
+            );
+            if (
+              candidates.length !== 1 ||
+              candidates[0]?.id !== association.memberId
+            )
+              throw new Error(
+                "Member activity person attribute qualification changed",
+              );
+          }
           const [saved] = await tx
             .select()
             .from(contextRecords)

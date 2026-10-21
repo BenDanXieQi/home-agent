@@ -62,7 +62,20 @@ export function MemberAssociationEvidence({
                 )
                 .join("、")}
             </p>
-            {association.basis === "species" ? null : association.basis ===
+            {association.basis === "attributes" ? (
+              <>
+                <p>识别方式：人体外观属性与家庭登记资料匹配</p>
+                <p>
+                  属性分数：{association.evidence[0]?.score.toFixed(3)}
+                  （不是身份概率）
+                </p>
+                <p>
+                  模型：{association.evidence[0]?.modelVersion} · 处理：
+                  {association.evidence[0]?.processingVersion}
+                </p>
+                <p>推测有效至：{attributionTime(association.expiresAt)}</p>
+              </>
+            ) : association.basis === "species" ? null : association.basis ===
               "appearance" ? (
               <>
                 <p>
@@ -88,38 +101,63 @@ export function MemberAssociationEvidence({
                   {association.references.map((reference) => (
                     <li key={reference.referenceId}>
                       <p>参考画面 ID：{reference.referenceId}</p>
-                      <p>
-                        参考画面来源：
-                        {sourceName(
-                          reference.appearance.run.deviceId,
-                          reference.appearance.run.channel,
-                        )}{" "}
-                        · 跟踪编号 {reference.appearance.trackId} · 帧{" "}
-                        {reference.appearance.sequence}
-                      </p>
-                      <p>
-                        人脸确认时间：
-                        {attributionTime(reference.face.observedAt)} ·
-                        人体外观采样时间：
-                        {attributionTime(reference.observedAt)}
-                      </p>
-                      <p>
-                        参考画面来源运行：{reference.appearance.run.runId} ·
-                        媒体代次：
-                        {reference.appearance.mediaTime.generation}
-                      </p>
-                      <p>人脸证据：{reference.face.provenance.evidenceKey}</p>
-                      <p>
-                        人脸参考版本：
-                        {referenceVersionsLabel(reference.referenceVersions)}
-                      </p>
-                      <p>
-                        人体模型：{reference.appearance.modelVersion} · 处理：
-                        {reference.appearance.processingVersion}
-                      </p>
-                      <p>
-                        参考画面有效至：{attributionTime(reference.expiresAt)}
-                      </p>
+                      {!("face" in reference) ? (
+                        <>
+                          <p>来源：该成员上传的人体参考照片</p>
+                          <p>照片摘要：{reference.sha256}</p>
+                          <p>
+                            人体模型：{reference.modelVersion} · 处理：
+                            {reference.processingVersion}
+                          </p>
+                          <p>
+                            参考版本：
+                            {referenceVersionsLabel(
+                              reference.referenceVersions,
+                            )}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <p>
+                            参考画面来源：
+                            {sourceName(
+                              reference.appearance.run.deviceId,
+                              reference.appearance.run.channel,
+                            )}{" "}
+                            · 跟踪编号 {reference.appearance.trackId} · 帧{" "}
+                            {reference.appearance.sequence}
+                          </p>
+                          <p>
+                            人脸确认时间：
+                            {attributionTime(reference.face.observedAt)} ·
+                            人体外观采样时间：
+                            {attributionTime(reference.observedAt)}
+                          </p>
+                          <p>
+                            参考画面来源运行：{reference.appearance.run.runId} ·
+                            媒体代次：
+                            {reference.appearance.mediaTime.generation}
+                          </p>
+                          <p>
+                            人脸证据：{reference.face.provenance.evidenceKey}
+                          </p>
+                          <p>
+                            人脸参考版本：
+                            {referenceVersionsLabel(
+                              reference.referenceVersions,
+                            )}
+                          </p>
+                          <p>
+                            人体模型：{reference.appearance.modelVersion} ·
+                            处理：
+                            {reference.appearance.processingVersion}
+                          </p>
+                          <p>
+                            参考画面有效至：
+                            {attributionTime(reference.expiresAt)}
+                          </p>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>

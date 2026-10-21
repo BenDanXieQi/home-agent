@@ -17,9 +17,11 @@ export function memberActivity(
   const summary = association
     ? association.basis === "species"
       ? `${camera}镜头 ${data.channel} 归因到${association.memberName}（家庭唯一${association.className === "dog" ? "狗" : "猫"}）。`
-      : association.basis === "appearance"
-        ? `${camera}镜头 ${data.channel} 推测观察到${association.memberName}（人体外观匹配）。`
-        : `${camera}镜头 ${data.channel} ${association.state === "confirmed" ? "观察到" : "可能观察到"}${association.memberName}。`
+      : association.basis === "attributes"
+        ? `${camera}镜头 ${data.channel} 可能观察到${association.memberName}（家庭唯一${association.gender === "male" ? "男性" : "女性"}，人体外观属性推测）。`
+        : association.basis === "appearance"
+          ? `${camera}镜头 ${data.channel} 推测观察到${association.memberName}（人体外观匹配）。`
+          : `${camera}镜头 ${data.channel} ${association.state === "confirmed" ? "观察到" : "可能观察到"}${association.memberName}。`
     : `${camera}镜头 ${data.channel} 的轨迹 ${data.trackId} 成员归属已撤销。`;
   const evidence =
     current.kind === "unknown"
@@ -61,7 +63,7 @@ export function activityReferences(
   current: z.infer<typeof memberActivityDataSchema>["attribution"]["current"],
 ) {
   return current.kind === "known" && current.association.basis === "appearance"
-    ? current.association.references
+    ? current.association.references.filter((reference) => "face" in reference)
     : [];
 }
 export function activitySupportVersions(
@@ -69,12 +71,17 @@ export function activitySupportVersions(
 ) {
   if (current.kind === "unknown") return [];
   const association = current.association;
-  if (association.basis === "species") return [];
+  if (association.basis === "species" || association.basis === "attributes")
+    return [];
   return association.basis === "appearance"
-    ? association.references.flatMap((reference) => [
-        reference.referenceVersions,
-        identityReferenceVersionsSchema.parse(reference.face.provenance),
-      ])
+    ? association.references.flatMap((reference) =>
+        !("face" in reference)
+          ? [reference.referenceVersions]
+          : [
+              reference.referenceVersions,
+              identityReferenceVersionsSchema.parse(reference.face.provenance),
+            ],
+      )
     : [
         association.referenceVersions,
         ...association.evidence.map((evidence) =>

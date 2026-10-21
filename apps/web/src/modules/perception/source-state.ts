@@ -108,6 +108,18 @@ export function createPerceptionSourceState({
     deviceAtom,
     accessibleAtom,
     activeSourceAtom,
+    attributeErrorAtom: atom((get) => {
+      const source = get(activeSourceAtom);
+      if (
+        !source ||
+        source.status !== "reading" ||
+        (source.identityValidity !== "valid" &&
+          source.identityValidity !== "unavailable") ||
+        source.identity?.run.runId !== source.run?.runId
+      )
+        return null;
+      return source.identity?.attributeError ?? null;
+    }),
     identityUnavailableMessageAtom: atom((get) => {
       if (!get(connectedAtom)) return "正在同步成员身份分析状态…";
       if (!get(accessibleAtom)) return "当前摄像头已不可访问，成员关联已清空。";

@@ -1,3 +1,4 @@
+import { identityReferenceSnapshotSchema } from "../../household/identity/contracts";
 import { ComputeBusyError } from "../compute/protocol";
 import type { enrollmentCommandSchema } from "./enrollment-protocol";
 import type { identityRequestSchema } from "./protocol";
@@ -13,17 +14,18 @@ import type {
 import type { runSchema } from "../observations";
 import { createIdentityAnalysis } from "./analysis";
 import { identityLimits, type identityConfigSchema } from "./config";
-import {
-  identityReferenceSnapshotSchema,
-  identityReferenceVersionsSchema,
-} from "@home-agent/api/contracts";
+import { identityReferenceVersionsSchema } from "@home-agent/api/contracts";
 import { identityProcessingVersions } from "./processing-version";
-import { createIdentityProcess, IdentityProcessExitError } from "./process";
+import {
+  createIdentityProcess,
+  IdentityProcessExitError,
+  IdentityModelUnavailableError,
+} from "./process";
 
 function createOwner(config: z.infer<typeof identityConfigSchema>) {
   return {
     config,
-    versions: identityProcessingVersions(config.minimumSharpness),
+    versions: identityProcessingVersions(),
     controller: new AbortController(),
     model: undefined as
       | Awaited<ReturnType<typeof createIdentityProcess>>
@@ -60,6 +62,7 @@ function createSource(
       | undefined,
     error: undefined as string | undefined,
     publishing: false,
+    attributeError: undefined as string | undefined,
     published: undefined as
       | Omit<z.infer<typeof identityObservationSchema>, "ageMs" | "revision">
       | undefined,
@@ -165,8 +168,16 @@ export function createIdentityRuntime(options: {
       ensureModel(session);
       await session.creating;
       const model = session.model;
-      if ((!model && performance.now() < session.retryAt) || session.retired)
-        throw new Error(session.error ?? "身份模型不可用");
+      if (session.retired) throw new Error("身份模型已停止");
+      if (!model && performance.now() < session.retryAt) {
+        if (session.retryAt === Infinity)
+          throw new IdentityProcessExitError(
+            session.error ?? "身份进程无法安全退出",
+          );
+        throw new IdentityModelUnavailableError(
+          session.error ?? "身份模型不可用",
+        );
+      }
       if (!model) throw new ComputeBusyError(session.error ?? "身份模型不可用");
       const operation = (async () => {
         const input = await prepare();
@@ -182,7 +193,7 @@ export function createIdentityRuntime(options: {
             : [input.className];
         const prepared = await model.prepare(classes);
         if (!prepared.available.length)
-          throw new Error(
+          throw new IdentityModelUnavailableError(
             prepared.failures.map((failure) => failure.error).join("; "),
           );
         if (session.retired) throw new Error("身份模型已停止");
@@ -208,7 +219,11 @@ export function createIdentityRuntime(options: {
           } catch (closeError) {
             session.retryAt = Infinity;
             options.fatal(closeError);
+            throw closeError;
           }
+          throw new IdentityModelUnavailableError("身份模型推理失败", {
+            cause,
+          });
         }
         throw cause;
       }
@@ -256,6 +271,7 @@ export function createIdentityRuntime(options: {
               ? ("recognizing" as const)
               : identityStatus(error, owner),
           error,
+          attributeError: source.attributeError,
 
           referenceVersions: snapshot
             ? identityReferenceVersionsSchema.parse(snapshot)
@@ -374,6 +390,7 @@ export function createIdentityRuntime(options: {
         next === null ? null : identityReferenceSnapshotSchema.parse(next);
       for (const source of sources.values()) {
         source.analysis.replaceReferences(snapshot);
+        source.attributeError = undefined;
         publish(source);
       }
     },
@@ -413,7 +430,6 @@ export function createIdentityRuntime(options: {
           kind: command.mode,
           className: command.className,
           ...input,
-          minimumSharpness: command.config.minimumSharpness,
         };
       });
     },
@@ -465,6 +481,7 @@ export function createIdentityRuntime(options: {
         source.generation = observation.mediaTime.generation;
         source.dimensions = dimensions;
         source.rtpTimestamp = -1;
+        source.attributeError = undefined;
       }
       source.sequence = observation.sequence;
       source.latest = { observation, availableAt, maxAgeMs };
@@ -488,7 +505,8 @@ export function createIdentityRuntime(options: {
         !snapshot ||
         snapshot.modelVersion !== session.versions.modelVersion ||
         snapshot.processingVersion !== session.versions.processingVersion ||
-        !snapshot.members.some((member) => member.enabled) ||
+        (!snapshot.members.some((member) => member.enabled) &&
+          !snapshot.attributeGenders?.length) ||
         repeated ||
         !targets.length
       ) {
@@ -519,20 +537,46 @@ export function createIdentityRuntime(options: {
       const analysis = source.analysis;
       const admittedSnapshot = snapshot;
       const pixels = rgb;
+      const targetTracks = observation.tracks.filter((track) =>
+        targets.includes(track.trackId),
+      );
+      const classes = [
+        ...new Set(
+          targetTracks
+            .filter((track) => analysis.hasPhotoCandidates(track.className))
+            .map((track) => track.className),
+        ),
+      ];
+      const includeAttributes =
+        Boolean(admittedSnapshot.attributeGenders?.length) &&
+        targetTracks.some((track) => track.className === "human");
       analysis.admitted(targets, availableAt);
       session.pending = (async () => {
         try {
-          const prepared = await model.prepare([
-            ...new Set(
-              observation.tracks
-                .filter((track) => targets.includes(track.trackId))
-                .map((track) => track.className),
-            ),
-          ]);
-          source.error = prepared.available.length
-            ? undefined
-            : prepared.failures.map((failure) => failure.error).join("; ");
-          if (!prepared.available.length) return;
+          const prepared = await model.prepare(classes, includeAttributes);
+          if (
+            session.retired ||
+            closed ||
+            sources.get(source.run.runId) !== source ||
+            source.analysis !== analysis ||
+            snapshot !== admittedSnapshot ||
+            performance.now() - availableAt >= maxAgeMs
+          )
+            return;
+          if (includeAttributes)
+            source.attributeError = prepared.attributeError;
+          source.error =
+            prepared.available.length || prepared.attributesAvailable
+              ? undefined
+              : [
+                  ...prepared.failures.map((failure) => failure.error),
+                  prepared.attributeError,
+                ]
+                  .filter(Boolean)
+                  .join("; ")
+                  .slice(0, 4096);
+          if (!prepared.available.length && !prepared.attributesAvailable)
+            return;
           const input = await prepareIdentityFrame(observation, pixels);
           if (
             session.retired ||
@@ -553,7 +597,14 @@ export function createIdentityRuntime(options: {
                   prepared.available.includes(track.className),
               ),
             ),
-            minimumSharpness: source.config.minimumSharpness,
+            attributeTargets: prepared.attributesAvailable
+              ? targets.filter((id) =>
+                  input.tracks.some(
+                    (track) =>
+                      track.trackId === id && track.className === "human",
+                  ),
+                )
+              : [],
           };
           const result = await model.extract(
             request,
@@ -576,6 +627,10 @@ export function createIdentityRuntime(options: {
             return;
           if (result.kind !== "result")
             throw new Error("Unexpected face response");
+          if (request.attributeTargets.length)
+            source.attributeError = result.attributeError;
+          if (result.attributeError && !request.targets.length)
+            source.error = result.attributeError;
           analysis.accept(
             result,
             observation,

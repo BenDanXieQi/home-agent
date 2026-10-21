@@ -11,7 +11,10 @@ import { createHouseholdBindingAccess } from "../binding-repository";
 import { HouseholdError } from "../errors";
 
 import { createMemberWriter } from "../identity/repository";
-import { identityClassForSubject } from "../identity/subject";
+import {
+  identityClassForSubject,
+  personGenderForSubject,
+} from "../identity/subject";
 
 async function readMembers(tx: Transaction) {
   const rows = await tx
@@ -23,6 +26,9 @@ async function readMembers(tx: Transaction) {
       id: row.id,
       kind: row.kind,
       name: row.name,
+      ...(row.kind === "person" && personGenderForSubject(row.details.gender)
+        ? { gender: personGenderForSubject(row.details.gender) }
+        : {}),
       species:
         typeof row.details.species === "string" ? row.details.species : "",
       description:
@@ -97,6 +103,7 @@ export function createMemberRepository(
                 );
                 if (
                   referenceMember ||
+                  existing.kind === "person" ||
                   className === "cat" ||
                   className === "dog"
                 )
@@ -107,15 +114,16 @@ export function createMemberRepository(
               }
             } else {
               const profile = command.profile;
+              const { gender: _gender, ...details } = existing?.details ?? {};
               const values = {
                 name: profile.name,
                 kind: profile.kind,
                 details: {
-                  ...existing?.details,
+                  ...details,
                   description: profile.description,
                   ...(profile.kind === "pet"
                     ? { species: profile.species }
-                    : {}),
+                    : { gender: profile.gender }),
                 },
               };
               if (command.operation === "create") {
@@ -129,7 +137,11 @@ export function createMemberRepository(
                   profile.kind,
                   profile.kind === "pet" ? profile.species : undefined,
                 );
-                if (className === "cat" || className === "dog") {
+                if (
+                  profile.kind === "person" ||
+                  className === "cat" ||
+                  className === "dog"
+                ) {
                   invalidateReferences();
                 }
                 await tx
@@ -149,11 +161,15 @@ export function createMemberRepository(
                   beforeWrite();
                   changed = true;
                   if (
-                    profile.kind === "pet" &&
-                    identityClassForSubject(
-                      existing.kind,
-                      existing.details.species,
-                    ) !== identityClassForSubject(profile.kind, profile.species)
+                    (profile.kind === "person" &&
+                      personGenderForSubject(existing.details.gender) !==
+                        profile.gender) ||
+                    (profile.kind === "pet" &&
+                      identityClassForSubject(
+                        existing.kind,
+                        existing.details.species,
+                      ) !==
+                        identityClassForSubject(profile.kind, profile.species))
                   ) {
                     invalidateReferences();
                   }

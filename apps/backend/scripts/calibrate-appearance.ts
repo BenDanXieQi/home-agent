@@ -53,9 +53,6 @@ async function extractSample(
         y: 0,
         w: frame.width,
         h: frame.height,
-        classId: 0,
-        className: "human",
-        confidence: 1,
       },
     ],
   });

@@ -1,3 +1,4 @@
+import { identityReferenceSnapshotSchema } from "../../household/identity/contracts";
 import {
   enrollmentCommandSchema,
   enrollmentResultSchema,
@@ -12,7 +13,6 @@ import { z } from "zod";
 import { inspect } from "node:util";
 import { frameSchema } from "../detection/frame";
 import {
-  identityReferenceSnapshotSchema,
   detectionSchema,
   detectionTimingSchema,
 } from "@home-agent/api/contracts";

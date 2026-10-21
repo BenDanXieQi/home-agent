@@ -346,3 +346,49 @@ test("pending appearance reservation drains saturated detectors before admitting
     await pool.close();
   }
 });
+
+test("a busy one-shot appearance request leaves every detector slot available", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>();
+  const second = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  workers[1]!.run.mockImplementationOnce(() => second.promise);
+  const a = pool.submit({ kind: "detect", frame });
+  const b = pool.submit({ kind: "detect", frame });
+  try {
+    expect(pool.reserveTracking(false)).toBe(false);
+    first.resolve(detected);
+    await a;
+    expect(pool.available).toBe(true);
+  } finally {
+    first.resolve(detected);
+    second.resolve(detected);
+    await Promise.all([a, b]);
+    await pool.close();
+  }
+});
+
+test("a busy one-shot request preserves an existing appearance reservation", async () => {
+  const pool = make(2);
+  await pool.submit({ kind: "initialize" });
+  const first = Promise.withResolvers<typeof detected>();
+  const second = Promise.withResolvers<typeof detected>();
+  workers[0]!.run.mockImplementationOnce(() => first.promise);
+  workers[1]!.run.mockImplementationOnce(() => second.promise);
+  const a = pool.submit({ kind: "detect", frame });
+  const b = pool.submit({ kind: "detect", frame });
+  try {
+    expect(pool.reserveTracking()).toBe(false);
+    expect(pool.reserveTracking(false)).toBe(false);
+    first.resolve(detected);
+    await a;
+    expect(pool.available).toBe(false);
+    expect(pool.reserveTracking()).toBe(true);
+  } finally {
+    first.resolve(detected);
+    second.resolve(detected);
+    await Promise.all([a, b]);
+    await pool.close();
+  }
+});
