@@ -313,6 +313,59 @@ export async function createDetector(minimumConfidence = 0.5) {
         const crop = await cropForReview(box, true, 3);
         if (!crop) continue;
         const mirroredLocal = await recheck(crop.frame, true, 0.1);
+        const correspondingPet = (
+          detections: typeof mirroredLocal,
+          mirrored: boolean,
+        ) =>
+          detections
+            .filter(
+              (candidate) =>
+                candidate.className === "cat" || candidate.className === "dog",
+            )
+            .map((candidate) => ({
+              ...candidate,
+              x:
+                crop.left +
+                (mirrored
+                  ? crop.frame.width - candidate.x - candidate.w
+                  : candidate.x),
+              y: candidate.y + crop.top,
+            }))
+            .map((candidate) => ({ candidate, overlap: iou(box, candidate) }))
+            .filter(
+              ({ candidate, overlap }) =>
+                overlap >= 0.5 &&
+                !result.detections.some(
+                  (other) =>
+                    other !== box &&
+                    (other.className === "cat" || other.className === "dog") &&
+                    iou(other, candidate) >= overlap,
+                ),
+            )
+            .toSorted(
+              (a, b) =>
+                b.candidate.confidence - a.candidate.confidence ||
+                b.overlap - a.overlap,
+            )[0]?.candidate;
+        const mirroredPet = correspondingPet(mirroredLocal, true);
+        if (
+          mirroredPet &&
+          mirroredPet.className !== box.className &&
+          mirroredPet.confidence > box.confidence
+        ) {
+          const localPet = correspondingPet(await recheck(crop.frame), false);
+          if (
+            localPet?.className === mirroredPet.className &&
+            localPet.confidence > box.confidence
+          )
+            corrections.set(box, {
+              ...box,
+              classId: mirroredPet.classId,
+              className: mirroredPet.className,
+              confidence: Math.min(mirroredPet.confidence, localPet.confidence),
+            });
+        }
+
         if (
           mirroredLocal.some(
             (candidate) =>
