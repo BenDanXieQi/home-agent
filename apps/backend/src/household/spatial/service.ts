@@ -5,14 +5,15 @@ import {
   spaceSaveSchema,
   passageSaveSchema,
   observationBindingSaveSchema,
+  isObservationSourceDevice,
+  type ObservationSourceDevice,
 } from "@home-agent/api/spatial";
-import type { inventoryDeviceSchema } from "@home-agent/api/devices";
 import type { createSpatialRepository } from "./repository";
 import { SpatialError } from "./errors";
 
 export function createSpatialService(
   repository: ReturnType<typeof createSpatialRepository> | undefined,
-  readDevices: () => ReturnType<typeof inventoryDeviceSchema.parse>[],
+  readDevices: () => ObservationSourceDevice[],
 ) {
   function storage() {
     if (!repository) throw new SpatialError("storage_unavailable");
@@ -46,6 +47,7 @@ export function createSpatialService(
         );
         if (
           !device ||
+          !isObservationSourceDevice(device) ||
           (device.camera
             ? command.channel === null ||
               !device.channels.includes(command.channel)

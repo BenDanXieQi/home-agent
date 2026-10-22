@@ -52,7 +52,8 @@ export const errorDefinitions = {
   },
   spatial_source_invalid: {
     status: 400,
-    message: "Select a device and channel from the current inventory.",
+    message:
+      "Select a camera with a valid channel or an occupancy sensor from the current inventory.",
   },
   spatial_storage_unavailable: {
     status: 503,

@@ -3,9 +3,10 @@ import {
   spaceSaveSchema,
   passageSaveSchema,
   observationBindingSaveSchema,
+  isObservationSourceDevice,
+  type ObservationSourceDevice,
   type spatialSnapshotSchema,
 } from "@home-agent/api/spatial";
-import type { inventoryDeviceSchema } from "@home-agent/api/devices";
 import { Button } from "../../components/Button";
 import { Notice } from "../../components/Notice";
 
@@ -230,7 +231,7 @@ export function BindingForm({
 }: FormActions & {
   record: Snapshot["observation_bindings"][number] | null;
   snapshot: Snapshot;
-  devices: ReturnType<typeof inventoryDeviceSchema.parse>[];
+  devices: ObservationSourceDevice[];
   onSave: (
     input: ReturnType<typeof observationBindingSaveSchema.parse>,
   ) => void;
@@ -239,7 +240,8 @@ export function BindingForm({
   const [deviceId, setDeviceId] = useState(record?.device_id ?? "");
   const [channel, setChannel] = useState(record?.channel?.toString() ?? "");
   const [error, setError] = useState("");
-  const device = devices.find((value) => value.id === deviceId);
+  const sourceDevices = devices.filter(isObservationSourceDevice);
+  const device = sourceDevices.find((value) => value.id === deviceId);
   const unavailableSource = !!deviceId && !device;
   const [selectedTarget, setSelectedTarget] = useState(() =>
     record?.space_id
@@ -294,7 +296,7 @@ export function BindingForm({
             required
             value={deviceId}
             onChange={(event) => {
-              const next = devices.find(
+              const next = sourceDevices.find(
                 (value) => value.id === event.target.value,
               );
               setDeviceId(event.target.value);
@@ -308,15 +310,15 @@ export function BindingForm({
             }}
           >
             <option value="" disabled>
-              从设备清单选择
+              选择摄像头或人体存在传感器
             </option>
             {record &&
-            !devices.some((value) => value.id === record.device_id) ? (
-              <option value={record.device_id}>
+            !sourceDevices.some((value) => value.id === record.device_id) ? (
+              <option value={record.device_id} disabled>
                 {record.device_id}（当前不可用）
               </option>
             ) : null}
-            {devices.map((value) => (
+            {sourceDevices.map((value) => (
               <option key={value.id} value={value.id}>
                 {value.name} · {value.id}
               </option>
@@ -333,7 +335,7 @@ export function BindingForm({
           >
             {!device?.camera ? (
               <option value={channel}>
-                {channel ? `镜头 ${channel}` : "普通传感器无需镜头"}
+                {channel ? `镜头 ${channel}` : "人体存在传感器无需镜头"}
               </option>
             ) : (
               <>
@@ -350,6 +352,9 @@ export function BindingForm({
           </select>
         </label>
       </div>
+      {devices.length > 0 && sourceDevices.length === 0 ? (
+        <Notice>暂无可绑定的摄像头或人体存在传感器。</Notice>
+      ) : null}
       {unavailableSource ? (
         <p className="text-xs leading-6 text-muted">
           原来源当前不在可选设备清单中，可维护说明、目标或启停状态；更换来源需选择当前可用设备。

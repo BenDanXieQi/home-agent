@@ -1,5 +1,17 @@
 import { z } from "zod";
 import { inventoryDeviceSchema } from "../domain/devices";
+import type { deviceSchema } from "./household";
+
+export type ObservationSourceDevice = Pick<
+  z.infer<typeof deviceSchema>,
+  "id" | "name" | "camera" | "channels" | "category"
+>;
+
+export function isObservationSourceDevice(
+  device: Pick<ObservationSourceDevice, "camera" | "category">,
+) {
+  return device.camera || device.category === "occupancy-sensor";
+}
 
 const timestamps = {
   created_at: z.iso.datetime(),

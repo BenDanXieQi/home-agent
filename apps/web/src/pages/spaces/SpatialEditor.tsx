@@ -1,4 +1,4 @@
-import type { inventoryDeviceSchema } from "@home-agent/api/devices";
+import type { ObservationSourceDevice } from "@home-agent/api/spatial";
 import type {
   SpatialSnapshot,
   SpatialSaveCommand,
@@ -15,7 +15,7 @@ export function SpatialEditor({
 }: {
   editor: Editor;
   snapshot: SpatialSnapshot;
-  devices: ReturnType<typeof inventoryDeviceSchema.parse>[];
+  devices: ObservationSourceDevice[];
   pending: boolean;
   onCancel: () => void;
   onSave: (command: SpatialSaveCommand) => void;
