@@ -491,15 +491,10 @@ export function createIdentityRuntime(options: {
         source.rtpTimestamp === observation.mediaTime.rtpTimestamp;
       source.rtpTimestamp = observation.mediaTime.rtpTimestamp;
       const targets = source.analysis.observe(
-        observation.tracks,
+        observation,
         availableAt,
         observation.receivedAt,
       );
-      if (observation.omittedHumans > 0 || observation.omittedPets > 0) {
-        source.analysis.skipped("coverage");
-        turns.delete(source.run.runId);
-        return frameSnapshot(source, session, "not_requested", snapshot);
-      }
       if (
         source.error ||
         !snapshot ||

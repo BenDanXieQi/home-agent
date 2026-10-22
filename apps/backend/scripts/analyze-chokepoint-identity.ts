@@ -522,14 +522,14 @@ try {
     const selectedTargets = galleries.map((gallery, offset) =>
       gallery.content
         .get(sample.source)!
-        .observe(observations[offset]!.tracks, sample.timeMs, sample.timeMs),
+        .observe(observations[offset]!, sample.timeMs, sample.timeMs),
     );
     const targets = [...new Set(selectedTargets.flat())].slice(0, 4);
     let evidence: Extract<
       Awaited<ReturnType<typeof face.extract>>,
       { kind: "result" }
     > | null = null;
-    if (targets.length && !observations[0]!.omittedHumans) {
+    if (targets.length) {
       const prepared = await prepareIdentityFrame(
         observations[0]!,
         image.frame.rgb,
@@ -553,9 +553,6 @@ try {
           sample.timeMs,
         );
       }
-    } else if (observations[0]!.omittedHumans) {
-      for (const gallery of galleries)
-        gallery.content.get(sample.source)!.skipped("coverage");
     }
     const outputs = galleries.map((gallery, offset) => {
       const observation = observations[offset]!;

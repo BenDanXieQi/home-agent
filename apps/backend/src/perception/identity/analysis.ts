@@ -219,12 +219,20 @@ export function createIdentityAnalysis(
       recent.length = 0;
     },
     observe(
-      input: z.infer<typeof trackingObservationSchema>["tracks"],
+      observation: Pick<
+        z.infer<typeof trackingObservationSchema>,
+        "tracks" | "omittedHumans" | "omittedPets"
+      >,
       clock: number,
       at: number,
     ) {
+      const { tracks: input, omittedHumans, omittedPets } = observation;
+
       prune(clock);
       statistics.frames++;
+      if (omittedHumans > 0 || omittedPets > 0)
+        statistics.skippedIncompleteTracking++;
+
       const activeIds = new Set(
         input
           .filter((track) => hasCandidates(track.className))
@@ -264,6 +272,9 @@ export function createIdentityAnalysis(
         .filter(
           (track) =>
             hasCandidates(track.className) &&
+            (track.className === "human"
+              ? omittedHumans === 0
+              : omittedPets === 0) &&
             track.state === "measured" &&
             track.measuredBox &&
             track.hits >= 2,
@@ -288,10 +299,9 @@ export function createIdentityAnalysis(
         if (track) track.attemptedAt = clock;
       }
     },
-    skipped(reason: "busy" | "pixels" | "coverage") {
+    skipped(reason: "busy" | "pixels") {
       if (reason === "busy") statistics.skippedBusy++;
-      else if (reason === "pixels") statistics.skippedNoPixels++;
-      else statistics.skippedIncompleteTracking++;
+      else statistics.skippedNoPixels++;
     },
     accept(
       result: z.infer<typeof identityEvidenceSchema>,

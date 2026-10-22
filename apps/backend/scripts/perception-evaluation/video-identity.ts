@@ -258,7 +258,7 @@ export async function createVideoIdentityAnalysis(
       tracks: input.tracks,
     });
     const targets = currentAnalysis.observe(
-      input.tracks,
+      observation,
       input.timeMs,
       input.timeMs,
     );
@@ -266,7 +266,7 @@ export async function createVideoIdentityAnalysis(
       Awaited<ReturnType<typeof model.extract>>,
       { kind: "result" }
     > | null = null;
-    if (targets.length && !input.omittedHumans && !input.omittedPets) {
+    if (targets.length) {
       const prepared = await prepareIdentityFrame(observation, input.frame.rgb);
       statistics.faceModelCalls++;
       statistics.requestedFaceTargets += targets.length;
@@ -284,8 +284,7 @@ export async function createVideoIdentityAnalysis(
       statistics.qualityWithFreshBody += result.samples.filter((item) =>
         freshIds.has(item.trackId),
       ).length;
-    } else if (input.omittedHumans || input.omittedPets)
-      currentAnalysis.skipped("coverage");
+    }
     const before = appearance.snapshot().statistics.referencesCreated;
     appearance.tracking(observation, input.timeMs);
     const appearanceInput = {

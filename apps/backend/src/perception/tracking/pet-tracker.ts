@@ -119,7 +119,17 @@ export function createPetTracker(
       );
       for (const [index, box] of pets.entries()) {
         if (tracks.length >= 8) break;
-        if (matched.has(index) || box.confidence < policy.newTrackConfidence)
+        if (
+          matched.has(index) ||
+          box.confidence < policy.newTrackConfidence ||
+          pets.some(
+            (other, otherIndex) =>
+              matched.has(otherIndex) &&
+              other.confidence >= 0.5 &&
+              other.className !== box.className &&
+              iou(box, other) >= 0.9,
+          )
+        )
           continue;
         if (box.className === "cat" || box.className === "dog")
           tracks.push(newTrack(box, box.className, at));
