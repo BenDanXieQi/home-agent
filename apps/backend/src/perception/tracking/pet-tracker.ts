@@ -3,6 +3,10 @@ import type { detectionSchema } from "../observations";
 import { assign, iou } from "./assignment";
 import { initiate, predict, correct, predictedBox } from "./kalman";
 import { createTrackIds } from "./track-ids";
+import { updateClassification } from "../classification";
+
+const maxPositionCost = 0.7;
+const classMismatchCost = 0.3;
 
 export const petTrackingPolicySchema = z.object({
   continuationConfidence: z.number().min(0.1).max(0.5).default(0.5),
@@ -25,6 +29,7 @@ export function createPetTracker(
     return {
       id: allocateId(),
       className,
+      opposingSamples: 0,
       box,
       motion: initiate(box),
       lastSeen: at,
@@ -66,12 +71,13 @@ export function createPetTracker(
           eligible.map((track) =>
             indices.map((index) => {
               const box = pets[index]!;
-              return track.className === box.className
-                ? 1 - iou(predictedBox(track.motion), box)
-                : Infinity;
+              const positionCost = 1 - iou(predictedBox(track.motion), box);
+              if (positionCost > maxPositionCost) return Infinity;
+              if (track.className === box.className) return positionCost;
+              return highPass ? positionCost + classMismatchCost : Infinity;
             }),
           ),
-          0.7,
+          maxPositionCost + classMismatchCost,
         )) {
           const index = indices[di]!;
           associations.set(eligible[ti]!.id, index);
@@ -87,7 +93,21 @@ export function createPetTracker(
         ].slice(-3);
         track.confirmed ||=
           track.confirmations.filter(Boolean).length >= policy.confirmationHits;
+        if (!box || box.confidence < 0.5) track.opposingSamples = 0;
         if (!box) continue;
+        if (
+          box.confidence >= 0.5 &&
+          (box.className === "cat" || box.className === "dog")
+        ) {
+          const classification = updateClassification(
+            track.className,
+            box.className,
+            track.opposingSamples,
+          );
+          track.className = classification.value;
+          track.opposingSamples = classification.opposingSamples;
+        }
+
         correct(track.motion, box);
         track.box = box;
         track.lastSeen = at;

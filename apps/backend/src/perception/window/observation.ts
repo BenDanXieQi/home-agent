@@ -27,7 +27,8 @@ export function projectWindowObservation(
             if (!box) return false;
             if (body)
               return (
-                track.className === detection.className &&
+                (track.className === "human") ===
+                  (detection.className === "human") &&
                 box.x === detection.x &&
                 box.y === detection.y &&
                 box.w === detection.w &&

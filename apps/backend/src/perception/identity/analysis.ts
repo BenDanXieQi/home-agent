@@ -9,6 +9,7 @@ import { personAttributeEvidenceSchema } from "@home-agent/api/contracts";
 import { identityLimits, type identityConfigSchema } from "./config";
 import { createReferences } from "./references";
 import type { identityEvidenceSchema } from "./evidence";
+import { updateClassification } from "../classification";
 
 function sampleEvidence(
   sample: z.infer<typeof identityEvidenceSchema>["samples"][number],
@@ -53,9 +54,14 @@ function sampleEvidence(
     detectionScore: sample.detectionScore,
   };
 }
-function newTrack(trackId: number, clock: number, at: number) {
+function newTrack(
+  input: z.infer<typeof trackingObservationSchema>["tracks"][number],
+  clock: number,
+  at: number,
+) {
   return {
-    trackId,
+    trackId: input.trackId,
+    className: input.className,
     firstSeenClock: clock,
     firstSeenAt: at,
     lastSeenAt: at,
@@ -65,6 +71,7 @@ function newTrack(trackId: number, clock: number, at: number) {
     confirmedAt: null as number | null,
     everConfirmed: false,
     conflict: false,
+    attributeOpposingSamples: 0,
     attributes: null as {
       clock: number;
       value: z.infer<typeof personAttributeEvidenceSchema>;
@@ -112,8 +119,10 @@ export function createIdentityAnalysis(
       if (
         track.attributes &&
         clock - track.attributes.clock >= config.evidenceTtlMs
-      )
+      ) {
         track.attributes = null;
+        track.attributeOpposingSamples = 0;
+      }
       track.samples = track.samples.filter(
         (sample) => clock - sample.clock < config.evidenceTtlMs,
       );
@@ -205,6 +214,7 @@ export function createIdentityAnalysis(
         track.confirmedAt = null;
         track.conflict = false;
         track.attributes = null;
+        track.attributeOpposingSamples = 0;
       }
       recent.length = 0;
     },
@@ -233,10 +243,19 @@ export function createIdentityAnalysis(
         )
           continue;
         let track = tracks.get(inputTrack.trackId);
-        if (!track && tracks.size < identityLimits.tracksPerRun) {
-          track = newTrack(inputTrack.trackId, clock, at);
+        if (
+          track?.className !== inputTrack.className &&
+          (track || tracks.size < identityLimits.tracksPerRun)
+        ) {
+          if (!track) statistics.tracksSeen++;
+          const everConfirmed = track?.everConfirmed ?? false;
+          track = newTrack(
+            inputTrack,
+            track?.firstSeenClock ?? clock,
+            track?.firstSeenAt ?? at,
+          );
+          track.everConfirmed = everConfirmed;
           tracks.set(inputTrack.trackId, track);
-          statistics.tracksSeen++;
         }
         if (track) track.lastSeenAt = at;
       }
@@ -282,7 +301,15 @@ export function createIdentityAnalysis(
     ) {
       prune(clock);
       for (const track of tracks.values()) {
-        if (track.attemptedAt === clock) track.attributes = null;
+        if (
+          track.attemptedAt === clock &&
+          !result.attributes?.some(
+            (attribute) => attribute.trackId === track.trackId,
+          )
+        ) {
+          track.attributes = null;
+          track.attributeOpposingSamples = 0;
+        }
       }
       for (const attribute of result.attributes ?? []) {
         const track = tracks.get(attribute.trackId);
@@ -291,11 +318,21 @@ export function createIdentityAnalysis(
         );
         if (
           !track ||
+          track.className !== "human" ||
+          track.attemptedAt !== clock ||
           target?.className !== "human" ||
           target.state !== "measured" ||
           !target.measuredBox
         )
           continue;
+        const classification = updateClassification(
+          track.attributes?.value.gender ?? attribute.gender,
+          attribute.gender,
+          track.attributeOpposingSamples,
+        );
+        track.attributeOpposingSamples = classification.opposingSamples;
+        if (classification.value !== attribute.gender) continue;
+
         track.attributes = {
           clock,
           value: personAttributeEvidenceSchema.parse({
@@ -311,6 +348,8 @@ export function createIdentityAnalysis(
         const track = tracks.get(sample.trackId);
         if (
           !track ||
+          track.className !== sample.className ||
+          track.attemptedAt !== clock ||
           !observation.tracks.some(
             (target) =>
               target.trackId === sample.trackId &&

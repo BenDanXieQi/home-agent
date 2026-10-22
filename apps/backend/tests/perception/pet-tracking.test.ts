@@ -24,16 +24,26 @@ test("cats and dogs retain distinct ids while detections change order and positi
     next.every((t) => t.feature === "not_applicable" && t.featureAt === null),
   ).toBe(true);
 });
-test("overlapping species never acquire each other's track id", () => {
+test("pet class flicker keeps its track and switches only after three opposing observations", () => {
   const tracker = createPetTracker();
-  const catId = tracker.update(0, [pet("cat", 10)])[0]!.trackId;
-  const result = tracker.update(300, [pet("dog", 10)]);
-  expect(result.find((t) => t.trackId === catId)).toMatchObject({
-    className: "cat",
-    state: "predicted",
-    measuredBox: null,
-  });
-  expect(result.find((t) => t.className === "dog")?.trackId).not.toBe(catId);
+  const id = tracker.update(0, [pet("dog", 10), pet("cat", 40)])[0]!.trackId;
+  for (const [at, observed, expected] of [
+    [300, "cat", "dog"],
+    [600, "cat", "dog"],
+    [900, "dog", "dog"],
+    [1200, "cat", "dog"],
+    [1500, "cat", "dog"],
+    [1800, "cat", "cat"],
+  ] as const) {
+    const result = tracker.update(at, [pet(observed, 10)]);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      trackId: id,
+      className: expected,
+      state: "measured",
+      lastMeasuredAt: at,
+    });
+  }
 });
 test("brief misses can resume a motion-consistent pet; expiry and far reentry allocate new ids", () => {
   const tracker = createPetTracker();
