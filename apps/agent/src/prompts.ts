@@ -112,10 +112,12 @@ export function createPromptResolver(
     name,
     context,
     systemVariables,
+    sectionKeys,
   }: {
     name: string;
     context: Context;
     systemVariables?: PromptVariables<[context: Context]> | undefined;
+    sectionKeys?: readonly string[] | undefined;
   }) {
     context.abortSignal?.throwIfAborted();
     if (!client)
@@ -141,30 +143,39 @@ export function createPromptResolver(
     const systemCount = inputIndex < 0 ? messages.length : inputIndex;
 
     const config = promptConfigSchema.parse(prompt.config);
+    const systemTemplates = messages.slice(0, systemCount);
+    const selectedSystem = systemTemplates
+      .map((template, index) => ({
+        template,
+        metadata: config.sections[index] ?? {
+          key: `managed_prompt_${index}`,
+          tag: false,
+        },
+      }))
+      .filter(
+        ({ metadata }) => !sectionKeys || sectionKeys.includes(metadata.key),
+      );
     const systemMessages = chatMessagesSchema.parse(
       compilePromptMessages(
         {
           name: prompt.name,
           version: prompt.version,
-          prompt: messages.slice(0, systemCount),
+          prompt: selectedSystem.map(({ template }) => template),
         },
         variables,
       ),
     );
     if (
       config.sections.length > 0 &&
-      config.sections.length !== systemMessages.length
+      config.sections.length !== systemTemplates.length
     )
       throw new Error(
         `Managed chat prompt ${name} must configure one section per system message`,
       );
 
-    const sections = systemMessages.map(({ content }, index) => ({
-      ...(config.sections[index] ?? {
-        key: `managed_prompt_${index}`,
-        tag: false,
-      }),
-      text: promptTextSchema.parse(content),
+    const sections = selectedSystem.map(({ metadata }, index) => ({
+      ...metadata,
+      text: promptTextSchema.parse(systemMessages[index]?.content),
     }));
     const binding = {
       name: prompt.name,
@@ -189,6 +200,7 @@ export function createPromptResolver(
     {
       name,
       systemVariables,
+      sectionKeys,
       userVariables,
       model,
       modelCollection,
@@ -201,7 +213,12 @@ export function createPromptResolver(
     },
     context: Context,
   ) {
-    const prompt = await resolve({ name, systemVariables, context });
+    const prompt = await resolve({
+      name,
+      systemVariables,
+      sectionKeys,
+      context,
+    });
     const variables = await resolvePromptVariables(userVariables, context);
     context.abortSignal?.throwIfAborted();
 

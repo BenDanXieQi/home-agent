@@ -44,6 +44,7 @@
     "./assistant/contracts": "./src/assistant/contracts.ts",
     "./config": "./src/config.ts",
     "./models": "./src/models.ts",
+    "./perception": "./src/perception/analysis.ts",
     "./runtime": "./src/runtime.ts",
     "./routes": "./src/routes/index.ts",
     "./workflows/runtime": "./src/workflows/index.ts",
