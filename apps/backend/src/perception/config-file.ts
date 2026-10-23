@@ -3,13 +3,13 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { perceptionConfigSchema } from "./config";
 
-export async function readPerceptionConfig(path: string) {
+export async function readPerceptionConfigFile(path: string) {
   let file;
   try {
     file = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT")
-      return perceptionConfigSchema.parse({});
+      return {};
     throw error;
   }
   try {
@@ -22,16 +22,21 @@ export async function readPerceptionConfig(path: string) {
     const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
     if (bytesRead > 65_536)
       throw new Error("Perception configuration exceeds 64 KiB");
-    const config = perceptionConfigSchema.parse(
-      JSON.parse(buffer.toString("utf8", 0, bytesRead)),
-    );
-    if (config.identity) {
-      const base = dirname(path);
-      const identity = config.identity;
-      identity.modelDirectory = resolve(base, identity.modelDirectory);
-    }
+    const config: unknown = JSON.parse(buffer.toString("utf8", 0, bytesRead));
     return config;
   } finally {
     await file.close();
   }
+}
+
+export async function readPerceptionConfig(path: string) {
+  const config = perceptionConfigSchema.parse(
+    await readPerceptionConfigFile(path),
+  );
+  if (config.identity)
+    config.identity.modelDirectory = resolve(
+      dirname(path),
+      config.identity.modelDirectory,
+    );
+  return config;
 }

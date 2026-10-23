@@ -1,7 +1,4 @@
-import { spawn } from "node:child_process";
-import { Readable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import pTimeout from "p-timeout";
+import { createFfmpegProcess } from "../../media/ffmpeg";
 import { Demuxer } from "node-av/api";
 import { AV_CODEC_ID_PCM_S16LE } from "node-av/constants";
 import type { z } from "zod";
@@ -33,11 +30,8 @@ export function createAudioDecoder(options: {
   ) => Promise<void>;
 }) {
   const controller = new AbortController();
-  let child: ReturnType<typeof spawn> | undefined;
-  let exit: Promise<unknown> = Promise.resolve();
-  let io: Promise<unknown>[] = [];
+  let process: ReturnType<typeof createFfmpegProcess<void>> | undefined;
   let packetTimer: ReturnType<typeof setTimeout> | undefined;
-  let diagnostic = "";
   function arm(ms: number) {
     clearTimeout(packetTimer);
     packetTimer = setTimeout(
@@ -59,15 +53,9 @@ export function createAudioDecoder(options: {
         performance.now() - (Date.now() - anchorReceivedAt);
       options.onMedia({ generation, anchorReceivedAt, decodedStartOffsetMs });
       controller.signal.throwIfAborted();
-      child = spawn(
+      process = createFfmpegProcess(
         options.executable,
         [
-          "-hide_banner",
-          "-loglevel",
-          "error",
-          "-nostdin",
-          "-threads",
-          "1",
           "-max_alloc",
           "33554432",
           "-probesize",
@@ -106,107 +94,76 @@ export function createAudioDecoder(options: {
           "1",
           "pipe:1",
         ],
-        { stdio: ["pipe", "pipe", "pipe"] },
-      );
-      exit = new Promise<void>((resolve, reject) => {
-        child!.once("error", (error) => {
-          diagnostic = error.message;
-          if (child?.pid === undefined) resolve();
-          else reject(error);
-        });
-        child!.once("exit", () => resolve());
-      });
-      child.stderr!.on("data", (chunk: Buffer) => {
-        diagnostic = (diagnostic + chunk.toString()).slice(-2048);
-      });
-      const input = pipeline(Readable.fromWeb(stream), child.stdin!, {
-        signal: controller.signal,
-      });
-      const output = (async () => {
-        await using demuxer = await Demuxer.open(child.stdout!, {
-          format: "nut",
-          copyTs: true,
-          options: { probesize: 32, analyzeduration: 1 },
-          signal: controller.signal,
-        });
-        const audio = demuxer.audio();
-        if (
-          !audio ||
-          audio.codecpar.codecId !== AV_CODEC_ID_PCM_S16LE ||
-          audio.codecpar.sampleRate !== 16000 ||
-          audio.codecpar.channels !== 1 ||
-          audio.timeBase.num !== 1 ||
-          audio.timeBase.den !== 16000
-        )
-          throw new Error("Invalid decoded PCM contract");
-        let end: number | undefined;
-        let firstPts: number | undefined;
-        for await (const packet of demuxer.packets(audio.index)) {
-          if (!packet) break;
-          try {
-            controller.signal.throwIfAborted();
-            const pts = Number(packet.pts);
-            if (
-              !packet.data ||
-              packet.size <= 0 ||
-              packet.size > 4096 ||
-              packet.size % 2 ||
-              !Number.isSafeInteger(pts) ||
-              (end !== undefined && pts !== end)
-            )
-              throw new Error("Audio PCM gap or invalid packet size");
-            const data = Buffer.from(packet.data);
-            const pcm = new Int16Array(data.length / 2);
-            for (let i = 0; i < pcm.length; i++)
-              pcm[i] = data.readInt16LE(i * 2);
-            firstPts ??= pts;
-            const offsetMs = decodedStartOffsetMs + (pts - firstPts) / 16;
-            const ageMs = performance.now() - anchorMonotonic - offsetMs;
-            if (ageMs > options.config.maxFrameAgeMs)
-              throw new Error("Audio media exceeded maximum age");
-            if (ageMs < -options.config.maxFrameAgeMs)
-              throw new Error(
-                "Audio media clock advanced beyond its receive anchor",
-              );
-            end = pts + pcm.length;
-            arm(options.config.silenceTimeoutMs);
-            await options.onPcm(pcm, anchorReceivedAt + offsetMs, Date.now());
-          } finally {
-            packet.free();
+        controller.signal,
+        async (stdout, signal) => {
+          await using demuxer = await Demuxer.open(stdout, {
+            format: "nut",
+            copyTs: true,
+            options: { probesize: 32, analyzeduration: 1 },
+            signal,
+          });
+          const audio = demuxer.audio();
+          if (
+            !audio ||
+            audio.codecpar.codecId !== AV_CODEC_ID_PCM_S16LE ||
+            audio.codecpar.sampleRate !== 16000 ||
+            audio.codecpar.channels !== 1 ||
+            audio.timeBase.num !== 1 ||
+            audio.timeBase.den !== 16000
+          )
+            throw new Error("Invalid decoded PCM contract");
+          let end: number | undefined;
+          let firstPts: number | undefined;
+          for await (const packet of demuxer.packets(audio.index)) {
+            if (!packet) break;
+            try {
+              signal.throwIfAborted();
+              const pts = Number(packet.pts);
+              if (
+                !packet.data ||
+                packet.size <= 0 ||
+                packet.size > 4096 ||
+                packet.size % 2 ||
+                !Number.isSafeInteger(pts) ||
+                (end !== undefined && pts !== end)
+              )
+                throw new Error("Audio PCM gap or invalid packet size");
+              const data = Buffer.from(packet.data);
+              const pcm = new Int16Array(data.length / 2);
+              for (let i = 0; i < pcm.length; i++)
+                pcm[i] = data.readInt16LE(i * 2);
+              firstPts ??= pts;
+              const offsetMs = decodedStartOffsetMs + (pts - firstPts) / 16;
+              const ageMs = performance.now() - anchorMonotonic - offsetMs;
+              if (ageMs > options.config.maxFrameAgeMs)
+                throw new Error("Audio media exceeded maximum age");
+              if (ageMs < -options.config.maxFrameAgeMs)
+                throw new Error(
+                  "Audio media clock advanced beyond its receive anchor",
+                );
+              end = pts + pcm.length;
+              arm(options.config.silenceTimeoutMs);
+              await options.onPcm(pcm, anchorReceivedAt + offsetMs, Date.now());
+            } finally {
+              packet.free();
+            }
           }
-        }
-        throw new Error(`Audio decoder ended: ${diagnostic}`);
-      })();
-      io = [input, output];
-      await Promise.race([
-        output,
-        input.then(() => {
-          throw new Error("Audio stream ended");
-        }),
-        exit.then(() => {
-          throw new Error(`Audio FFmpeg exited: ${diagnostic}`);
-        }),
-      ]);
+          throw new Error("Audio decoder ended");
+        },
+        { liveInput: stream },
+      );
+      await process.completed;
     } finally {
       clearTimeout(packetTimer);
       controller.abort();
-      child?.kill("SIGKILL");
-      await pTimeout(Promise.allSettled([exit, ...io]), {
-        milliseconds: 3000,
-        message: "Audio decoder cleanup unconfirmed",
-      });
     }
   })();
   return {
     completed,
     async close() {
       controller.abort(new Error("Audio source stopped"));
-      child?.kill("SIGKILL");
       await Promise.allSettled([completed]);
-      await pTimeout(Promise.allSettled([exit, ...io]), {
-        milliseconds: 3000,
-        message: "Audio decoder exit unconfirmed",
-      });
+      await process?.close();
     },
   };
 }

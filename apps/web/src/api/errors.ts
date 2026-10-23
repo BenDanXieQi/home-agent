@@ -1,4 +1,4 @@
-import type { ApiError } from "@home-agent/api/contracts";
+import { apiErrorSchema, type ApiError } from "@home-agent/api/contracts";
 export type ClientErrorCode =
   | "network_error"
   | "request_timeout"
@@ -20,4 +20,18 @@ export class RequestError extends Error {
     this.details = details;
     this.status = status;
   }
+}
+
+export async function readResponseError(
+  response: Pick<Response, "json" | "status">,
+) {
+  const payload: unknown = await response.json().catch((cause: unknown) => {
+    if (cause instanceof SyntaxError) return null;
+    throw cause;
+  });
+  const details = apiErrorSchema.safeParse(payload);
+  return new RequestError(
+    details.success ? details.data : { code: "invalid_response" },
+    response.status,
+  );
 }

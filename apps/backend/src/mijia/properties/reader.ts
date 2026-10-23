@@ -1,4 +1,5 @@
 import { sourceMetadata } from "../protocols/source-metadata";
+import pTimeout from "p-timeout";
 import { z } from "zod";
 import { MiCloudError, type MiCloud } from "../protocols/micloud";
 import {
@@ -182,24 +183,7 @@ export class PropertyReader {
       () => {},
       () => {},
     );
-    return new Promise<T>((resolve, reject) => {
-      const abort = () => {
-        signal.removeEventListener("abort", abort);
-        reject(signal.reason);
-      };
-      signal.addEventListener("abort", abort, { once: true });
-      operation.then(
-        (value) => {
-          signal.removeEventListener("abort", abort);
-          resolve(value);
-        },
-        (error: unknown) => {
-          signal.removeEventListener("abort", abort);
-          reject(error);
-        },
-      );
-      if (signal.aborted) abort();
-    });
+    return pTimeout(operation, { milliseconds: Infinity, signal });
   }
 
   private async readBatch(

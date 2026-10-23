@@ -31,8 +31,6 @@ import {
 } from "../../modules/spatial/planning";
 import {
   applySpatialLayout,
-  spatialQueryOptions,
-  unconfirmedWrite,
   type SpatialSnapshot,
 } from "../../modules/spatial/api";
 import {
@@ -69,7 +67,6 @@ export function SpatialPlanning({
   available: boolean;
 }) {
   const client = useQueryClient();
-  const options = spatialQueryOptions(scope);
   const state = useAtomValue(planningStateAtom);
   const [text, setText] = useAtom(state.text);
   const [images, setImages] = useAtom(state.images);
@@ -328,29 +325,19 @@ export function SpatialPlanning({
 
   const finalize = useMutation({
     mutationKey: saveKey,
-    mutationFn: async ({
+    mutationFn: ({
       draft,
       planned,
     }: {
       id: string;
       draft: Session["draft"];
       planned: SpatialSnapshot;
-    }) => {
-      try {
-        return await applySpatialLayout({
-          expected: layoutVersions(planned),
-          ...draft,
-        });
-      } catch (cause) {
-        if (!unconfirmedWrite(cause)) throw cause;
-        // The response was lost; the save may still have landed.
-        const current = await client.fetchQuery({ ...options, staleTime: 0 });
-        if (!compareLayout(current, draft).changes) return current;
-        throw cause;
-      }
-    },
-    onSuccess: (next, { id }) => {
-      client.setQueryData(options.queryKey, next);
+    }) =>
+      applySpatialLayout(client, scope, {
+        expected: layoutVersions(planned),
+        ...draft,
+      }),
+    onSuccess: (_next, { id }) => {
       if (sessionId.current !== id) return;
       setFinalizing(false);
       restart(id);

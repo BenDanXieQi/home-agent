@@ -1,6 +1,6 @@
 # Backend
 
-基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、语音请求判断和聊天转发。语音判断通过独立 [Agent](../agent/README.md) 的 workflow 执行，聊天也转发到该服务。基础检测不依赖 Agent 在线。
+基于 Hono + Bun，负责 Web 静态托管、来源接入、家庭设备清单、成员与感知、语音请求判断和聊天转发。语音判断通过独立 [Agent](../agent/README.md) 的 workflow 执行，聊天也转发到该服务。基础检测与原始录像不依赖 Agent 在线。
 
 当前支持原生属性持续采集、带有效性的当前值与房间事实查询、设备状态历史保存与只读查询，以及成员资料、参考身份关联与可修订的成员出现记录。已有数据通过[Agent 专用通路](#agent-当前数据与历史)持续交付，历史支持设备报告、成员出现和整体音视频窗口；当前位置、通用活动识别与可执行要求管理尚未实现。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
@@ -28,27 +28,28 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 
 ## 接口
 
-| 接口                                                | 职责                                                                                |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GET /api/health`                                   | backend 存活状态，不检查外围服务或数据库                                            |
-| `POST /api/spatial/*`                               | 空间、通道与观测绑定的读取和维护，见[空间关系资料](#空间关系资料)                   |
-| `GET /api/config`                                   | 读取连接配置及可写状态                                                              |
-| `PUT /api/config`                                   | 校验并保存完整连接配置                                                              |
-| `GET /api/services/status`                          | 检查 Agent 与 go2rtc 的接口是否可用                                                 |
-| `POST /api/chat`                                    | 向 Agent 转发聊天 SSE，校验过程与最终回答，不保存会话                               |
-| `GET /api/agent/context/stream`                     | 向 Agent 推送当前家庭、设备状态、成员、出现记录和整体感知数据                       |
-| `POST /api/agent/context/history`                   | 按区间与对象读取设备报告、成员出现或仍保留的完整感知窗口                            |
-| `GET /api/perception`                               | 本地检测、人宠跟踪、人物身份与音频的健康及最新观测                                  |
-| `GET /api/perception/stream`                        | 订阅本地感知当前状态，不传输媒体片段                                                |
-| `POST /api/perception/images/detect`                | 接收图片字节并返回该输入的检测结果，复用共享池                                      |
-| `GET /api/perception/windows`                       | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量           |
-| `POST /api/perception/windows/:id/media`            | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口) |
-| `POST /api/mijia/recordings/availability`           | 按当前来源查询最多 25 个观察时刻是否有覆盖该时间的 SD 录像，不下载文件              |
-| `PUT/GET/DELETE /api/mijia/recordings/playback/:id` | 申请、查询或释放经校验的 SD 卡回放资源                                              |
-| `GET/HEAD /api/mijia/recordings/playback/:id/media` | 受控 MP4 读取，支持单段字节范围请求                                                 |
-| `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                          |
-| `GET /api/perception/speech/stream`                 | 订阅同一语音收件箱                                                                  |
-| `POST /api/perception/retry`                        | 显式重试检测与音频计算，重新准入失败音轨                                            |
+| 接口                                                | 职责                                                                                                 |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `GET /api/health`                                   | backend 存活状态，不检查外围服务或数据库                                                             |
+| `POST /api/spatial/*`                               | 空间、通道与观测绑定的读取和维护，见[空间关系资料](#空间关系资料)                                    |
+| `GET /api/config`                                   | 读取连接配置及可写状态                                                                               |
+| `PUT /api/config`                                   | 校验并保存完整连接配置                                                                               |
+| `GET /api/services/status`                          | 检查 Agent 与 go2rtc 的接口是否可用                                                                  |
+| `POST /api/chat`                                    | 向 Agent 转发聊天 SSE，校验过程与最终回答，不保存会话                                                |
+| `GET /api/agent/context/stream`                     | 向 Agent 推送当前家庭、设备状态、成员、出现记录和整体感知数据                                        |
+| `POST /api/agent/context/history`                   | 按区间与对象读取设备报告、成员出现或仍保留的完整感知窗口                                             |
+| `GET /api/perception`                               | 本地检测、人宠跟踪、人物身份与音频的健康及最新观测                                                   |
+| `GET /api/perception/stream`                        | 订阅本地感知当前状态，不传输媒体片段                                                                 |
+| `POST /api/perception/images/detect`                | 接收图片字节并返回该输入的检测结果，复用共享池                                                       |
+| `GET /api/perception/windows`                       | 按 `scopeEpoch`、`deviceId`、`channel` 查询轻量窗口列表及全局媒体资源用量                            |
+| `POST /api/perception/windows/:id/media`            | 显式申请窗口媒体表示，状态查询与读取见[窗口接口](../../docs/perception.md#本机接口)                  |
+| `POST /api/recordings/media`                        | 按时刻或区间读取本地／SD 原片，返回图片、图片序列或视频，见[原始录像与媒体读取](#原始录像与媒体读取) |
+| `POST /api/mijia/recordings/availability`           | 按当前来源查询最多 25 个观察时刻是否有覆盖该时间的 SD 录像，不下载文件                               |
+| `PUT/GET/DELETE /api/mijia/recordings/playback/:id` | 申请、查询或释放经校验的 SD 卡回放资源                                                               |
+| `GET/HEAD /api/mijia/recordings/playback/:id/media` | 受控 MP4 读取，支持单段字节范围请求                                                                  |
+| `GET /api/perception/speech`                        | 有界语音片段与逐段判断状态                                                                           |
+| `GET /api/perception/speech/stream`                 | 订阅同一语音收件箱                                                                                   |
+| `POST /api/perception/retry`                        | 显式重试检测与音频计算，重新准入失败音轨                                                             |
 
 窗口详情的 `speech.segments` 保存关联转写，`frames[].identity` 保存采样帧当时的身份判断，`sampledMedia` 表示 backend 生成的采样产物。迟到转写只更新窗口历史与版本，不改写帧身份或重新编码媒体；声音与人物标签不构成说话人身份识别。
 
@@ -65,6 +66,38 @@ bun run start       # 构建后启动 backend 和 Agent，提供页面与 API
 聊天请求最多 32 KiB。聊天和 Workflow 操作流的总期限为 20 分钟，Workflow 外层转发使用同一期限；普通读取及其他 Backend 请求继续使用 `BACKEND_REQUEST_TIMEOUT_MS`，默认 130 秒。客户端取消会传递到 Agent。代理只提交本次消息，通过 SSE 转发本次回答文本和工具状态，校验最终 `result`；不提供会话历史或检查点。流消费复用共享操作协议，非本项目格式的上游响应转换为安全错误。
 
 收到 SIGINT/SIGTERM 后停止接收请求，最多等待 `BACKEND_SHUTDOWN_TIMEOUT_MS`（默认 30 秒），再关闭数据库与追踪资源。追踪配置与生命周期见[追踪接入](../../packages/observability/README.md)。
+
+## 原始录像与媒体读取
+
+录像与感知共用 `config/perception.json` 的 `sources/sourceProfiles` 选择及画质设置，独立于检测模型和计算进程运行。`recordings.cacheBytes` 控制所有来源共用的原片及请求临时文件预算，默认 25000000000 字节（25 GB）；修改后重启 Backend：
+
+```json
+{
+  "recordings": { "cacheBytes": 25000000000 }
+}
+```
+
+Backend 从共享摄像头连接取得 H.264/H.265 原编码视频，保留所选码流的分辨率和帧率，以约 10 秒的 MPEG-TS 段保存，实际按关键帧切段；这不保证摄像头最高画质。录制由 Backend 进程内的 node-av 封装，写入前取得容量。只读取已经关闭的段。原片索引在内存中，文件位于 Git 忽略的 `data/recordings/`，每次启动清理上次实例缓存。普通媒体重连保留仍有访问资格的已封段文件；来源撤销清理对应媒体，家庭撤销或替换清理全部媒体。取流或录制失败完成清理后，仍有资格的来源等待 5 秒重试。SD 读取独立于连续录制的启动和来源配置校验；两者仍共用原片预算与目录，预算配置或存储不可用时均无法读取，修复后下次请求重新初始化。
+
+`POST /api/recordings/media` 接收 JSON；请求规则由 [录像服务的 `readMediaInputSchema`](src/recordings/service.ts) 唯一定义。例如取得本地某时刻的图片：
+
+```json
+{
+  "deviceId": "1000000001",
+  "channel": 1,
+  "source": "local",
+  "selection": { "kind": "at", "at": 1792670400000 },
+  "output": { "kind": "image", "width": 1280 }
+}
+```
+
+`source` 选择 `local` 或 `sd`；单时刻输出最近的实际帧，区间 `[start,end)` 输出指定频率的图片序列或 MP4 视频。可按原图显示方向指定归一化 `crop`，先裁切再缩放；单边尺寸等比推导，省略尺寸保留裁切后大小。视频支持 H.264/H.265，省略编码沿用首段原片格式，省略帧率保留来源时间节奏。本地时间按主机观察时刻近似定位，SD 时间按设备录像索引解释，不保证两者同步。覆盖以实际解码帧为准，时刻无覆盖、已知原片缺段、损坏帧或断流边界返回素材不足。帧间显示时长按相邻媒体时间戳解释，不以名义帧率判断缺帧；文件时间戳不证明传感器完整采集。区间跨越不兼容的视频参数或音轨布局时返回素材不足，应分别读取参数一致的区间。当前本地原片无音轨；SD 视频有音轨时保留并按 MP4 要求编码。转换视频使用可顺序写入的 fragmented MP4（分段式 MP4），媒体内容完整取得后再交给下游。
+
+响应为 `multipart/form-data`：`metadata` 部分提供 JSON，随后按实际时间顺序重复 `media` 部分，图片为 JPEG、视频为 MP4。服务内 `readMedia()` 返回元数据和原生可读流数组。HTTP 使用流式 multipart 编码器发送这些流，避免 [Bun 1.4.2 的原生 `Response(FormData)`](https://github.com/oven-sh/bun/blob/bun-v1.4.2/src/runtime/webcore/Blob.rs#L3777) 全量读取文件；每部分开始消费后连续 120 秒无读取进展才超时。取消或读完后清理请求输出；共享 SD 原片按容量保留，同一文件共用下载与已取得的原片，现有 SD 回放也借用该原片。[Response.formData()](https://developer.mozilla.org/en-US/docs/Web/API/Response/formData) 读取完整响应后才返回，逐项处理的调用方应使用流式 multipart 解析库。Agent 工具及页面入口沿用各自现有功能，本接口不自动提交模型分析。
+
+容量记账串行。SD 下载按传输上限预留空间；连续原片、转换产物及转换临时文本在每块字节落盘前取得空间，成功写入后结算。空间不足先淘汰最旧的未使用原片，仍不足则返回容量错误；正在使用的原片受保护。取消和失败等待在途写入及文件关闭，文件删除成功后才归还空间。部分写入失败保留相应预留，关闭未能确认时隔离文件并停止后续写入。预算约束本服务文件内容的逻辑字节数，不承诺固定保留时长。
+
+录像预算默认 25 GB，窗口媒体保持 1 GiB／30 分钟，现有 SD 回放输出及其临时文件为 512 MiB。窗口和 SD 回放整体预留生成空间，FFmpeg 用 `-fs` 限制文件大小，视频使用 `+faststart` 普通 MP4。参数化视频与原片共用总预算，不另设单请求文件上限。媒体转换直接执行，磁盘预算不限制 CPU 或 RGB 内存，也不保证高负载下的检测延迟与编码成功率。精确帧覆盖校验和输出编码仍分别解码，校验只处理覆盖定位所需范围；单个长 SD 文件的前部仍可能需要顺序读取。真实设备的开放 GOP（部分画面依赖前一组画面的编码）、长关键帧间隔、容量、撤销与重连及长期联合负载，以及物理连接的并行下载和等待取消仍待专项验收，见[部署验收](../../docs/plans/recording-media-tools.md)；已有 SD 回放的验证范围见[米家说明](../../docs/mijia.md#资源边界与验证范围)。
 
 ## Agent 当前数据与历史
 

@@ -3,10 +3,9 @@ import {
   deviceHistoryStreamPolicy,
   deviceHistoryStreamRequestSchema,
 } from "@home-agent/api/device-history";
-import { apiErrorSchema } from "@home-agent/api/contracts";
 import { rpc } from "../../api/client";
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
-import { RequestError } from "../../api/errors";
+import { readResponseError, RequestError } from "../../api/errors";
 import type { HistoryQuery } from "./page";
 
 export const historyStreamSilenceMs = deviceHistoryStreamPolicy.heartbeatMs * 3;
@@ -32,19 +31,7 @@ export async function streamDeviceHistory(
           { init: { signal: requestSignal, cache: "no-store" } },
         );
         onResponse?.(response);
-        if (!response.ok) {
-          const payload: unknown = await response
-            .json()
-            .catch((error: unknown) => {
-              if (error instanceof SyntaxError) return null;
-              throw error;
-            });
-          const details = apiErrorSchema.safeParse(payload);
-          throw new RequestError(
-            details.success ? details.data : { code: "invalid_response" },
-            response.status,
-          );
-        }
+        if (!response.ok) throw await readResponseError(response);
         return response;
       },
       signal,

@@ -6,7 +6,11 @@ import { apiErrorSchema } from "@home-agent/api/contracts";
 import { AppError } from "@home-agent/api/errors";
 import { consumeOperationStream } from "@home-agent/api/http/operation-stream";
 import { ZodError } from "zod";
-import { RequestError, type ClientErrorCode } from "./errors";
+import {
+  readResponseError,
+  RequestError,
+  type ClientErrorCode,
+} from "./errors";
 
 type RpcRequest<R extends Response = Response> = (
   client: BackendClient,
@@ -103,21 +107,8 @@ async function execute<R extends Response, T>(
       const response = await send(rpc, {
         init: { signal, ...(options.keepalive ? { keepalive: true } : {}) },
       });
-      if (
-        !response.ok &&
-        !options.acceptedStatuses?.includes(response.status)
-      ) {
-        const details = apiErrorSchema.safeParse(
-          await response.json().catch((cause: unknown) => {
-            if (cause instanceof SyntaxError) return null;
-            throw cause;
-          }),
-        );
-        throw new RequestError(
-          details.success ? details.data : { code: "invalid_response" },
-          response.status,
-        );
-      }
+      if (!response.ok && !options.acceptedStatuses?.includes(response.status))
+        throw await readResponseError(response);
       const result = await decode(response);
       signal.throwIfAborted();
       return result;

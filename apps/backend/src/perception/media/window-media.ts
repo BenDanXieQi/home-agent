@@ -1,3 +1,5 @@
+import { mediaExpired } from "../../media/resource";
+import { mkdtemp } from "node:fs/promises";
 import { join } from "node:path";
 import type { z } from "zod";
 import type {
@@ -13,8 +15,8 @@ import { representationParameters } from "./representation";
 import { prepareClipDirectory } from "../../media/clip-files";
 import {
   createMediaResources,
-  mediaExpired,
   MediaCapacityError,
+  MediaCleanupError,
 } from "../../media/resources";
 
 export class WindowMediaError extends Error {
@@ -101,14 +103,11 @@ export function createWindowMedia(
   }
   const resources = createMediaResources({
     bytes: windowLimits.productsBytes,
-    concurrency: windowLimits.encodingConcurrency,
-    readers: windowLimits.reads,
     readMs: windowLimits.readMs,
     readChunkBytes: windowLimits.readChunkBytes,
     eviction: "expiry",
     interruptExpiredReads: false,
   });
-  let inputBytes = 0;
   let storageError: string | null = null;
   const ready = prepareClipDirectory(directory).catch((cause: unknown) => {
     storageError = String(cause).slice(0, 1024);
@@ -197,17 +196,11 @@ export function createWindowMedia(
     const lease = store.acquire(id, Date.now());
     if (!lease)
       throw new WindowMediaError("unavailable", "Window input unavailable");
-    if (
-      resources.snapshot.queued + resources.snapshot.encoding >=
-        windowLimits.encodingQueue ||
-      inputBytes + lease.bytes > windowLimits.encodingInputBytes
-    )
-      throw new WindowMediaError("capacity", "Clip encoding queue is full");
     if (previous) resources.invalidate(previous.media, "cancelled");
     const item = new WindowProduct(
       {
         ...view(entry, input),
-        state: "queued",
+        state: "generating",
         error: null,
       },
       resources,
@@ -215,66 +208,63 @@ export function createWindowMedia(
     );
     products.set(idKey, item);
     changed();
-    inputBytes += lease.bytes;
     const signal = AbortSignal.any([
       lease.authorizationSignal,
       item.media.generation.signal,
-      AbortSignal.timeout(windowLimits.encodingWaitMs),
     ]);
-    resources.schedule(item.media, {
-      reservation: windowLimits.productBytes + windowLimits.windowBytes,
-      signal,
-      generate: async () => {
-        await ready;
-        signal.throwIfAborted();
-        if (storageError) throw new Error(storageError);
-        item.view.state = "generating";
-        changed();
-        const mediaId = crypto.randomUUID();
-        const path = join(
-          directory,
-          `${mediaId}.${input.representation.endsWith("image") ? "jpg" : "mp4"}`,
-        );
-        resources.claim(item.media, path);
-        const result = await encodeWindow(
-          {
-            ...lease.input,
-            representation: input.representation,
-            parameters: item.view.parameters,
-          },
-          executable,
-          AbortSignal.any([
+    resources
+      .execute(item.media, {
+        reservation: windowLimits.productBytes + windowLimits.windowBytes,
+        signal,
+        generate: async () => {
+          await ready;
+          signal.throwIfAborted();
+          if (storageError) throw new Error(storageError);
+          const mediaId = crypto.randomUUID();
+          const productDirectory = await mkdtemp(join(directory, "product-"));
+          resources.claim(item.media, productDirectory, true);
+          const path = join(
+            productDirectory,
+            `${mediaId}.${input.representation.endsWith("image") ? "jpg" : "mp4"}`,
+          );
+          const encodingSignal = AbortSignal.any([
             signal,
             AbortSignal.timeout(windowLimits.encodingMs),
-          ]),
-          path,
-        );
-        if (!store.access(id, Date.now()))
-          throw new WindowMediaError("not_found", "Window unavailable");
-        signal.throwIfAborted();
-        resources.publish(item.media, path, result.bytes);
-        item.view = {
-          ...item.view,
-          bytes: result.bytes,
-          state: "ready",
-          mediaId,
-          contentType: result.contentType,
-        };
-        changed();
-      },
-      failed: (cause) => {
+          ]);
+          const result = await encodeWindow(
+            {
+              ...lease.input,
+              representation: input.representation,
+              parameters: item.view.parameters,
+            },
+            executable,
+            encodingSignal,
+            path,
+          );
+          if (!store.access(id, Date.now()))
+            throw new WindowMediaError("not_found", "Window unavailable");
+          signal.throwIfAborted();
+          await resources.publish(item.media, path, result.bytes);
+          item.view = {
+            ...item.view,
+            bytes: result.bytes,
+            state: "ready",
+            mediaId,
+            contentType: result.contentType,
+          };
+          changed();
+        },
+      })
+      .catch((cause: unknown) => {
         if (item.media.retired) return;
         const access = store.access(id, Date.now());
         item.view.state =
           !access || access.inputState === "revoked" ? "revoked" : "failed";
         item.view.error = String(cause).slice(0, 1024);
         changed();
-      },
-    });
-    const releaseInput = () => {
-      inputBytes -= lease.bytes;
-    };
-    item.media.pending!.then(releaseInput, releaseInput);
+        if (cause instanceof MediaCleanupError)
+          storageError ??= String(cause).slice(0, 1024);
+      });
     return view(entry, input);
   }
   function capture(id: string) {
@@ -342,8 +332,6 @@ export function createWindowMedia(
         item.view.mediaId !== mediaId
       )
         throw new WindowMediaError("not_ready", "Media product not ready");
-      if (resources.snapshot.reads >= windowLimits.reads)
-        throw new WindowMediaError("capacity", "Media read capacity exhausted");
       const access = store.acquireRead(id, Date.now());
       if (!access)
         throw new WindowMediaError("not_found", "Window unavailable");
@@ -367,9 +355,6 @@ export function createWindowMedia(
       prune();
       const state = resources.snapshot;
       return {
-        encoding: state.encoding,
-        queued: state.queued,
-        encodingInputBytes: inputBytes,
         reads: state.reads,
         productBytes: state.bytes,
         reservedBytes: state.reservedBytes,

@@ -17,7 +17,6 @@ const resourceStatus = {
   not_ready: 409,
   unavailable: 410,
   conflict: 409,
-  capacity: 429,
 } as const;
 function identifier(value: string) {
   const parsed = mijiaRecordingPlaybackInputSchema.shape.id.safeParse(value);
@@ -42,11 +41,9 @@ export function createRecordingRoutes(
           error.reason === "not_found"
             ? new AppError("not_found")
             : new MijiaError(
-                error.reason === "capacity"
-                  ? "capacity_exceeded"
-                  : error.reason === "conflict"
-                    ? "playback_conflict"
-                    : "camera_failed",
+                error.reason === "conflict"
+                  ? "playback_conflict"
+                  : "camera_failed",
               );
         return errorResponse(c, problem, resourceStatus[error.reason]);
       }

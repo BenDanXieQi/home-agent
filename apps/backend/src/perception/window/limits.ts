@@ -12,9 +12,6 @@ export const windowLimits = Object.freeze({
   pendingVideoPerKind: 16,
   summaryBytes: 64 * 1024 * 1024,
   mediaRetentionMs: 30 * 60_000,
-  encodingQueue: 8,
-  encodingInputBytes: 48 * 1024 * 1024,
-  encodingWaitMs: 30_000,
   encodingMs: 5000,
   readMs: 30_000,
   captureConcurrency: 2,
@@ -23,8 +20,6 @@ export const windowLimits = Object.freeze({
   graySide: 448,
   productBytes: 4 * 1024 * 1024,
   productsBytes: 1024 * 1024 * 1024,
-  encodingConcurrency: 1,
-  reads: 4,
   readChunkBytes: 64 * 1024,
 });
 

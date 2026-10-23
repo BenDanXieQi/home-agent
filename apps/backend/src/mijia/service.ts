@@ -451,6 +451,48 @@ export class MijiaService {
     return this.observeDevices(deviceIds, receive, signal, true);
   }
 
+  private captureDeviceAccess(
+    client: MiCloud,
+    deviceIds: readonly string[],
+    signal: AbortSignal,
+  ) {
+    const revision = this.readGeneration;
+    const devices = new Map(
+      [...new Set(deviceIds)].map((id) => {
+        const device = this.discovery.find(id);
+        if (!device) throw new MijiaError("device_not_found");
+        return [id, device] as const;
+      }),
+    );
+    const combined = AbortSignal.any([
+      signal,
+      this.readScope.signal,
+      ...[...devices.keys()].map((id) => this.deviceReadSignal(id)),
+    ]);
+    return {
+      revision,
+      devices,
+      signal: combined,
+      assertCurrent: () => {
+        combined.throwIfAborted();
+        if (!this.activeAccount(client) || this.readGeneration !== revision)
+          throw new MijiaError("stale_session");
+      },
+      assertDevices: () => {
+        for (const [id, previous] of devices) {
+          const current = this.discovery.find(id);
+          if (!current) throw new MijiaError("device_not_found");
+          if (
+            previous.home_id !== current.home_id ||
+            previous.model !== current.model ||
+            previous.spec_type !== current.spec_type
+          )
+            throw new MijiaError("stale_session");
+        }
+      },
+    };
+  }
+
   materialSession(signal: AbortSignal, deviceId?: string) {
     signal.throwIfAborted();
     const client = this.accountClient;
@@ -462,41 +504,24 @@ export class MijiaService {
     )
       throw new MijiaError("devices_failed");
     const home = this.discovery.requireHome();
-    const generation = this.readGeneration;
-    const device =
-      deviceId === undefined ? undefined : this.discovery.find(deviceId);
-    if (deviceId !== undefined && !device)
-      throw new MijiaError("device_not_found");
-    const combined = AbortSignal.any([
+    const access = this.captureDeviceAccess(
+      client,
+      deviceId === undefined ? [] : [deviceId],
       signal,
-      this.readScope.signal,
-      ...(deviceId === undefined ? [] : [this.deviceReadSignal(deviceId)]),
-    ]);
+    );
     const assertCurrent = () => {
-      combined.throwIfAborted();
-      if (
-        !this.activeAccount(client) ||
-        this.readGeneration !== generation ||
-        !this.discovery.catalogConfirmed
-      )
+      access.assertCurrent();
+      if (!this.discovery.catalogConfirmed)
         throw new MijiaError("stale_session");
       this.discovery.requireHome();
-      if (deviceId !== undefined) {
-        const current = this.discovery.find(deviceId);
-        if (!current) throw new MijiaError("device_not_found");
-        if (
-          current.home_id !== device?.home_id ||
-          current.model !== device?.model ||
-          current.spec_type !== device?.spec_type
-        )
-          throw new MijiaError("stale_session");
-      }
+      access.assertDevices();
     };
     return {
       client,
       home,
-      revision: generation,
-      signal: combined,
+      device: deviceId === undefined ? undefined : access.devices.get(deviceId),
+      revision: access.revision,
+      signal: access.signal,
       assertCurrent,
       devices: () => {
         assertCurrent();
@@ -592,40 +617,20 @@ export class MijiaService {
     if (!client) throw new MijiaError("not_bound");
     if (!this.activeAccount(client)) throw new MijiaError("stale_session");
     const uid = client.getCredentials().userId;
-    const generation = this.readGeneration;
     this.discovery.requireHome();
     if (!this.discovery.catalogConfirmed)
       throw new MijiaError("devices_failed");
     const propertiesSnapshot = properties.map((property) => ({ ...property }));
-    const devices = new Map(
-      [...new Set(propertiesSnapshot.map(({ did }) => did))].map((did) => [
-        did,
-        this.discovery.find(did),
-      ]),
-    );
-    if ([...devices.values()].some((device) => !device))
-      throw new MijiaError("device_not_found");
-    const combined = AbortSignal.any([
+    const access = this.captureDeviceAccess(
+      client,
+      propertiesSnapshot.map(({ did }) => did),
       signal,
-      this.readScope.signal,
-      ...[...devices.keys()].map((did) => this.deviceReadSignal(did)),
-    ]);
+    );
     const assertCurrent = () => {
-      combined.throwIfAborted();
-      if (!this.activeAccount(client) || this.readGeneration !== generation)
-        throw new MijiaError("stale_session");
+      access.assertCurrent();
       if (!this.discovery.catalogConfirmed)
         throw new MijiaError("devices_failed");
-      for (const [did, previous] of devices) {
-        const current = this.discovery.find(did);
-        if (!previous || !current) throw new MijiaError("device_not_found");
-        if (
-          previous.home_id !== current.home_id ||
-          previous.model !== current.model ||
-          previous.spec_type !== current.spec_type
-        )
-          throw new MijiaError("stale_session");
-      }
+      access.assertDevices();
     };
     assertCurrent();
     const requested = preparePropertyRead(
@@ -634,17 +639,17 @@ export class MijiaService {
         getDeviceSpec: (did, readSignal) => this.getDeviceSpec(did, readSignal),
         assertCurrent,
       },
-      combined,
+      access.signal,
     );
     const observations = await this.propertyReader.read(
       requested,
       {
         client,
         source_id: miotSourceId(uid),
-        collection_generation: generation,
+        collection_generation: access.revision,
         assertCurrent,
       },
-      combined,
+      access.signal,
     );
     assertCurrent();
     const rejected = observations.some(
@@ -702,57 +707,34 @@ export class MijiaService {
     if (!this.activeAccount(client) || this.committingCredentials)
       throw new MijiaError("stale_session");
     this.discovery.requireHome();
-    const generation = this.readGeneration;
+    const access = this.captureDeviceAccess(client, deviceIds, signal);
     const definitions = new Map(
-      [...new Set(deviceIds)].map((did) => {
-        const device = this.discovery.find(did);
-        if (!device) throw new MijiaError("device_not_found");
-        return [
-          did,
-          {
-            device,
-            specification: this.getDeviceSpec(did, signal).spec,
-          },
-        ];
-      }),
+      [...access.devices.keys()].map((id) => [
+        id,
+        this.getDeviceSpec(id, signal).spec,
+      ]),
     );
-    const combined = AbortSignal.any([
-      signal,
-      this.readScope.signal,
-      ...[...definitions.keys()].map((did) => this.deviceReadSignal(did)),
-    ]);
     const assertCurrent = () => {
-      combined.throwIfAborted();
+      access.signal.throwIfAborted();
       assertCallerCurrent();
-      if (
-        !this.activeAccount(client) ||
-        this.committingCredentials ||
-        this.readGeneration !== generation
-      )
-        throw new MijiaError("stale_session");
+      access.assertCurrent();
+      if (this.committingCredentials) throw new MijiaError("stale_session");
       this.discovery.requireHome();
       if (!this.household?.ready() || !this.discovery.catalogConfirmed)
         throw new MijiaError("devices_failed");
-      for (const [did, initial] of definitions) {
-        const current = this.discovery.find(did);
-        if (!current) throw new MijiaError("device_not_found");
-        if (
-          initial.device.home_id !== current.home_id ||
-          initial.device.model !== current.model ||
-          initial.device.spec_type !== current.spec_type ||
-          this.getDeviceSpec(did, combined).spec !== initial.specification
-        )
+      access.assertDevices();
+      for (const [id, specification] of definitions)
+        if (this.getDeviceSpec(id, access.signal).spec !== specification)
           throw new MijiaError("stale_session");
-      }
     };
     assertCurrent();
     return {
       onSendStarted,
       client,
       accountKey: this.accountKey(client),
-      signal: combined,
+      signal: access.signal,
       assertCurrent,
-      specification: (did: string) => this.getDeviceSpec(did, combined),
+      specification: (did: string) => this.getDeviceSpec(did, access.signal),
       authenticationRejected: () => {
         if (!this.activeAccount(client)) return;
         this.maintenance.renew(client).catch((backgroundError: unknown) => {

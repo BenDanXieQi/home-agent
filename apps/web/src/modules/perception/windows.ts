@@ -77,9 +77,7 @@ export function windowListOptions({
       query.state.error
         ? false
         : query.state.data?.windows.some(
-              (entry) =>
-                entry.sampledMedia?.state === "queued" ||
-                entry.sampledMedia?.state === "generating",
+              (entry) => entry.sampledMedia?.state === "generating",
             )
           ? 1000
           : 4000,
@@ -149,8 +147,7 @@ export function windowMediaOptions(
     refetchInterval: (query) =>
       query.state.error
         ? false
-        : query.state.data?.state === "queued" ||
-            query.state.data?.state === "generating"
+        : query.state.data?.state === "generating"
           ? 500
           : false,
   });

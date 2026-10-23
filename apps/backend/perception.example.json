@@ -2,6 +2,9 @@
   "cpuRatio": 0.5,
   "sources": [],
   "sampleFps": 3,
+  "recordings": {
+    "cacheBytes": 25000000000
+  },
   "firstFrameTimeoutMs": 90000,
   "silenceTimeoutMs": 30000,
   "maxFrameAgeMs": 2000

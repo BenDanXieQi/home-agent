@@ -1,6 +1,10 @@
 import { z } from "zod";
 import type { stateVersionSchema } from "@home-agent/api/household";
-import type { sourceSelectionSchema } from "./config";
+import {
+  sourceKey,
+  type perceptionConfigSchema,
+  type sourceSelectionSchema,
+} from "./config";
 
 export const sourceAccessSchema = z.strictObject({
   endpoint: z.url(),
@@ -26,3 +30,20 @@ export type PerceptionSources = {
     signal: AbortSignal;
   }>;
 };
+
+export function selectSources(
+  config: Pick<
+    z.infer<typeof perceptionConfigSchema>,
+    "sources" | "sourceProfiles"
+  >,
+  available: z.infer<typeof sourceSelectionSchema>[],
+) {
+  return (config.sources === "household" ? available : config.sources).map(
+    (source) => ({
+      ...config.sourceProfiles.find(
+        (profile) => sourceKey(profile) === sourceKey(source),
+      ),
+      ...source,
+    }),
+  );
+}

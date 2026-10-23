@@ -7,8 +7,6 @@ import { Notice } from "../../components/Notice";
 import { requestErrorMessage } from "../../messages/zh-CN";
 import {
   applySpatialLayout,
-  spatialQueryOptions,
-  unconfirmedWrite,
   type SpatialSnapshot,
 } from "../../modules/spatial/api";
 import { layoutVersions } from "../../modules/spatial/layout";
@@ -23,26 +21,15 @@ export function ResetLayout({
 }) {
   const client = useQueryClient();
   const navigate = useNavigate();
-  const options = spatialQueryOptions(scope);
   const [open, setOpen] = useState(false);
   const reset = useMutation({
-    mutationFn: async (planned: SpatialSnapshot) => {
-      try {
-        return await applySpatialLayout({
-          expected: layoutVersions(planned),
-          spaces: [],
-          passages: [],
-        });
-      } catch (cause) {
-        if (!unconfirmedWrite(cause)) throw cause;
-        // The response was lost; the reset may still have landed.
-        const current = await client.fetchQuery({ ...options, staleTime: 0 });
-        if (!current.spaces.length && !current.passages.length) return current;
-        throw cause;
-      }
-    },
-    onSuccess: async (next) => {
-      client.setQueryData(options.queryKey, next);
+    mutationFn: (planned: SpatialSnapshot) =>
+      applySpatialLayout(client, scope, {
+        expected: layoutVersions(planned),
+        spaces: [],
+        passages: [],
+      }),
+    onSuccess: async () => {
       setOpen(false);
       await navigate({ to: "/spaces" });
     },

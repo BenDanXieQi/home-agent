@@ -914,8 +914,11 @@ export function createAppearanceIdentity(options: {
         versions !== null &&
         isDeepStrictEqual(observation.referenceVersions, versions);
       const all = [...observation.tracks, ...observation.recent];
-      const validFaces = (track: Observation["tracks"][number]) =>
-        track.evidence.filter((face) => {
+      const facesByTrack = new Map<Observation["tracks"][number], Face[]>();
+      const validFaces = (track: Observation["tracks"][number]) => {
+        const cached = facesByTrack.get(track);
+        if (cached) return cached;
+        const faces = track.evidence.filter((face) => {
           const p = face.provenance;
           return (
             p.sourceRunId === source.run.runId &&
@@ -932,6 +935,9 @@ export function createAppearanceIdentity(options: {
             face.observedAt <= wallNow
           );
         });
+        facesByTrack.set(track, faces);
+        return faces;
+      };
       const legal = new Map(
         options.matching
           .associate(

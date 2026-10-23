@@ -15,6 +15,9 @@ import type { createDeviceHistoryService } from "./household/history/service";
 import { createIdentityRoutes } from "./household/identity/routes";
 import type { createReferenceEnrollment } from "./household/identity/enrollment";
 import type { createIdentityReferences } from "./household/identity/references";
+import { createRecordingsRoutes } from "./recordings/routes";
+import type { createRecordingsService } from "./recordings/service";
+import type { createSdRecordingSource } from "./mijia/recordings/source";
 import { createRecordingService } from "./mijia/recordings/service";
 import { createRecordingRoutes } from "./mijia/recordings/routes";
 import { createSpeechRoutes } from "./conversation/routes";
@@ -64,6 +67,8 @@ type AppDependencies = {
   speechInbox: ReturnType<typeof createSpeechInbox>;
   perception: ReturnType<typeof createPerceptionService>;
   staticRoot?: string;
+  recordingMedia: ReturnType<typeof createRecordingsService>;
+  sdRecordings: ReturnType<typeof createSdRecordingSource>;
   recordings?: Pick<
     Parameters<typeof createRecordingService>[0],
     "directory" | "executable" | "resolveWindow"
@@ -92,6 +97,8 @@ export function createApp({
   perception,
   staticRoot,
   recordings,
+  recordingMedia,
+  sdRecordings,
   environment,
   connectionStore,
   household,
@@ -110,7 +117,8 @@ export function createApp({
   const recordingService = createRecordingService({
     ...recordings,
     household,
-    mijia: mijiaService,
+    sd: sdRecordings,
+    originals: recordingMedia,
     shutdown: shutdownSignal,
     resolveWindow:
       recordings?.resolveWindow ??
@@ -251,6 +259,10 @@ export function createApp({
         port: environment.BACKEND_PORT,
         workflows,
       }),
+    )
+    .route(
+      "/api/recordings",
+      createRecordingsRoutes(recordingMedia, environment.BACKEND_PORT),
     )
     .route(
       "/api/mijia/recordings",

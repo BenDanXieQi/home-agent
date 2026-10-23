@@ -19,9 +19,13 @@ import { prepareSourceLease } from "./source-lease";
 import { createAudioService } from "./audio/service";
 import { errorDetails } from "./compute/protocol";
 import pTimeout from "p-timeout";
-import type { PerceptionSources } from "./sources";
+import { selectSources, type PerceptionSources } from "./sources";
 import { readPerceptionConfig } from "./config-file";
-import { perceptionConfigSchema, sourceKey } from "./config";
+import {
+  perceptionConfigSchema,
+  perceptionSourceLimit,
+  sourceKey,
+} from "./config";
 import { createDetectionPool, DetectionPoolError } from "./compute/pool";
 import { createObservationStore } from "./observation-store";
 
@@ -259,16 +263,9 @@ export function createPerceptionService(options: {
     options.appearance?.tick(performance.now());
     windows.tick(Date.now());
     media.prune();
-    const selected = (
-      config.sources === "household" ? options.sources.list() : config.sources
-    ).map((source) => ({
-      ...config.sourceProfiles.find(
-        (profile) => sourceKey(profile) === sourceKey(source),
-      ),
-      ...source,
-    }));
+    const selected = selectSources(config, options.sources.list());
     windows.reconcile(
-      selected.length > 8
+      selected.length > perceptionSourceLimit
         ? []
         : selected.flatMap((source) => {
             const access = options.sources.eligibility(source);
@@ -291,7 +288,7 @@ export function createPerceptionService(options: {
         retire(key, "Compute unavailable or replaced");
       computeId = compute?.processId;
     }
-    if (selected.length > 8) {
+    if (selected.length > perceptionSourceLimit) {
       status = "unavailable";
       error = "Perception supports at most 8 camera channels";
       for (const key of desired.keys()) retire(key, error);

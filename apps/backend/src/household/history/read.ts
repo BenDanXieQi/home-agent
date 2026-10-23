@@ -1,4 +1,4 @@
-import { addAbortListener } from "node:events";
+import pTimeout from "p-timeout";
 import { AppError } from "@home-agent/api/errors";
 import type { deviceHistoryQuerySchema } from "@home-agent/api/device-history";
 import { jsonBytes } from "../config";
@@ -39,24 +39,23 @@ export function createDeviceHistoryReader(
       access.assertCurrent();
     };
     assertCurrent();
-    const aborted = Promise.withResolvers<never>();
-    const listener = addAbortListener(signal, () =>
-      aborted.reject(abortError()),
-    );
     try {
-      const result = await Promise.race([
-        run(query, {
-          identity: access.identity,
-          assertCurrent,
-          signal,
-          timeoutMs,
-        }),
-        aborted.promise,
-      ]);
+      const result = await pTimeout(
+        Promise.resolve().then(() =>
+          run(query, {
+            identity: access.identity,
+            assertCurrent,
+            signal,
+            timeoutMs,
+          }),
+        ),
+        { milliseconds: Infinity, signal },
+      );
       assertCurrent();
       return result;
-    } finally {
-      listener[Symbol.dispose]();
+    } catch (cause) {
+      if (signal.aborted) throw abortError();
+      throw cause;
     }
   }
   const read = (

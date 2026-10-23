@@ -16,6 +16,7 @@
 | 空间、通道与观测绑定维护 | [Web 空间维护](../apps/web/README.md#空间关系资料)、[Backend 空间资料](../apps/backend/README.md#空间关系资料)、[共享契约](../packages/api/README.md#空间资料契约)                                                                | [空间模块](../apps/backend/src/household/spatial)、[维护页面](../apps/web/src/pages/spaces)、[共享契约](../packages/api/src/contracts/spatial.ts)                                    |
 | 图片与持续空间规划       | [Agent 空间规划会话](../apps/agent/README.md#空间规划会话)、[会话契约](../apps/agent/README.md#空间规划会话契约)                                                                                                                  | [规划 Workflow](../apps/agent/src/workflows/spatial-planning/workflow.ts)、[会话生命周期](../apps/agent/src/workflows/spatial-planning/session.ts)                                   |
 | 本地检测、音视频证据     | [当前检测](perception.md)，新增能力再读[媒体扩展计划](plans/media-perception.md)                                                                                                                                                  | [感知模块](../apps/backend/src/perception)、[go2rtc 扩展](../docker/go2rtc)                                                                                                          |
+| 原始录像、抽帧与裁切     | [Backend 媒体接口](../apps/backend/README.md#原始录像与媒体读取)、[SD 回放](mijia.md#sd-卡录像读取与回放)                                                                                                                         | [请求 schema 与生命周期](../apps/backend/src/recordings/service.ts)、[原片共享](../apps/backend/src/recordings/originals.ts)、[按需读取](../apps/backend/src/recordings/read.ts)     |
 | Agent 媒体分析           | [模型调用](../apps/agent/README.md#媒体分析)、[提示词管理](agent/prompt-management.md)                                                                                                                                            | [Agent 媒体分析](../apps/agent/src/perception/analysis.ts)                                                                                                                           |
 | 本地成员身份分析         | [持续身份分析](perception.md#持续成员身份分析)                                                                                                                                                                                    | [身份分析](../apps/backend/src/perception/identity)、[窗口接纳](../apps/backend/src/perception/window)                                                                               |
 | 离线身份校准             | [评估协议与结果](../apps/backend/scripts/perception-evaluation/README.md#人体外观离线校准)、[属性模型参考](references/person-attributes.md)                                                                                       | [评估适配](../apps/backend/scripts/perception-evaluation)、[ReID 校准](../apps/backend/scripts/calibrate-appearance.ts)                                                              |
@@ -36,7 +37,7 @@
 | 文档                                                     | 回答的问题与维护范围                                                                                                                                                 |
 | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [本地运行](running.md)                                   | 如何启动、配置服务连接、切换 go2rtc 运行方式及停止服务                                                                                                               |
-| [米家接入与摄像头](mijia.md)                             | 如何授权、预览、管理媒体资源；米家设备能力与使用限制                                                                                                                 |
+| [米家接入与摄像头](mijia.md)                             | 如何授权、预览、读取与回放 SD 录像、管理媒体资源；米家设备能力与使用限制                                                                                             |
 | [家庭运行时](household-runtime.md)                       | 当前家庭绑定、设备清单、规格、公共状态订阅，设备历史保存与查询，以及 Agent 六部分推送、成员和音视频材料历史及验证限制                                                |
 | [设备事实与房间快照](contracts/device-facts.md)          | 持续采集、当前值质量、本机策略、房间查询与读取                                                                                                                       |
 | [家庭自动化](automations.md)                             | 条件树、自然语言草稿、固定动作、执行记录，以及未启用的 AI 能力边界                                                                                                   |
@@ -49,11 +50,12 @@
 
 ## 实施计划
 
-| 文档                                         | 唯一维护的设计                                             |
-| -------------------------------------------- | ---------------------------------------------------------- |
-| [计划入口](plans/README.md)                  | 计划导航和共同交付要求，不另维护一份实施路线               |
-| [媒体能力扩展](plans/media-perception.md)    | 非人声候选、有限观察、Agent 媒体输入与恢复、身份生产者扩展 |
-| [家庭 Agent 评测](plans/agent-evaluation.md) | 家庭设备约束、有来源的米家用户场景、黄金集设计及能力前提   |
+| 文档                                                           | 维护范围                                                   |
+| -------------------------------------------------------------- | ---------------------------------------------------------- |
+| [计划入口](plans/README.md)                                    | 计划导航和共同交付要求，不另维护一份实施路线               |
+| [媒体能力扩展](plans/media-perception.md)                      | 非人声候选、有限观察、Agent 媒体输入与恢复、身份生产者扩展 |
+| [原始录像与媒体读取：部署验收](plans/recording-media-tools.md) | 断流、原片缺口、容量与撤销及 SD 并发读卡验收               |
+| [家庭 Agent 评测](plans/agent-evaluation.md)                   | 家庭设备约束、有来源的米家用户场景、黄金集设计及能力前提   |
 
 Agent 当前数据推送、独立接收和设备／成员／音视频历史读取的用法与限制由家庭运行时、Agent README 和共享契约维护；未验证范围统一见[Agent 通路验证边界](household-runtime.md#agent-通路验证边界)。设备历史读取已保存的变化，成员读取当前归因修订，音视频读取数据库保留的整体观察记录与当前媒体状态；这些材料不证明区间完整。AI 关联推理与回写不属于当前已实现能力。
 

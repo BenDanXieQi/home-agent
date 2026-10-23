@@ -1,4 +1,4 @@
-import { addAbortListener } from "node:events";
+import pTimeout from "p-timeout";
 import {
   deviceHistoryTimeSchema,
   deviceHistoryPolicy,
@@ -86,17 +86,12 @@ export function createDeviceHistoryLiveReader(
               if (current.page === page) current.page = undefined;
             });
           }
-          const aborted = Promise.withResolvers<never>();
-          const listener = addAbortListener(signal, () =>
-            aborted.reject(signal.reason),
-          );
-          try {
-            const page = await Promise.race([current.page, aborted.promise]);
-            signal.throwIfAborted();
-            return page;
-          } finally {
-            listener[Symbol.dispose]();
-          }
+          const page = await pTimeout(current.page, {
+            milliseconds: Infinity,
+            signal,
+          });
+          signal.throwIfAborted();
+          return page;
         },
         release() {
           if (released) return;

@@ -13,6 +13,7 @@ import {
 import { frameLimits } from "@home-agent/api/contracts";
 import { MediaCleanupError } from "../../media/resources";
 import { runFfmpeg } from "../../media/ffmpeg";
+import { describeMedia } from "../../media/inspection";
 
 const limits = {
   segmentMs: 255_000,
@@ -55,7 +56,7 @@ export async function inspectRecording(
 ) {
   try {
     checkSignal(signal);
-    await recordingFile(file);
+    const bytes = await recordingFile(file);
     if (
       !Number.isFinite(maxDurationMs) ||
       maxDurationMs <= 0 ||
@@ -235,6 +236,17 @@ export async function inspectRecording(
       actualDurationMs,
       width,
       height,
+      recording: {
+        ...describeMedia(input),
+        bytes,
+        startPtsMs:
+          (videoPackets.startPts * videoPackets.timeBaseNumerator * 1000) /
+          videoPackets.timeBaseDenominator,
+        endPtsMs:
+          (videoPackets.endPts * videoPackets.timeBaseNumerator * 1000) /
+          videoPackets.timeBaseDenominator,
+        formatStartPtsMs: formatStartMs,
+      },
       videoPackets: videoPackets.packets,
       videoTimeline: [...videoTimes.entries()]
         .toSorted(([left], [right]) => left - right)
@@ -402,9 +414,7 @@ export async function encodeRecording(
     new Set(inputs.map((input) => input.path)).size !== inputs.length ||
     inputs.some(
       ({ path: file }) =>
-        dirname(file) !== directory ||
-        !/^segment-\d+\.mp4$/.test(basename(file)) ||
-        file === destination,
+        !isAbsolute(file) || resolve(file) !== file || file === destination,
     )
   )
     throw invalidMedia();
@@ -439,7 +449,7 @@ export async function encodeRecording(
           const file = inputs[index]?.path;
           if (!file) throw invalidMedia();
           return [
-            `file '${basename(file)}'`,
+            `file '${file.replaceAll("'", "'\\''")}'`,
             `duration ${item.actualDurationMs / 1000}`,
           ];
         }),
@@ -455,12 +465,13 @@ export async function encodeRecording(
         "file",
         "-err_detect",
         "explode",
+        // concat rebases timestamps; preserve that timeline for event offsets.
+        // Shifting again would move video frames when AAC priming has negative PTS.
         "-copyts",
-        "-start_at_zero",
         "-f",
         "concat",
         "-safe",
-        "1",
+        "0",
         "-i",
         list,
         "-map",
@@ -556,15 +567,16 @@ export async function encodeRecording(
       throw error;
     }
     checkSignal(signal);
-    // oxlint-disable-next-line eslint/preserve-caught-error
-    throw new Error("recording_encoding_failed");
+    throw new Error("recording_encoding_failed", { cause: error });
   } finally {
     if (cleanupSafe)
       await Promise.all([
         rm(list, { force: true }),
         rm(output, { force: true }),
-      ]).catch(() => {
-        throw new MediaCleanupError("Recording temporary file cleanup failed");
+      ]).catch((cause: unknown) => {
+        throw new MediaCleanupError("Recording temporary file cleanup failed", {
+          cause,
+        });
       });
   }
 }

@@ -3,11 +3,14 @@ import {
   petSoundConfigSchema,
   cameraVideoQualitySchema,
 } from "@home-agent/api/contracts";
+import { recordingsConfigSchema } from "../recordings/config";
 import { identityConfigSchema } from "./identity/config";
 import { speechDialogueConfigSchema } from "../conversation/contracts";
 import { speechConfigSchema } from "@home-agent/api/contracts";
 import { cpuRatioSchema } from "./compute/budget";
 import { z } from "zod";
+
+export const perceptionSourceLimit = 8;
 
 export const sourceSelectionSchema = z.strictObject({
   deviceId: z.string().regex(/^[0-9]{1,32}$/),
@@ -17,6 +20,7 @@ export const sourceSelectionSchema = z.strictObject({
 export const perceptionConfigSchema = z
   .strictObject({
     cpuRatio: cpuRatioSchema,
+    recordings: recordingsConfigSchema.prefault({}),
     window: windowPolicySchema.default(() => windowPolicySchema.parse({})),
     identity: identityConfigSchema.nullable().default(null),
     dialogue: speechDialogueConfigSchema.prefault({}),
@@ -24,12 +28,25 @@ export const perceptionConfigSchema = z
     speech: speechConfigSchema.prefault({}),
     petSounds: petSoundConfigSchema.prefault({}),
     sources: z
-      .union([z.literal("household"), z.array(sourceSelectionSchema).max(8)])
-      .default([]),
+      .union([
+        z.literal("household"),
+        z.array(sourceSelectionSchema).max(perceptionSourceLimit),
+      ])
+      .default([])
+      .refine(
+        (sources) =>
+          sources === "household" ||
+          new Set(sources.map(sourceKey)).size === sources.length,
+        "Duplicate camera channel",
+      ),
     sourceProfiles: z
       .array(sourceSelectionSchema.required({ videoQuality: true }))
-      .max(8)
-      .default([]),
+      .max(perceptionSourceLimit)
+      .default([])
+      .refine(
+        (profiles) => new Set(profiles.map(sourceKey)).size === profiles.length,
+        "Duplicate camera channel profile",
+      ),
     sampleFps: z.number().positive().max(30).default(3),
     firstFrameTimeoutMs: z.int().min(100).max(300_000).default(90_000),
     silenceTimeoutMs: z.int().min(100).max(300_000).default(30_000),
@@ -40,20 +57,8 @@ export const perceptionConfigSchema = z
     "Dialogue requires speech transcription",
   )
   .refine(
-    (config) =>
-      new Set(config.sourceProfiles.map(sourceKey)).size ===
-      config.sourceProfiles.length,
-    "Duplicate camera channel profile",
-  )
-  .refine(
     (config) => config.silenceTimeoutMs > 1000 / config.sampleFps,
     "Silence timeout must exceed the sampling interval",
-  )
-  .refine(
-    (config) =>
-      config.sources === "household" ||
-      new Set(config.sources.map(sourceKey)).size === config.sources.length,
-    "Duplicate camera channel",
   );
 export function sourceKey(source: z.infer<typeof sourceSelectionSchema>) {
   return `${source.deviceId}:${source.channel}`;

@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { HouseholdError } from "../../../src/household/errors";
 import { windowSummarySchema } from "@home-agent/api/contracts";
 import { createRecordingService } from "../../../src/mijia/recordings/service";
+import { createSdRecordingSource } from "../../../src/mijia/recordings/source";
+import { createRecordingsService } from "../../../src/recordings/service";
+import { perceptionConfigSchema } from "../../../src/perception/config";
 import { deferred, eventually, nextTurn } from "../../support/async";
 
 function observation() {
@@ -63,7 +66,7 @@ function observation() {
   });
 }
 
-function fixture(
+async function fixture(
   resolveWindow: NonNullable<
     Parameters<typeof createRecordingService>[0]["resolveWindow"]
   >,
@@ -89,8 +92,8 @@ function fixture(
     nextAfterMs: null,
   };
   const readRecordings = mock(async () => index);
-  const service = createRecordingService({
-    household: { ready: true, epoch: scopeEpoch, subscribe: () => () => {} },
+  const shutdown = new AbortController().signal;
+  const sd = createSdRecordingSource({
     mijia: {
       recordingAccess: () => ({
         signal: source.signal,
@@ -104,10 +107,51 @@ function fixture(
         },
       }),
       readRecordings,
+      sourceSnapshot() {
+        throw new Error("Current binding lookup is not used by playback");
+      },
     },
-    shutdown: new AbortController().signal,
-    resolveWindow,
+    shutdown,
   });
+  const directory = await mkdtemp(join(tmpdir(), "recording-playback-test-"));
+  const originals = createRecordingsService({
+    sd,
+    sources: {
+      list: () => [],
+      subscribe: () => () => {},
+      eligibility: () =>
+        source.signal.aborted
+          ? null
+          : {
+              scopeEpoch,
+              householdVersion: { scope_epoch: scopeEpoch, sequence: 0 },
+              identity: "test-source",
+            },
+      prepare() {
+        throw new Error("Live capture is not used by playback");
+      },
+    },
+    readConfig: async () => perceptionConfigSchema.parse({ cpuRatio: 0.5 }),
+    executable: "ffmpeg",
+    directory: join(directory, "originals"),
+  });
+  await originals.start();
+  const playback = createRecordingService({
+    household: { ready: true, epoch: scopeEpoch, subscribe: () => () => {} },
+    sd,
+    originals,
+    shutdown,
+    resolveWindow,
+    directory: join(directory, "playback"),
+  });
+  const service = {
+    ...playback,
+    async close() {
+      await playback.close();
+      await originals.close();
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
   const input = {
     id: crypto.randomUUID(),
     scope_epoch: scopeEpoch,
@@ -124,7 +168,7 @@ function fixture(
 }
 
 test("missing observation is unavailable before any SD index or download request", async () => {
-  const run = fixture(async () => undefined);
+  const run = await fixture(async () => undefined);
   try {
     run.service.request(run.input);
     expect(await run.settled()).toMatchObject({
@@ -138,7 +182,7 @@ test("missing observation is unavailable before any SD index or download request
 });
 
 test("archive failure is reported as an observation read failure before SD access", async () => {
-  const run = fixture(async () => {
+  const run = await fixture(async () => {
     throw new HouseholdError("home_storage");
   });
   try {
@@ -154,7 +198,7 @@ test("archive failure is reported as an observation read failure before SD acces
 });
 
 test("missing SD recordings remain distinct from a failed SD index read", async () => {
-  const run = fixture(() => Promise.resolve(run.window));
+  const run = await fixture(() => Promise.resolve(run.window));
   try {
     run.readRecordings.mockImplementationOnce(async () => ({
       ...run.index,
@@ -183,7 +227,7 @@ test("missing SD recordings remain distinct from a failed SD index read", async 
 
 test("releasing playback cancels a pending observation read without accessing SD", async () => {
   const entered = deferred<AbortSignal>();
-  const run = fixture((_id, signal) => {
+  const run = await fixture((_id, signal) => {
     if (!signal) throw new Error("Expected playback cancellation signal");
     entered.resolve(signal);
     return new Promise((_resolve, reject) => {
@@ -210,7 +254,7 @@ test("releasing playback cancels a pending observation read without accessing SD
 test("revoking the source during observation lookup preserves revoked playback", async () => {
   const entered = deferred();
   const lookup = deferred<ReturnType<typeof observation> | undefined>();
-  const run = fixture(() => {
+  const run = await fixture(() => {
     entered.resolve();
     return lookup.promise;
   });
@@ -271,7 +315,7 @@ test("a valid archived observation reaches SD playback and produces readable med
   );
   const peer = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: downloads });
   let resolvedSignal: AbortSignal | undefined;
-  const run = fixture((id, signal) => {
+  const run = await fixture((id, signal) => {
     expect(id).toBe(run.window.id);
     resolvedSignal = signal;
     return Promise.resolve(run.window);

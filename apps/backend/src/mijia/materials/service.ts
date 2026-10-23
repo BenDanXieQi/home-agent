@@ -367,10 +367,7 @@ export function createMijiaMaterials(deps: {
                   session.signal,
                 );
         }
-        session.assertCurrent();
         scope.assertCurrent();
-        if (!session.devices().some((item) => item.did === device.did))
-          throw new MijiaError("device_not_found");
         success(
           diagnostic,
           rows.length,

@@ -112,12 +112,7 @@ export function createWindowRoutes(
           c.req.param("id"),
           c.req.valid("json"),
         );
-        return c.json(
-          result,
-          result.state === "queued" || result.state === "generating"
-            ? 202
-            : 200,
-        );
+        return c.json(result, result.state === "generating" ? 202 : 200);
       },
     )
     .get("/:id/media/:representation", mediaQuery, (c) => {

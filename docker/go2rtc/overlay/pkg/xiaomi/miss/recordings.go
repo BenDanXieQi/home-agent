@@ -54,7 +54,6 @@ type recordingRequest struct {
 
 type recordingReader struct {
 	init    sync.Once
-	slots   chan struct{}
 	gate    chan struct{}
 	mu      sync.Mutex
 	request *recordingRequest
@@ -78,18 +77,11 @@ func (c *Client) beginRecordingRequest(ctx context.Context, command uint32) (*re
 	}
 	r := &c.recordings
 	r.init.Do(func() {
-		r.slots = make(chan struct{}, 2)
 		r.gate = make(chan struct{}, 1)
 	})
 	select {
-	case r.slots <- struct{}{}:
-	default:
-		return nil, ErrRecordingsBusy
-	}
-	select {
 	case r.gate <- struct{}{}:
 	case <-ctx.Done():
-		<-r.slots
 		return nil, ctx.Err()
 	}
 	r.mu.Lock()
@@ -100,7 +92,6 @@ func (c *Client) beginRecordingRequest(ctx context.Context, command uint32) (*re
 	}
 	if err != nil {
 		<-r.gate
-		<-r.slots
 		return nil, err
 	}
 	request := &recordingRequest{ctx: ctx, command: command, done: make(chan recordingReply, 1)}
@@ -122,7 +113,6 @@ func (c *Client) releaseRecordingRequest(request *recordingRequest, completed bo
 		r.failed = true
 	}
 	<-r.gate
-	<-r.slots
 }
 
 func (c *Client) writeRecordingCommand(ctx context.Context, command uint32, payload []byte) error {

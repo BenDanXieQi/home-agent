@@ -56,10 +56,15 @@ function diff<T extends { id: string; name: string }>(
   const old = new Map(previous.map((record) => [record.id, record]));
   const kept = new Set(next.map((record) => record.id));
   return {
-    created: next.filter((record) => !old.has(record.id)),
-    changed: next.filter((record) => {
+    kept,
+    items: next.map((record) => {
       const saved = old.get(record.id);
-      return saved && !same(saved, record);
+      const state = !saved
+        ? ("created" as const)
+        : same(saved, record)
+          ? ("unchanged" as const)
+          : ("changed" as const);
+      return { ...record, state };
     }),
     removed: previous.filter((record) => !kept.has(record.id)),
   };
@@ -78,29 +83,27 @@ export function describeLayoutChange(
   before: ReturnType<typeof spatialLayoutSchema.parse>,
   after: ReturnType<typeof spatialLayoutSchema.parse>,
 ) {
-  const spaces = diff(
-    before.spaces,
-    after.spaces,
-    (left, right) =>
-      left.name === right.name && left.description === right.description,
-  );
-  const passages = diff(
-    before.passages,
-    after.passages,
-    (left, right) =>
-      left.name === right.name &&
-      left.description === right.description &&
-      left.space_a_id === right.space_a_id &&
-      left.space_b_id === right.space_b_id,
-  );
+  const comparison = compareLayout(before, after);
   return (
     [
-      ["新增空间", spaces.created],
-      ["修改空间", spaces.changed],
-      ["删除空间", spaces.removed],
-      ["新增通道", passages.created],
-      ["修改通道", passages.changed],
-      ["删除通道", passages.removed],
+      [
+        "新增空间",
+        comparison.spaces.filter((record) => record.state === "created"),
+      ],
+      [
+        "修改空间",
+        comparison.spaces.filter((record) => record.state === "changed"),
+      ],
+      ["删除空间", comparison.removedSpaces],
+      [
+        "新增通道",
+        comparison.passages.filter((record) => record.state === "created"),
+      ],
+      [
+        "修改通道",
+        comparison.passages.filter((record) => record.state === "changed"),
+      ],
+      ["删除通道", comparison.removedPassages],
     ] as const
   )
     .filter(([, records]) => records.length)
@@ -110,51 +113,34 @@ export function describeLayoutChange(
 
 /** Compares a planned layout with the saved snapshot, record by record. */
 export function compareLayout(
-  snapshot: SpatialSnapshot,
+  snapshot: ReturnType<typeof spatialLayoutSchema.parse> &
+    Partial<Pick<SpatialSnapshot, "observation_bindings">>,
   layout: ReturnType<typeof spatialLayoutSchema.parse>,
 ) {
-  const spaces = new Map(snapshot.spaces.map((record) => [record.id, record]));
-  const passages = new Map(
-    snapshot.passages.map((record) => [record.id, record]),
+  const spaces = diff(
+    snapshot.spaces,
+    layout.spaces,
+    (left, right) =>
+      left.name === right.name && left.description === right.description,
   );
-  const keptSpaces = new Set(layout.spaces.map((space) => space.id));
-  const keptPassages = new Set(layout.passages.map((passage) => passage.id));
-  const spaceState = (space: (typeof layout.spaces)[number]) => {
-    const saved = spaces.get(space.id);
-    if (!saved) return "created" as const;
-    return saved.name !== space.name || saved.description !== space.description
-      ? ("changed" as const)
-      : ("unchanged" as const);
-  };
-  const passageState = (passage: (typeof layout.passages)[number]) => {
-    const saved = passages.get(passage.id);
-    if (!saved) return "created" as const;
-    return saved.name !== passage.name ||
-      saved.description !== passage.description ||
-      saved.space_a_id !== passage.space_a_id ||
-      saved.space_b_id !== passage.space_b_id
-      ? ("changed" as const)
-      : ("unchanged" as const);
-  };
+  const passages = diff(
+    snapshot.passages,
+    layout.passages,
+    (left, right) =>
+      left.name === right.name &&
+      left.description === right.description &&
+      left.space_a_id === right.space_a_id &&
+      left.space_b_id === right.space_b_id,
+  );
   const result = {
-    spaces: layout.spaces.map((space) => ({
-      ...space,
-      state: spaceState(space),
-    })),
-    passages: layout.passages.map((passage) => ({
-      ...passage,
-      state: passageState(passage),
-    })),
-    removedSpaces: snapshot.spaces.filter(
-      (record) => !keptSpaces.has(record.id),
-    ),
-    removedPassages: snapshot.passages.filter(
-      (record) => !keptPassages.has(record.id),
-    ),
-    referenced: snapshot.observation_bindings.filter(
+    spaces: spaces.items,
+    passages: passages.items,
+    removedSpaces: spaces.removed,
+    removedPassages: passages.removed,
+    referenced: (snapshot.observation_bindings ?? []).filter(
       (binding) =>
-        (binding.space_id !== null && !keptSpaces.has(binding.space_id)) ||
-        (binding.passage_id !== null && !keptPassages.has(binding.passage_id)),
+        (binding.space_id !== null && !spaces.kept.has(binding.space_id)) ||
+        (binding.passage_id !== null && !passages.kept.has(binding.passage_id)),
     ),
   };
   const count = (state: "created" | "changed") =>

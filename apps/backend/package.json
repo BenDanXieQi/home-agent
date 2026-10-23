@@ -37,6 +37,7 @@
     "@techstark/opencv-js": "4.12.0-release.1",
     "cron-parser": "^5.10.1",
     "drizzle-orm": "catalog:",
+    "form-data": "4.0.6",
     "hono": "catalog:",
     "kalman-filter": "2.3.0",
     "mqtt": "5.16.0",

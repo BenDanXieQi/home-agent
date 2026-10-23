@@ -30,7 +30,6 @@ export const mediaRequestSchema = mediaSelectionSchema.extend({
   retry: z.boolean().default(false),
 });
 export const mediaStateSchema = z.enum([
-  "queued",
   "not_generated",
   "generating",
   "ready",

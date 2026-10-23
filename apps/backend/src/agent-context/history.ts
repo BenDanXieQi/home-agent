@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { addAbortListener } from "node:events";
+import pTimeout from "p-timeout";
 import { z } from "zod";
 import {
   agentContextPolicy,
@@ -74,10 +74,6 @@ export function createAgentHistoryReader(options: {
       access.assertCurrent();
     };
     assertCurrent();
-    const aborted = Promise.withResolvers<never>();
-    const listener = addAbortListener(signal, () => {
-      aborted.reject(abortError());
-    });
     const run = async () => {
       const { cursor: _cursor, limit: _limit, ...conditions } = input;
       const hash = createHash("sha256")
@@ -193,7 +189,10 @@ export function createAgentHistoryReader(options: {
       return { ...envelope, records, next_cursor: more ? next : null };
     };
     try {
-      const result = await Promise.race([run(), aborted.promise]);
+      const result = await pTimeout(Promise.resolve().then(run), {
+        milliseconds: Infinity,
+        signal,
+      });
       assertCurrent();
       if (result.kind === "perception_windows") {
         for (const record of result.records) {
@@ -209,8 +208,9 @@ export function createAgentHistoryReader(options: {
         throw new HouseholdError("capacity_exceeded");
       assertCurrent();
       return response;
-    } finally {
-      listener[Symbol.dispose]();
+    } catch (cause) {
+      if (signal.aborted) throw abortError();
+      throw cause;
     }
   };
 }

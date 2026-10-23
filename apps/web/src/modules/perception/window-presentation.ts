@@ -27,7 +27,6 @@ export function candidateLabel(window: Pick<WindowListEntry, "gate">) {
 }
 
 export const mediaStates = {
-  queued: "等待生成",
   generating: "正在生成",
   ready: "可播放",
   failed: "生成失败",

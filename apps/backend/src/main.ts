@@ -33,6 +33,9 @@ import { createSpatialService } from "./household/spatial/service";
 import { createWindowHistory } from "./perception/history/service";
 import { createWindowHistoryRepository } from "./perception/history/repository";
 import { createPerceptionService } from "./perception/service";
+import { createRecordingsService } from "./recordings/service";
+import { createSdRecordingSource } from "./mijia/recordings/source";
+import { readPerceptionConfigFile } from "./perception/config-file";
 import { createPerceptionSources } from "./mijia/perception-source";
 import { join, resolve as resolvePath } from "node:path";
 import { initializeTelemetry } from "@home-agent/observability";
@@ -192,6 +195,25 @@ const speechInbox = createSpeechInbox({
   },
 });
 const perceptionSources = createPerceptionSources(household, mijiaService);
+const perceptionConfigPath = resolvePath(
+  import.meta.dir,
+  "../../..",
+  "config/perception.json",
+);
+const sdRecordings = createSdRecordingSource({
+  mijia: mijiaService,
+  shutdown: shutdown.signal,
+});
+const recordingMedia = createRecordingsService({
+  sources: perceptionSources,
+  readConfig: () => readPerceptionConfigFile(perceptionConfigPath),
+  executable: environment.PERCEPTION_FFMPEG_PATH,
+  directory: resolvePath(import.meta.dir, "../../..", "data/recordings"),
+  sd: sdRecordings,
+});
+recordingMedia.start().catch((cause: unknown) => {
+  console.error("Recordings startup failed", cause);
+});
 const perception = createPerceptionService({
   ...(database
     ? {
@@ -212,11 +234,7 @@ const perception = createPerceptionService({
       }
     : {}),
   speechInbox,
-  configPath: resolvePath(
-    import.meta.dir,
-    "../../..",
-    "config/perception.json",
-  ),
+  configPath: perceptionConfigPath,
   executable: environment.PERCEPTION_FFMPEG_PATH,
   sources: perceptionSources,
 });
@@ -289,6 +307,8 @@ const app = createApp({
     ? createContextRepository(database.db)
     : undefined,
   perception,
+  recordingMedia,
+  sdRecordings,
   staticRoot: join(import.meta.dir, "public"),
   recordings: {
     executable: environment.PERCEPTION_FFMPEG_PATH,
@@ -333,6 +353,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
             ),
             perceptionClosing,
             app.closeRecordings(),
+            recordingMedia.close(),
             speechInbox.close(),
             (async () => {
               try {

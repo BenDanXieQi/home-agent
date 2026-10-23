@@ -11,8 +11,6 @@ import (
 	"github.com/AlexxIT/go2rtc/pkg/xiaomi/miss"
 )
 
-var homeAgentRecordingDownloadGate = make(chan struct{}, 1)
-
 type homeAgentRecordingWriter struct {
 	response http.ResponseWriter
 	ctx      context.Context
@@ -83,13 +81,6 @@ func homeAgentRecordingDownload(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	stop := context.AfterFunc(r.Context(), cancel)
 	defer stop()
-	select {
-	case homeAgentRecordingDownloadGate <- struct{}{}:
-		defer func() { <-homeAgentRecordingDownloadGate }()
-	default:
-		homeAgentError(w, "recording_busy", http.StatusConflict)
-		return
-	}
 	current := func() bool {
 		homeAgentMu.Lock()
 		defer homeAgentMu.Unlock()

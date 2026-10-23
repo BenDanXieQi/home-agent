@@ -4,7 +4,11 @@ import { isDeepStrictEqual } from "node:util";
 import { speechLimits } from "../speech/limits";
 import { prepareSourceLease } from "../source-lease";
 import type { PerceptionSources } from "../sources";
-import type { perceptionConfigSchema, sourceSelectionSchema } from "../config";
+import {
+  perceptionSourceLimit,
+  type perceptionConfigSchema,
+  type sourceSelectionSchema,
+} from "../config";
 import type { z } from "zod";
 import type { perceptionSnapshotSchema } from "@home-agent/api/contracts";
 import { createAudioProcess } from "./process";
@@ -107,10 +111,10 @@ export function createAudioService(options: {
         !isDeepStrictEqual(petConfiguration, config.petSounds))
     )
       restartRequested = true;
-    if (selected.length > 8) {
+    if (selected.length > perceptionSourceLimit) {
       for (const key of tracks.keys()) retire(key);
       status = "unavailable";
-      error = "Audio supports at most 8 camera channels";
+      error = `Audio supports at most ${perceptionSourceLimit} camera channels`;
       return;
     }
     const grouped = new Map<string, z.infer<typeof sourceSelectionSchema>[]>();

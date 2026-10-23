@@ -1,4 +1,4 @@
-import { queryOptions } from "@tanstack/react-query";
+import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import {
   spaceSchema,
   passageSchema,
@@ -14,6 +14,7 @@ import {
 } from "@home-agent/api/spatial";
 import { requestJson } from "../../api/client";
 import { RequestError } from "../../api/errors";
+import { compareLayout } from "./layout";
 
 export function spatialQueryOptions(scope: string) {
   return queryOptions({
@@ -30,14 +31,25 @@ export function spatialQueryOptions(scope: string) {
 }
 export type SpatialSnapshot = ReturnType<typeof spatialSnapshotSchema.parse>;
 
-export function applySpatialLayout(
+export async function applySpatialLayout(
+  client: QueryClient,
+  scope: string,
   input: ReturnType<typeof spatialLayoutApplySchema.parse>,
 ) {
-  return requestJson(
+  const query = spatialQueryOptions(scope);
+  const result = await requestJson(
     (api, options) =>
       api.api.spatial.layout.apply.$post({ json: input }, options),
     spatialSnapshotSchema,
-  );
+  ).catch(async (cause: unknown) => {
+    if (!unconfirmedWrite(cause)) throw cause;
+    // A lost response may follow a committed write; confirm by reading, not retrying.
+    const current = await client.fetchQuery({ ...query, staleTime: 0 });
+    if (compareLayout(current, input).changes) throw cause;
+    return current;
+  });
+  client.setQueryData(query.queryKey, result);
+  return result;
 }
 
 /** Whether a failed write may still have been applied and needs a re-read. */
