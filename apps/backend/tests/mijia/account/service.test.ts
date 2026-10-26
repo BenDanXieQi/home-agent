@@ -65,6 +65,8 @@ function harness(
     commit,
     revoke: (_candidate, assert) => assert(),
     ready: () => false,
+    devices: () => ({}),
+    subscribe: () => () => {},
     specification: () => {
       throw new Error("No property capability in account fixture");
     },

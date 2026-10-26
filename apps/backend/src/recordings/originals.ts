@@ -219,6 +219,7 @@ export function createRecordingOriginals(
     source: z.infer<typeof sourceSelectionSchema>,
     identity: string,
     controller: AbortController,
+    captured: () => void,
   ) {
     const { resources: budget, root } = available();
     let writing:
@@ -264,6 +265,7 @@ export function createRecordingOriginals(
           entry.endedAt = segment.endedAt;
           release();
           writing = undefined;
+          captured();
         },
       });
     } catch (cause) {

@@ -23,6 +23,7 @@ import { DeviceDiscovery } from "./devices/discovery";
 import type { MijiaDeviceSpec } from "@home-agent/api/mijia";
 import { mijiaOperation } from "./operation";
 import { MijiaCommands } from "./control/commands";
+import type { HouseholdRuntime } from "../household/runtime";
 
 import { accountSessionSchema } from "./account/session";
 import { deviceDirectory } from "./devices/directory";
@@ -95,10 +96,7 @@ export class MijiaService {
           });
       },
       onDevices: (devices, retryFailed) =>
-        this.media.updateDevices(
-          this.household?.ready() ? devices : [],
-          retryFailed,
-        ),
+        this.updateMediaDevices(devices, retryFailed),
     });
     this.maintenance = new AccountMaintenance({
       currentAccount: () => this.accountClient,
@@ -141,7 +139,7 @@ export class MijiaService {
   private readonly listeners = new Set<() => void>();
   private notificationPending = false;
   private household:
-    | {
+    | (Pick<HouseholdRuntime, "subscribe"> & {
         restore: (accountId: string, homeId: string | null) => Promise<void>;
         commit: (
           directory: ReturnType<typeof deviceDirectory>,
@@ -152,13 +150,52 @@ export class MijiaService {
           assertCurrent: () => void,
         ) => void;
         ready: () => boolean;
+        devices: () => ReturnType<
+          HouseholdRuntime["snapshot"]
+        >["projection"]["device"];
         specification: (id: string) => MijiaDeviceSpec;
-      }
+      })
     | undefined;
 
   attachHousehold(household: NonNullable<MijiaService["household"]>) {
+    this.stopCameraAvailability?.();
     this.household = household;
+    let devices = household.devices();
+    let ready = household.ready();
+    this.stopCameraAvailability = household.subscribe(() => {
+      const nextDevices = household.devices();
+      const nextReady = household.ready();
+      if (devices === nextDevices && ready === nextReady) return;
+      devices = nextDevices;
+      ready = nextReady;
+      this.updateMediaDevices(this.discovery.devices);
+    });
+    this.updateMediaDevices(this.discovery.devices);
   }
+  private stopCameraAvailability: (() => void) | undefined;
+
+  private updateMediaDevices(
+    devices: Parameters<MediaSession["updateDevices"]>[0],
+    retryFailed = false,
+  ) {
+    const online = new Map(
+      Object.values(this.household?.devices() ?? {})
+        .filter((device) => device.camera)
+        .map((device) => [device.id, device.online]),
+    );
+    this.media.updateDevices(
+      this.household?.ready()
+        ? devices
+            .filter((device) => online.has(device.did))
+            .map((device) => ({
+              ...device,
+              isOnline: online.get(device.did) === true,
+            }))
+        : [],
+      retryFailed,
+    );
+  }
+
   subscribe(listener: () => void) {
     this.listeners.add(listener);
     return () => {
@@ -1386,6 +1423,7 @@ export class MijiaService {
   async close() {
     this.cancelConnectionOperation();
     this.stopped = true;
+    this.stopCameraAvailability?.();
     const maintenanceClosing = this.maintenance.shutdown();
     this.invalidateDeviceAccess();
     this.initialRestorePending = false;

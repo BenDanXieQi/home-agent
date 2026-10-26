@@ -104,7 +104,6 @@ function CameraView({
         enabled={!paused.has(playbackKey)}
         active={active && ready}
         onEnabledChange={(enabled) => setEnabled(playbackKey, enabled)}
-        notice={!device.online ? "设备离线，保留现有画面" : null}
       />
     </article>
   );

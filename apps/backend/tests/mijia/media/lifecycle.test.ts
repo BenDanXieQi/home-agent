@@ -278,7 +278,7 @@ describe("resident camera source ownership", () => {
     }
   });
 
-  test("offline catalog hint does not block media; shared source is prepared once and removal revokes its viewers", async () => {
+  test("offline sources do not connect; going offline revokes viewers and coming online restores the shared source", async () => {
     const peer = mediaPeer();
     peers.push(peer);
     await peer.install();
@@ -288,6 +288,14 @@ describe("resident camera source ownership", () => {
     playbacks.push(playback);
     const manager = new CameraSourceManager(peer.adapter, playback, () => {});
     sources.push(manager);
+    const offline = { ...camera, isOnline: false };
+    await manager.update([offline]);
+    expect(manager.validate(camera.did, 1).deviceId).toBe(camera.did);
+    await expect(manager.prepare(camera.did, 1)).rejects.toMatchObject({
+      reason: "camera_failed",
+    });
+    expect(peer.calls.filter((call) => call.path === "camera")).toEqual([]);
+
     await manager.update([camera]);
     const first = playback.reserve("revision", camera.did, 1);
     const second = playback.reserve("revision", camera.did, 1);
@@ -300,8 +308,10 @@ describe("resident camera source ownership", () => {
         (call) => call.path === "camera" && call.method === "PUT",
       ),
     ).toHaveLength(1);
+    const previous = manager.existing(camera.did, 1);
     expect(() => manager.validate(camera.did, 2)).toThrow();
-    await manager.update([]);
+    await manager.update([offline]);
+    expect(previous.signal.aborted).toBe(true);
     expect(() => playback.snapshot(first.id)).toThrow();
     expect(() => playback.snapshot(second.id)).toThrow();
     expect(
@@ -309,9 +319,77 @@ describe("resident camera source ownership", () => {
         (call) => call.path === "camera" && call.method === "DELETE",
       ),
     ).toHaveLength(1);
+
+    await manager.update([camera]);
+    expect(manager.existing(camera.did, 1).sourceId).not.toBe(
+      previous.sourceId,
+    );
+    const restored = playback.reserve("revision", camera.did, 1);
+    await playback.offer("revision", restored.id, "restored-offer", signal());
+    expect(playback.snapshot(restored.id).phase).toBe("active");
+    expect(
+      peer.calls.filter(
+        (call) => call.path === "camera" && call.method === "PUT",
+      ),
+    ).toHaveLength(2);
+
+    await manager.update([]);
+    expect(() => playback.snapshot(restored.id)).toThrow();
     await expect(manager.prepare(camera.did, 1)).rejects.toMatchObject({
       reason: "camera_invalid",
     });
+  });
+
+  test("another camera going offline and inventory metadata changes preserve an in-flight preparation", async () => {
+    const peer = mediaPeer();
+    peers.push(peer);
+    await peer.install();
+    const playback = new PlaybackManager(async (_revision, did, channel) =>
+      manager.prepare(did, channel),
+    );
+    playbacks.push(playback);
+    const manager = new CameraSourceManager(peer.adapter, playback, () => {});
+    sources.push(manager);
+    const other = { ...camera, did: "other-camera" };
+    await manager.update([other]);
+    const viewer = playback.reserve("revision", other.did, 1);
+    await playback.offer("revision", viewer.id, "other-offer", signal());
+
+    const entered = deferred();
+    const response = deferred<Response>();
+    peer.handlers.set("PUT camera", (call) => {
+      if (call.body.did === camera.did) {
+        entered.resolve();
+        return response.promise;
+      }
+      return new Response(null, { status: 204 });
+    });
+    const updating = manager.update([camera, other]);
+    await entered.promise;
+    const preparing = manager.prepare(camera.did, 1);
+    try {
+      await manager.update([
+        { ...camera, name: "Updated display name" },
+        { ...other, isOnline: false },
+      ]);
+      expect(() => playback.snapshot(viewer.id)).toThrow();
+    } finally {
+      response.resolve(new Response(null, { status: 204 }));
+      await updating;
+    }
+    const prepared = await preparing;
+    expect(prepared.sourceId).toBe(manager.existing(camera.did, 1).sourceId);
+    expect(
+      peer.calls.filter(
+        (call) =>
+          call.path === "camera" &&
+          call.method === "PUT" &&
+          call.body.did === camera.did,
+      ),
+    ).toHaveLength(1);
+    const surviving = playback.reserve("revision", camera.did, 1);
+    await playback.offer("revision", surviving.id, "surviving-offer", signal());
+    expect(playback.snapshot(surviving.id).phase).toBe("active");
   });
 });
 

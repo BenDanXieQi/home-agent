@@ -50,7 +50,7 @@ const CameraTile = memo(function CameraTile({
     device.channels.length > 1
       ? `${device.name} · 镜头 ${channel}`
       : device.name;
-  const notice = !device.online ? "设备离线，保留现有画面" : null;
+  const notice = !device.online ? "设备离线，上线后自动恢复" : null;
   const analysisLink = (
     <Link
       to="/cameras/$deviceId/$channel"
@@ -82,7 +82,6 @@ const CameraTile = memo(function CameraTile({
           name={label}
           enabled={enabled}
           active={pageActive && nearViewport}
-          notice={notice}
           statusAction={analysisLink}
           onEnabledChange={(value) => onEnabledChange(playbackKey, value)}
         />

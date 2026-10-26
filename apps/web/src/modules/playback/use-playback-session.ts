@@ -1,5 +1,5 @@
 import { usePlaybackSessions } from "./playback-context";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import {
   useCallback,
   useEffect,
@@ -9,6 +9,7 @@ import {
 } from "react";
 import { PlaybackSession, initialPlaybackSnapshot } from "./session";
 import { createPlaybackStatusAtom, registerPlaybackAtom } from "./state";
+import { devicesAtom } from "../devices/state";
 
 const subscribeInitial = () => () => {};
 const getInitialSnapshot = () => initialPlaybackSnapshot;
@@ -27,8 +28,12 @@ export function usePlaybackSession({
   onStop?: () => void;
 }) {
   const sessions = usePlaybackSessions();
+  const devices = useAtomValue(devicesAtom);
+  const online = devices.some(
+    (device) => device.id === target?.deviceId && device.online,
+  );
   const [session, setSession] = useState(() =>
-    target ? (sessions.get(target) ?? null) : null,
+    target && online ? (sessions.get(target) ?? null) : null,
   );
   const [attempt, setAttempt] = useState(0);
   const [statusAtom] = useState(createPlaybackStatusAtom);
@@ -38,7 +43,7 @@ export function usePlaybackSession({
     session?.subscribe ?? subscribeInitial,
     session?.getSnapshot ?? getInitialSnapshot,
   );
-  const deviceId = target?.deviceId;
+  const deviceId = online ? target?.deviceId : undefined;
   const channel = target?.channel;
   const scope_epoch = target?.scope_epoch;
   const revision = target?.revision;
@@ -100,7 +105,7 @@ export function usePlaybackSession({
     setAttempt((value) => value + 1);
   }, [sessions, deviceId, channel, scope_epoch, revision]);
   return {
-    snapshot: target ? snapshot : initialPlaybackSnapshot,
+    snapshot: target && online ? snapshot : initialPlaybackSnapshot,
     restart,
   };
 }

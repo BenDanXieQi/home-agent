@@ -3,6 +3,7 @@ import type { Go2RtcAdapter } from "./go2rtc-adapter";
 import { isRecoverableMijiaError, MijiaError, safeMijiaError } from "../errors";
 import type { PlaybackManager } from "./playback-manager";
 import { RetryTimer } from "../retry-timer";
+import { isDeepStrictEqual } from "node:util";
 
 import type { CameraSourceSpec } from "./camera-source-spec";
 import { isCamera, cameraChannels } from "../devices/mapping";
@@ -43,8 +44,25 @@ export class CameraSourceManager {
 
   update(devices: readonly MiCloudDevice[], retryFailed = false) {
     if (this.closed) return Promise.resolve();
-    this.devices = new Map(devices.map((device) => [device.did, device]));
-    return this.reconcile(retryFailed);
+    const changed = new Set<string>();
+    const next = new Map(
+      devices.filter(isCamera).map((device) => {
+        const inventory = {
+          did: device.did,
+          ...(device.model === undefined ? {} : { model: device.model }),
+          mac: device.mac,
+          localip: device.localip,
+          isOnline: device.isOnline === true,
+        };
+        const previous = this.devices.get(device.did);
+        if (previous && isDeepStrictEqual(previous, inventory))
+          return [device.did, previous] as const;
+        changed.add(device.did);
+        return [device.did, inventory] as const;
+      }),
+    );
+    this.devices = next;
+    return this.reconcile(retryFailed, changed);
   }
 
   pause() {
@@ -132,6 +150,7 @@ export class CameraSourceManager {
     const key = `${deviceId}:${channel}`;
     const specification = this.validate(deviceId, channel);
     const inventoryDevice = this.devices.get(deviceId)!;
+    if (!inventoryDevice.isOnline) throw new MijiaError("camera_failed");
     const observedAddress = await this.resolveAddress(inventoryDevice);
     if (this.closed || this.devices.get(deviceId) !== inventoryDevice)
       throw new MijiaError("stale_session");
@@ -210,7 +229,12 @@ export class CameraSourceManager {
   }
 
   private retry(key: string, stream: CameraSourceEntry) {
-    if (this.paused || !this.current(key, stream)) return;
+    if (
+      this.paused ||
+      !this.current(key, stream) ||
+      !this.devices.get(stream.device.deviceId)?.isOnline
+    )
+      return;
     stream.controller.abort();
     stream.id = crypto.randomUUID();
     stream.controller = new AbortController();
@@ -282,16 +306,21 @@ export class CameraSourceManager {
     return stream.pending;
   }
 
-  private async reconcile(retryFailed = false) {
+  private async reconcile(
+    retryFailed = false,
+    changed = new Set(this.devices.keys()),
+  ) {
     if (this.closed || this.paused) return;
     const desired = new Set<string>();
     const pending: Promise<unknown>[] = [];
     for (const device of this.devices.values()) {
+      if (!device.isOnline) continue;
       const channels = cameraChannels(device);
       for (const channel of channels) {
         const key = `${device.did}:${channel}`;
         desired.add(key);
-        pending.push(this.ensure(device.did, channel, retryFailed));
+        if (changed.has(device.did) || retryFailed || !this.streams.has(key))
+          pending.push(this.ensure(device.did, channel, retryFailed));
       }
     }
     for (const [key, stream] of this.streams) {

@@ -110,6 +110,8 @@ export function createMijiaHousehold(
     commit: (candidate, assert) => runtime.commitDirectory(candidate, assert),
     revoke: (candidate, assert) => runtime.revoke(candidate, assert),
     ready: () => runtime.ready,
+    devices: () => runtime.snapshot().projection.device,
+    subscribe: (listener) => runtime.subscribe(listener),
     specification: (id) => runtime.specification(id),
   });
   runtime.attachCollection(

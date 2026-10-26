@@ -61,7 +61,7 @@ export class DeviceDiscovery {
   get revision() {
     return this.scopeRevision;
   }
-  private get devices() {
+  get devices() {
     return [...this.selectedDevices.values()];
   }
   private indexSelectedDevices() {

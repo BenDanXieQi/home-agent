@@ -4,7 +4,7 @@ import { twMerge } from "tailwind-merge";
 import { Maximize, Pause, Play, RotateCcw } from "lucide-react";
 import { Button } from "../../components/Button";
 import { useEffect, useMemo, type ReactNode } from "react";
-import { useAtom } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { AnimatePresence, m } from "motion/react";
 import { contentSwap } from "../../utils/motion";
 import { useMijiaPlayback } from "../../modules/playback/use-mijia-playback";
@@ -17,6 +17,7 @@ import { PlaybackStatus } from "./PlaybackStatus";
 import { buttonStyles } from "../../components/button-styles";
 import { cameraTransitionName } from "./camera-styles";
 import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
+import { devicesAtom } from "../../modules/devices/state";
 
 export function CameraFrame({
   children,
@@ -133,20 +134,24 @@ export function MijiaPlayer({
   enabled,
   active,
   onEnabledChange,
-  notice,
   statusAction,
   expanded = false,
 }: NonNullable<Parameters<typeof useMijiaPlayback>[0]> & {
   name: string;
-  notice?: ReactNode;
   statusAction?: ReactNode;
   enabled: boolean;
   active: boolean;
   onEnabledChange: (enabled: boolean) => void;
   expanded?: boolean;
 }) {
+  const devices = useAtomValue(devicesAtom);
+  const online = devices.some(
+    (device) => device.id === deviceId && device.online,
+  );
   const { videoRef, snapshot, restart } = useMijiaPlayback(
-    enabled && active ? { revision, scope_epoch, deviceId, channel } : null,
+    enabled && active && online
+      ? { revision, scope_epoch, deviceId, channel }
+      : null,
   );
   const aspectAtom = useMemo(
     () => createCameraAspectAtom(deviceId, channel),
@@ -169,7 +174,7 @@ export function MijiaPlayer({
     };
   }, [videoRef, setAspectRatio]);
   const presentation = playbackPresentation(snapshot);
-  const playing = enabled && active;
+  const playing = enabled && active && online;
   return (
     <div
       className={expanded ? "flex h-full min-h-0 flex-col" : "relative"}
@@ -204,6 +209,7 @@ export function MijiaPlayer({
             layout="position"
             aria-label={`${enabled ? "重新播放" : "开始播放"}${name}`}
             title={enabled ? "重新播放" : "开始播放"}
+            disabled={!online}
             icon={enabled ? <RotateCcw size={15} /> : <Play size={15} />}
             onClick={() => {
               restart();
@@ -228,7 +234,6 @@ export function MijiaPlayer({
       <CameraFrame
         aspectRatio={aspectRatio}
         transitionName={cameraTransitionName(deviceId, channel)}
-        notice={notice}
         statusAction={statusAction}
         waiting={
           playing &&
@@ -236,18 +241,28 @@ export function MijiaPlayer({
           (snapshot.phase === "connecting" || snapshot.phase === "waiting")
         }
         placeholder={
-          !playing
-            ? enabled
-              ? "画面可见时自动播放"
-              : "已暂停播放"
-            : snapshot.phase === "error"
-              ? "暂时无法播放"
-              : snapshot.firstFrameAt !== null
-                ? null
-                : "等待摄像头画面"
+          !online
+            ? "设备离线，上线后自动恢复"
+            : !playing
+              ? enabled
+                ? "画面可见时自动播放"
+                : "已暂停播放"
+              : snapshot.phase === "error"
+                ? "暂时无法播放"
+                : snapshot.firstFrameAt !== null
+                  ? null
+                  : "等待摄像头画面"
         }
         tone={playing ? presentation.tone : "unknown"}
-        status={playing ? presentation.label : enabled ? "等待显示" : "已暂停"}
+        status={
+          !online
+            ? "离线"
+            : playing
+              ? presentation.label
+              : enabled
+                ? "等待显示"
+                : "已暂停"
+        }
         loader={<PlaybackLoader active={playing && snapshot.visible} />}
         statusContent={
           playing ? <PlaybackStatus snapshot={snapshot} /> : undefined

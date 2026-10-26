@@ -40,6 +40,7 @@ export function PlaybackProvider({
             (device) =>
               device.id === target.deviceId &&
               device.camera &&
+              device.online &&
               device.channels.includes(target.channel),
           ),
       );

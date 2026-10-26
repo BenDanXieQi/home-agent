@@ -98,5 +98,5 @@ export const sourceId = "10000000-0000-4000-8000-000000000001";
 export const camera = {
   did: "camera-1",
   model: "test.camera.single",
-  isOnline: false,
+  isOnline: true,
 };

@@ -100,7 +100,15 @@ export function createRecordingsService(options: {
     string,
     { identity: string; controller: AbortController; pending: Promise<void> }
   >();
-  const retries = new Map<string, ReturnType<typeof setTimeout>>();
+  const retries = new Map<
+    string,
+    {
+      identity: string;
+      timer: ReturnType<typeof setTimeout> | undefined;
+      delayMs: number;
+      error: string | undefined;
+    }
+  >();
   let config: z.infer<typeof captureConfigSchema> | undefined;
   let resources: ReturnType<typeof createMediaResources> | undefined;
   let instanceDirectory: string | undefined;
@@ -156,16 +164,29 @@ export function createRecordingsService(options: {
       )
         run.controller.abort(new MijiaError("stale_session"));
     }
-    for (const [key, timer] of retries)
-      if (!keys.has(key)) {
-        clearTimeout(timer);
+    for (const [key, retry] of retries) {
+      const source = selected.find((candidate) => sourceKey(candidate) === key);
+      if (
+        !source ||
+        !keys.has(key) ||
+        options.sources.eligibility(source)?.identity !== retry.identity
+      ) {
+        clearTimeout(retry.timer);
         retries.delete(key);
       }
+    }
     if (selected.length > perceptionSourceLimit) return;
     for (const source of selected) {
       const key = sourceKey(source);
       const access = options.sources.eligibility(source);
-      if (!access || runs.has(key) || retries.has(key)) continue;
+      if (!access || runs.has(key) || retries.get(key)?.timer) continue;
+      const retry = retries.get(key) ?? {
+        identity: access.identity,
+        timer: undefined,
+        delayMs: 5000,
+        error: undefined,
+      };
+      retries.set(key, retry);
       const controller = new AbortController();
       const run = {
         identity: access.identity,
@@ -174,21 +195,34 @@ export function createRecordingsService(options: {
       };
       runs.set(key, run);
       run.pending = originals
-        .capture(source, access.identity, controller)
+        .capture(source, access.identity, controller, () => {
+          retry.delayMs = 5000;
+          retry.error = undefined;
+        })
         .catch((cause) => {
-          if (!controller.signal.aborted)
-            console.warn("Recording capture failed", cause);
+          if (controller.signal.aborted) return;
+          const message =
+            cause instanceof Error ? cause.message : String(cause);
+          if (retry.error !== message)
+            console.warn(
+              "Recording capture failed; retrying automatically",
+              cause,
+            );
+          retry.error = message;
         })
         .finally(() => {
           runs.delete(key);
-          if (!stopping.signal.aborted && options.sources.eligibility(source))
-            retries.set(
-              key,
-              setTimeout(() => {
-                retries.delete(key);
-                reconcile();
-              }, 5000),
-            );
+          if (
+            !stopping.signal.aborted &&
+            retries.get(key) === retry &&
+            options.sources.eligibility(source)?.identity === run.identity
+          ) {
+            retry.timer = setTimeout(() => {
+              retry.timer = undefined;
+              reconcile();
+            }, retry.delayMs);
+            retry.delayMs = Math.min(retry.delayMs * 2, 60_000);
+          } else if (!stopping.signal.aborted) reconcile();
         });
     }
   }
@@ -240,7 +274,7 @@ export function createRecordingsService(options: {
         milliseconds: 3000,
         message: new MediaCleanupError("Recording initialization did not stop"),
       });
-      for (const timer of retries.values()) clearTimeout(timer);
+      for (const retry of retries.values()) clearTimeout(retry.timer);
       retries.clear();
       unsubscribe?.();
       for (const run of runs.values())
