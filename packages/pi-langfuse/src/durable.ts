@@ -127,7 +127,7 @@ export async function createPiLangfuseDurableConversation(
       releaseCommits?.();
       releaseCommits = undefined;
       try {
-        await stream?.stop({ drain: true });
+        await stream?.stop();
       } catch {
         report("observer stop");
       }

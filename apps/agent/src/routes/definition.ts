@@ -15,7 +15,9 @@ export type RouteContext = {
   harness: Parameters<typeof createConversationInteraction>[1];
   workflows: Pick<
     NonNullable<
-      ReturnType<ReturnType<typeof configureWorkflows>["register"]>["instance"]
+      Awaited<
+        ReturnType<ReturnType<typeof configureWorkflows>["register"]>
+      >["instance"]
     >,
     "run"
   >;

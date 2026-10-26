@@ -264,6 +264,7 @@ export const PromptBindingDoc = defineDoc<{
   scope: "conversation",
   history: "rewindable",
   fork: "asOf",
+  checkpointWhen: () => false,
   initial: () => ({}),
 });
 

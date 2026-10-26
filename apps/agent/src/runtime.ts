@@ -1,10 +1,4 @@
-import {
-  ChordError,
-  local,
-  opaque,
-  resource,
-  type Host,
-} from "@earendil-works/chord";
+import { ChordError, local, opaque, type Host } from "@earendil-works/chord";
 import { Type } from "typebox";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -130,22 +124,20 @@ export function registerAgentRuntime(
     (_input, _principal, self) => {
       const modelsHandle = self.get(AgentModels, {});
 
-      const resources = self.resources({
-        runtime: resource({
-          rev: 1,
-          deps: [modelsHandle],
-          open: ({ signal }) =>
-            createAgentRuntime({
-              ...options,
-              modelRuntime: getServiceInstance(modelsHandle),
-              signal: AbortSignal.any([signal, options.signal]),
-            }),
-          close: (runtime) => runtime.close(),
-        }),
+      const runtime = self.resource("runtime", {
+        version: 1,
+        deps: [modelsHandle],
+        open: ({ signal }) =>
+          createAgentRuntime({
+            ...options,
+            modelRuntime: getServiceInstance(modelsHandle),
+            signal: AbortSignal.any([signal, options.signal]),
+          }),
+        close: (instance) => instance.close(),
       });
 
-      return { instance: self.expose(resources.runtime) };
+      return { instance: self.expose(runtime) };
     },
-    { eager: true },
+    { lifetime: "host" },
   );
 }

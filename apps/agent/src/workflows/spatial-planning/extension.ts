@@ -26,6 +26,7 @@ export const SpatialPlanningDoc = /* @__PURE__ */ defineDoc<
   scope: "conversation",
   history: "latest",
   fork: "initial",
+  checkpointWhen: () => false,
   initial: () => ({
     questions: [],
     draft: { spaces: [], passages: [] },

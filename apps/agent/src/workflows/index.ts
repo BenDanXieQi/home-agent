@@ -19,16 +19,20 @@ export function configureWorkflows(
   return {
     modelRefs: configuration.modelRefs,
     extensions: configuration.extensions,
-    register(host: Host, contextReader: WorkflowDependencies["contextReader"]) {
+    register(
+      host: Host,
+      contextReader: WorkflowDependencies["contextReader"],
+      signal: AbortSignal,
+    ) {
       host.serve(
         Workflows,
         (_input, _principal, self) => {
           const registry = configuration.createRegistry(self, contextReader);
           return { instance: createWorkflows(registry) };
         },
-        { eager: true },
+        { lifetime: "host" },
       );
-      return host.get(Workflows, {});
+      return host.get(Workflows, {}, { signal });
     },
   };
 }

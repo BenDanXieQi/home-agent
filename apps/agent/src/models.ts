@@ -1,4 +1,4 @@
-import { local, opaque, resource, type Host } from "@earendil-works/chord";
+import { local, opaque, type Host } from "@earendil-works/chord";
 import { Type } from "typebox";
 import { createModels } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
@@ -102,19 +102,17 @@ export function registerAgentModels(
   host.serve(
     AgentModels,
     (_input, _principal, self) => {
-      const resources = self.resources({
-        models: resource({
-          rev: 1,
-          open: ({ signal }) =>
-            initializeModelRuntime({
-              ...options,
-              signal: AbortSignal.any([signal, options.signal]),
-            }),
-        }),
+      const models = self.resource("models", {
+        version: 1,
+        open: ({ signal }) =>
+          initializeModelRuntime({
+            ...options,
+            signal: AbortSignal.any([signal, options.signal]),
+          }),
       });
 
-      return { instance: self.expose(resources.models) };
+      return { instance: self.expose(models) };
     },
-    { eager: true },
+    { lifetime: "host" },
   );
 }

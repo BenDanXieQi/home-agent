@@ -46,7 +46,7 @@ ${names.map((name) => `  agentWorkflowStreamContracts["${name}"].result,`).join(
 `;
 
   const registry = `import { z } from "zod";
-import { resource, type Self } from "@earendil-works/chord";
+import type { Self } from "@earendil-works/chord";
 import type { Config } from "../config";
 import type { agentWorkflowInputSchema, agentWorkflowStreamContract } from "./contracts.generated";
 import { runWorkflow, type WorkflowDependencies, type WorkflowInstance, type WorkflowRegistry } from "./definition";
@@ -68,12 +68,11 @@ ${names.map((_name, index) => `  const modelRef${index} = config[modelConfigurat
     modelRefs: [${names.map((_name, index) => `modelRef${index}`).join(", ")}],
     extensions: [${names.map((_name, index) => `...extensions${index}`).join(", ")}],
     createRegistry(self: Self, contextReader: WorkflowDependencies["contextReader"]) {
-  const workflows = self.resources({
-${names.map((name, index) => `    "${name}": createWorkflow${index}({ self, modelRef: modelRef${index}, contextReader }),`).join("\n")}
-  });
-  return self.resources({
-    registry: resource({
-      rev: 1,
+  const workflows = {
+${names.map((name, index) => `    "${name}": self.resource("${name}", createWorkflow${index}({ self, modelRef: modelRef${index}, contextReader })),`).join("\n")}
+  };
+  return self.resource("registry", {
+      version: 1,
       deps: Object.values(workflows),
       open: () => {
         const registry = {
@@ -107,8 +106,7 @@ ${names
     },
   };
       },
-    }),
-  }).registry;
+  });
     },
   };
 }

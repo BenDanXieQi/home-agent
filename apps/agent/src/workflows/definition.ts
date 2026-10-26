@@ -4,7 +4,7 @@ import type {
   agentWorkflowInputSchema,
   agentWorkflowStreamContract,
 } from "./contracts.generated";
-import { resource, type Handle, type Self } from "@earendil-works/chord";
+import type { ResourceDeclaration, Ref, Self } from "@earendil-works/chord";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { AgentModels } from "../models";
 import { AgentRuntime, getServiceInstance } from "../runtime";
@@ -25,10 +25,10 @@ export type WorkflowInstance = {
   close?: (() => Promise<void>) | undefined;
 };
 
-type ModelRuntime = NonNullable<Handle<typeof AgentModels>["instance"]>;
+type ModelRuntime = NonNullable<Ref<typeof AgentModels>["instance"]>;
 
 export type WorkflowDependencies = Pick<
-  NonNullable<Handle<typeof AgentRuntime>["instance"]>,
+  NonNullable<Ref<typeof AgentRuntime>["instance"]>,
   "harness" | "workspacePath" | "prompts"
 > & {
   model: NonNullable<ReturnType<ModelRuntime["findAvailableModel"]>>;
@@ -42,8 +42,8 @@ export function defineWorkflow<T extends WorkflowInstance>(
 ) {
   const models = self.get(AgentModels, {});
   const runtime = self.get(AgentRuntime, {});
-  return resource({
-    rev: 1,
+  return {
+    version: 1,
     deps: [models, runtime],
     open: () => {
       const { findAvailableModel, modelCollection } =
@@ -63,7 +63,7 @@ export function defineWorkflow<T extends WorkflowInstance>(
     close: async (workflow) => {
       if ("close" in workflow) await workflow.close?.();
     },
-  });
+  } satisfies ResourceDeclaration<T | { run: undefined }>;
 }
 
 export async function runWorkflow<Input, Result, Progress>(

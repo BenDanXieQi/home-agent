@@ -28,14 +28,12 @@ export async function createApp(
     ...(config.AGENT_SUBAGENT_MODELS ?? []),
   ]);
   const services = appResources.adopt(
-    createHost({ name: "home-agent" }),
+    createHost({ name: "home-agent", self: "home-agent" }),
     (host) => host.close(),
   );
   registerAgentModels(services, { modelRefs, signal });
-  const models = services.get(AgentModels, {});
+  const models = await services.get(AgentModels, {}, { signal });
   appResources.defer(() => models.release());
-  await models.ready;
-  signal.throwIfAborted();
   const modelRuntime = getServiceInstance(models);
 
   const contextSource = createContextSource(config.BACKEND_URL);
@@ -60,16 +58,19 @@ export async function createApp(
     ],
     signal,
   });
-  const runtimeHandle = services.get(AgentRuntime, {});
+  const runtimeHandle = await services.get(AgentRuntime, {}, { signal });
   appResources.defer(() => runtimeHandle.release());
-  const assistantHandle = assistantConfiguration.register(services, signal);
-  const workflowHandle = workflowConfiguration.register(
+  const assistantHandle = await assistantConfiguration.register(
     services,
-    contextReader,
+    signal,
   );
   appResources.defer(() => assistantHandle.release());
+  const workflowHandle = await workflowConfiguration.register(
+    services,
+    contextReader,
+    signal,
+  );
   appResources.defer(() => workflowHandle.release());
-  await services.ready();
   signal.throwIfAborted();
   const assistant = assistantHandle.instance;
   const workflows = getServiceInstance(workflowHandle);

@@ -1,10 +1,4 @@
-import {
-  local,
-  opaque,
-  resource,
-  type Host,
-  type Handle,
-} from "@earendil-works/chord";
+import { local, opaque, type Host, type Ref } from "@earendil-works/chord";
 import { randomUUID } from "node:crypto";
 import {
   BACKGROUND_CONTEXT,
@@ -158,7 +152,7 @@ export function configureAssistant({
   ];
 
   async function createAssistant(
-    runtime: NonNullable<Handle<typeof AgentRuntime>["instance"]>,
+    runtime: NonNullable<Ref<typeof AgentRuntime>["instance"]>,
     signal: AbortSignal,
   ) {
     signal.throwIfAborted();
@@ -194,26 +188,24 @@ export function configureAssistant({
         Assistant,
         (_input, _principal, self) => {
           const runtime = self.get(AgentRuntime, {});
-          const resources = self.resources({
-            assistant: resource({
-              rev: 1,
-              deps: [runtime],
-              open: ({ signal }) => {
-                return createAssistant(
-                  getServiceInstance(runtime),
-                  AbortSignal.any([signal, startupSignal]),
-                );
-              },
-              close: async (assistant) => {
-                await assistant?.close();
-              },
-            }),
+          const assistant = self.resource("assistant", {
+            version: 1,
+            deps: [runtime],
+            open: ({ signal }) => {
+              return createAssistant(
+                getServiceInstance(runtime),
+                AbortSignal.any([signal, startupSignal]),
+              );
+            },
+            close: async (instance) => {
+              await instance?.close();
+            },
           });
-          return { instance: self.expose(resources.assistant) };
+          return { instance: self.expose(assistant) };
         },
-        { eager: true },
+        { lifetime: "host" },
       );
-      return host.get(Assistant, {});
+      return host.get(Assistant, {}, { signal: startupSignal });
     },
   };
 }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { resource, type Self } from "@earendil-works/chord";
+import type { Self } from "@earendil-works/chord";
 import type { Config } from "../config";
 import type {
   agentWorkflowInputSchema,
@@ -51,135 +51,128 @@ export function configureWorkflowRegistry(config: Config) {
       self: Self,
       contextReader: WorkflowDependencies["contextReader"],
     ) {
-      const workflows = self.resources({
-        "automation-generation": createWorkflow0({
-          self,
-          modelRef: modelRef0,
-          contextReader,
-        }),
-        "spatial-planning": createWorkflow1({
-          self,
-          modelRef: modelRef1,
-          contextReader,
-        }),
-        "speech-interpretation": createWorkflow2({
-          self,
-          modelRef: modelRef2,
-          contextReader,
-        }),
+      const workflows = {
+        "automation-generation": self.resource(
+          "automation-generation",
+          createWorkflow0({ self, modelRef: modelRef0, contextReader }),
+        ),
+        "spatial-planning": self.resource(
+          "spatial-planning",
+          createWorkflow1({ self, modelRef: modelRef1, contextReader }),
+        ),
+        "speech-interpretation": self.resource(
+          "speech-interpretation",
+          createWorkflow2({ self, modelRef: modelRef2, contextReader }),
+        ),
+      };
+      return self.resource("registry", {
+        version: 1,
+        deps: Object.values(workflows),
+        open: () => {
+          const registry = {
+            "automation-generation": workflows["automation-generation"].value,
+            "spatial-planning": workflows["spatial-planning"].value,
+            "speech-interpretation": workflows["speech-interpretation"].value,
+          } satisfies WorkflowRegistry;
+          const instances: WorkflowInstance[] = Object.values(registry);
+          return {
+            execute: async (
+              input: z.output<typeof agentWorkflowInputSchema>,
+              signal: AbortSignal,
+              receive?: (
+                progress: z.output<typeof agentWorkflowStreamContract.progress>,
+              ) => Promise<void>,
+            ) => {
+              switch (input.workflow) {
+                case "automation-generation":
+                  return {
+                    workflow: input.workflow,
+                    result: await observeWorkflowExecution(
+                      "automation-generation",
+                      observation0,
+                      input.input,
+                      () =>
+                        runWorkflow(
+                          registry["automation-generation"].run,
+                          contract0,
+                          input.input,
+                          signal,
+                          receive
+                            ? async (progress) => {
+                                await receive({
+                                  workflow: input.workflow,
+                                  progress,
+                                });
+                              }
+                            : undefined,
+                        ),
+                    ),
+                  };
+                case "spatial-planning":
+                  return {
+                    workflow: input.workflow,
+                    result: await observeWorkflowExecution(
+                      "spatial-planning",
+                      observation1,
+                      input.input,
+                      () =>
+                        runWorkflow(
+                          registry["spatial-planning"].run,
+                          contract1,
+                          input.input,
+                          signal,
+                          receive
+                            ? async (progress) => {
+                                await receive({
+                                  workflow: input.workflow,
+                                  progress,
+                                });
+                              }
+                            : undefined,
+                        ),
+                    ),
+                  };
+                case "speech-interpretation":
+                  return {
+                    workflow: input.workflow,
+                    result: await observeWorkflowExecution(
+                      "speech-interpretation",
+                      observation2,
+                      input.input,
+                      () =>
+                        runWorkflow(
+                          registry["speech-interpretation"].run,
+                          contract2,
+                          input.input,
+                          signal,
+                          receive
+                            ? async (progress) => {
+                                await receive({
+                                  workflow: input.workflow,
+                                  progress,
+                                });
+                              }
+                            : undefined,
+                        ),
+                    ),
+                  };
+              }
+            },
+            reset: async () => {
+              const results = await Promise.allSettled(
+                instances.map(async (instance) => {
+                  await instance.reset?.();
+                }),
+              );
+              const errors = results.flatMap((result) =>
+                result.status === "rejected" ? [result.reason] : [],
+              );
+              if (errors.length)
+                throw new AggregateError(errors, "Workflow reset failed");
+            },
+          };
+        },
       });
-      return self.resources({
-        registry: resource({
-          rev: 1,
-          deps: Object.values(workflows),
-          open: () => {
-            const registry = {
-              "automation-generation": workflows["automation-generation"].value,
-              "spatial-planning": workflows["spatial-planning"].value,
-              "speech-interpretation": workflows["speech-interpretation"].value,
-            } satisfies WorkflowRegistry;
-            const instances: WorkflowInstance[] = Object.values(registry);
-            return {
-              execute: async (
-                input: z.output<typeof agentWorkflowInputSchema>,
-                signal: AbortSignal,
-                receive?: (
-                  progress: z.output<
-                    typeof agentWorkflowStreamContract.progress
-                  >,
-                ) => Promise<void>,
-              ) => {
-                switch (input.workflow) {
-                  case "automation-generation":
-                    return {
-                      workflow: input.workflow,
-                      result: await observeWorkflowExecution(
-                        "automation-generation",
-                        observation0,
-                        input.input,
-                        () =>
-                          runWorkflow(
-                            registry["automation-generation"].run,
-                            contract0,
-                            input.input,
-                            signal,
-                            receive
-                              ? async (progress) => {
-                                  await receive({
-                                    workflow: input.workflow,
-                                    progress,
-                                  });
-                                }
-                              : undefined,
-                          ),
-                      ),
-                    };
-                  case "spatial-planning":
-                    return {
-                      workflow: input.workflow,
-                      result: await observeWorkflowExecution(
-                        "spatial-planning",
-                        observation1,
-                        input.input,
-                        () =>
-                          runWorkflow(
-                            registry["spatial-planning"].run,
-                            contract1,
-                            input.input,
-                            signal,
-                            receive
-                              ? async (progress) => {
-                                  await receive({
-                                    workflow: input.workflow,
-                                    progress,
-                                  });
-                                }
-                              : undefined,
-                          ),
-                      ),
-                    };
-                  case "speech-interpretation":
-                    return {
-                      workflow: input.workflow,
-                      result: await observeWorkflowExecution(
-                        "speech-interpretation",
-                        observation2,
-                        input.input,
-                        () =>
-                          runWorkflow(
-                            registry["speech-interpretation"].run,
-                            contract2,
-                            input.input,
-                            signal,
-                            receive
-                              ? async (progress) => {
-                                  await receive({
-                                    workflow: input.workflow,
-                                    progress,
-                                  });
-                                }
-                              : undefined,
-                          ),
-                      ),
-                    };
-                }
-              },
-              reset: async () => {
-                const results = await Promise.allSettled(
-                  instances.map(async (instance) => {
-                    await instance.reset?.();
-                  }),
-                );
-                const errors = results.flatMap((result) =>
-                  result.status === "rejected" ? [result.reason] : [],
-                );
-                if (errors.length)
-                  throw new AggregateError(errors, "Workflow reset failed");
-              },
-            };
-          },
-        }),
-      }).registry;
     },
   };
 }
