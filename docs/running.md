@@ -70,6 +70,10 @@ OTEL_INCLUDE_CONTENT=true
 
 `bun run status` 显示所有依赖容器；`bun run stop` 包括已启用的 Langfuse，即使已清空 profile 也会停止其容器，并保留数据卷。关闭本地展示时先停止服务，再清空 `COMPOSE_PROFILES` 并设置 `OTEL_TRACES_EXPORTER=none`，然后重新启动。不要使用 `docker compose down -v`，它会删除数据库和追踪数据卷。
 
+本地部署默认保留最近 7 天的追踪及原始事件，可通过 `LANGFUSE_RETENTION_DAYS` 修改（至少 3 天），修改后重建 `langfuse-cleanup`。清理容器随本地入口启动，启动时及之后每 24 小时调用官方批量删除接口，清理过期 Trace（一次完整调用的追踪记录）及关联数据；仍有近期开始或结束的观测记录时保留整个 Trace。Langfuse Worker 异步删除相关媒体，仅移除没有其他 Trace 或数据集引用的文件。未关联到观测记录的媒体不在此清理范围内；提示词与数据集不受影响。删除不可恢复，停止容器期间不执行清理，重新启动后补做。可用 `docker compose logs langfuse-cleanup` 查看执行结果。
+
+原始事件仅对 MinIO 的 `events/` 前缀设置过期规则，不给 `media/` 设置独立过期规则；ClickHouse 的事件文件索引采用相同保留期，系统日志保留 7 天，容器日志轮转。过期删除与数据库空间回收在后台进行，不保证立即释放磁盘，也不是固定容量上限。依据见官方[存储增长建议](https://langfuse.com/self-hosting/configuration/scaling)、[对象存储生命周期](https://langfuse.com/self-hosting/deployment/infrastructure/blobstorage#bucket-lifecycle-policies)与[数据删除](https://langfuse.com/docs/administration/data-deletion)。官方[项目数据保留](https://langfuse.com/docs/administration/data-retention)为自托管企业版功能，此 OSS 部署使用独立清理容器调用公开接口。
+
 单独准备本机部署依赖时，用 `docker compose up -d --build --wait langfuse-entry langfuse-worker` 启动已配置的 Langfuse，再按生产运行说明启动应用；`bun run start` 不管理 Docker 依赖。此配置依据 [Langfuse 官方 Compose](https://langfuse.com/self-hosting/deployment/docker-compose) 与[启动初始化](https://langfuse.com/self-hosting/administration/headless-initialization)，容器启动、健康检查、初始化账号登录及项目页面已在本机验证；普通聊天及工具失败追踪已通过本机 Observations API（观测记录查询接口）核验，其余验证范围见[追踪链路](../packages/observability/README.md#追踪链路)。
 
 ## HTTPS 与 HTTP/2 入口
