@@ -10,7 +10,7 @@ import {
   type StreamOptions,
 } from "@earendil-works/pi-ai";
 import { recordFailure, SpanKind, withSpan } from "./spans";
-import { genAiMessages } from "./messages";
+import { genAiMessages, serializeModelInput } from "./messages";
 import { telemetryStatus } from "./telemetry";
 import { recordEvaluationModel } from "./evaluation";
 import { z } from "zod";
@@ -225,7 +225,7 @@ function observeModelStream(
             const request = replacement === undefined ? payload : replacement;
             if (telemetryStatus().includeContent) {
               try {
-                const serialized = JSON.stringify(request);
+                const serialized = serializeModelInput(request);
                 if (serialized !== undefined) {
                   const input: unknown = JSON.parse(serialized);
                   recordEvaluationModel(input, span);

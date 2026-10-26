@@ -110,13 +110,17 @@ export function initializeTelemetry(serviceName: string) {
       `${langfuse.publicKey}:${langfuse.secretKey}`,
     ).toString("base64");
     spanProcessors.push(
-      new LangfuseAgentSpanProcessor(
-        createLangfuseTraceExporter(
+      new LangfuseAgentSpanProcessor({
+        ...langfuse,
+        exporter: createLangfuseTraceExporter(
           `${langfuse.baseUrl}/api/public/otel/v1/traces`,
           authorization,
         ),
-        { scheduledDelayMillis: 1_000 },
-      ),
+        flushInterval: 1,
+        mediaUploadEnabled: includeContent,
+        shouldExportSpan: ({ otelSpan }) =>
+          otelSpan.attributes["home_agent.trace.agent"] === true,
+      }),
     );
   }
   const sdk = new NodeSDK({

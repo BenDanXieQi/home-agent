@@ -6,10 +6,10 @@ import {
   type Span,
 } from "@opentelemetry/api";
 import {
-  BatchSpanProcessor,
   NoopSpanProcessor,
   type SpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
+import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { genAiContextAttributes } from "./gen-ai";
 import { requestSession, traceSessionId } from "./session";
 
@@ -62,8 +62,15 @@ export class AgentTraceMarker extends NoopSpanProcessor {
   }
 }
 
-export class LangfuseAgentSpanProcessor extends BatchSpanProcessor {
+export class LangfuseAgentSpanProcessor extends LangfuseSpanProcessor {
   override onEnd(span: Parameters<SpanProcessor["onEnd"]>[0]) {
-    if (span.attributes[attribute] === true) super.onEnd(span);
+    if (span.attributes[attribute] !== true) return;
+
+    // Langfuse replaces media in place; other exporters retain their own input.
+    super.onEnd({
+      ...span,
+      attributes: { ...span.attributes },
+      spanContext: () => span.spanContext(),
+    });
   }
 }

@@ -26,7 +26,7 @@ LANGFUSE_SECRET_KEY=你的项目密钥
 
 无需 Collector（集中接收并转发追踪数据的服务）即可使用。若已经有 Collector，设置完整的 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`，例如 `http://127.0.0.1:4318/v1/traces`，或设置不含信号路径的 `OTEL_EXPORTER_OTLP_ENDPOINT`。自定义 endpoint 使用 OTLP/HTTP protobuf exporter 和标准 `OTEL_EXPORTER_OTLP_TRACES_HEADERS` / `OTEL_EXPORTER_OTLP_HEADERS`（逗号分隔、值可 URL 编码），不会自动收到 Langfuse 密钥。应用可同时把完整的已采样记录发送到该 Collector，把 Agent 相关记录直接发送到 Langfuse；两套认证配置独立。通用 endpoint 应指向 Collector 或 APM（应用性能监控平台）。Collector 若另行转发给 Langfuse，须在该转发通路按 `home_agent.trace.agent=true` 过滤并配置认证；不要把通用 endpoint 直接指向同一个 Langfuse 接收地址，以免绕过筛选或重复发送。
 
-媒体不单独上传到 Langfuse 对象存储；开启内容采集时图片原始 base64 随模型 span 发给目标 exporter。大图片会增大 OTLP 请求体，接收端限制及 Langfuse 媒体展示尚未实机验证；本项目不保证原生 OTLP 图片在界面中自动渲染。
+开启内容采集后，模型调用记录中的图片、音频和视频由官方 Langfuse 处理器上传到对象存储，记录中保留可预览的媒体引用。媒体分析的顶层输入只展示文本，媒体见子级模型调用的 Input；其他 exporter 保留包含媒体内容的模型记录。自托管实例须配置 `LANGFUSE_S3_MEDIA_UPLOAD_*`，并确保应用及浏览器可访问媒体存储地址；本地 Compose 已配置 MinIO。用法与支持格式见 [Langfuse 多模态说明](https://langfuse.com/docs/observability/features/multi-modality)。
 
 ## 追踪链路
 
@@ -36,6 +36,6 @@ HTTP 记录不自动采集请求和响应正文；Langfuse 的输入输出筛选
 
 评测需要开启内容采集，并显式映射任务、结果和 `metadata.evaluation_context` 中的材料。本包不创建评测器或评分。请求取消、追踪中断及历史缺口可能使材料不完整；Session 分组不保证任务恢复或历史完整。
 
-普通聊天及工具失败追踪已在本机核验。大图片的接收限制及媒体展示尚未实机验证。
+普通聊天、工具失败追踪及合成图片、音频和短视频的媒体预览已在本机核验。大媒体的上传与接收限制尚未实机验证。
 
 维护原则见[观测维护决策](../../docs/agent/observability-maintenance.md)，接口与字段以[源码](src)为准。
