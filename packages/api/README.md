@@ -34,7 +34,7 @@ backend 与 Agent 共用一套错误契约，Web 按错误码显示中文。HTTP
 
 删除成功返回 HTTP `200 / { status: "deleted", id }`；有引用时返回 HTTP `409 / { status: "referenced", id, references: { passages, observation_bindings } }`，至少一个引用数组非空，数组元素复用公开记录 schema。空间删除只返回直接引用，通道删除的 `passages` 为空。删除对象不存在返回 `404 / not_found`。
 
-其他错误沿用通用格式：`spatial_record_exists`、`spatial_record_changed` 返回 `409`，分别表示 ID 已存在、记录版本变化；`spatial_layout_referenced` 返回 `409`，表示整体保存要删除的记录仍被观测绑定引用；`spatial_reference_invalid`、`spatial_source_invalid` 返回 `400`；`spatial_storage_unavailable` 返回 `503`。客户端不自动重试写入，响应丢失时应先读取并确认实际结果。
+其他错误沿用通用格式：`spatial_record_exists`、`spatial_record_changed` 返回 `409`，分别表示 ID 已存在、记录版本变化；`spatial_layout_referenced` 返回 `409`，表示整体保存要删除的记录仍被观测绑定引用；`spatial_source_bound` 返回 `409`，表示摄像头镜头已被其他绑定占用（包括停用记录）；`spatial_reference_invalid`、`spatial_source_invalid` 返回 `400`；`spatial_storage_unavailable` 返回 `503`。客户端不自动重试写入，响应丢失时应先读取并确认实际结果。
 
 ## 连接检查
 

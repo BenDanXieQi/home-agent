@@ -19,6 +19,7 @@ export const errorCodeSchema = z.enum([
   "spatial_reference_invalid",
   "spatial_layout_referenced",
   "spatial_source_invalid",
+  "spatial_source_bound",
   "spatial_storage_unavailable",
   "internal_error",
   "http_error",

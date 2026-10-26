@@ -1,4 +1,4 @@
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 import type { Database } from "../../db";
 import {
   createLockedTransactions,
@@ -363,6 +363,22 @@ export function createSpatialRepository(db: Database) {
           .where(eq(observationBindings.id, input.id));
         requireOperation(input, existing);
         checkSource(existing ? bindingRecord(existing) : undefined);
+
+        if (input.channel !== null) {
+          const [bound] = await tx
+            .select({ id: observationBindings.id })
+            .from(observationBindings)
+            .where(
+              and(
+                eq(observationBindings.deviceId, input.device_id),
+                eq(observationBindings.channel, input.channel),
+                ne(observationBindings.id, input.id),
+              ),
+            )
+            .limit(1);
+          if (bound) throw new SpatialError("source_bound");
+        }
+
         const values = {
           deviceId: input.device_id,
           channel: input.channel,

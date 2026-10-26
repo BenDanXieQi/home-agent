@@ -40,6 +40,7 @@ const errorMessages = {
     "草稿删除的空间或通道仍有观测绑定，请先在手动设置中解除这些绑定。",
   spatial_source_invalid:
     "请选择当前设备清单中的摄像头及有效镜头，或人体存在传感器。",
+  spatial_source_bound: "该摄像头镜头已绑定，请选择其他镜头或编辑已有绑定。",
   spatial_storage_unavailable:
     "空间资料存储暂时不可用，请恢复连接并刷新确认保存结果后再重试。",
   internal_error: "服务内部发生错误，请稍后重试。",

@@ -240,9 +240,29 @@ export function BindingForm({
   const [deviceId, setDeviceId] = useState(record?.device_id ?? "");
   const [channel, setChannel] = useState(record?.channel?.toString() ?? "");
   const [error, setError] = useState("");
-  const sourceDevices = devices.filter(isObservationSourceDevice);
+  const sourceDevices = devices
+    .filter(isObservationSourceDevice)
+    .map((device) => ({
+      ...device,
+      availableChannels: device.channels.filter(
+        (candidate) =>
+          !snapshot.observation_bindings.some(
+            (binding) =>
+              binding.id !== id &&
+              binding.device_id === device.id &&
+              binding.channel === candidate,
+          ),
+      ),
+    }));
   const device = sourceDevices.find((value) => value.id === deviceId);
   const unavailableSource = !!deviceId && !device;
+  const sourceBound = snapshot.observation_bindings.some(
+    (binding) =>
+      binding.id !== id &&
+      binding.device_id === deviceId &&
+      binding.channel !== null &&
+      binding.channel.toString() === channel,
+  );
   const [selectedTarget, setSelectedTarget] = useState(() =>
     record?.space_id
       ? `space:${record.space_id}`
@@ -261,6 +281,10 @@ export function BindingForm({
       title={record ? "编辑观测绑定" : "新增观测绑定"}
       error={error}
       onSubmit={(data) => {
+        if (sourceBound) {
+          setError("该摄像头镜头已绑定，请选择其他镜头或编辑已有绑定。");
+          return;
+        }
         if (!availableTarget) {
           setError("所选观察目标已不可用，请重新选择。");
           return;
@@ -296,16 +320,19 @@ export function BindingForm({
             required
             value={deviceId}
             onChange={(event) => {
+              setDeviceId(event.target.value);
+              if (event.target.value === record?.device_id) {
+                setChannel(record.channel?.toString() ?? "");
+                return;
+              }
+
               const next = sourceDevices.find(
                 (value) => value.id === event.target.value,
               );
-              setDeviceId(event.target.value);
               setChannel(
-                next?.camera
-                  ? (next.channels[0]?.toString() ?? "")
-                  : event.target.value === record?.device_id
-                    ? (record.channel?.toString() ?? "")
-                    : "",
+                next?.camera && next.availableChannels.length === 1
+                  ? (next.availableChannels[0]?.toString() ?? "")
+                  : "",
               );
             }}
           >
@@ -319,8 +346,15 @@ export function BindingForm({
               </option>
             ) : null}
             {sourceDevices.map((value) => (
-              <option key={value.id} value={value.id}>
+              <option
+                key={value.id}
+                value={value.id}
+                disabled={value.camera && !value.availableChannels.length}
+              >
                 {value.name} · {value.id}
+                {value.camera && !value.availableChannels.length
+                  ? "（镜头已全部绑定）"
+                  : ""}
               </option>
             ))}
           </select>
@@ -343,8 +377,15 @@ export function BindingForm({
                   选择镜头
                 </option>
                 {device.channels.map((value) => (
-                  <option key={value} value={value}>
+                  <option
+                    key={value}
+                    value={value}
+                    disabled={!device.availableChannels.includes(value)}
+                  >
                     镜头 {value}
+                    {device.availableChannels.includes(value)
+                      ? ""
+                      : "（已绑定）"}
                   </option>
                 ))}
               </>
@@ -396,6 +437,7 @@ export function BindingForm({
       <label className="m-0 flex items-center gap-2 text-sm">
         <input
           type="checkbox"
+          className="size-4 shrink-0 p-0 accent-ink"
           name="enabled"
           defaultChecked={record?.enabled ?? true}
         />

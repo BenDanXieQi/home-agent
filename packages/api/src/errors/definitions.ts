@@ -55,6 +55,10 @@ export const errorDefinitions = {
     message:
       "Select a camera with a valid channel or an occupancy sensor from the current inventory.",
   },
+  spatial_source_bound: {
+    status: 409,
+    message: "The camera channel already has an observation binding.",
+  },
   spatial_storage_unavailable: {
     status: 503,
     message:

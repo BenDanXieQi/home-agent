@@ -116,6 +116,8 @@ export function useSpatialCommands(
         setUnconfirmed(command);
         setMessage("响应未能确认操作结果，正在重新读取…");
         await confirm(command);
+      } else if (error.details.code === "spatial_source_bound") {
+        await client.invalidateQueries({ queryKey: options.queryKey });
       } else if (
         [
           "spatial_record_changed",

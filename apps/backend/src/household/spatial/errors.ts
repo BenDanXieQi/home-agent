@@ -7,6 +7,7 @@ export class SpatialError extends Error {
       | "reference_invalid"
       | "layout_referenced"
       | "source_invalid"
+      | "source_bound"
       | "storage_unavailable",
     options?: ErrorOptions,
   ) {
