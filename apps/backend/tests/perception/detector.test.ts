@@ -267,7 +267,7 @@ test("preserves distinct subpixel boxes and nonempty image-edge coverage", async
     output0: modelOutput([
       [0.25, 0.25, 0.3, 0.3, 0.9, 0, 0, 0, 0],
       [0.75, 0.25, 0.3, 0.3, 0.8, 0, 0, 0, 0],
-      [4, 3.75, 0.4, 0.3, 0.7, 0, 0, 0, 0],
+      [4, 3.75, 0.4, 0.3, 0.8, 0, 0, 0, 0],
     ]),
   });
   await withDetector(async (detector) => {
@@ -509,6 +509,185 @@ test("keeps the human mirror review and its weak support ahead of pet review", a
       { className: "cat", x: 16, y: 24, w: 16, h: 16 },
     ]);
     expect(detections[0]?.confidence).toBeCloseTo(0.6);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+});
+
+const imageEdgeHumans = [
+  { edge: "top", box: [2.5, 1.25, 0.5, 0.5], x: 72, y: 0 },
+  { edge: "bottom", box: [2.5, 2.75, 0.5, 0.5], x: 72, y: 48 },
+  { edge: "left", box: [0.25, 2, 0.5, 0.5], x: 0, y: 24 },
+  { edge: "right", box: [3.75, 2, 0.5, 0.5], x: 112, y: 24 },
+  { edge: "corner", box: [0.25, 1.25, 0.5, 0.5], x: 0, y: 0 },
+];
+
+test.each(imageEdgeHumans)(
+  "removes an unsupported human at the $edge image edge after both review views fail",
+  async ({ box }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(0, 0.65, box)]),
+      })
+      .mockResolvedValueOnce({ output0: modelOutput([]) })
+      .mockResolvedValueOnce({ output0: modelOutput([]) });
+    await withDetector(async (detector) => {
+      expect((await detector.detect(frame(128, 64))).detections).toEqual([]);
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+  },
+);
+
+test.each(imageEdgeHumans)(
+  "retains a human at the $edge image edge when the full mirrored view has weak support",
+  async ({ box, x, y }) => {
+    const [cx, cy, width, height] = box;
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(0, 0.65, box)]),
+      })
+      .mockResolvedValueOnce({ output0: modelOutput([]) })
+      .mockResolvedValueOnce({
+        output0: modelOutput([
+          detectionRow(0, 0.2, [4 - cx!, cy!, width!, height!]),
+        ]),
+      });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className: "human", x, y, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(0.65);
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+  },
+);
+
+test("retains a human when its crop cuts off context inside the image", async () => {
+  run
+    .mockResolvedValueOnce({
+      output0: modelOutput([detectionRow(0, 0.65, [2, 2, 2, 1])]),
+    })
+    .mockResolvedValueOnce({ output0: modelOutput([]) });
+  await withDetector(async (detector) => {
+    const { detections } = await detector.detect(frame(128, 64));
+    expect(detections).toMatchObject([
+      { className: "human", x: 32, y: 16, w: 64, h: 32 },
+    ]);
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+test.each(
+  [
+    { className: "human", classId: 0, box: [2, 1, 2, 2] },
+    { className: "head", classId: 3, box: [2, 0.5, 0.5, 0.5] },
+    { className: "face", classId: 4, box: [2, 0.5, 0.5, 0.5] },
+  ].flatMap((candidate) =>
+    [0.7, 0.3, 0.1].map((confidence) => ({ ...candidate, confidence })),
+  ),
+)(
+  "retains an edge human with local $className support at confidence $confidence",
+  async ({ classId, confidence, box }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(0, 0.65, [2.5, 1.25, 0.5, 0.5])]),
+      })
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, confidence, box)]),
+      });
+    await withDetector(async (detector) => {
+      const { detections } = await detector.detect(frame(128, 64));
+      expect(detections).toMatchObject([
+        { className: "human", x: 72, y: 0, w: 16, h: 16 },
+      ]);
+      expect(detections[0]?.confidence).toBeCloseTo(0.65);
+      expect(run).toHaveBeenCalledTimes(2);
+    });
+  },
+);
+
+test.each([
+  {
+    className: "human",
+    classId: 0,
+    confidence: 0.3,
+    box: [3.5, 3.5, 0.5, 0.5],
+  },
+  { className: "head", classId: 3, confidence: 0.3, box: [3.5, 3.5, 0.5, 0.5] },
+  { className: "face", classId: 4, confidence: 0.3, box: [3.5, 3.5, 0.5, 0.5] },
+  { className: "cat", classId: 1, confidence: 0.3, box: [2, 1, 2, 2] },
+  { className: "dog", classId: 2, confidence: 0.3, box: [2, 1, 2, 2] },
+  { className: "human", classId: 0, confidence: 0.09, box: [2, 1, 2, 2] },
+])(
+  "removes an unsupported edge human despite unrelated or insufficient $className evidence at $confidence",
+  async ({ classId, confidence, box }) => {
+    run
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(0, 0.65, [2.5, 1.25, 0.5, 0.5])]),
+      })
+      .mockResolvedValueOnce({
+        output0: modelOutput([detectionRow(classId, confidence, box)]),
+      })
+      .mockResolvedValueOnce({ output0: modelOutput([]) });
+    await withDetector(async (detector) => {
+      expect((await detector.detect(frame(128, 64))).detections).toEqual([]);
+      expect(run).toHaveBeenCalledTimes(3);
+    });
+  },
+);
+
+test("retains an edge human at the review ceiling without extra inference", async () => {
+  run.mockResolvedValueOnce({
+    output0: modelOutput([detectionRow(0, 0.8, [2.5, 1.25, 0.5, 0.5])]),
+  });
+  await withDetector(async (detector) => {
+    const { detections } = await detector.detect(frame(128, 64));
+    expect(detections).toMatchObject([
+      { className: "human", x: 72, y: 0, w: 16, h: 16 },
+    ]);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+test("retains edge and interior humans when local reviews exhaust the mirror budget", async () => {
+  run
+    .mockResolvedValueOnce({
+      output0: modelOutput([
+        detectionRow(0, 0.6, [2.5, 1.25, 0.5, 0.5]),
+        detectionRow(0, 0.65, [0.75, 2, 0.5, 0.5]),
+      ]),
+    })
+    .mockResolvedValueOnce({ output0: modelOutput([]) })
+    .mockResolvedValueOnce({ output0: modelOutput([]) });
+  await withDetector(async (detector) => {
+    const { detections } = await detector.detect(frame(128, 64));
+    expect(detections).toMatchObject([
+      { className: "human", x: 16, y: 24, w: 16, h: 16 },
+      { className: "human", x: 72, y: 0, w: 16, h: 16 },
+    ]);
+    expect(run).toHaveBeenCalledTimes(3);
+  });
+});
+
+test("removes only the unsupported edge human in a scene with another human and a cat", async () => {
+  run
+    .mockResolvedValueOnce({
+      output0: modelOutput([
+        detectionRow(0, 0.65, [2.5, 1.25, 0.5, 0.5]),
+        detectionRow(0, 0.95, [0.75, 2, 0.5, 0.5]),
+        detectionRow(1, 0.9, [1.5, 2, 0.5, 0.5]),
+      ]),
+    })
+    .mockResolvedValueOnce({ output0: modelOutput([]) })
+    .mockResolvedValueOnce({
+      output0: modelOutput([detectionRow(0, 0.2, [3.25, 2, 0.5, 0.5])]),
+    });
+  await withDetector(async (detector) => {
+    const { detections } = await detector.detect(frame(128, 64));
+    expect(detections).toMatchObject([
+      { className: "human", x: 16, y: 24, w: 16, h: 16 },
+      { className: "cat", x: 40, y: 24, w: 16, h: 16 },
+    ]);
     expect(run).toHaveBeenCalledTimes(3);
   });
 });

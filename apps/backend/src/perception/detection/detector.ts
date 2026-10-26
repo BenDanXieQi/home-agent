@@ -224,7 +224,11 @@ export async function createDetector(minimumConfidence = 0.5) {
         return {
           left,
           top,
-          hasContext,
+          hasVisibleContext:
+            (left < box.x || left === 0) &&
+            (top < box.y || top === 0) &&
+            (left + side > box.x + box.w || left + side === frame.width) &&
+            (top + side > box.y + box.h || top + side === frame.height),
           frame: crop,
         };
       };
@@ -239,28 +243,47 @@ export async function createDetector(minimumConfidence = 0.5) {
       const reviews = humans
         .filter((box) => box.confidence < reviewConfidenceCeiling)
         .toSorted((a, b) => a.confidence - b.confidence);
-      const emptyReviews: typeof humans = [];
+      const unsupportedHumans: typeof humans = [];
 
       for (const box of reviews) {
         if (reviewed >= detectionComputeBudget.humanReviewsPerTask) break;
         const crop = await cropForReview(box);
         if (!crop) continue;
-        const review = await recheck(crop.frame);
+        const review = (await recheck(crop.frame, false, 0.1)).map(
+          (candidate) => ({
+            ...candidate,
+            x: candidate.x + crop.left,
+            y: candidate.y + crop.top,
+          }),
+        );
 
-        if (!review.length && crop.hasContext) {
-          emptyReviews.push(box);
+        const hasSupport = review.some((candidate) => {
+          if (candidate.confidence >= threshold) return true;
+          if (candidate.className === "human")
+            return iou(box, candidate) >= 0.5;
+          if (candidate.className !== "head" && candidate.className !== "face")
+            return false;
+
+          const centerX = candidate.x + candidate.w / 2;
+          const centerY = candidate.y + candidate.h / 2;
+          return (
+            centerX >= box.x &&
+            centerX < box.x + box.w &&
+            centerY >= box.y &&
+            centerY < box.y + box.h
+          );
+        });
+        if (!hasSupport && crop.hasVisibleContext) {
+          unsupportedHumans.push(box);
           continue;
         }
 
         const corresponding = review
-          .filter((candidate) =>
-            ["human", "cat", "dog"].includes(candidate.className),
+          .filter(
+            (candidate) =>
+              candidate.confidence >= threshold &&
+              ["human", "cat", "dog"].includes(candidate.className),
           )
-          .map((candidate) => ({
-            ...candidate,
-            x: candidate.x + crop.left,
-            y: candidate.y + crop.top,
-          }))
           .map((candidate) => ({ candidate, overlap: iou(box, candidate) }))
           .filter(
             ({ candidate, overlap }) =>
@@ -283,11 +306,11 @@ export async function createDetector(minimumConfidence = 0.5) {
       }
 
       if (
-        emptyReviews.length &&
+        unsupportedHumans.length &&
         reviewed < detectionComputeBudget.humanReviewsPerTask
       ) {
         const mirrored = await recheck(prepared, true, 0.1);
-        for (const box of emptyReviews) {
+        for (const box of unsupportedHumans) {
           if (
             !mirrored.some(
               (candidate) =>
