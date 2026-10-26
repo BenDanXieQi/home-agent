@@ -33,10 +33,14 @@ const dimensions = {
   width: z.int().positive().optional(),
   height: z.int().positive().optional(),
 };
+export const recordingSourceSchema = sourceSelectionSchema.pick({
+  deviceId: true,
+  channel: true,
+});
 export const readMediaInputSchema = z
   .strictObject({
-    ...sourceSelectionSchema.pick({ deviceId: true, channel: true }).shape,
-    source: z.enum(["local", "sd"]),
+    ...recordingSourceSchema.shape,
+    source: z.enum(["local", "sd"]).optional(),
     selection: z.discriminatedUnion("kind", [
       z.strictObject({ kind: z.literal("at"), at: z.number() }),
       z
@@ -297,5 +301,16 @@ export function createRecordingsService(options: {
     })();
     return closing;
   }
-  return { start: startService, close, readMedia, beginRead };
+  return {
+    start: startService,
+    close,
+    readMedia,
+    beginRead,
+    covers: originals.covers,
+    subscribe: originals.subscribe,
+    async ranges(target: Parameters<typeof originals.ranges>[0]) {
+      await startService();
+      return originals.ranges(target);
+    },
+  };
 }

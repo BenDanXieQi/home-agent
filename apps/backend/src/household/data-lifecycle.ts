@@ -4,6 +4,7 @@ import * as schema from "../db/schema";
 import type { Transaction } from "../db/transaction-outcome";
 
 const tableLifetime = {
+  perceptionMarkers: "household",
   perceptionWindows: "household",
   credentials: "installation",
   deviceCommands: "household",

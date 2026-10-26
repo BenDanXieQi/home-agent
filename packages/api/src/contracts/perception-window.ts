@@ -15,13 +15,7 @@ export const windowHistoryRetentionMs = 365 * 24 * 60 * 60_000;
 export const windowPolicySchema = z.strictObject({
   retentionMs: z.int().min(1000).max(60_000).default(12_000),
 });
-export const mediaRepresentationSchema = z.enum([
-  "image",
-  "crop_image",
-  "video",
-  "crop_video",
-  "audio",
-]);
+export const mediaRepresentationSchema = z.enum(["audio"]);
 export const mediaSelectionSchema = z.strictObject({
   representation: mediaRepresentationSchema,
   includeAudio: z.boolean().default(false),
@@ -138,6 +132,7 @@ export const windowSampledMediaSchema = z.object({
   error: z.string().max(1024).nullable(),
 });
 export const windowDetailSchema = windowSummarySchema.extend({
+  analysisAcceptingUntil: z.number().nullable(),
   sampledMedia: windowSampledMediaSchema.nullable(),
 });
 export const windowListEntrySchema = windowDetailSchema
@@ -168,8 +163,13 @@ export const windowListEntrySchema = windowDetailSchema
       )
       .max(40),
   });
+export const windowMarkerSchema = windowSummarySchema.pick({
+  id: true,
+  startedAt: true,
+  endedAt: true,
+});
 export const windowListSchema = z.object({
-  windows: z.array(windowListEntrySchema),
+  markers: z.array(windowMarkerSchema),
   next: z.object({ before: z.number(), beforeId: z.uuid() }).nullable(),
   history: z.object({ enabled: z.boolean(), error: z.string().nullable() }),
 });
@@ -184,33 +184,9 @@ export const mediaViewSchema = z.object({
   contentType: z.string().nullable(),
   error: z.string().max(1024).nullable(),
   parameters: z.object({
-    shortSide: z.literal(512),
-    sampleFps: z.literal(1),
     timestampBasis: z.literal("host_receive"),
-    crop: windowBoxSchema.nullable(),
-    cropPixels: z
-      .object({
-        left: z.int().nonnegative(),
-        top: z.int().nonnegative(),
-        width: z.int().positive(),
-        height: z.int().positive(),
-      })
-      .nullable(),
     audioIncluded: z.boolean(),
     startedAt: z.number(),
     endedAt: z.number(),
-    width: z.int().positive().nullable(),
-    height: z.int().positive().nullable(),
-    coordinateBasis: z.literal("encoded_pixels"),
-    frames: z
-      .array(
-        z.object({
-          sequence: z.int().positive(),
-          offsetMs: z.number().nonnegative(),
-          detections: z.array(detectionSchema).max(128).nullable(),
-          identity: windowFrameSchema.shape.identity,
-        }),
-      )
-      .max(6),
   }),
 });

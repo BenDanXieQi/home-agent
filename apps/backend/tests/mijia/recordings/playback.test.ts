@@ -164,7 +164,16 @@ async function fixture(
     await eventually(() => service.state(input.id).state !== "preparing", 5000);
     return service.state(input.id);
   }
-  return { service, window, source, input, index, readRecordings, settled };
+  return {
+    service,
+    originals,
+    window,
+    source,
+    input,
+    index,
+    readRecordings,
+    settled,
+  };
 }
 
 test("missing observation is unavailable before any SD index or download request", async () => {
@@ -271,7 +280,7 @@ test("revoking the source during observation lookup preserves revoked playback",
   }
 });
 
-test("a valid archived observation reaches SD playback and produces readable media", async () => {
+async function recordingDownload() {
   const directory = await mkdtemp(join(tmpdir(), "recording-playback-test-"));
   const clip = join(directory, "input.mp4");
   const process = Bun.spawn(
@@ -314,6 +323,11 @@ test("a valid archived observation reaches SD playback and produces readable med
       }),
   );
   const peer = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: downloads });
+  return { directory, peer, downloads, bytes };
+}
+
+test("a valid archived observation reaches SD playback and produces readable media", async () => {
+  const { directory, peer, downloads } = await recordingDownload();
   let resolvedSignal: AbortSignal | undefined;
   const run = await fixture((id, signal) => {
     expect(id).toBe(run.window.id);
@@ -340,6 +354,144 @@ test("a valid archived observation reaches SD playback and produces readable med
     expect((await new Response(stream).arrayBuffer()).byteLength).toBe(
       info.bytes,
     );
+  } finally {
+    await run.service.close();
+    await peer.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("clip playback reads shared original bytes with independent concurrent Range lifetimes", async () => {
+  const { directory, peer, downloads, bytes } = await recordingDownload();
+  const run = await fixture(() => {
+    throw new Error("Clip playback does not resolve observation windows");
+  }, peer.url.toString());
+  const input = {
+    ...run.input,
+    selection: { kind: "clip" as const, startAt: run.window.startedAt },
+  };
+  run.index.recordings[0]!.endAt += 200;
+  const second = { ...input, id: crypto.randomUUID() };
+  try {
+    run.service.request(input);
+    run.service.request(second);
+    await eventually(
+      () =>
+        run.service.state(input.id).state !== "preparing" &&
+        run.service.state(second.id).state !== "preparing",
+      5000,
+    );
+    expect(run.service.state(input.id)).toMatchObject({
+      state: "ready",
+      actualDurationMs: 1000,
+      segments: [
+        {
+          startAt: input.selection.startAt,
+          endAt: run.window.endedAt + 200,
+          mediaStartMs: 0,
+          mediaEndMs: 1000,
+        },
+      ],
+      alignment: { type: "unknown", reason: "clip_selected" },
+    });
+    expect(downloads).toHaveBeenCalledTimes(1);
+    expect(run.service.mediaInfo(input.id).bytes).toBe(bytes.byteLength);
+
+    const intervals = [
+      { start: 0, end: 31 },
+      { start: 32, end: bytes.byteLength - 1 },
+    ];
+    const results = await Promise.all(
+      intervals.map(async (range, index) => {
+        const stream = run.service.read(
+          index === 0 ? input.id : second.id,
+          range,
+          new AbortController().signal,
+        );
+        return new Uint8Array(await new Response(stream).arrayBuffer());
+      }),
+    );
+    for (const [index, result] of results.entries()) {
+      const range = intervals[index]!;
+      expect(result).toEqual(
+        new Uint8Array(bytes.slice(range.start, range.end + 1)),
+      );
+    }
+
+    const interrupted = new Response(
+      run.service.read(
+        input.id,
+        { start: 0, end: bytes.byteLength - 1 },
+        new AbortController().signal,
+      ),
+    )
+      .arrayBuffer()
+      .then(
+        () => "completed",
+        () => "cancelled",
+      );
+    await run.service.release(input.id);
+    expect(await interrupted).toBe("cancelled");
+    expect(() => run.service.mediaInfo(input.id)).toThrow();
+    const retained = run.service.read(
+      second.id,
+      { start: 0, end: bytes.byteLength - 1 },
+      new AbortController().signal,
+    );
+    expect(new Uint8Array(await new Response(retained).arrayBuffer())).toEqual(
+      new Uint8Array(bytes),
+    );
+    expect(downloads).toHaveBeenCalledTimes(1);
+
+    const revoked = new Response(
+      run.service.read(
+        second.id,
+        { start: 0, end: bytes.byteLength - 1 },
+        new AbortController().signal,
+      ),
+    )
+      .arrayBuffer()
+      .then(
+        () => "completed",
+        () => "cancelled",
+      );
+    run.source.abort();
+    expect(await revoked).toBe("cancelled");
+    expect(() => run.service.mediaInfo(second.id)).toThrow();
+  } finally {
+    await run.service.close();
+    await peer.stop(true);
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("closing the original owner revokes ready clip playback and its active Range before playback closes", async () => {
+  const { directory, peer, bytes } = await recordingDownload();
+  const run = await fixture(() => undefined, peer.url.toString());
+  const input = {
+    ...run.input,
+    selection: { kind: "clip" as const, startAt: run.window.startedAt },
+  };
+  try {
+    run.service.request(input);
+    expect(await run.settled()).toMatchObject({ state: "ready" });
+    const pending = new Response(
+      run.service.read(
+        input.id,
+        { start: 0, end: bytes.byteLength - 1 },
+        new AbortController().signal,
+      ),
+    )
+      .arrayBuffer()
+      .then(
+        () => "completed",
+        () => "cancelled",
+      );
+
+    await run.originals.close();
+    expect(await pending).toBe("cancelled");
+    expect(run.service.state(input.id)).toMatchObject({ state: "revoked" });
+    expect(() => run.service.mediaInfo(input.id)).toThrow();
   } finally {
     await run.service.close();
     await peer.stop(true);

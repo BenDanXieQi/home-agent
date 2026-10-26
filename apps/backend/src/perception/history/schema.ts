@@ -1,5 +1,6 @@
 import {
   bigint,
+  check,
   index,
   integer,
   jsonb,
@@ -11,6 +12,33 @@ import {
 import { sql } from "drizzle-orm";
 import type { z } from "zod";
 import type { windowSummarySchema } from "@home-agent/api/contracts";
+
+export const perceptionMarkers = pgTable(
+  "perception_markers",
+  {
+    id: uuid("id").primaryKey(),
+    deviceId: text("device_id").notNull(),
+    channel: integer("channel").notNull(),
+    startedAt: bigint("started_at", { mode: "number" }).notNull(),
+    endedAt: bigint("ended_at", { mode: "number" }).notNull(),
+  },
+  (table) => [
+    check(
+      "perception_markers_time_order",
+      sql`${table.startedAt} < ${table.endedAt}`,
+    ),
+    index("perception_markers_source_time").on(
+      table.deviceId,
+      table.channel,
+      table.startedAt,
+      table.id,
+    ),
+    index("perception_markers_range").using(
+      "gist",
+      sql`numrange(${table.startedAt}, ${table.endedAt}, '[]')`,
+    ),
+  ],
+);
 
 export const perceptionWindows = pgTable(
   "perception_windows",

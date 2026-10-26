@@ -132,7 +132,7 @@ function CameraDetailModes({
               activeOptions={{ exact: true }}
               className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-ink focus-visible:outline-2 aria-[current=page]:bg-ink/5 aria-[current=page]:font-medium aria-[current=page]:text-ink"
             >
-              {value === "windows" ? "筛选片段" : "实时检测"}
+              {value === "windows" ? "历史录像" : "实时检测"}
             </Link>
           ))}
         </nav>

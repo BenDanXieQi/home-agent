@@ -5,6 +5,7 @@ import {
   eq,
   gt,
   gte,
+  inArray,
   lt,
   lte,
   or,
@@ -14,14 +15,23 @@ import {
 import postgres from "postgres";
 import {
   windowSummarySchema,
+  windowMarkerSchema,
+  windowHistoryRetentionMs,
   type windowListQuerySchema,
   type perceptionWindowsHistoryQuerySchema,
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
 import type { Database } from "../../db";
 import { createHouseholdBindingAccess } from "../../household/binding-repository";
-import { perceptionWindows as records } from "./schema";
+import {
+  perceptionMarkers as markers,
+  perceptionWindows as records,
+} from "./schema";
 import { HouseholdError } from "../../household/errors";
+import { lockTransaction } from "../../db/transaction-outcome";
+
+const markerLock = (deviceId: string, channel: number) =>
+  JSON.stringify(["perception_markers", deviceId, channel]);
 
 const connectionErrorCodes = new Set([
   "CONNECTION_ENDED",
@@ -88,6 +98,11 @@ export function createWindowHistoryRepository(db: Database) {
         observedEndAt: Math.max(...intervals.map((interval) => interval[1]!)),
       };
       return access(identity, assertCurrent, async (tx) => {
+        await lockTransaction(
+          tx,
+          markerLock(summary.run.deviceId, summary.run.channel),
+          "exclusive",
+        );
         await tx
           .insert(records)
           .values({
@@ -105,6 +120,51 @@ export function createWindowHistoryRepository(db: Database) {
             set: { summary, ...observed },
             setWhere: sql`(${records.summary}->>'revision')::integer <= ${summary.revision}`,
           });
+
+        const startedAt = Math.max(
+          summary.startedAt,
+          Date.now() - windowHistoryRetentionMs,
+        );
+        if (summary.endedAt <= startedAt) return;
+        const overlapping = await tx
+          .select()
+          .from(markers)
+          .where(
+            and(
+              eq(markers.deviceId, summary.run.deviceId),
+              eq(markers.channel, summary.run.channel),
+              sql`numrange(${markers.startedAt}, ${markers.endedAt}, '[]') && numrange(${startedAt}, ${summary.endedAt}, '[]')`,
+            ),
+          )
+          .orderBy(asc(markers.startedAt), asc(markers.id));
+        const first = overlapping[0];
+        const marker = {
+          id: first?.id ?? crypto.randomUUID(),
+          deviceId: summary.run.deviceId,
+          channel: summary.run.channel,
+          startedAt: Math.min(
+            startedAt,
+            ...overlapping.map((entry) => entry.startedAt),
+          ),
+          endedAt: Math.max(
+            summary.endedAt,
+            ...overlapping.map((entry) => entry.endedAt),
+          ),
+        };
+        if (
+          overlapping.length === 1 &&
+          first?.startedAt === marker.startedAt &&
+          first.endedAt === marker.endedAt
+        )
+          return;
+        if (overlapping.length)
+          await tx.delete(markers).where(
+            inArray(
+              markers.id,
+              overlapping.map((entry) => entry.id),
+            ),
+          );
+        await tx.insert(markers).values(marker);
       });
     },
     get(
@@ -127,30 +187,33 @@ export function createWindowHistoryRepository(db: Database) {
       query: z.infer<typeof windowListQuerySchema>,
     ) {
       return read(identity, assertCurrent, async (tx) => {
-        const rows = await tx
-          .select({ summary: records.summary })
-          .from(records)
+        const cutoff = Date.now() - windowHistoryRetentionMs;
+        const startedAt =
+          sql<number>`greatest(${markers.startedAt}, ${cutoff})`.mapWith(
+            Number,
+          );
+        const spans = await tx
+          .select({ id: markers.id, startedAt, endedAt: markers.endedAt })
+          .from(markers)
           .where(
             and(
-              gt(records.expiresAt, Date.now()),
-              eq(records.deviceId, query.deviceId),
-              eq(records.channel, query.channel),
+              eq(markers.deviceId, query.deviceId),
+              eq(markers.channel, query.channel),
+              gt(markers.endedAt, cutoff),
               query.start === undefined
                 ? undefined
-                : gte(records.startedAt, query.start),
-              query.end === undefined
-                ? undefined
-                : lt(records.startedAt, query.end),
+                : gt(markers.endedAt, query.start),
+              query.end === undefined ? undefined : lt(startedAt, query.end),
               query.before === undefined
                 ? undefined
                 : query.beforeId
-                  ? sql`(${records.startedAt}, ${records.id}) < (${query.before}, ${query.beforeId}::uuid)`
-                  : lt(records.startedAt, query.before),
+                  ? sql`(${startedAt}, ${markers.id}) < (${query.before}, ${query.beforeId}::uuid)`
+                  : lt(startedAt, query.before),
             ),
           )
-          .orderBy(desc(records.startedAt), desc(records.id))
+          .orderBy(desc(markers.startedAt), desc(markers.id))
           .limit(51);
-        return rows.map((row) => windowSummarySchema.parse(row.summary));
+        return spans.map((row) => windowMarkerSchema.parse(row));
       });
     },
     history(
@@ -205,6 +268,34 @@ export function createWindowHistoryRepository(db: Database) {
         .where(
           sql`${records.id} in (select id from ${records} where ${lte(records.expiresAt, Date.now())} limit 1000)`,
         );
+
+      const cutoff = Date.now() - windowHistoryRetentionMs;
+      const sources = await db
+        .selectDistinct({
+          deviceId: markers.deviceId,
+          channel: markers.channel,
+        })
+        .from(markers)
+        .where(lt(markers.startedAt, cutoff));
+      for (const source of sources)
+        await db.transaction(async (tx) => {
+          await lockTransaction(
+            tx,
+            markerLock(source.deviceId, source.channel),
+            "exclusive",
+          );
+          const current = and(
+            eq(markers.deviceId, source.deviceId),
+            eq(markers.channel, source.channel),
+          );
+          await tx
+            .delete(markers)
+            .where(and(current, lte(markers.endedAt, cutoff)));
+          await tx
+            .update(markers)
+            .set({ startedAt: cutoff })
+            .where(and(current, lt(markers.startedAt, cutoff)));
+        });
     },
   };
 }

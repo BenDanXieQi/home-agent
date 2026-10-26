@@ -16,17 +16,13 @@ export function WindowMediaPreview({
   mediaId,
   available,
   active,
-  autoPlay,
-  initialTime,
 }: {
   available: boolean;
   active: boolean;
-  autoPlay: boolean;
   scope: string;
   id: string;
   selection: WindowMediaSelection;
   mediaId: string;
-  initialTime: number | undefined;
 }) {
   const query = useQuery({
     ...windowBytesOptions(scope, id, selection, mediaId),
@@ -35,16 +31,14 @@ export function WindowMediaPreview({
   });
   const [failed, setFailed] = useState(false);
   const attachMedia = useCallback(
-    (node: HTMLImageElement | HTMLMediaElement | null) => {
+    (node: HTMLMediaElement | null) => {
       if (!query.data || !node) return undefined;
       const url = URL.createObjectURL(query.data);
       node.src = url;
       return () => {
         node.removeAttribute("src");
-        if (node instanceof HTMLMediaElement) {
-          node.pause();
-          node.load();
-        }
+        node.pause();
+        node.load();
         URL.revokeObjectURL(url);
       };
     },
@@ -56,7 +50,7 @@ export function WindowMediaPreview({
   )
     return (
       <StatusNotice className="m-4 max-h-full overflow-auto text-ink">
-        此媒体尚未加载，后台已无法读取。请选择新的片段。
+        此窗口声音已无法读取。
       </StatusNotice>
     );
   if (query.isError)
@@ -79,7 +73,7 @@ export function WindowMediaPreview({
   if (!query.data)
     return (
       <StatusNotice className="m-4 max-h-full overflow-auto text-ink">
-        {active ? "正在读取片段媒体…" : "等待家庭连接恢复后读取片段媒体。"}
+        {active ? "正在读取窗口声音…" : "等待家庭连接恢复后读取窗口声音。"}
       </StatusNotice>
     );
   if (failed)
@@ -90,39 +84,14 @@ export function WindowMediaPreview({
     );
   return (
     <div className="relative grid size-full place-items-center">
-      {selection.representation.endsWith("image") ? (
-        <img
-          ref={attachMedia}
-          alt="所选窗口的最后一张保留帧"
-          className="size-full object-contain"
-          onError={() => setFailed(true)}
-        />
-      ) : selection.representation === "audio" ? (
-        // oxlint-disable-next-line jsx-a11y/media-has-caption
-        <audio
-          ref={attachMedia}
-          controls
-          aria-label="所选窗口声音"
-          className="w-full"
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        // oxlint-disable-next-line jsx-a11y/media-has-caption
-        <video
-          ref={attachMedia}
-          controls
-          autoPlay={autoPlay}
-          muted={autoPlay}
-          playsInline
-          aria-label="所选窗口采样视频"
-          className="size-full object-contain"
-          onLoadedMetadata={(event) => {
-            if (initialTime !== undefined)
-              event.currentTarget.currentTime = initialTime;
-          }}
-          onError={() => setFailed(true)}
-        />
-      )}
+      {/* oxlint-disable-next-line jsx-a11y/media-has-caption */}
+      <audio
+        ref={attachMedia}
+        controls
+        aria-label="所选窗口声音"
+        className="w-full"
+        onError={() => setFailed(true)}
+      />
     </div>
   );
 }

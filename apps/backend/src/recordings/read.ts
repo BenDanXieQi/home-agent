@@ -110,10 +110,21 @@ export async function readRecordingMedia(
   });
 
   try {
-    const segments =
-      input.source === "sd"
-        ? await sdSegments(input, operation, signal, options.sd)
-        : operation.localSegments(input);
+    const start =
+      input.selection.kind === "at"
+        ? input.selection.at
+        : input.selection.start;
+    const end =
+      input.selection.kind === "at"
+        ? input.selection.at + 0.001
+        : input.selection.end;
+    const local =
+      input.source === "local" ||
+      (input.source === undefined &&
+        options.originals.covers({ ...input, start, end }));
+    const segments = local
+      ? operation.localSegments(input)
+      : await sdSegments(input, operation, signal, options.sd);
     if (!segments.length)
       throw new RecordingCoverageError("Recording selection has no material");
     const directory = await mkdtemp(join(root, "read-"));
@@ -154,6 +165,11 @@ export async function readRecordingMedia(
     return { media, metadata: transformed.metadata };
   } catch (cause) {
     cancelled.abort(cause);
+    if (cause instanceof RecordingCoverageError)
+      console.warn("Recording coverage unavailable", {
+        selection: input.selection,
+        reason: cause.message,
+      });
     if (cause instanceof MediaCleanupError) {
       output.quarantined = true;
       operation.quarantine();

@@ -17,7 +17,7 @@ export function WindowMaterialSummary({
     <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
       <dt className="text-muted">窗口内容修订</dt>
       <dd>{material.revision}</dd>
-      <dt className="text-muted">原始音视频</dt>
+      <dt className="text-muted">分析采样输入</dt>
       <dd>{windowInputStates[material.inputState]}</dd>
       <dt className="text-muted">语音转写</dt>
       <dd>
@@ -25,16 +25,13 @@ export function WindowMaterialSummary({
       </dd>
       <dt className="text-muted">猫狗叫声</dt>
       <dd>{petSoundSummary(material)}</dd>
-      <dt className="text-muted">片段</dt>
+      <dt className="text-muted">窗口声音</dt>
       <dd>{mediaStateLabel(media?.state)}</dd>
       {media ? (
         <>
-          <dt className="text-muted">片段生成选项</dt>
-          <dd>
-            {representations[media.selection.representation]} ·{" "}
-            {media.selection.includeAudio ? "包含声音" : "不包含声音"}
-          </dd>
-          <dt className="text-muted">片段有效期</dt>
+          <dt className="text-muted">声音生成选项</dt>
+          <dd>{representations[media.selection.representation]}</dd>
+          <dt className="text-muted">声音有效期</dt>
           <dd>{formatTime(media.readableUntil, "dateTime")}</dd>
           {media.error ? (
             <>

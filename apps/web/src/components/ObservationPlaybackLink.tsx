@@ -31,18 +31,18 @@ export function ObservationPlaybackLink({
     buttonStyles.secondary,
     "min-h-8 px-3 py-1.5 text-xs hover:bg-sidebar focus-visible:outline-2",
   );
-  if (availability?.status === "window") {
-    const { window } = availability;
+  if (availability?.status === "local") {
     return (
       <Link
         to="/cameras/$deviceId/$channel"
         params={{ deviceId: source.deviceId, channel: String(source.channel) }}
         search={{
           mode: "windows",
-          window: window.id,
+          window: windowId,
           activityRun: source.sourceRunId,
           activityFirstAt: source.firstObservedAt,
           activityAt: source.lastObservedAt,
+          seekAt: availability.seekAt,
           member: memberId,
         }}
         className={linkClassName}

@@ -154,7 +154,7 @@ export async function prepareTimeline(
         Math.min(current.startedAt, selectionEnd)
     )
       throw new RecordingCoverageError(
-        "Recording selection has missing segments",
+        `Recording selection has missing segments from ${previous.endedAt} to ${current.startedAt}`,
       );
   }
   const list = join(options.directory, `input-${crypto.randomUUID()}.ffconcat`);

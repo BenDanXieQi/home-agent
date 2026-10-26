@@ -108,7 +108,7 @@ export function WindowDetail({
         </dd>
       </dl>
       <p className="text-xs leading-5 text-muted">
-        时间来自本机接收，音视频同步精度未知。媒体可提前淘汰；窗口图片为最后一张实际保留帧，视频为采样画面。
+        观察时间来自本机接收。采样输入释放不影响原始录像；人物与语音判断只属于各自的观察证据。
       </p>
       {window.gaps.length ? (
         <Notice tone="warning">

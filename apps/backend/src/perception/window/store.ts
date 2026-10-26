@@ -860,6 +860,14 @@ export function createWindowStore(options: {
       return entry
         ? {
             inputState: entry.summary.inputState,
+            analysisAcceptingUntil:
+              entry.summary.audio.run &&
+              analysisWindows.get(entry.summary.audio.run.trackRunId)?.has(id)
+                ? Math.max(
+                    entry.summary.speech.acceptingUntil,
+                    entry.petAcceptingUntil,
+                  )
+                : null,
           }
         : undefined;
     },

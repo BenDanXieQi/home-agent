@@ -253,6 +253,15 @@ CREATE TABLE "passages" (
 	CONSTRAINT "passages_endpoints_differ" CHECK ("passages"."space_a_id" <> "passages"."space_b_id")
 );
 --> statement-breakpoint
+CREATE TABLE "perception_markers" (
+	"id" uuid PRIMARY KEY NOT NULL,
+	"device_id" text NOT NULL,
+	"channel" integer NOT NULL,
+	"started_at" bigint NOT NULL,
+	"ended_at" bigint NOT NULL,
+	CONSTRAINT "perception_markers_time_order" CHECK ("perception_markers"."started_at" < "perception_markers"."ended_at")
+);
+--> statement-breakpoint
 CREATE TABLE "perception_windows" (
 	"id" uuid PRIMARY KEY NOT NULL,
 	"device_id" text NOT NULL,
@@ -314,6 +323,8 @@ CREATE INDEX "observation_bindings_space_idx" ON "observation_bindings" USING bt
 CREATE INDEX "observation_bindings_passage_idx" ON "observation_bindings" USING btree ("passage_id");--> statement-breakpoint
 CREATE INDEX "passages_space_a_idx" ON "passages" USING btree ("space_a_id");--> statement-breakpoint
 CREATE INDEX "passages_space_b_idx" ON "passages" USING btree ("space_b_id");--> statement-breakpoint
+CREATE INDEX "perception_markers_source_time" ON "perception_markers" USING btree ("device_id","channel","started_at","id");--> statement-breakpoint
+CREATE INDEX "perception_markers_range" ON "perception_markers" USING gist (numrange("started_at", "ended_at", '[]'));--> statement-breakpoint
 CREATE INDEX "perception_windows_source_time" ON "perception_windows" USING btree ("device_id","channel","started_at","id");--> statement-breakpoint
 CREATE INDEX "perception_windows_history_time" ON "perception_windows" USING btree ("started_at","id");--> statement-breakpoint
 CREATE INDEX "perception_windows_observed_range" ON "perception_windows" USING gist (numrange("observed_start_at", "observed_end_at", '[]'));--> statement-breakpoint

@@ -3,6 +3,7 @@ import {
   type windowListQuerySchema,
   type windowSummarySchema,
   type perceptionWindowsHistoryQuerySchema,
+  type windowMarkerSchema,
 } from "@home-agent/api/contracts";
 import type { z } from "zod";
 
@@ -15,14 +16,12 @@ export function compareWindowPosition(
   return a.startedAt - b.startedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 }
 
-export function matchesWindowList(
-  entry: Pick<Window, "run" | "startedAt" | "id">,
+export function matchesWindowMarker(
+  entry: z.infer<typeof windowMarkerSchema>,
   query: z.infer<typeof windowListQuerySchema>,
 ) {
   return (
-    entry.run.deviceId === query.deviceId &&
-    entry.run.channel === query.channel &&
-    (query.start === undefined || entry.startedAt >= query.start) &&
+    (query.start === undefined || entry.endedAt > query.start) &&
     (query.end === undefined || entry.startedAt < query.end) &&
     (query.before === undefined ||
       entry.startedAt < query.before ||
@@ -30,6 +29,24 @@ export function matchesWindowList(
         query.beforeId !== undefined &&
         entry.id < query.beforeId))
   );
+}
+
+export function windowMarkers(
+  entries: readonly z.infer<typeof windowMarkerSchema>[],
+) {
+  const markers: z.infer<typeof windowMarkerSchema>[] = [];
+  for (const entry of entries.toSorted(compareWindowPosition)) {
+    const previous = markers.at(-1);
+    if (previous && entry.startedAt <= previous.endedAt)
+      previous.endedAt = Math.max(previous.endedAt, entry.endedAt);
+    else
+      markers.push({
+        id: entry.id,
+        startedAt: entry.startedAt,
+        endedAt: entry.endedAt,
+      });
+  }
+  return markers;
 }
 
 export function createWindowHistoryMatcher(

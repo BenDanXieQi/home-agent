@@ -118,7 +118,10 @@ export function createPlaybackGenerator(
     ]);
     return media
       .execute(item.media, {
-        reservation: recordingTransferLimits.bytes,
+        reservation:
+          item.input.selection.kind === "clip"
+            ? 0
+            : recordingTransferLimits.bytes,
         signal,
         generate: async () => {
           let originals:
@@ -155,9 +158,43 @@ export function createPlaybackGenerator(
                 item.media.generation.abort(
                   reason ?? new Error("Recording read cancelled"),
                 );
+                if (input.selection.kind === "clip")
+                  media.invalidate(item.media, "revoked");
               },
             });
             failure = "download_failed";
+            if (input.selection.kind === "clip") {
+              const clip = clips[0]!;
+              const original = await originals.borrowSd(
+                { ...input, startAt: clip.startAt },
+                item.source,
+              );
+              signal.throwIfAborted();
+              assertCurrent(item);
+              const view = mijiaRecordingPlaybackStateSchema.parse({
+                ...item.base(),
+                state: "ready",
+                fileUrl: `/api/mijia/recordings/playback/${input.id}/media`,
+                actualDurationMs: original.media.actualDurationMs,
+                segments: [
+                  {
+                    startAt: clip.startAt,
+                    endAt: clip.endAt,
+                    mediaStartMs: 0,
+                    mediaEndMs: original.media.actualDurationMs,
+                    timestampBasis: "device_recording",
+                    gapBeforeMs: 0,
+                  },
+                ],
+                alignment: { type: "unknown", reason: "clip_selected" },
+                eventFrameOffsets: [],
+              });
+              item.original = original;
+              item.originals = originals;
+              originals = undefined;
+              item.view = view;
+              return;
+            }
             const tools = (mediaTools ??= await import("./media"));
             root ??= prepareRoot().catch((cause: unknown) => {
               root = undefined;

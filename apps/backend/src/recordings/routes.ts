@@ -9,10 +9,17 @@ import { requireLocalAccess } from "@home-agent/api/local-access";
 import { MediaCapacityError } from "../media/resources";
 import { safeMijiaError } from "../mijia/errors";
 import { RecordingCoverageError } from "./selection";
-import { readMediaInputSchema, type createRecordingsService } from "./service";
+import {
+  readMediaInputSchema,
+  recordingSourceSchema,
+  type createRecordingsService,
+} from "./service";
 
 export function createRecordingsRoutes(
-  service: ReturnType<typeof createRecordingsService>,
+  service: Pick<
+    ReturnType<typeof createRecordingsService>,
+    "ranges" | "readMedia"
+  >,
   port: number,
 ) {
   return new Hono()
@@ -23,12 +30,22 @@ export function createRecordingsRoutes(
         error instanceof MediaCapacityError
           ? new AppError("perception_media_capacity")
           : error instanceof RecordingCoverageError
-            ? new AppError("perception_media_unavailable")
+            ? new AppError("recording_coverage_unavailable")
             : error instanceof AppError
               ? error
               : safeMijiaError(error, "camera_failed"),
         error instanceof MediaCapacityError ? 429 : undefined,
       ),
+    )
+    .post(
+      "/ranges",
+      bodyLimit({ maxSize: 1024 }),
+      validateJson(recordingSourceSchema),
+      async (c) => {
+        const ranges = await service.ranges(c.req.valid("json"));
+        c.header("Cache-Control", "no-store");
+        return c.json({ ranges });
+      },
     )
     .post(
       "/media",

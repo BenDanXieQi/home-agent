@@ -20,6 +20,7 @@ export function RecordingPlayer({
   autoPlay?: boolean;
 }) {
   const { state, request, expired } = playback;
+  const [failedMediaId, setFailedMediaId] = useState<string>();
   if (!request) return null;
   return (
     <section aria-label="SD 录像回看" className="space-y-3">
@@ -31,6 +32,7 @@ export function RecordingPlayer({
           refresh={playback.refresh}
           activityAt={activityAt}
           autoPlay={autoPlay}
+          onMediaError={() => setFailedMediaId(state.id)}
         />
       ) : (
         <RecordingSurface>
@@ -49,17 +51,17 @@ export function RecordingPlayer({
       )}
       {playback.error ? (
         <Notice tone="error">
-          录像状态读取失败：{requestErrorMessage(playback.error)}
-          <Button
-            size="small"
-            onClick={() => {
-              // oxlint-disable-next-line typescript/no-floating-promises
-              playback.refresh();
-            }}
-          >
-            重新读取状态
-          </Button>
+          录像读取失败：{requestErrorMessage(playback.error)}
         </Notice>
+      ) : null}
+      {failedMediaId === request.id ||
+      playback.error ||
+      expired ||
+      state?.state === "expired" ||
+      state?.state === "unavailable" ? (
+        <Button onClick={() => playback.start(request.selection)}>
+          重新读取录像
+        </Button>
       ) : null}
     </section>
   );
@@ -78,10 +80,12 @@ function ReadyRecording({
   refresh,
   activityAt,
   autoPlay,
+  onMediaError,
 }: {
   resource: Extract<RecordingPlaybackState, { state: "ready" }>;
   activityAt?: number | undefined;
   autoPlay: boolean;
+  onMediaError: () => void;
   refresh: ReturnType<typeof useRecordingPlayback>["refresh"];
 }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -95,10 +99,7 @@ function ReadyRecording({
         );
   const activityOffset =
     activitySegment && activityAt !== undefined
-      ? activitySegment.mediaStartMs +
-        ((activityAt - activitySegment.startAt) *
-          (activitySegment.mediaEndMs - activitySegment.mediaStartMs)) /
-          (activitySegment.endAt - activitySegment.startAt)
+      ? activitySegment.mediaStartMs + activityAt - activitySegment.startAt
       : undefined;
   useEffect(() => {
     const node = video.current;
@@ -146,6 +147,7 @@ function ReadyRecording({
               seek(alignment.seekOffsetMs);
           }}
           onError={() => {
+            onMediaError();
             setFailure(
               "录像读取或解码失败，可能已过期、连接中断或浏览器不支持当前编码。",
             );
@@ -163,7 +165,7 @@ function ReadyRecording({
       {activityAt !== undefined ? (
         <p className="text-xs text-muted">
           {activityOffset !== undefined
-            ? "已按摄像头录像时间定位到活动时刻；画面与识别采样尚未经逐帧核对。"
+            ? "按摄像头索引定位活动时刻，尚未经逐帧核对。"
             : "录像未覆盖活动时间，请返回成员重新查看。"}
         </p>
       ) : alignment.type === "confirmed" ? (

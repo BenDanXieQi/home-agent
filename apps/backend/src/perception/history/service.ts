@@ -2,8 +2,8 @@ import pTimeout from "p-timeout";
 import { HouseholdError } from "../../household/errors";
 import {
   compareWindowPosition,
-  matchesWindowList,
   createWindowHistoryMatcher,
+  windowMarkers,
 } from "./query";
 import {
   windowHistoryRetentionMs,
@@ -208,22 +208,28 @@ export function createWindowHistory(options: {
       signal?: AbortSignal,
     ) {
       const grant = accessHousehold(household, query.scopeEpoch);
-      if (!sources.eligibility(query)) return [];
+      if (!sources.eligibility(query)) return { markers: [], stored: false };
       const records = await read(grant, signal, (assertCurrent) =>
         repository.list(grant.identity, assertCurrent, query),
       ).catch((cause: unknown) => {
         if (cause instanceof HouseholdError && cause.reason === "home_storage")
-          return [];
+          return null;
         throw cause;
       });
-      const pendingRecords = queued(grant).filter((entry) =>
-        matchesWindowList(entry, query),
-      );
       return sources.eligibility(query)
-        ? merge(records, pendingRecords)
-            .toSorted((a, b) => compareWindowPosition(b, a))
-            .slice(0, 51)
-        : [];
+        ? {
+            markers:
+              records ??
+              windowMarkers(
+                queued(grant).filter(
+                  (entry) =>
+                    entry.run.deviceId === query.deviceId &&
+                    entry.run.channel === query.channel,
+                ),
+              ),
+            stored: records !== null,
+          }
+        : { markers: [], stored: false };
     },
     async history(
       input: Parameters<typeof repository.history>[2],

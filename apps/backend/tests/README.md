@@ -52,3 +52,9 @@ bun test apps/backend/tests/perception/video-observations.test.ts apps/backend/t
 ```sh
 bun test apps/backend/tests/perception/history-reader.test.ts apps/backend/tests/mijia/recordings/playback.test.ts
 ```
+
+连续标记的数据库验证需设置 `TEST_DATABASE_URL`，连接角色须能创建及删除数据库；测试自行创建随机临时库并加载当前初始化结构，只在该库内验证写入、合并、分页及清理，结束后删除临时库。未设置时跳过。
+
+```sh
+bun test apps/backend/tests/perception/history-markers.test.ts
+```

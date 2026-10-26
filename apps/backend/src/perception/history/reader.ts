@@ -1,11 +1,11 @@
 import {
   compareWindowPosition,
-  matchesWindowList,
+  matchesWindowMarker,
+  windowMarkers,
   createWindowHistoryMatcher,
 } from "./query";
 import {
   perceptionWindowHistoryRecordSchema,
-  windowListEntrySchema,
   type windowListQuerySchema,
   type windowSummarySchema,
   type perceptionWindowsHistoryQuerySchema,
@@ -15,7 +15,6 @@ import type { createWindowHistory } from "./service";
 import type { createWindowStore } from "../window/store";
 import type { createWindowMedia } from "../media/window-media";
 import type { PerceptionSources } from "../sources";
-import { windowIdentities } from "../window/aggregate";
 import { HouseholdError } from "../../household/errors";
 
 export class PerceptionHistoryError extends Error {}
@@ -45,59 +44,28 @@ export function createWindowHistoryReader({
       signal?: AbortSignal,
     ) {
       assertReadable(signal);
-      const archived = (await history?.list(selection, signal)) ?? [];
+      const archived = await history?.list(selection, signal);
       assertReadable(signal);
-      const snapshot = windows.snapshot(Date.now(), selection);
-      const entries = new Map(
-        archived.map((entry) => [
-          entry.id,
-          windowListEntrySchema.parse({
-            ...entry,
-            ...windowIdentities(entry.frames),
-            speechCount: entry.speech.segments.length,
-            petSoundKinds: entry.audio.petSounds && [
-              ...new Set(
-                entry.audio.petSounds.chunks.flatMap((chunk) =>
-                  chunk.detections.map((detection) => detection.kind),
-                ),
-              ),
-            ],
-            sampledMedia: null,
-          }),
-        ]),
-      );
-      const live = snapshot.windows.filter((entry) =>
-        matchesWindowList(entry, selection),
-      );
-      const merged = new Map(
-        [...entries.entries()].map(([id, entry]) => [
-          id,
-          { ...entry, sampledMedia: media.sampledMedia(id) },
-        ]),
-      );
-      for (const entry of live) {
-        const saved = entries.get(entry.id);
-        merged.set(entry.id, {
-          ...saved,
-          ...entry,
-          summaryUntil: saved?.summaryUntil ?? entry.summaryUntil,
-          sampledMedia: media.sampledMedia(entry.id),
-        });
-      }
-      const sorted = [...merged.values()].toSorted((a, b) =>
-        compareWindowPosition(b, a),
-      );
-      const page = sorted.slice(0, 50);
-      const last = page.at(-1);
+      const markers = sources.eligibility(selection)
+        ? (archived?.stored
+            ? archived.markers
+            : windowMarkers([
+                ...windows.snapshot(Date.now(), selection).windows,
+                ...(archived?.markers ?? []),
+              ])
+          )
+            .filter((entry) => matchesWindowMarker(entry, selection))
+            .toSorted((a, b) => compareWindowPosition(b, a))
+        : [];
+      const markerPage = markers.slice(0, 50);
+      const lastMarker = markerPage.at(-1);
       return {
-        ...snapshot,
-        windows: page,
+        markers: markerPage,
         next:
-          sorted.length > 50 && last
-            ? { before: last.startedAt, beforeId: last.id }
+          markers.length > 50 && lastMarker
+            ? { before: lastMarker.startedAt, beforeId: lastMarker.id }
             : null,
         history: history?.status() ?? { enabled: false, error: null },
-        media: media.snapshot(),
       };
     },
     async readWindow(id: string, signal?: AbortSignal) {
@@ -121,11 +89,13 @@ export function createWindowHistoryReader({
         return {
           ...live,
           summaryUntil: saved?.summaryUntil ?? live.summaryUntil,
+          analysisAcceptingUntil:
+            windows.access(id, Date.now())?.analysisAcceptingUntil ?? null,
           sampledMedia: media.sampledMedia(id),
         };
       if (failure) throw failure;
       return saved && sources.eligibility(saved.run)
-        ? { ...saved, sampledMedia: null }
+        ? { ...saved, analysisAcceptingUntil: null, sampledMedia: null }
         : undefined;
     },
     historyAccess(entry: z.infer<typeof windowSummarySchema>) {
@@ -142,6 +112,7 @@ export function createWindowHistoryReader({
           live && live.inputState !== "revoked"
             ? live.inputState
             : ("expired" as const),
+        analysisAcceptingUntil: live?.analysisAcceptingUntil ?? null,
         sampledMedia: media.sampledMedia(entry.id),
       };
     },
@@ -215,7 +186,11 @@ export function createWindowHistoryReader({
         )
           continue;
         yield perceptionWindowHistoryRecordSchema.parse({
-          window: { ...entry, sampledMedia },
+          window: {
+            ...entry,
+            analysisAcceptingUntil: access?.analysisAcceptingUntil ?? null,
+            sampledMedia,
+          },
           matches,
         });
       }

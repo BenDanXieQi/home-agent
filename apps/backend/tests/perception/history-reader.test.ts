@@ -2,7 +2,10 @@ import { afterEach, expect, mock, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { windowSummarySchema } from "@home-agent/api/contracts";
+import {
+  windowMarkerSchema,
+  windowSummarySchema,
+} from "@home-agent/api/contracts";
 import { createWindowHistory } from "../../src/perception/history/service";
 import { createWindowHistoryReader } from "../../src/perception/history/reader";
 import { createWindowHistoryRepository } from "../../src/perception/history/repository";
@@ -156,6 +159,22 @@ const interval = (value: Awaited<ReturnType<typeof fixture>>) => ({
   limit: 10,
 });
 
+test("stored marker browsing does not substitute live observations or read their details", async () => {
+  const value = await fixture();
+  const marker = {
+    id: crypto.randomUUID(),
+    startedAt: value.window.startedAt - 120_000,
+    endedAt: value.window.startedAt - 60_000,
+  };
+  value.repository.list.mockResolvedValue([marker]);
+
+  const list = await value.reader.listWindows(value.run);
+  expect(list.markers).toEqual([marker]);
+  expect(value.repository.list).toHaveBeenCalledTimes(1);
+  expect(value.repository.get).not.toHaveBeenCalled();
+  expect(value.repository.history).not.toHaveBeenCalled();
+});
+
 test("storage failure preserves live detail and list while marking incomplete history", async () => {
   const value = await fixture();
   value.repository.get.mockRejectedValue(new HouseholdError("home_storage"));
@@ -167,7 +186,7 @@ test("storage failure preserves live detail and list while marking incomplete hi
     value.window.id,
   );
   const list = await value.reader.listWindows(value.run);
-  expect(list.windows.map(({ id }) => id)).toEqual([value.window.id]);
+  expect(list.markers.map(({ id }) => id)).toEqual([value.window.id]);
   expect(list.history.error).toContain("读取失败");
   await expect(
     value.reader.readWindow(crypto.randomUUID()),
@@ -189,12 +208,12 @@ test("storage failure keeps authorized pending records after live cache eviction
   const detail = await value.reader.readWindow(value.window.id);
   expect(detail?.id).toBe(value.window.id);
   expect(detail?.inputState).toBe("expired");
-  expect((await value.reader.listWindows(value.run)).windows).toHaveLength(1);
+  expect((await value.reader.listWindows(value.run)).markers).toHaveLength(1);
   value.revoke();
   await expect(value.reader.readWindow(value.window.id)).rejects.toMatchObject({
     reason: "home_storage",
   });
-  expect((await value.reader.listWindows(value.run)).windows).toHaveLength(0);
+  expect((await value.reader.listWindows(value.run)).markers).toHaveLength(0);
 });
 
 test("revoked household access cannot turn a failed archive read into a live result", async () => {
@@ -306,7 +325,7 @@ test("invalid persisted data is not hidden by cached detail or list", async () =
     Promise.resolve(windowSummarySchema.parse({})),
   );
   value.repository.list.mockImplementation(() =>
-    Promise.resolve([windowSummarySchema.parse({})]),
+    Promise.resolve([windowMarkerSchema.parse({})]),
   );
   await expect(value.reader.readWindow(value.window.id)).rejects.toMatchObject({
     name: "ZodError",
@@ -337,7 +356,6 @@ test("computation failure does not revoke a still authorized cached window", asy
   expect((await value.reader.readWindow(value.window.id))?.id).toBe(
     value.window.id,
   );
-  expect((await value.reader.listWindows(value.run)).windows).toHaveLength(1);
   await expect(value.reader.history(interval(value)).next()).rejects.toThrow(
     "Perception history unavailable",
   );

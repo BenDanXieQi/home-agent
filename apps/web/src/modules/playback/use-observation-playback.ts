@@ -1,17 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { atom, useAtomValue } from "jotai";
 import { useQueries } from "@tanstack/react-query";
 import type { z } from "zod";
 import { createPerceptionSourceState } from "../perception/source-state";
-import {
-  observationCacheSettled,
-  observationWindowListOptions,
-} from "./observation-cache";
 import { recordingAvailabilityOptions } from "../recordings/api";
-import {
-  findObservationWindow,
-  type observationPlaybackSourceSchema,
-} from "./observation";
+import type { observationPlaybackSourceSchema } from "./observation";
+import { recordingRangesOptions } from "../recordings/originals";
 
 export function useObservationPlayback(
   activities: {
@@ -83,126 +77,93 @@ export function useObservationPlayback(
   const targetsAtom = useMemo(
     () =>
       atom((get) =>
-        groupStates.map((group) => get(group.state.playbackTargetAtom)),
+        groupStates.map((group) => ({
+          accessible: get(group.state.accessibleAtom),
+          target: get(group.state.playbackTargetAtom),
+        })),
       ),
     [groupStates],
   );
   const targets = useAtomValue(targetsAtom);
-  const windows = useQueries({
+  const ranges = useQueries({
     queries: groups.map((group, index) => ({
-      ...observationWindowListOptions({
-        scopeEpoch: scope,
-        ...group.state.target,
-      }),
-      enabled: targets[index]?.scope_epoch === scope,
+      ...recordingRangesOptions(scope, group.state.target),
+      enabled: targets[index]?.accessible === true,
     })),
   });
-  const [clock, setClock] = useState(Date.now);
-  const now = Math.max(clock, ...windows.map((query) => query.dataUpdatedAt));
-  const indexes = windows.map((query) => query.data);
-  const nextExpiry = Math.min(
-    ...indexes.flatMap((runs) =>
-      [...(runs?.values() ?? [])].flatMap((entries) =>
-        entries.flatMap((entry) =>
-          entry.sampledMedia && entry.sampledMedia.readableUntil > now
-            ? [entry.sampledMedia.readableUntil]
-            : [],
-        ),
-      ),
-    ),
-  );
-  useEffect(() => {
-    if (!Number.isFinite(nextExpiry)) return undefined;
-    const timer = setTimeout(
-      () => setClock(Date.now()),
-      Math.max(0, nextExpiry - Date.now()),
-    );
-    return () => clearTimeout(timer);
-  }, [nextExpiry]);
-  const matched = groups.map(
+  const local = groups.map(
     (group, index) =>
-      new Map(
-        group.activities.map((activity) => [
-          activity.id,
-          targets[index]?.scope_epoch === scope && windows[index]?.isSuccess
-            ? findObservationWindow(
-                indexes[index]?.get(activity.source.sourceRunId) ?? [],
-                activity.source,
-                now,
-                activity.windowId,
-              )
-            : undefined,
-        ]),
+      new Set(
+        group.activities
+          .filter((activity) => {
+            const at = activity.recordingAt ?? activity.source.lastObservedAt;
+            return ranges[index]?.data?.ranges.some(
+              (range) => range.start <= at && at < range.end,
+            );
+          })
+          .map((activity) => activity.id),
       ),
   );
   const recordings = useQueries({
     queries: groups.map((group, index) => {
-      const target = targets[index];
+      const target = targets[index]?.target;
       const at = [
         ...new Set(
           group.activities
-            .filter((activity) => !matched[index]?.get(activity.id))
+            .filter((activity) => !local[index]?.has(activity.id))
             .map(
               (activity) =>
                 activity.recordingAt ?? activity.source.lastObservedAt,
             ),
         ),
       ];
-      const options = recordingAvailabilityOptions(
-        target?.scope_epoch === scope && at.length
-          ? { ...target, at }
-          : undefined,
-      );
       return {
-        ...options,
-        queryKey: [...options.queryKey, JSON.stringify(group.state.target)],
+        ...recordingAvailabilityOptions(
+          target?.scope_epoch === scope && at.length
+            ? { ...target, at }
+            : undefined,
+        ),
         enabled:
           target?.scope_epoch === scope &&
           at.length > 0 &&
-          observationCacheSettled(windows[index]),
+          ranges[index]?.isPending === false,
       };
     }),
   });
   return new Map(
     groups.flatMap((group, index) => {
+      const query = ranges[index];
       const recording = recordings[index];
       const clips = new Map(
         recording?.isSuccess && recording.data?.status === "ready"
           ? recording.data.matches.map((match) => [match.at, match.clip])
           : [],
       );
-      const windowQuery = windows[index];
-      const qualified = targets[index]?.scope_epoch === scope;
       return group.activities.map((activity) => {
-        const window = matched[index]?.get(activity.id);
-        const clip =
-          qualified && windowQuery?.isSuccess
-            ? clips.get(activity.recordingAt ?? activity.source.lastObservedAt)
-            : undefined;
         function availability() {
-          if (!qualified) return { status: "waiting" as const };
-          if (window) return { status: "window" as const, window };
-          if (windowQuery?.isError && !windowQuery.isFetching)
+          if (!targets[index]?.accessible)
+            return { status: "waiting" as const };
+          if (local[index]?.has(activity.id))
             return {
-              status: "failed" as const,
-              error: windowQuery.error,
-              retry: windowQuery.refetch,
+              status: "local" as const,
+              seekAt: activity.recordingAt ?? activity.source.lastObservedAt,
             };
-          if (!windowQuery?.isSuccess) return { status: "checking" as const };
-          if (recording?.isError && !recording.isFetching)
+          if (query?.isPending) return { status: "checking" as const };
+          if (recording?.isError)
             return {
               status: "failed" as const,
               error: recording.error,
               retry: recording.refetch,
             };
+          const clip = clips.get(
+            activity.recordingAt ?? activity.source.lastObservedAt,
+          );
           if (clip)
             return {
               status: "recording" as const,
               clip,
               seekAt: activity.recordingAt ?? activity.source.lastObservedAt,
-              checking:
-                windowQuery.fetchStatus !== "idle" ||
-                recording?.fetchStatus !== "idle",
+              checking: recording?.isFetching ?? false,
             };
           if (recording?.data?.status === "unavailable")
             return {
@@ -210,7 +171,14 @@ export function useObservationPlayback(
               reason: recording.data.reason,
               retry: recording.refetch,
             };
-          if (!recording?.isSuccess) return { status: "checking" as const };
+          if (targets[index]?.target && !recording?.isSuccess)
+            return { status: "checking" as const };
+          if (query?.isError)
+            return {
+              status: "failed" as const,
+              error: query.error,
+              retry: query.refetch,
+            };
           return { status: "empty" as const };
         }
         return [activity.id, availability()] as const;

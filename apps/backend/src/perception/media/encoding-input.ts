@@ -6,12 +6,6 @@ export type WindowEncodingInput = Pick<
   z.infer<typeof mediaViewSchema>,
   "representation" | "parameters"
 > & {
-  frames: readonly Readonly<
-    Pick<
-      ReturnType<typeof createWindowDraft>["frames"][number],
-      "rgb" | "retainedWidth" | "retainedHeight"
-    >
-  >[];
   audio: readonly Readonly<
     Pick<
       ReturnType<typeof createWindowDraft>["audio"][number],

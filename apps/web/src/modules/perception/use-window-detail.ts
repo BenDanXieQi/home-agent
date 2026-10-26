@@ -1,46 +1,39 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  windowDetailOptions,
-  windowRequestUnavailable,
-  type WindowListEntry,
-} from "./windows";
+import { windowDetailOptions, windowRequestUnavailable } from "./windows";
 import {
   useWindowInputState,
   useWindowMediaState,
 } from "./use-window-input-state";
 export function useWindowDetail(
-  entry: WindowListEntry | undefined,
+  id: string | undefined,
   scope: string,
   active: boolean,
 ) {
   const query = useQuery({
-    ...windowDetailOptions(scope, entry?.id),
+    ...windowDetailOptions(scope, id),
     enabled: (cached) =>
-      active && !!entry && !windowRequestUnavailable(cached.state.error),
+      active && !!id && !windowRequestUnavailable(cached.state.error),
     refetchInterval: (cached) =>
-      !cached.state.error &&
-      cached.state.data &&
-      cached.state.data.revision < (entry?.revision ?? 0)
-        ? 500
+      !cached.state.error && cached.state.data?.analysisAcceptingUntil != null
+        ? 1000
         : false,
   });
-  const inputState = useWindowInputState(entry);
-  const mediaState = useWindowMediaState(entry?.sampledMedia);
+  const inputState = useWindowInputState(query.data);
+  const mediaState = useWindowMediaState(query.data?.sampledMedia);
   const window = useMemo(
     () =>
-      query.data && entry && inputState !== undefined
+      query.data && inputState !== undefined
         ? {
             ...query.data,
             inputState,
             sampledMedia:
-              entry.sampledMedia && mediaState
-                ? { ...entry.sampledMedia, state: mediaState }
+              query.data.sampledMedia && mediaState
+                ? { ...query.data.sampledMedia, state: mediaState }
                 : null,
-            summaryUntil: entry.summaryUntil,
           }
         : undefined,
-    [query.data, entry, inputState, mediaState],
+    [query.data, inputState, mediaState],
   );
   return { query, window };
 }

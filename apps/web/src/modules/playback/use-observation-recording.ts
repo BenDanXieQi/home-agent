@@ -4,50 +4,30 @@ import { useAtomValue } from "jotai";
 import type { z } from "zod";
 import { createPerceptionSourceState } from "../perception/source-state";
 import { useRecordingPlayback } from "../recordings/use-recording-playback";
-import {
-  observationCacheSettled,
-  observationWindowListOptions,
-} from "./observation-cache";
-import {
-  findObservationWindow,
-  type observationPlaybackSourceSchema,
-} from "./observation";
+import { recordingRangesOptions } from "../recordings/originals";
+import { householdScopeEpochAtom } from "../household/state";
+import type { observationPlaybackSourceSchema } from "./observation";
 
 export function useObservationRecording(
   activity: z.infer<typeof observationPlaybackSourceSchema>,
   recordingAt: number,
-  windowId?: string,
+  seekAt: number,
 ) {
-  const [openedAt] = useState(Date.now);
-  const [source] = useState(() =>
-    createPerceptionSourceState({
-      deviceId: activity.deviceId,
-      channel: activity.channel,
-    }),
-  );
+  const [source] = useState(() => createPerceptionSourceState(activity));
   const target = useAtomValue(source.playbackTargetAtom);
-  const windows = useQuery({
-    ...observationWindowListOptions({
-      scopeEpoch: target?.scope_epoch ?? "",
-      ...source.target,
-    }),
-    enabled: !!target,
+  const accessible = useAtomValue(source.accessibleAtom);
+  const scope = useAtomValue(householdScopeEpochAtom);
+  const ranges = useQuery({
+    ...recordingRangesOptions(scope ?? "", source.target),
+    enabled: accessible && !!scope,
     refetchInterval: false,
-    refetchOnMount: "always",
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
   });
-  const settled = observationCacheSettled(windows);
-  const cached =
-    target && settled
-      ? findObservationWindow(
-          windows.data?.get(activity.sourceRunId) ?? [],
-          activity,
-          Math.max(openedAt, windows.dataUpdatedAt),
-          windowId,
-        )
-      : undefined;
-  const sdTarget = target && settled && !cached ? target : null;
+  const local = ranges.data?.ranges.some(
+    (range) => range.start <= seekAt && seekAt < range.end,
+  );
+  const sdTarget = !ranges.isPending && !local ? target : null;
   const playback = useRecordingPlayback(sdTarget);
   const { start } = playback;
   useEffect(() => {
@@ -55,10 +35,8 @@ export function useObservationRecording(
   }, [sdTarget, recordingAt, start]);
   return {
     target,
-    cached,
+    local,
     ready: !!sdTarget,
-    error: windows.error,
-    retry: windows.refetch,
     playback,
   };
 }

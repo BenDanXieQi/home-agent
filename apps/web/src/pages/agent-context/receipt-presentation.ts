@@ -172,11 +172,11 @@ export function presentReceiptChange(change: Change) {
           );
         if (old.inputState !== next.inputState)
           details.push(
-            `原始音视频：${windowInputStates[old.inputState]} → ${windowInputStates[next.inputState]}`,
+            `分析采样输入：${windowInputStates[old.inputState]} → ${windowInputStates[next.inputState]}`,
           );
         if (old.sampledMedia?.state !== next.sampledMedia?.state)
           details.push(
-            `片段：${mediaStateLabel(old.sampledMedia?.state)} → ${mediaStateLabel(next.sampledMedia?.state)}`,
+            `窗口声音：${mediaStateLabel(old.sampledMedia?.state)} → ${mediaStateLabel(next.sampledMedia?.state)}`,
           );
         if (
           old.sampledMedia?.error !== next.sampledMedia?.error &&
@@ -187,7 +187,7 @@ export function presentReceiptChange(change: Change) {
           old.sampledMedia?.readableUntil !== next.sampledMedia?.readableUntil
         )
           details.push(
-            `片段有效期：${time(old.sampledMedia?.readableUntil)} → ${time(next.sampledMedia?.readableUntil)}`,
+            `声音有效期：${time(old.sampledMedia?.readableUntil)} → ${time(next.sampledMedia?.readableUntil)}`,
           );
         if (
           old.sampledMedia?.selection.representation !==
@@ -195,7 +195,7 @@ export function presentReceiptChange(change: Change) {
           old.sampledMedia?.selection.includeAudio !==
             next.sampledMedia?.selection.includeAudio
         )
-          details.push("片段生成选项更新");
+          details.push("声音生成选项更新");
       }
       return {
         subject: record

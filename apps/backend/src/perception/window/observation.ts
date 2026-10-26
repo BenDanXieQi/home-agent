@@ -1,9 +1,13 @@
 import type { z } from "zod";
-import type { windowDetailSchema } from "@home-agent/api/contracts";
+import type {
+  windowDetailSchema,
+  windowSummarySchema,
+} from "@home-agent/api/contracts";
 import { projectWindowMaterial } from "@home-agent/api/perception/window-observations";
 
 export function projectWindowObservation(
-  window: z.infer<typeof windowDetailSchema>,
+  window: z.infer<typeof windowSummarySchema> &
+    Pick<z.infer<typeof windowDetailSchema>, "sampledMedia">,
 ) {
   return {
     id: window.id,

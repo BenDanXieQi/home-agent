@@ -200,6 +200,7 @@ export function createAgentHistoryReader(options: {
           const current = perception.historyAccess(record.window);
           if (!current) throw new HouseholdError("stale_session");
           record.window.inputState = current.inputState;
+          record.window.analysisAcceptingUntil = current.analysisAcceptingUntil;
           record.window.sampledMedia = current.sampledMedia;
         }
       }

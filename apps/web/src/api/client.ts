@@ -1,5 +1,6 @@
 import {
   createBackendClient,
+  readRecordingMediaResponse,
   type BackendClient,
 } from "@home-agent/backend-client";
 import { apiErrorSchema } from "@home-agent/api/contracts";
@@ -92,7 +93,7 @@ export async function requestOperationStream<Progress, Result>(
 
 async function execute<R extends Response, T>(
   send: RpcRequest<R>,
-  decode: (response: R) => Promise<T>,
+  decode: (response: R, signal: AbortSignal) => Promise<T>,
   options: RequestOptions = {},
 ) {
   for (let attempt = 0; ; attempt++) {
@@ -109,7 +110,7 @@ async function execute<R extends Response, T>(
       });
       if (!response.ok && !options.acceptedStatuses?.includes(response.status))
         throw await readResponseError(response);
-      const result = await decode(response);
+      const result = await decode(response, signal);
       signal.throwIfAborted();
       return result;
     } catch (cause) {
@@ -162,4 +163,11 @@ export function requestEmpty(send: RpcRequest, options?: RequestOptions) {
 
 export function requestBlob(send: RpcRequest, options?: RequestOptions) {
   return execute(send, (response) => response.blob(), options);
+}
+
+export function requestRecordingMedia(
+  send: RpcRequest,
+  options?: RequestOptions,
+) {
+  return execute(send, readRecordingMediaResponse, options);
 }

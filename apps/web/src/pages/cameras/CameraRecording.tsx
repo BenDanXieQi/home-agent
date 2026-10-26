@@ -1,10 +1,8 @@
 import { formatTime } from "../../modules/presentation/time";
 import { Navigate, useParams, useSearch } from "@tanstack/react-router";
 import type { z } from "zod";
-import { Button } from "../../components/Button";
 import { BackLink } from "../../components/BackLink";
 import { Notice, StatusNotice } from "../../components/Notice";
-import { requestErrorMessage } from "../../messages/zh-CN";
 import type { observationPlaybackSourceSchema } from "../../modules/playback/observation";
 import { useObservationRecording } from "../../modules/playback/use-observation-recording";
 import { RecordingPlayer } from "../../modules/recordings/RecordingPlayer";
@@ -75,8 +73,8 @@ function ObservationRecording({
   seekAt: number;
   windowId: string | undefined;
 }) {
-  const recording = useObservationRecording(activity, recordingAt, windowId);
-  if (recording.cached)
+  const recording = useObservationRecording(activity, recordingAt, seekAt);
+  if (recording.local)
     return (
       <Navigate
         to="/cameras/$deviceId/$channel"
@@ -86,10 +84,11 @@ function ObservationRecording({
         }}
         search={{
           mode: "windows",
-          window: recording.cached.id,
+          window: windowId,
           activityRun: activity.sourceRunId,
           activityFirstAt: activity.firstObservedAt,
           activityAt: activity.lastObservedAt,
+          seekAt,
           member,
         }}
         replace
@@ -100,18 +99,6 @@ function ObservationRecording({
       <h2 className="text-sm font-medium">观察录像 · {formatTime(seekAt)}</h2>
       {!recording.target ? (
         <StatusNotice>等待摄像头连接就绪…</StatusNotice>
-      ) : recording.error ? (
-        <Notice tone="error">
-          缓存录像查询失败：{requestErrorMessage(recording.error)}
-          <Button
-            onClick={() => {
-              // oxlint-disable-next-line typescript/no-floating-promises
-              recording.retry();
-            }}
-          >
-            重新读取
-          </Button>
-        </Notice>
       ) : recording.ready ? (
         <RecordingPlayer
           playback={recording.playback}
@@ -119,7 +106,7 @@ function ObservationRecording({
           autoPlay
         />
       ) : (
-        <StatusNotice>正在查找缓存录像…</StatusNotice>
+        <StatusNotice>正在查找原始录像…</StatusNotice>
       )}
     </div>
   );

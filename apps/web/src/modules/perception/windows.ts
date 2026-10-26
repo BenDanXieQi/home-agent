@@ -6,7 +6,6 @@ import {
   type mediaRequestSchema,
   type mediaSelectionSchema,
   windowDetailSchema,
-  type windowSourceSchema,
   type windowListQuerySchema,
   type windowListEntrySchema,
 } from "@home-agent/api/contracts";
@@ -15,10 +14,10 @@ import { RequestError } from "../../api/errors";
 
 export type PerceptionWindow = z.infer<typeof windowDetailSchema>;
 export type WindowListEntry = z.infer<typeof windowListEntrySchema>;
+export type WindowMarker = z.infer<typeof windowListSchema>["markers"][number];
 export type WindowListCursor = NonNullable<
   z.infer<typeof windowListSchema>["next"]
 >;
-export type WindowSource = z.infer<typeof windowSourceSchema>;
 export type WindowMediaSelection = z.infer<typeof mediaSelectionSchema>;
 
 export function windowRequestUnavailable(error: unknown) {
@@ -50,8 +49,13 @@ export function windowListOptions({
   ...range
 }: z.infer<typeof windowListQuerySchema>) {
   const source = { scopeEpoch, deviceId, channel, ...range };
+  const latest =
+    range.before === undefined &&
+    range.start === undefined &&
+    range.end === undefined;
   return queryOptions({
     ...windowQueryPolicy,
+    staleTime: latest ? 0 : Infinity,
     queryKey: [...windowQueryScope(source.scopeEpoch), "list", source],
     queryFn: ({ signal }) =>
       requestJson(
@@ -73,31 +77,7 @@ export function windowListOptions({
         windowListSchema,
         { signal },
       ),
-    refetchInterval: (query) =>
-      query.state.error
-        ? false
-        : query.state.data?.windows.some(
-              (entry) => entry.sampledMedia?.state === "generating",
-            )
-          ? 1000
-          : 4000,
-  });
-}
-
-export function cachedWindowListOptions(source: WindowSource) {
-  return queryOptions({
-    ...windowListOptions(source),
-    queryKey: [...windowQueryScope(source.scopeEpoch), "cached", source],
-    queryFn: ({ signal }) =>
-      requestJson(
-        (client, options) =>
-          client.api.perception.windows.cached.$get(
-            { query: { ...source, channel: String(source.channel) } },
-            options,
-          ),
-        windowListSchema,
-        { signal },
-      ),
+    refetchInterval: (query) => (latest && !query.state.error ? 4000 : false),
   });
 }
 
@@ -118,7 +98,8 @@ export function windowDetailOptions(scope: string, id: string | undefined) {
               windowDetailSchema,
               { signal },
             ),
-    staleTime: Infinity,
+    staleTime: (query) =>
+      query.state.data?.analysisAcceptingUntil != null ? 0 : Infinity,
   });
 }
 

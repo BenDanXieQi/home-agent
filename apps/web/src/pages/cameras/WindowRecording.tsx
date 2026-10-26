@@ -31,7 +31,7 @@ export function WindowRecording({
       <div>
         <h3 className="text-sm font-medium">摄像头原始录像</h3>
         <p className="mt-1 text-xs leading-5 text-muted">
-          可从 SD 卡查找这一事件附近的完整录像。视频缓存过期后仍可查找；SD
+          可从 SD 卡查找这一观察附近的录像。采样输入释放后仍可查找；SD
           卡录像已被覆盖时，文字记录仍保留。
         </p>
       </div>

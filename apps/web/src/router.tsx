@@ -98,6 +98,9 @@ const cameraDetailRoute = createRoute({
       Number.isFinite(search.activityAt)
         ? search.activityAt
         : undefined,
+    ...(typeof search.seekAt === "number" && Number.isFinite(search.seekAt)
+      ? { seekAt: search.seekAt }
+      : {}),
   }),
   component: lazyRouteComponent(() => import("./pages/cameras/CameraDetail")),
 });

@@ -50,40 +50,8 @@ class WindowProduct {
     return mediaExpired(this.media) ? ("expired" as const) : this.view.state;
   }
 }
-function key(
-  summary: Pick<
-    z.infer<typeof windowSummarySchema>,
-    "id" | "crop" | "audio" | "gate"
-  >,
-  selection: z.infer<typeof mediaSelectionSchema>,
-) {
-  const { representation, includeAudio } = selection;
-  const normalized =
-    summary.crop === null && representation === "crop_video"
-      ? "video"
-      : summary.crop === null && representation === "crop_image"
-        ? "image"
-        : representation;
-  const audio =
-    normalized.endsWith("video") &&
-    includeAudio &&
-    summary.audio.status === "available";
-  const sampled = defaultSelection(summary);
-  return normalized === sampled.representation &&
-    audio === (normalized === "video" && sampled.includeAudio)
-    ? `${summary.id}:sampled`
-    : `${summary.id}:${normalized}:${audio}`;
-}
-function defaultSelection(
-  summary: Pick<z.infer<typeof windowSummarySchema>, "gate" | "audio">,
-) {
-  return {
-    representation:
-      summary.gate.candidate === "audio"
-        ? ("audio" as const)
-        : ("video" as const),
-    includeAudio: summary.audio.status === "available",
-  };
+function defaultSelection() {
+  return { representation: "audio" as const, includeAudio: true };
 }
 export function createWindowMedia(
   store: ReturnType<typeof createWindowStore>,
@@ -125,7 +93,12 @@ export function createWindowMedia(
     entry: z.infer<typeof windowSummarySchema>,
     selection: z.infer<typeof mediaSelectionSchema>,
   ) {
-    const existing = products.get(key(entry, selection));
+    if (selection.representation !== "audio")
+      throw new WindowMediaError(
+        "ineligible",
+        "Only window audio is available",
+      );
+    const existing = products.get(entry.id);
     const result: z.infer<typeof mediaViewSchema> = existing?.view ?? {
       windowId: entry.id,
       representation: selection.representation,
@@ -135,7 +108,7 @@ export function createWindowMedia(
       bytes: 0,
       contentType: null,
       error: null,
-      parameters: representationParameters(entry, selection),
+      parameters: representationParameters(entry),
     };
     return {
       ...result,
@@ -176,15 +149,12 @@ export function createWindowMedia(
       throw new WindowMediaError("unavailable", "Media manager closed");
     prune();
     const entry = window(id);
-    if (
-      entry.gate.candidate === "none" ||
-      (entry.gate.candidate === "audio" && input.representation !== "audio")
-    )
+    if (entry.gate.candidate === "none" || entry.audio.status !== "available")
       throw new WindowMediaError(
         "ineligible",
         "Representation is not eligible for this candidate",
       );
-    const idKey = key(entry, input);
+    const idKey = entry.id;
     const previous = products.get(idKey);
     if (previous && (previous.view.state !== "failed" || !input.retry))
       return view(entry, input);
@@ -223,10 +193,7 @@ export function createWindowMedia(
           const mediaId = crypto.randomUUID();
           const productDirectory = await mkdtemp(join(directory, "product-"));
           resources.claim(item.media, productDirectory, true);
-          const path = join(
-            productDirectory,
-            `${mediaId}.${input.representation.endsWith("image") ? "jpg" : "mp4"}`,
-          );
+          const path = join(productDirectory, `${mediaId}.mp4`);
           const encodingSignal = AbortSignal.any([
             signal,
             AbortSignal.timeout(windowLimits.encodingMs),
@@ -269,7 +236,9 @@ export function createWindowMedia(
   }
   function capture(id: string) {
     const entry = window(id);
-    const selection = defaultSelection(entry);
+    if (entry.gate.candidate === "none" || entry.audio.status !== "available")
+      return;
+    const selection = defaultSelection();
     try {
       request(id, { ...selection, retry: false });
     } catch (cause) {
@@ -282,7 +251,7 @@ export function createWindowMedia(
         resources,
         changed,
       );
-      products.set(key(entry, selection), item);
+      products.set(entry.id, item);
       changed();
     }
   }
@@ -300,7 +269,7 @@ export function createWindowMedia(
     },
     request,
     sampledMedia(id: string) {
-      const item = products.get(`${id}:sampled`);
+      const item = products.get(id);
       if (!item) return null;
       const access = store.access(id, Date.now());
       if (!access || access.inputState === "revoked") return null;
@@ -322,7 +291,7 @@ export function createWindowMedia(
     ) {
       prune();
       const entry = window(id);
-      const item = products.get(key(entry, selection));
+      const item = products.get(entry.id);
       const state = view(entry, selection).state;
       if (state === "expired" || state === "evicted" || state === "revoked")
         throw new WindowMediaError("unavailable", `Clip ${state}`);

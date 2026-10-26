@@ -22,6 +22,9 @@ const limits = Object.freeze({
 type PlaybackInput = z.infer<typeof mijiaRecordingPlaybackInputSchema>;
 type PlaybackState = z.infer<typeof mijiaRecordingPlaybackStateSchema>;
 type WindowSummary = z.infer<typeof windowSummarySchema>;
+type OriginalReader = Awaited<
+  ReturnType<ReturnType<typeof createRecordingsService>["beginRead"]>
+>;
 
 export class RecordingResourceError extends Error {
   constructor(
@@ -38,6 +41,8 @@ export class RecordingResource {
   view: PlaybackState;
   readonly media;
   stopAccess: (() => void) | undefined;
+  originals: OriginalReader | undefined;
+  original: Awaited<ReturnType<OriginalReader["borrowSd"]>> | undefined;
   constructor(
     readonly input: PlaybackInput,
     readonly source: ReturnType<MijiaService["recordingAccess"]>,
@@ -68,6 +73,9 @@ export class RecordingResource {
       }
       this.stopAccess?.();
       this.stopAccess = undefined;
+      this.originals?.release().catch((cause: unknown) => {
+        console.error("Recording original release failed", cause);
+      });
     });
   }
 }
@@ -247,17 +255,23 @@ export function createRecordingService(options: {
     prune();
     const item = resources.get(id);
     tombstones.set(id, Date.now() + limits.retentionMs);
-    if (item) await media.retire(item.media, "cancelled");
+    if (item) {
+      await media.retire(item.media, "cancelled");
+      await item.originals?.release();
+    }
   }
   function mediaInfo(id: string) {
     const item = find(id);
     if (
       item.view.state !== "ready" ||
-      !item.media.path ||
+      (!item.original && !item.media.path) ||
       item.media.access.signal.aborted
     )
       throw new RecordingResourceError("not_ready");
-    return { bytes: item.media.bytes, etag: `"${item.input.id}"` };
+    return {
+      bytes: item.original?.bytes ?? item.media.bytes,
+      etag: `"${item.input.id}"`,
+    };
   }
   function read(
     id: string,
@@ -265,21 +279,35 @@ export function createRecordingService(options: {
     requestSignal: AbortSignal,
   ) {
     const item = find(id);
-    mediaInfo(id);
+    const info = mediaInfo(id);
     if (
       !Number.isSafeInteger(range.start) ||
       !Number.isSafeInteger(range.end) ||
       range.start < 0 ||
       range.end < range.start ||
-      range.end >= item.media.bytes
+      range.end >= info.bytes
     )
       throw new RecordingResourceError("unavailable");
     const signal = AbortSignal.any([
       requestSignal,
       options.shutdown,
       item.source.signal,
+      item.media.access.signal,
     ]);
     signal.throwIfAborted();
+    if (item.original) {
+      const finishRead = media.use(item.media);
+      try {
+        return item.original.read(
+          range,
+          AbortSignal.any([signal, AbortSignal.timeout(limits.readMs)]),
+          finishRead,
+        );
+      } catch (cause) {
+        finishRead();
+        throw cause;
+      }
+    }
     return media.read(item.media, signal, range);
   }
   function close() {
@@ -288,6 +316,11 @@ export function createRecordingService(options: {
     options.shutdown.removeEventListener("abort", onShutdown);
     closing = (async () => {
       await media.close();
+      await Promise.all(
+        [...resources.values()].flatMap((item) =>
+          item.originals ? [item.originals.release()] : [],
+        ),
+      );
       await generation.close();
       resources.clear();
       tombstones.clear();

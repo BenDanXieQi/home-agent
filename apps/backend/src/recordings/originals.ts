@@ -60,6 +60,23 @@ export function createRecordingOriginals(
   const available = options.storage;
   const originals = new Map<string, ReturnType<typeof original>>();
   const readers = new Set<ReturnType<typeof reader>>();
+  const listeners = new Set<() => void>();
+  const rangeCache = new Map<
+    string,
+    { identity: string; ranges: ReturnType<typeof collectRanges> }
+  >();
+
+  function changed() {
+    rangeCache.clear();
+    for (const listener of listeners) {
+      try {
+        listener();
+      } catch (cause) {
+        console.error("Recording notification failed", cause);
+      }
+    }
+  }
+
   function reader(input: {
     signal: AbortSignal;
     cancel: (reason?: Error) => void;
@@ -77,13 +94,18 @@ export function createRecordingOriginals(
     path: string,
   ) {
     const budget = available().resources;
-    const resource = budget.create(null, () => {
-      if (originals.get(key)?.resource === resource) originals.delete(key);
-    });
+    const resource = budget.create(null, () => forget(key, resource));
     budget.claim(resource, path);
     const entry = original(input, path, resource);
     originals.set(key, entry);
     return entry;
+  }
+
+  function forget(key: string, resource: MediaResource) {
+    const entry = originals.get(key);
+    if (entry?.resource !== resource) return;
+    originals.delete(key);
+    changed();
   }
   function hold(
     item: ReturnType<typeof reader>,
@@ -168,7 +190,27 @@ export function createRecordingOriginals(
       });
       item.input.signal.throwIfAborted();
       source.assertCurrent();
-      return { path: entry.path, media: result.media };
+      return {
+        path: entry.path,
+        media: result.media,
+        bytes: result.bytes,
+        read(
+          range: { start: number; end: number },
+          signal: AbortSignal,
+          onClose?: () => void,
+        ) {
+          item.input.signal.throwIfAborted();
+          source.assertCurrent();
+          if (!item.held.has(current))
+            throw new Error("Recording original released");
+          return budget.read(
+            current.resource,
+            AbortSignal.any([signal, item.input.signal, source.signal]),
+            range,
+            onClose,
+          );
+        },
+      };
     }
     function release() {
       released ??= Promise.resolve().then(async () => {
@@ -266,6 +308,7 @@ export function createRecordingOriginals(
           release();
           writing = undefined;
           captured();
+          changed();
         },
       });
     } catch (cause) {
@@ -299,6 +342,83 @@ export function createRecordingOriginals(
     for (const item of readers)
       item.input.cancel(new Error("Recordings stopped"));
     await Promise.all([...readers].map((item) => item.finished.promise));
+    changed();
   }
-  return { beginRead, capture, reconcile, close };
+
+  function collectRanges(
+    target: Pick<z.infer<typeof sourceSelectionSchema>, "deviceId" | "channel">,
+  ) {
+    const identity = options.sources.eligibility(target)?.identity;
+    if (!identity) return [];
+    const entries = [...originals.values()]
+      .filter(
+        (entry) =>
+          entry.source === "local" &&
+          entry.identity === identity &&
+          sourceKey(entry) === sourceKey(target) &&
+          entry.segment &&
+          !entry.resource.retired,
+      )
+      .map((entry) => entry.segment!)
+      .toSorted((left, right) => left.startedAt - right.startedAt);
+    const result: { start: number; end: number; last: Segment }[] = [];
+    for (const entry of entries) {
+      const previous = result[result.length - 1];
+      if (
+        previous &&
+        entry.runId === previous.last.runId &&
+        entry.sequence === previous.last.sequence + 1 &&
+        entry.media.codecFingerprint === previous.last.media.codecFingerprint
+      ) {
+        previous.end = Math.max(previous.end, entry.endedAt);
+        previous.last = entry;
+      } else
+        result.push({
+          start: entry.startedAt,
+          end: entry.endedAt,
+          last: entry,
+        });
+    }
+    return result.map(({ start, end }) => ({ start, end }));
+  }
+
+  function ranges(target: Parameters<typeof collectRanges>[0]) {
+    const identity = options.sources.eligibility(target)?.identity;
+    if (options.signal.aborted || !identity) return [];
+    const key = sourceKey(target);
+    let current = rangeCache.get(key);
+    if (current?.identity !== identity) {
+      current = { identity, ranges: collectRanges(target) };
+      rangeCache.set(key, current);
+    }
+    return current.ranges;
+  }
+
+  function covers(
+    input: Pick<
+      z.infer<typeof sourceSelectionSchema>,
+      "deviceId" | "channel"
+    > & { start: number; end: number },
+  ) {
+    return ranges(input).some(
+      (range) => range.start <= input.start && range.end >= input.end,
+    );
+  }
+
+  function subscribe(listener: () => void) {
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }
+
+  return {
+    beginRead,
+    capture,
+    reconcile,
+    close,
+    ranges,
+    covers,
+    subscribe,
+  };
 }

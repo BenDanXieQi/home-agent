@@ -72,6 +72,8 @@ const errorMessages = {
   perception_timeout: "图片分析超时，请重试。",
   perception_failed: "图片检测失败，请稍后重试。",
   perception_media_unavailable: "窗口媒体已过期或访问已撤销。",
+  recording_coverage_unavailable:
+    "原始录像无法完整覆盖所选时间，请选择其他时间范围。",
   perception_media_ineligible: "当前窗口不能生成所选媒体。",
   perception_media_not_ready: "窗口媒体尚未生成完成。",
   perception_media_capacity: "窗口媒体处理已达到资源限制，请稍后重试。",

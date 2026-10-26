@@ -145,6 +145,10 @@ export const errorDefinitions = {
     status: 410,
     message: "The window media is no longer available.",
   },
+  recording_coverage_unavailable: {
+    status: 422,
+    message: "The recording does not cover the selected time range.",
+  },
   perception_media_ineligible: {
     status: 409,
     message: "The window cannot produce the requested media.",

@@ -11,10 +11,6 @@ export const visualReasons = {
   failed: "视觉筛选失败",
 };
 export const representations = {
-  image: "全景图片",
-  crop_image: "裁切图片",
-  video: "全景视频",
-  crop_video: "裁切视频",
   audio: "声音",
 };
 export function windowTime(time: number) {
