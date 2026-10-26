@@ -215,6 +215,24 @@ index 1801fa8..1c3f4cc 100644
  }
  
  var tokens map[string]string
+diff --git a/pkg/mpegts/muxer.go b/pkg/mpegts/muxer.go
+--- a/pkg/mpegts/muxer.go
++++ b/pkg/mpegts/muxer.go
+@@ -49,8 +49,13 @@
+ 	pes := m.pes[pid]
+ 
+ 	switch pes.StreamType {
+-	case StreamTypeH264, StreamTypeH265:
++	case StreamTypeH264:
+ 		payload = annexb.DecodeAVCCWithAUD(payload)
++	case StreamTypeH265:
++		// HEVC AUD: NAL type 35, temporal_id_plus1 1, pic_type 2.
++		const aud = annexb.StartCode + "\x46\x01\x50"
++		payload = append([]byte(aud), payload...)
++		annexb.DecodeAVCC(payload[len(aud):], false)
+ 	}
+ 
+ 	if pes.Timestamp != 0 {
 diff --git a/pkg/tutk/conn.go b/pkg/tutk/conn.go
 index e061069..3ec7802 100644
 --- a/pkg/tutk/conn.go

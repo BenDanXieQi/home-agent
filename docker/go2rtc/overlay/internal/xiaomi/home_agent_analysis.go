@@ -33,11 +33,13 @@ type homeAgentAnalysisPacket struct {
 
 func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, track *core.Receiver) error {
 	var kind byte
+	isKeyframe := h264.IsKeyframe
 	switch track.Codec.Name {
 	case core.CodecH264:
 		kind = mpegts.StreamTypeH264
 	case core.CodecH265:
 		kind = mpegts.StreamTypeH265
+		isKeyframe = h265.IsKeyframe
 	default:
 		return errors.New("unsupported_analysis_codec")
 	}
@@ -55,6 +57,9 @@ func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, t
 			return
 		}
 		if !anchored {
+			if !isKeyframe(packet.Payload) {
+				return
+			}
 			origin, anchored = packet.Timestamp, true
 		}
 		payload := c.muxer.GetPayload(pid, packet.Timestamp-origin+1, packet.Payload)
@@ -79,6 +84,8 @@ func (c *homeAgentAnalysisConsumer) AddTrack(media *core.Media, _ *core.Codec, t
 		}
 	} else if track.Codec.IsRTP() {
 		sender.Handler = h265.RTPDepay(track.Codec, sender.Handler)
+	} else {
+		sender.Handler = h265.RepairAVCC(track.Codec, sender.Handler)
 	}
 	sender.HandleRTP(track)
 	c.Senders = append(c.Senders, sender)

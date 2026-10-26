@@ -61,6 +61,8 @@ Diagnostics report negotiation outcomes with their timing snapshot, resident att
 
 `runtime.patch` and the overlay add the private session/media API, bounded camera negotiation, stream recovery and CS2 packet handling fixes. They also remove sensitive Xiaomi protocol and media logs. Diagnostics expose fixed stage/reason labels rather than device identifiers, addresses or payloads.
 
+MPEG-TS output uses the access-unit delimiter for the selected video codec without transcoding. Analysis readers start at a keyframe with codec parameter sets so a newly attached reader can decode independently.
+
 The MISS control-message drain includes the focused change from upstream [PR #2489](https://github.com/AlexxIT/go2rtc/pull/2489), commit [`3fd320ec0dd9cd4c90ac9e9bd9115f7637a350c8`](https://github.com/AlexxIT/go2rtc/commit/3fd320ec0dd9cd4c90ac9e9bd9115f7637a350c8).
 
 Camera compatibility depends on upstream Xiaomi support and backend channel mapping. See [camera usage and limitations](../../docs/mijia.md).
