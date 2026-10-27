@@ -1,3 +1,4 @@
+import { createDynamicsRepository } from "./dynamics/repository";
 import { createMijiaDeviceControl } from "./mijia/control/adapter";
 import { mijiaAutomationProperties } from "./mijia/automation-properties";
 import { createStoredRecordAccess } from "./household/records/access";
@@ -265,6 +266,7 @@ const agentContext = createAgentContextService({
   spatial: spatialRepository,
   sightings: memberActivityRepository,
   perception,
+  recordings: recordingMedia,
 });
 identityEnrollment = identityReferences
   ? createReferenceEnrollment(
@@ -290,6 +292,9 @@ const automations =
     : undefined;
 await automations?.start();
 const app = createApp({
+  dynamicsRepository: database
+    ? createDynamicsRepository(database.db)
+    : undefined,
   provenance,
   agentContext,
   memberActivityRepository,

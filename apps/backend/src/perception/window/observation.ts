@@ -15,6 +15,11 @@ export function projectWindowObservation(
     videoRun: window.videoRun ? { ...window.videoRun } : null,
     startedAt: window.startedAt,
     endedAt: window.endedAt,
+    summaryUntil: window.summaryUntil,
+    candidate: window.gate.candidate,
+    audioAvailable: window.audio.status === "available",
+    audioRun: window.audio.run ? { ...window.audio.run } : null,
+    audioGeneration: window.audio.generation,
     material: projectWindowMaterial(window),
     frames: window.frames.map((frame) => ({
       generation: frame.mediaTime.generation,

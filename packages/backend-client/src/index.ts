@@ -8,3 +8,9 @@ export { readRecordingMediaResponse } from "./recordings";
 export const createBackendClient = (...args: Parameters<typeof hc>) =>
   hc<BackendApp>(...args);
 export type BackendClient = ReturnType<typeof createBackendClient>;
+
+export {
+  mediaAnalysisEntrySchema,
+  mediaAnalysisCompletedSchema,
+  mediaAnalysisSnapshotSchema,
+} from "@home-agent/agent/media-analysis/session";

@@ -46,6 +46,11 @@ const agentRoute = createRoute({
   staticData: { contentLayout: "viewport" },
   component: lazyRouteComponent(() => import("./pages/agent/index")),
 });
+const dynamicsRoute = createRoute({
+  getParentRoute: () => accountRoute,
+  path: "/dynamics",
+  component: lazyRouteComponent(() => import("./pages/dynamics/index")),
+});
 const devicesRoute = createRoute({
   getParentRoute: () => accountRoute,
   path: "/devices",
@@ -83,6 +88,9 @@ const cameraDetailRoute = createRoute({
   getParentRoute: () => camerasRoute,
   path: "$deviceId/$channel",
   validateSearch: (search: Record<string, unknown>) => ({
+    ...(search.returnTo === "/dynamics"
+      ? { returnTo: "/dynamics" as const }
+      : {}),
     mode: search.mode === "windows" ? search.mode : undefined,
     window: typeof search.window === "string" ? search.window : undefined,
     activityRun:
@@ -98,6 +106,13 @@ const cameraDetailRoute = createRoute({
       Number.isFinite(search.activityAt)
         ? search.activityAt
         : undefined,
+    ...(typeof search.rangeStart === "number" &&
+    Number.isFinite(search.rangeStart) &&
+    typeof search.rangeEnd === "number" &&
+    Number.isFinite(search.rangeEnd) &&
+    search.rangeStart < search.rangeEnd
+      ? { rangeStart: search.rangeStart, rangeEnd: search.rangeEnd }
+      : {}),
     ...(typeof search.seekAt === "number" && Number.isFinite(search.seekAt)
       ? { seekAt: search.seekAt }
       : {}),
@@ -185,6 +200,7 @@ export const router = createRouter({
       indexRoute,
       agentRoute,
       devicesRoute,
+      dynamicsRoute,
       membersRoute,
       automationsRoute,
       addMemberRoute,

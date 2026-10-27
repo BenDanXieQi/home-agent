@@ -44,7 +44,8 @@
     "./assistant/contracts": "./src/assistant/contracts.ts",
     "./config": "./src/config.ts",
     "./models": "./src/models.ts",
-    "./perception": "./src/perception/analysis.ts",
+    "./media-analysis": "./src/media-analysis/service.ts",
+    "./media-analysis/analysis": "./src/media-analysis/analysis.ts",
     "./runtime": "./src/runtime.ts",
     "./routes": "./src/routes/index.ts",
     "./workflows/runtime": "./src/workflows/index.ts",
@@ -57,6 +58,7 @@
     "./context/model-view/format": "./src/context/model-view/format.ts",
     "./context/model-view/decoding": "./src/context/model-view/decoding.ts",
     "./development": "./scripts/watch.ts",
-    "./conversation/contracts": "./src/conversation/contracts.ts"
+    "./conversation/contracts": "./src/conversation/contracts.ts",
+    "./media-analysis/session": "./src/media-analysis/session.ts"
   }
 }

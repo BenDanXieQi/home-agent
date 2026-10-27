@@ -12,6 +12,7 @@ x-langfuse-environment: &langfuse-environment
   SALT: ${LANGFUSE_LOCAL_SECRET:-}
   ENCRYPTION_KEY: ${LANGFUSE_LOCAL_SECRET:-}
   TELEMETRY_ENABLED: "false"
+  LANGFUSE_LLM_CONNECTION_ALLOWED_HOSTS: ${LANGFUSE_LLM_CONNECTION_ALLOWED_HOSTS:-}
   CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
   CLICKHOUSE_URL: http://langfuse-clickhouse:8123
   CLICKHOUSE_USER: langfuse

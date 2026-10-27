@@ -11,6 +11,8 @@ import type {
 import type { createWindowStore } from "../window/store";
 import { windowLimits } from "../window/limits";
 import { encodeWindow } from "./encode-window";
+import { readAudioRange } from "./read-audio-range";
+import type { windowSourceSchema } from "@home-agent/api/contracts";
 import { representationParameters } from "./representation";
 import { prepareClipDirectory } from "../../media/clip-files";
 import {
@@ -255,8 +257,90 @@ export function createWindowMedia(
       changed();
     }
   }
+  function read(
+    id: string,
+    selection: z.infer<typeof mediaSelectionSchema>,
+    mediaId: string,
+    requestSignal: AbortSignal,
+  ) {
+    prune();
+    const entry = window(id);
+    const item = products.get(entry.id);
+    const state = view(entry, selection).state;
+    if (state === "expired" || state === "evicted" || state === "revoked")
+      throw new WindowMediaError("unavailable", `Clip ${state}`);
+    if (!item?.media.path || state !== "ready" || item.view.mediaId !== mediaId)
+      throw new WindowMediaError("not_ready", "Media product not ready");
+    const access = store.acquireRead(id, Date.now());
+    if (!access) throw new WindowMediaError("not_found", "Window unavailable");
+    const signal = AbortSignal.any([requestSignal, access.signal]);
+    try {
+      return {
+        stream: resources.read(item.media, signal, undefined, () => {
+          access.release();
+        }),
+        contentType: item.view.contentType!,
+        bytes: item.view.bytes,
+      };
+    } catch (cause) {
+      access.release();
+      if (cause instanceof MediaCapacityError)
+        throw new WindowMediaError("capacity", cause.message);
+      throw cause;
+    }
+  }
+
   return {
     capture,
+    async readRange(
+      input: z.infer<typeof windowSourceSchema> & {
+        start: number;
+        end: number;
+      },
+      requestSignal: AbortSignal,
+    ) {
+      prune();
+      const selection = defaultSelection();
+      const candidates = store
+        .snapshot(Date.now(), input)
+        .windows.filter(
+          (entry) => entry.endedAt > input.start && entry.startedAt < input.end,
+        );
+      const leases: NonNullable<ReturnType<typeof store.acquireRead>>[] = [];
+      try {
+        const rangeProducts = candidates.flatMap((candidate) => {
+          const entry = window(candidate.id);
+          if (entry.audio.status !== "available") return [];
+          const product = view(entry, selection);
+          if (product.state !== "ready" || !product.mediaId) return [];
+          const access = store.acquireRead(entry.id, Date.now());
+          if (!access)
+            throw new WindowMediaError("unavailable", "Audio range revoked");
+          leases.push(access);
+          return [{ id: entry.id, product, mediaId: product.mediaId }];
+        });
+        const signal = AbortSignal.any([
+          requestSignal,
+          ...leases.map((lease) => lease.signal),
+        ]);
+        const parts = rangeProducts.map(({ id, product, mediaId }) => ({
+          ...product.parameters,
+          bytes: product.bytes,
+          open: () => read(id, selection, mediaId, signal).stream,
+        }));
+        const data = await readAudioRange({
+          start: input.start,
+          end: input.end,
+          parts,
+          executable,
+          signal,
+        });
+        signal.throwIfAborted();
+        return data;
+      } finally {
+        for (const lease of leases) lease.release();
+      }
+    },
     prune,
     subscribe(listener: () => void) {
       listeners.add(listener);
@@ -283,43 +367,7 @@ export function createWindowMedia(
         error: item.view.error,
       };
     },
-    read(
-      id: string,
-      selection: z.infer<typeof mediaSelectionSchema>,
-      mediaId: string,
-      requestSignal: AbortSignal,
-    ) {
-      prune();
-      const entry = window(id);
-      const item = products.get(entry.id);
-      const state = view(entry, selection).state;
-      if (state === "expired" || state === "evicted" || state === "revoked")
-        throw new WindowMediaError("unavailable", `Clip ${state}`);
-      if (
-        !item?.media.path ||
-        state !== "ready" ||
-        item.view.mediaId !== mediaId
-      )
-        throw new WindowMediaError("not_ready", "Media product not ready");
-      const access = store.acquireRead(id, Date.now());
-      if (!access)
-        throw new WindowMediaError("not_found", "Window unavailable");
-      const signal = AbortSignal.any([requestSignal, access.signal]);
-      try {
-        return {
-          stream: resources.read(item.media, signal, undefined, () => {
-            access.release();
-          }),
-          contentType: item.view.contentType!,
-          bytes: item.view.bytes,
-        };
-      } catch (cause) {
-        access.release();
-        if (cause instanceof MediaCapacityError)
-          throw new WindowMediaError("capacity", cause.message);
-        throw cause;
-      }
-    },
+    read,
     snapshot() {
       prune();
       const state = resources.snapshot;

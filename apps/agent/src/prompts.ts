@@ -23,7 +23,7 @@ export const promptConfigurationSchema = langfuseConfigurationSchema.extend({
 });
 
 const promptConfigSchema = z.strictObject({
-  thinkingLevel: z.enum(MODEL_THINKING_LEVELS).default("off"),
+  thinkingLevel: z.enum(MODEL_THINKING_LEVELS).default("medium"),
   tools: z
     .array(
       z.strictObject({
@@ -112,12 +112,10 @@ export function createPromptResolver(
     name,
     context,
     systemVariables,
-    sectionKeys,
   }: {
     name: string;
     context: Context;
     systemVariables?: PromptVariables<[context: Context]> | undefined;
-    sectionKeys?: readonly string[] | undefined;
   }) {
     context.abortSignal?.throwIfAborted();
     if (!client)
@@ -144,23 +142,19 @@ export function createPromptResolver(
 
     const config = promptConfigSchema.parse(prompt.config);
     const systemTemplates = messages.slice(0, systemCount);
-    const selectedSystem = systemTemplates
-      .map((template, index) => ({
-        template,
-        metadata: config.sections[index] ?? {
-          key: `managed_prompt_${index}`,
-          tag: false,
-        },
-      }))
-      .filter(
-        ({ metadata }) => !sectionKeys || sectionKeys.includes(metadata.key),
-      );
+    const systemSections = systemTemplates.map((template, index) => ({
+      template,
+      metadata: config.sections[index] ?? {
+        key: `managed_prompt_${index}`,
+        tag: false,
+      },
+    }));
     const systemMessages = chatMessagesSchema.parse(
       compilePromptMessages(
         {
           name: prompt.name,
           version: prompt.version,
-          prompt: selectedSystem.map(({ template }) => template),
+          prompt: systemSections.map(({ template }) => template),
         },
         variables,
       ),
@@ -173,7 +167,7 @@ export function createPromptResolver(
         `Managed chat prompt ${name} must configure one section per system message`,
       );
 
-    const sections = selectedSystem.map(({ metadata }, index) => ({
+    const sections = systemSections.map(({ metadata }, index) => ({
       ...metadata,
       text: promptTextSchema.parse(systemMessages[index]?.content),
     }));
@@ -200,7 +194,6 @@ export function createPromptResolver(
     {
       name,
       systemVariables,
-      sectionKeys,
       userVariables,
       model,
       modelCollection,
@@ -216,7 +209,6 @@ export function createPromptResolver(
     const prompt = await resolve({
       name,
       systemVariables,
-      sectionKeys,
       context,
     });
     const variables = await resolvePromptVariables(userVariables, context);

@@ -16,7 +16,7 @@
     }
   ],
   "config": {
-    "thinkingLevel": "off",
+    "thinkingLevel": "medium",
     "tools": [
       {
         "name": "update_spatial_draft",

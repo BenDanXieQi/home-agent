@@ -5,6 +5,8 @@ import {
 } from "@home-agent/api/agent-context";
 import type { memberObservationSchema } from "../household/identity/activity-repository";
 import type { projectWindowObservation } from "../perception/window/observation";
+import { projectMediaRanges } from "../perception/media/ranges";
+import type { createRecordingsService } from "../recordings/service";
 
 export function sightingStateKey(
   record: z.infer<typeof memberObservationSchema>,
@@ -31,6 +33,7 @@ export function latestMemberObservations(
 export function assembleAgentObservations(
   sightings: z.infer<typeof memberObservationSchema>[],
   windows: ReturnType<typeof projectWindowObservation>[],
+  recordings: Pick<ReturnType<typeof createRecordingsService>, "covers">,
 ) {
   const latestSightings = latestMemberObservations(sightings);
   const latestIds = new Set(latestSightings.map((record) => record.id));
@@ -156,6 +159,7 @@ export function assembleAgentObservations(
     ];
   });
   return {
+    media_ranges: projectMediaRanges(windows, recordings),
     member_sightings: latestSightings
       .map(({ id, data, revision, attribution }) =>
         agentSightingSummarySchema.parse({

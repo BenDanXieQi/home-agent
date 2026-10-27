@@ -1,45 +1,28 @@
 # Agent
 
+## 模型配置
+
+在根目录 `.env` 中为各入口设置 `provider/modelId`，并配置该提供商的认证；示例见 [`.env.example`](../../.env.example)。模型必须存在于 Pi 的内置清单并通过凭据可用性检查；未登记的提供商或模型会导致初始化失败。模型发现与认证由 [models.ts](src/models.ts) 调用 Pi 提供商实现，不支持在环境变量中登记自定义模型。提示词还需要 [Langfuse 配置](../../docs/agent/prompt-management.md#配置与使用)。
+
+主助手使用 `AGENT_MODEL`；Workflow 的模型选项见[各自配置](src/workflows/registry.generated.ts)，媒体分析使用 `AGENT_MEDIA_ANALYSIS_MODEL`。未配置主模型不影响本地检测与家庭数据接收。启动方式与进程配置见 [Host](../agent-host/README.md)。
+
 ## 媒体分析
 
-[媒体分析模块](src/perception/analysis.ts)接收调用方已有的 MP4 视频、M4A 音频或按时间排序的图片序列，以及结构化的场景上下文、身份候选和参考资料，流式调用 MiMo、Qwen、Gemini 并校验、归一化分析结果。媒体编码、参考图编码和调用调度由调用方负责；模块不接入 Backend 或启动持续消费。提示词 `perception` 由[现有初始化入口](../../docs/agent/prompt-management.md#初始提示词)准备。
+[模型调用](src/media-analysis/analysis.ts)只使用一份固定的 `media-analysis-agent` 系统指令，把中文背景资料和实际图片、视频或音频交给模型，返回中文描述。媒体协议转换由供应商适配器负责。支持 MiMo、百炼 Omni 的 OpenAI 兼容媒体接口和 Gemini 原生接口；端点必须支持实际发送的媒体模态。提示词准备与版本发布见[提示词管理](../../docs/agent/prompt-management.md)。
 
-```ts
-import { createMediaPerception } from "@home-agent/agent/perception";
+## 音视频分析 Agent
 
-const perception = createMediaPerception({
-  provider,
-  model,
-  modelCollection,
-  prompts,
-});
-const result = await perception.analyze({
-  media: {
-    kind: "video",
-    data: videoBytes,
-    fps: 1,
-    hasAudio: true,
-    hasSpeech: true,
-  },
-  context: { homeProfile, rules },
-  identity: { candidates, gallery },
-  pets,
-  panorama,
-  signal,
-});
-```
+[分析服务](src/media-analysis/service.ts)由 Host 装配。设置 `AGENT_MEDIA_ANALYSIS_MODEL=provider/modelId` 启用，未设置时不启动。Backend 把画面变化、语音或宠物声音选出的同镜头相邻片段合成连续媒体区间，不以本地检测窗口作为模型任务。采集运行或音轨改变、媒体缺口会分开区间；区间末端经过下一次本地检测接纳期，且输入媒体完整可读后进入队列。持续延长的区间在待分析池显示收集中，媒体仍受原有保留期限限制。成员、空间或设备清单尚未就绪时保留队列，恢复后继续处理仍可读取的区间。
 
-成员、宠物参考图和可选全景图均使用已有的 `ImageContent`。人物框 `bbox` 必须对应主视频最后一帧或图片序列最后一张主画面，坐标归一化到 `[0, 1000]`；裁切或缩放视频时，调用方须同步调整位置。输入类型见 `MediaAnalysisInput`，结果规范见 [session.ts](src/perception/session.ts)。返回的 `usage` 统一记录输入、输出、缓存、音频和视频 token；供应商未返回的用量记为 0。响应按 MiLoCo 提取 JSON 并逐项归一化，无法解析时返回 `skipped: true`；宠物判定仅记录审计日志。
+纯音频区间暂不进入分析队列，也不读取媒体或调用模型；视频区间仍可携带同期音频。恢复纯音频分析时，将分析服务中的 `audioOnlyAnalysisEnabled` 设为 `true` 并重载 Agent。
 
-识别具体宠物需要可辨别的参考图片或 `homeProfile` 中的外观资料；只有名字和物种不足以确认身份，依据不足时使用泛称。
+每次输入完整的成员与空间中文描述，并注明摄像头、房间、观测区域、该时刻有效的镜头描述和时间。背景、视频与音频的时间均按 Agent 运行环境的本地时区格式化并附带 GMT 偏移，正文沿用该时区；部署时应使 Agent 的系统时区与家庭所在地一致。内部 ID、检测框、身份归因及其证据不进入模型。Host 按整个分析区间读取原片采样视频，并读取覆盖同一区间的独立声音；不补造缺失媒体。声音使用 M4A 容器，视频与声音分别输入模型。模型任务、结果保存和原片回看均使用该区间，不依赖单个检测窗口 ID。
 
-图片序列使用 `media: { kind: "images", frames, durationSeconds, audio, hasSpeech }`：`frames` 为非空 `ImageContent` 数组，按拍摄时间从早到晚排列；`durationSeconds` 是实际采集窗口时长（正数），模块据此计算采样率。可选 `audio` 为同一窗口的 M4A 字节，`hasSpeech` 表示其中是否有人声。参考图在主画面序列之前，独立音频在序列之后；模型须支持所用模态的组合输入。图片模式会调整模板措辞，家庭档案、规则、待续接语音和机位说明原文保持不变。已有 Langfuse `perception` 提示词须同步[初始模板](prompts/perception.json)末尾的图片序列用户模板；初始化命令不会更新已有版本。
+输入明确标注实际提供的画面与声音。成员、空间和镜头说明仅作背景，不作为事件证据；仅有音频时只描述声音，不能据此确认画面、人物身份或移动路线。看不清、听不清或没有可确认活动时允许直接说明，不强行补齐叙事要素。这些要求通过提示词约束模型，不保证消除无依据的描述；结果仍须与原始媒体核对。
 
-`provider` 为 `mimo`、`qwen` 或 `gemini`。MiMo、Qwen 使用已配置的 `openai-completions` 模型，Gemini 使用原生 `google-generative-ai` 模型。Qwen 需要调用方注册实际支持媒体的百炼 Omni 端点模型；内置 Coding Plan 模型不适用。默认最大输出 512 tokens、`temperature: 0.1`、`topP: 0.95`，模型 HTTP 请求超时 30 秒，可通过 `options` 调整。超时沿用各 SDK 的原生机制，与 MiLoCo 的 httpx 分阶段超时语义不同。
+区间依次分析，每次读取与分析总截止 120 秒。模型请求和 Langfuse Session（追踪分组）各自独立；中文描述记录在追踪中，完成结果通过 Host 保存到 Backend 的动态历史。同一区间的重复结果按来源、时间与媒体类型去重。调度状态只在内存中，重启后重新接纳当前推送中仍可读取的区间；迟到的新片段只提交尚未分析的部分。断线中断的任务在重连后继续，其他读取或模型错误显示失败，家庭上下文失效时取消调用并清空运行状态。不更新模型视图的最新观察，不主动补看或发送事件。实际端点的持续运行效果须按部署验证。
 
-Gemini 的思考配置由现有模型 SDK 按模型能力处理，也可通过 `options.reasoning` 指定支持的思考级别（仅对 Gemini 生效）；Gemini 2.5 Pro 应显式设置为 `"minimal"` 或更高级别。无法完全关闭思考的模型仍会消耗思考 tokens，最大输出预算包含这部分消耗，返回的 `usage.output_tokens` 也包含它们。`options.mediaResolution` 为 `"default"`（默认，沿用模型的媒体分辨率）或 `"high"`，同时影响主画面和参考图；适用范围见 Google 的[思考配置](https://ai.google.dev/gemini-api/docs/generate-content/thinking)与[媒体分辨率](https://ai.google.dev/gemini-api/docs/generate-content/media-resolution)说明。
-
-提示词与供应商请求参考 [MiLoCo 固定源码](https://github.com/XiaoMi/xiaomi-miloco/tree/a48c1812562e786806647ca06abf02c0a3226485/backend/miloco/src/miloco/perception/engine/omni)。真实端点尚未完成实机验收。
+Web「动态」展示待分析池、正在分析和已完成结果。展开分析详情后通过 SSE（服务端事件流）接收本轮过程与文本，并按需读取实际送给模型的视频／音频；收起页面不取消分析。详情仅显示模型实际返回的过程，供应商未返回时不补造。完成结果保存在数据库，排队和执行状态只在当前进程保留；重启不补录此前仅存在于追踪中的结果。家庭上下文失效时清空运行状态与当前媒体。
 
 ## Workflow 扩展
 

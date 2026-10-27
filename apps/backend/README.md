@@ -4,7 +4,7 @@
 
 当前支持原生属性持续采集、带有效性的当前值与房间事实查询、设备状态历史保存与只读查询，以及成员资料、参考身份关联与可修订的成员出现记录。已有数据通过[Agent 专用通路](#agent-当前数据与历史)持续交付，历史支持设备报告、成员出现和整体音视频窗口；当前位置、通用活动识别与可执行要求管理尚未实现。本文仅说明当前后端实现；设备历史与 Agent 长期记忆不是同一层能力。
 
-本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和语音请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；家庭权威身份接纳与音视频语义理解仍按[摄像头计划](../../docs/plans/media-perception.md)实施。
+本地检测的接口、配置和验证范围见[感知功能说明](../../docs/perception.md)。人体外观跟踪、猫狗位置跟踪、可选的轨迹人物身份分析、音频分析、可选本地语音转写、短时语音交付和语音请求判断及窗口筛选、历史语音与人物判断、自动回看及按需媒体已接入；音视频理解由[媒体分析 Agent](../agent/README.md#音视频分析-agent)负责；LLM 身份核验等扩展见[媒体计划](../../docs/plans/media-perception.md)。
 
 ## 运行
 
@@ -107,7 +107,7 @@ Backend 从共享摄像头连接取得 H.264/H.265 原编码视频，保留所�
 
 `GET /api/agent/receipts`、`/api/agent/receipts/:id` 与 `/api/agent/receipts/current` 将 Web 只读请求转发到配置的 Agent 服务，校验响应并限制大小与超时，沿用可信本机 Web 访问限制，不用 Backend 发布缓存替代接收结果。
 
-Agent 启动后独立接收，不要求模型配置或聊天请求；本机 `GET /api/received-context` 供只读验收，使用方式见[Agent README](../agent/README.md)。推送和历史仅交付已有来源材料与引用，凭据、参考照片、特征向量及媒体字节不进入该通路；没有接入模型工具、默认模型输入或语义回写。专用通路的真实来源比对与未覆盖的故障、家庭生命周期边界见[验证边界](../../docs/household-runtime.md#agent-通路验证边界)。
+Agent 启动后独立接收，不要求模型配置或聊天请求；本机 `GET /api/received-context` 供只读验收，使用方式见[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)。推送和历史仅交付已有来源材料与引用，凭据、参考照片、特征向量及媒体字节不进入该通路；主聊天尚未接入材料查询工具；媒体分析 Agent 另行读取连续区间与背景资料，保存描述到动态历史，尚不写回最新观察。专用通路的真实来源比对与未覆盖的故障、家庭生命周期边界见[验证边界](../../docs/household-runtime.md#agent-通路验证边界)。
 
 ## 连接配置与探测
 
@@ -216,4 +216,8 @@ backend 的 `db:check` 只读核对 Drizzle 应用登记的时间戳、SQL 文�
 
 ## 家庭自动化
 
-所有 Workflow 均使用 `POST /api/workflows` 返回 SSE；空间规划的 `message` 与 `close` 共用这一入口，请求为 `{ scope_epoch, workflow: "spatial-planning", input }`。消息过程与最终结果通过 SSE 转发，过程事件为 `{ workflow, progress }`，结果事件为 `{ workflow, result }`，流契约由 Agent 从各 Workflow 的输入、进度和结果 Schema 生成；没有过程内容的操作直接交付最终结果。Backend 使用浏览器提交的 `scope_epoch` 检查请求有效性，直接转发规划输入，每次交付过程更新和最终结果前再次校验。Agent 的家庭上下文接收器在上下文撤销或替换时统一清空全部规划会话、对话和草稿，规划本身只管理会话 ID 与资源。等待使用服务配置的预算，沿用取消检查，只返回待核对草稿，不写入空间数据库，也不采集摄像头画面。会话协议见[Agent 会话契约](../../apps/agent/README.md#空间规划会话契约)。
+所有 Workflow 均使用 `POST /api/workflows` 返回 SSE；空间规划的 `message` 与 `close` 共用这一入口，请求为 `{ scope_epoch, workflow: "spatial-planning", input }`。消息过程与最终结果通过 SSE 转发，过程事件为 `{ workflow, progress }`，结果事件为 `{ workflow, result }`，流契约由 Agent 从各 Workflow 的输入、进度和结果 Schema 生成；没有过程内容的操作直接交付最终结果。Backend 使用浏览器提交的 `scope_epoch` 检查请求有效性，直接转发规划输入，每次交付过程更新和最终结果前再次校验。Agent 的家庭上下文接收器在上下文撤销或替换时统一清空全部规划会话、对话和草稿，规划本身只管理会话 ID 与资源。等待使用服务配置的预算，沿用取消检查，只返回待核对草稿，不写入空间数据库，也不采集摄像头画面。会话协议见[Agent 会话契约](../agent/src/workflows/spatial-planning/session.ts)。
+
+## 动态历史
+
+Web「动态」通过 Backend 订阅 Agent 的待分析池和执行进度。完成结果由 Host 调用仅限本机的写入入口，Backend 核对当前可读连续媒体区间及来源、时间后保存到现有 `context_records`，按来源、时间与媒体类型去重，并按发生时间分页读取。区间声音通过 `POST /api/dynamics/audio` 读取，使用独立 M4A 容器。结果随当前家庭业务数据一起清理，不增加家庭分区。实时分析媒体按需从 Agent 读取，不在数据库中复制媒体字节；原片继续由既有录像通路管理。

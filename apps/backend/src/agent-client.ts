@@ -88,6 +88,27 @@ export function createAgentClient(options: {
   }
 
   return {
+    async mediaAnalysis(path: string, signal: AbortSignal) {
+      const url = new URL(
+        `/api/media-analysis${path}`,
+        await options.readAgentUrl(),
+      );
+      signal.throwIfAborted();
+      const response = await tracedFetch(
+        { from: "backend", to: "agent" },
+        url,
+        { signal, redirect: "error" },
+      );
+      return new Response(response.body, {
+        status: response.status,
+        headers: {
+          "Content-Type":
+            response.headers.get("content-type") ?? "application/octet-stream",
+          "Cache-Control": "no-store",
+          "X-Accel-Buffering": "no",
+        },
+      });
+    },
     chat(
       input: z.output<typeof chatInputSchema>,
       signal: AbortSignal,

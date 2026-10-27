@@ -1,4 +1,5 @@
 import {
+  Activity,
   Database,
   Radio,
   Bot,
@@ -12,6 +13,13 @@ import {
 } from "lucide-react";
 
 export const navigation = [
+  {
+    to: "/dynamics",
+    label: "动态",
+    icon: Activity,
+    cornerRadius: 14,
+    mobilePrimary: true,
+  },
   {
     to: "/agent",
     label: "AI",

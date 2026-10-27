@@ -1,7 +1,6 @@
 import { startWebEntry, stopWebEntry, webEntryRunning } from "./web-entry";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { delimiter, dirname, resolve } from "node:path";
 import { parse } from "yaml";
 import {
@@ -86,6 +85,26 @@ async function runDocker(arguments_: string[]) {
   });
   if (await child.exited) throw new Error("Docker 命令失败，服务操作未完成。");
 }
+async function requireDocker() {
+  const child = Bun.spawn([docker!, "info", "--format", "{{.ServerVersion}}"], {
+    cwd: root,
+    env,
+    stdout: "ignore",
+    stderr: "pipe",
+    timeout: 5000,
+  });
+  const error = await new Response(child.stderr).text();
+  if ((await child.exited) === 0) return;
+
+  if (process.platform === "darwin" && existsSync(desktopDocker)) {
+    console.info("等待 Docker Desktop 启动，最多 120 秒……");
+    await runDocker(["desktop", "start", "--timeout", "120"]);
+    await runDocker(["info", "--format", "Docker {{.ServerVersion}} 已就绪"]);
+    return;
+  }
+
+  throw new Error(`Docker 引擎未就绪，请启动 Docker 服务后重试。\n${error}`);
+}
 async function dockerRunning(service: "go2rtc" | "db") {
   const child = Bun.spawn(
     [docker!, "compose", "ps", "--status", "running", "-q", service],
@@ -95,24 +114,22 @@ async function dockerRunning(service: "go2rtc" | "db") {
   if (await child.exited) throw new Error(`无法检查 ${service} 容器状态。`);
   return output.trim().length > 0;
 }
-async function requireDockerNetwork() {
-  if (process.platform !== "darwin") return;
-  const settingsPath = resolve(
-    homedir(),
-    "Library/Group Containers/group.com.docker/settings-store.json",
-  );
-  let settings: { HostNetworkingEnabled?: boolean; KernelForUDP?: boolean };
-  try {
-    settings = JSON.parse(await readFile(settingsPath, "utf8"));
-  } catch {
-    throw new Error(
-      "无法读取本机 Docker Desktop 网络设置。请安装并启动 Docker Desktop，按 README.md 完成网络设置后重试。",
-    );
+async function waitForGo2rtc() {
+  let cause: unknown;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      const response = await fetch("http://127.0.0.1:1984/api", {
+        signal: AbortSignal.timeout(1000),
+      });
+      await response.body?.cancel();
+      if (response.ok) return { ready: true as const };
+      cause = new Error(`go2rtc HTTP ${response.status}`);
+    } catch (error) {
+      cause = error;
+    }
+    await Bun.sleep(500);
   }
-  if (settings.HostNetworkingEnabled !== true || settings.KernelForUDP !== true)
-    throw new Error(
-      "Docker 摄像头需要在 Settings → Resources → Network 同时开启 Enable host networking 和 Use kernel networking for UDP，然后 Apply & restart。每台 Mac 配置一次；启动脚本不会修改全局设置。详见 README.md。",
-    );
+  return { ready: false as const, cause };
 }
 
 async function selectedMode() {
@@ -180,12 +197,13 @@ try {
     await runDocker(["compose", "--profile", "langfuse", "stop"]);
     console.info("本项目管理的开发应用及 Docker 依赖已停止，数据保留。");
   } else if (action === "initialize" || action === "migrate") {
+    await requireDocker();
     await runBun(["scripts/setup-local.ts"]);
     await prepareDatabase();
   } else {
     const modeFile = resolve(runtime, "go2rtc-mode");
     const mode = requestedMode ?? (await selectedMode());
-    if (mode === "docker") await requireDockerNetwork();
+    await requireDocker();
     console.info(`go2rtc 运行方式：${modeLabel(mode)}；数据库：Docker 容器`);
     await runBun(["scripts/setup-local.ts"]);
     const configPath = resolve(root, "config/config.yaml");
@@ -220,23 +238,16 @@ try {
         await requireFreePorts();
         await runDocker([...up, "--build", "--no-deps", "go2rtc"]);
       }
-      let reachable = false;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        try {
-          const response = await fetch("http://127.0.0.1:1984/api", {
-            signal: AbortSignal.timeout(1000),
-          });
-          await response.body?.cancel();
-          if (response.ok) {
-            reachable = true;
-            break;
-          }
-        } catch {}
-        await Bun.sleep(500);
+      let health = await waitForGo2rtc();
+      if (!health.ready && process.platform === "darwin") {
+        console.info("go2rtc 本机端口不可达，重启本项目 go2rtc 容器后重试……");
+        await runDocker(["compose", "restart", "--no-deps", "go2rtc"]);
+        health = await waitForGo2rtc();
       }
-      if (!reachable)
+      if (!health.ready)
         throw new Error(
-          "go2rtc 容器已启动，但本机无法访问 1984。Docker Desktop 请在 Settings → Resources → Network 开启 Enable host networking 并 Apply & restart；Linux 请检查 host 网络与端口占用。详见 README.md。",
+          "go2rtc 容器已启动，但本机仍无法访问 1984。macOS 请确认 Docker Desktop 的 Settings → Resources → Network 已开启 Enable host networking 并应用；Linux 请检查 host 网络与端口占用。详见 docs/running.md。",
+          { cause: health.cause },
         );
     }
     await prepareDatabase();

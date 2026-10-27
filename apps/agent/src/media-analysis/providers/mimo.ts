@@ -5,8 +5,13 @@ export function buildMimoPayload({
   systemPrompt,
   messages,
   options,
+  payload,
 }: MediaPrompt) {
+  if (typeof payload !== "object" || payload === null)
+    throw new Error("Invalid MiMo SDK request payload");
+
   return {
+    ...payload,
     model: modelId,
     messages: [
       { role: "system", content: systemPrompt },
@@ -39,11 +44,9 @@ export function buildMimoPayload({
         }),
       })),
     ],
-    max_completion_tokens: options.maxTokens,
     temperature: options.temperature,
     top_p: options.topP,
     stream: true,
     stream_options: { include_usage: true },
-    thinking: { type: "disabled" },
   };
 }

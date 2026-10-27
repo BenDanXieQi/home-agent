@@ -32,6 +32,8 @@ export function CameraWindows({
   visible: boolean;
 }) {
   const {
+    rangeStart,
+    rangeEnd,
     activityRun,
     activityFirstAt,
     activityAt,
@@ -84,7 +86,7 @@ export function CameraWindows({
     active,
   );
   const markers = query.data?.markers ?? [];
-  const focusAt = observedAt ?? detail.window?.startedAt;
+  const focusAt = observedAt ?? rangeStart ?? detail.window?.startedAt;
   const selected =
     selection ??
     markers.find(
@@ -99,13 +101,14 @@ export function CameraWindows({
       : undefined;
   const playbackStart =
     selection?.startedAt ??
+    rangeStart ??
     activityFirstAt ??
     activityAt ??
     detail.window?.startedAt;
   const playbackEnd =
     fromActivity && !selection
       ? activityAt + 1000
-      : (selection?.endedAt ?? detail.window?.endedAt);
+      : (selection?.endedAt ?? rangeEnd ?? detail.window?.endedAt);
   return (
     <section ref={container} aria-label="录像与观察记录">
       <CameraAnalysisLayout

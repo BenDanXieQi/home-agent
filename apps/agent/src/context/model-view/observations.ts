@@ -1,5 +1,6 @@
 import type { requireReadyContext } from "./source";
 import { compareText } from "./source";
+import { observationTarget } from "../spatial";
 
 export function latestObservations(
   source: ReturnType<typeof requireReadyContext>,
@@ -24,20 +25,12 @@ export function latestObservations(
     (sighting) => sighting.association.memberId,
   );
   function observationArea(sighting: (typeof sightings)[number]) {
-    const bindings = spatial.observation_bindings.filter(
-      (binding) =>
-        binding.enabled &&
-        binding.device_id === sighting.deviceId &&
-        binding.channel === sighting.channel,
+    const target = observationTarget(
+      spatial,
+      sighting,
+      sighting.firstObservedAt,
     );
-    if (bindings.length !== 1) return null;
-    const binding = bindings[0]!;
-    if (Date.parse(binding.updated_at) > sighting.firstObservedAt) return null;
-    const target = binding.space_id
-      ? spatial.spaces.find((space) => space.id === binding.space_id)
-      : spatial.passages.find((passage) => passage.id === binding.passage_id);
-    if (!target) return null;
-    return `${target.name}（观测区域）`;
+    return target ? `${target.name}（观测区域）` : null;
   }
   const identityLabels = {
     candidate: "待确认",

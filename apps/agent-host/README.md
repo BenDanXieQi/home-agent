@@ -18,7 +18,7 @@ bun run --cwd apps/agent-host start
 
 ## 资源生命周期
 
-宿主创建一个 Chord Host（进程内服务与资源管理器），注册 `AgentModels`、`AgentRuntime`、主助手和 Workflow 本地服务。服务以 `lifetime: "host"` 注册，通过 `self.get()` 声明依赖，用 `self.resource()` 管理异步初始化与关闭；宿主用 `await host.get()` 等待各服务就绪。所有消费者共享同一运行时实例；业务扩展先统一注册，对话再显式选择自己的扩展。自动化生成与语音判断只依赖模型服务。关闭时先停止上下文接收，再由 `host.close()` 按依赖关系清理 Workflow 和主助手，随后关闭 Harness、执行环境并删除临时工作区。关闭单个规划不关闭公共运行时。
+宿主创建一个 Chord Host（进程内服务与资源管理器），注册 `AgentModels`、`AgentRuntime`、主助手和 Workflow 本地服务。服务以 `lifetime: "host"` 注册，通过 `self.get()` 声明依赖，用 `self.resource()` 管理异步初始化与关闭；宿主用 `await host.get()` 等待各服务就绪。所有消费者共享同一运行时实例；业务扩展先统一注册，对话再显式选择自己的扩展。自动化生成与语音判断只依赖模型服务。配置 `AGENT_MEDIA_ANALYSIS_MODEL` 时，宿主在上下文接收启动前装配音视频分析 Agent：上下文同步后通知其接纳新材料，家庭上下文失效时先同步重置它，再重置 Workflow；它在共享运行时关闭前关闭。关闭时先停止上下文接收，再由 `host.close()` 按依赖关系清理 Workflow 和主助手，随后关闭 Harness、执行环境并删除临时工作区。关闭单个规划不关闭公共运行时。
 
 收到退出信号时启动 `AGENT_SHUTDOWN_TIMEOUT_MS` 计时，初始化取消、HTTP 排空和资源清理共用这段预算，默认 10,000 毫秒；重复信号不重置计时。应用装配返回失败时，后续进程资源清理也受该预算约束。没有退出信号时，工厂内部因初始化失败而触发的回收发生在装配返回之前，不受这段计时约束。
 

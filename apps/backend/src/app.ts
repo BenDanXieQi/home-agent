@@ -1,3 +1,5 @@
+import { createDynamicsRoutes } from "./dynamics/routes";
+import type { createDynamicsRepository } from "./dynamics/repository";
 import { createProvenanceRoutes } from "./household/records/routes";
 import {
   AGENT_OPERATION_TIMEOUT_MS,
@@ -48,6 +50,7 @@ import { createContextRoutes } from "./household-context/routes";
 import type { createContextRepository } from "./household-context/repository";
 
 type AppDependencies = {
+  dynamicsRepository?: ReturnType<typeof createDynamicsRepository> | undefined;
   provenance?: Parameters<typeof createProvenanceRoutes>[1];
   automations?: AutomationService | undefined;
   agentContext: ReturnType<typeof createAgentContextService>;
@@ -84,6 +87,7 @@ type AppDependencies = {
 };
 
 export function createApp({
+  dynamicsRepository,
   provenance,
   automations,
   agentContext,
@@ -258,6 +262,17 @@ export function createApp({
       createWorkflowRoutes({
         port: environment.BACKEND_PORT,
         workflows,
+      }),
+    )
+    .route(
+      "/api/dynamics",
+      createDynamicsRoutes({
+        port: environment.BACKEND_PORT,
+        household,
+        agent,
+        perception,
+        agentContext,
+        repository: dynamicsRepository,
       }),
     )
     .route(

@@ -619,6 +619,10 @@ export function createPerceptionService(options: {
       };
     },
     windowRevision: () => windowRevision,
+    readAudioRange: (
+      input: Parameters<typeof media.readRange>[0],
+      signal: AbortSignal,
+    ) => media.readRange(input, signal),
     windowObservation(id: string) {
       const observation = windows.observation(id, Date.now());
       return observation

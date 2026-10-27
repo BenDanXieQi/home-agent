@@ -20,6 +20,7 @@ import type {
   memberObservationSchema,
 } from "../household/identity/activity-repository";
 import type { createPerceptionService } from "../perception/service";
+import type { createRecordingsService } from "../recordings/service";
 import { HouseholdError } from "../household/errors";
 import {
   assembleAgentObservations,
@@ -75,6 +76,10 @@ export function createAgentContextService(options: {
   spatial: ReturnType<typeof createSpatialRepository> | undefined;
   sightings: ReturnType<typeof createMemberActivityRepository> | undefined;
   perception: ReturnType<typeof createPerceptionService>;
+  recordings: Pick<
+    ReturnType<typeof createRecordingsService>,
+    "covers" | "subscribe"
+  >;
   commands:
     | Pick<
         ReturnType<typeof createCommandRepository>,
@@ -268,6 +273,7 @@ export function createAgentContextService(options: {
           if (
             old.status === "ready" &&
             isDeepStrictEqual(old.data.records, next.records) &&
+            isDeepStrictEqual(old.data.media_ranges, next.media_ranges) &&
             isDeepStrictEqual(
               old.data.member_sightings,
               next.member_sightings,
@@ -414,29 +420,37 @@ export function createAgentContextService(options: {
     windowSource.records = windowSource.records.filter(
       (record) => record.endedAt >= start,
     );
+    const data = assembleAgentObservations(
+      sightingSource.records,
+      windowSource.records,
+      options.recordings,
+    );
     const oldest = [
       ...sightingSource.records
         .filter((record) => !latestIds.has(record.id))
         .map((record) => record.data.lastObservedAt),
       ...windowSource.records.map((record) => record.endedAt),
     ].reduce((minimum, at) => Math.min(minimum, at), Infinity);
-    if (Number.isFinite(oldest)) {
+    const nextRefresh = Math.min(
+      oldest + agentContextPolicy.recentObservationMs + 1,
+      ...data.media_ranges
+        .filter((range) => range.settledAt > end)
+        .map((range) => range.settledAt),
+    );
+    if (Number.isFinite(nextRefresh)) {
       observationExpiry = setTimeout(
         () => {
           observationsLane.refresh();
           if (sightingSource.capacityExceeded) sightingsLane.refresh();
         },
-        Math.max(1, oldest + agentContextPolicy.recentObservationMs + 1 - end),
+        Math.max(1, nextRefresh - end),
       );
       observationExpiry.unref();
     }
     if (sightingSource.capacityExceeded)
       throw new HouseholdError("capacity_exceeded");
     return ready({
-      ...assembleAgentObservations(
-        sightingSource.records,
-        windowSource.records,
-      ),
+      ...data,
       as_of: new Date(end).toISOString(),
       sources: {
         member_sightings: sightingSource.state,
@@ -632,6 +646,7 @@ export function createAgentContextService(options: {
     spatial?.subscribe(spatialLane.refresh),
     sightings?.subscribe(sightingsLane.refresh),
     perception.subscribeContext(windowsLane.refresh),
+    options.recordings.subscribe(observationsLane.refresh),
   ];
   if (eligible) for (const source of lanes) source.refresh();
   return {

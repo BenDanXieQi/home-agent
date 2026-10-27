@@ -36,18 +36,22 @@ export function useCameraReturnFocus() {
 
 export function useCameraReturn() {
   const navigate = useNavigate();
-  const { member } = useSearch({ strict: false });
+  const { member, returnTo } = useSearch({ strict: false });
   useEffect(() => {
-    const returnToWall = (event: KeyboardEvent) => {
+    const returnToSource = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
       event.preventDefault();
       navigate(
-        member ? { to: "/members", search: { member } } : { to: "/cameras" },
+        returnTo
+          ? { to: returnTo }
+          : member
+            ? { to: "/members", search: { member } }
+            : { to: "/cameras" },
       ).catch((error) => {
         console.error("无法返回来源页面", error);
       });
     };
-    document.addEventListener("keydown", returnToWall);
-    return () => document.removeEventListener("keydown", returnToWall);
-  }, [navigate, member]);
+    document.addEventListener("keydown", returnToSource);
+    return () => document.removeEventListener("keydown", returnToSource);
+  }, [navigate, member, returnTo]);
 }

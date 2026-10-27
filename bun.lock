@@ -50,6 +50,7 @@
         "@earendil-works/chord": "catalog:",
         "@earendil-works/pi-ai": "catalog:",
         "@home-agent/agent": "workspace:*",
+        "@home-agent/api": "workspace:*",
         "@home-agent/backend-client": "workspace:*",
         "@home-agent/observability": "workspace:*",
         "es-toolkit": "^1.52.0",

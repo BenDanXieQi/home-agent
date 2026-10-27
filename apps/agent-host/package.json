@@ -15,6 +15,7 @@
     "lint:fix": "oxlint --type-aware --max-warnings 0 --fix ."
   },
   "dependencies": {
+    "@home-agent/api": "workspace:*",
     "@home-agent/agent": "workspace:*",
     "@home-agent/backend-client": "workspace:*",
     "@home-agent/observability": "workspace:*",

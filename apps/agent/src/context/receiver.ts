@@ -16,6 +16,7 @@ import { AppError } from "@home-agent/api/errors";
 export function createContextReceiver(options: {
   client: Pick<ContextSource, "stream">;
   onReset?: () => Promise<void>;
+  onSynchronized?: () => void;
 }) {
   const receipts = createReceiptJournal();
   let heartbeatAt: string | null = null;
@@ -100,6 +101,7 @@ export function createContextReceiver(options: {
       Buffer.byteLength(event.data),
       previous,
     );
+    if (synchronized) options.onSynchronized?.();
     return synchronized;
   }
 
@@ -179,6 +181,9 @@ export function createContextReceiver(options: {
 
   return {
     currentSignal,
+    currentParts() {
+      return currentSignal() ? parts : null;
+    },
     householdPart() {
       return parts.household;
     },

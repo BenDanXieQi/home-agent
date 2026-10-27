@@ -204,6 +204,20 @@ export const agentContextDataSchemas = {
   observations: z.object({
     as_of: z.iso.datetime(),
     records: z.array(agentObservationSchema),
+    media_ranges: z.array(
+      windowDetailSchema
+        .pick({ id: true, readableUntil: true, startedAt: true, endedAt: true })
+        .extend({
+          source: windowDetailSchema.shape.run.pick({
+            deviceId: true,
+            channel: true,
+          }),
+          kind: z.enum(["video", "audio"]),
+          includeAudio: z.boolean(),
+          settledAt: z.number(),
+          ready: z.boolean(),
+        }),
+    ),
     member_sightings: z.array(agentSightingSummarySchema),
     sources: z.object({
       member_sightings: agentObservationSourceSchema,

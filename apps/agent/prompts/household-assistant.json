@@ -12,7 +12,7 @@
     }
   ],
   "config": {
-    "thinkingLevel": "off",
+    "thinkingLevel": "medium",
     "tools": [
       {
         "name": "read",

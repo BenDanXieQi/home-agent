@@ -4,6 +4,7 @@ import {
   type mijiaRecordingPlaybackInputSchema,
   mijiaRecordingPlaybackStateSchema,
   mijiaRecordingAvailabilitySchema,
+  mijiaRecordingAvailabilityBatchSize,
   type mijiaRecordingAvailabilityQuerySchema,
 } from "@home-agent/api/mijia-recordings";
 import {
@@ -91,16 +92,42 @@ export function recordingAvailabilityOptions(
   return queryOptions({
     queryKey: ["recording-availability", input],
     queryFn: input
-      ? ({ signal }) =>
-          requestJson(
-            (client, options) =>
-              client.api.mijia.recordings.availability.$post(
-                { json: input },
-                options,
-              ),
-            mijiaRecordingAvailabilitySchema,
-            { signal },
-          )
+      ? async ({ signal }) => {
+          const at = [...new Set(input.at)].toSorted((a, b) => a - b);
+          const matches: Extract<
+            z.infer<typeof mijiaRecordingAvailabilitySchema>,
+            { status: "ready" }
+          >["matches"] = [];
+
+          for (
+            let start = 0;
+            start < at.length;
+            start += mijiaRecordingAvailabilityBatchSize
+          ) {
+            signal.throwIfAborted();
+            const result = await requestJson(
+              (client, options) =>
+                client.api.mijia.recordings.availability.$post(
+                  {
+                    json: {
+                      ...input,
+                      at: at.slice(
+                        start,
+                        start + mijiaRecordingAvailabilityBatchSize,
+                      ),
+                    },
+                  },
+                  options,
+                ),
+              mijiaRecordingAvailabilitySchema,
+              { signal },
+            );
+            if (result.status !== "ready") return result;
+            matches.push(...result.matches);
+          }
+
+          return { status: "ready" as const, matches };
+        }
       : skipToken,
     retry: false,
     staleTime: 30_000,

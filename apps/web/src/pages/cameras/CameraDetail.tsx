@@ -25,9 +25,16 @@ import { createCameraAspectAtom } from "../../modules/playback/media-aspect";
 import { CameraWindows } from "./CameraWindows";
 
 function CameraDetailBackLink() {
-  const { member } = useSearch({
+  const { member, returnTo } = useSearch({
     from: "/account/cameras/$deviceId/$channel",
   });
+  if (returnTo)
+    return (
+      <BackLink to={returnTo} className="-ml-2">
+        返回动态
+      </BackLink>
+    );
+
   return member ? (
     <BackLink to="/members" search={{ member }} className="-ml-2">
       返回成员
@@ -95,10 +102,13 @@ function CameraDetailModes({
 }) {
   const {
     mode,
+    rangeStart,
+    rangeEnd,
     activityRun,
     activityFirstAt,
     activityAt,
     member,
+    returnTo,
     window: windowId,
   } = useSearch({
     from: "/account/cameras/$deviceId/$channel",
@@ -128,6 +138,7 @@ function CameraDetailModes({
                 activityAt: undefined,
                 activityFirstAt: undefined,
                 member,
+                ...(returnTo ? { returnTo } : {}),
               }}
               activeOptions={{ exact: true }}
               className="rounded-lg px-3 py-1.5 text-[13px] text-muted hover:text-ink focus-visible:outline-2 aria-[current=page]:bg-ink/5 aria-[current=page]:font-medium aria-[current=page]:text-ink"
@@ -145,7 +156,7 @@ function CameraDetailModes({
       {windowsVisited ? (
         <div hidden={mode !== "windows"}>
           <CameraWindows
-            key={`${windowId ?? ""}:${activityRun ?? ""}:${activityFirstAt ?? ""}:${activityAt ?? ""}`}
+            key={`${rangeStart ?? ""}:${rangeEnd ?? ""}:${windowId ?? ""}:${activityRun ?? ""}:${activityFirstAt ?? ""}:${activityAt ?? ""}`}
             source={source}
             scope={scope}
             visible={mode === "windows"}

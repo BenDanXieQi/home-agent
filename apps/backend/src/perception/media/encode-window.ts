@@ -31,7 +31,7 @@ export async function encodeWindow(
       createWriteStream(join(directory, "audio.pcm")),
       { signal },
     );
-    const output = join(directory, "media.mp4");
+    const output = join(directory, "media.m4a");
     const args = [
       "-f",
       "s16le",
@@ -68,7 +68,7 @@ export async function encodeWindow(
       "-movflags",
       "+faststart",
       "-f",
-      "mp4",
+      "ipod",
     );
     args.push(output);
     await runFfmpeg(executable, args, signal, 1024);

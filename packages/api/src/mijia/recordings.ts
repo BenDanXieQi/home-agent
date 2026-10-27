@@ -47,9 +47,11 @@ export const cameraRecordingIndexSchema = z.discriminatedUnion("status", [
   }),
 ]);
 
+export const mijiaRecordingAvailabilityBatchSize = 25;
+
 export const mijiaRecordingAvailabilityQuerySchema =
   mijiaPlaybackReservationInputSchema.safeExtend({
-    at: z.array(timestamp).min(1).max(25),
+    at: z.array(timestamp).min(1).max(mijiaRecordingAvailabilityBatchSize),
   });
 
 export const mijiaRecordingAvailabilitySchema = z.discriminatedUnion("status", [
@@ -63,7 +65,7 @@ export const mijiaRecordingAvailabilitySchema = z.discriminatedUnion("status", [
           clip: cameraRecordingIndexSchema.options[0].shape.recordings.element.nullable(),
         }),
       )
-      .max(25),
+      .max(mijiaRecordingAvailabilityBatchSize),
   }),
 ]);
 

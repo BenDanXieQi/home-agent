@@ -45,9 +45,6 @@ export function buildGeminiPayload({
       maxOutputTokens: options.maxTokens,
       temperature: options.temperature,
       topP: options.topP,
-      ...(options.mediaResolution === "high"
-        ? { mediaResolution: "MEDIA_RESOLUTION_HIGH" }
-        : {}),
     },
   };
 }

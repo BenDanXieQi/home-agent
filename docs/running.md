@@ -8,7 +8,7 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
-`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时跳过启动；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。数据库结构由 Drizzle 当前初始化基线建立，已登记应用的 SQL 不重复执行；基线变化后，已有数据库需重建，再按当前基线初始化。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时检查本机接口；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。数据库结构由 Drizzle 当前初始化基线建立，已登记应用的 SQL 不重复执行；基线变化后，已有数据库需先备份，再重建并按当前基线初始化，启动命令不会自动清库。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
 
 新启动的应用使用带服务名前缀的连续日志输出，Agent 重载保留已有日志。启动命令等待 Web `/`、backend `/api/health` 和 Agent `/health` 返回成功响应，逐项显示就绪；120 秒内仍未就绪时，列出失败应用及最近的探测错误，以非零退出码结束，并停止本次新启动的应用、移除对应进程记录，保留已有应用与依赖。此检查只确认启动时的 HTTP 接口可用，不代表模型、米家或摄像头就绪。运行中修改代码导致错误时，监听进程可能继续等待修正，须查看对应服务的错误日志；命令仍在运行不表示服务仍然健康。
 
@@ -26,7 +26,11 @@ go2rtc 配置位于 `config/go2rtc/go2rtc.yaml`，运行产物和日志位于 `c
 - **Linux / Docker Engine**：使用宿主机网络；实际摄像头播放尚未验证。
 - **Windows**：启动脚本和摄像头链路尚未验证。
 
-启动命令会检查 macOS 的上述设置。Docker 网络设置全局生效，重启会中断其他容器；内核 UDP 可能与 VPN 冲突。详见 [Docker 网络设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#network)。
+上述开关需在 Docker Desktop 中配置。启动命令检查 Docker 引擎和 go2rtc 本机接口的可达性，不读取受 macOS 权限保护的 Docker 设置文件；接口就绪不代表摄像头 UDP 取流已就绪。Docker 网络设置全局生效，重启会中断其他容器；内核 UDP 可能与 VPN 冲突。详见 [Docker 网络设置](https://docs.docker.com/desktop/settings-and-maintenance/settings/#network)。
+
+`dev`、`db:init` 和 `db:migrate` 会先检查 Docker 引擎；macOS 引擎未就绪时，调用 Docker Desktop 自带的启动命令并等待，最多 120 秒，无需开机后手动等待再运行。
+
+macOS 的 Docker 模式会检查 `http://127.0.0.1:1984/api`；接口不可达时自动重启本项目的 go2rtc 容器一次并重新检查，以恢复机器或 Docker 重启后失效的宿主网络端口。恢复会中断现有摄像头连接；仍失败则保留探测错误并停止启动，不循环重启 Docker 或其他容器。
 
 服务仅面向可信本机，尚无用户认证。数据库与 go2rtc 管理端口限制在本机访问，不应暴露到公网。摄像头用法与限制见[米家与摄像头](mijia.md)，构建说明见 [go2rtc](../docker/go2rtc/README.md)。
 
@@ -99,7 +103,7 @@ bun --env-file=.env scripts/web-entry.ts stop         # 只停止本项目入口
 
 Docker 数据库通过 `.env` 的 `POSTGRES_PORT` 映射到本机，容器内端口固定为 5432；`DATABASE_URL` 的端口须与 `POSTGRES_PORT` 一致。backend 和 Agent 运行在本机，监听地址分别由 `.env` 的 `BACKEND_HOST` / `BACKEND_PORT`、`AGENT_HOST` / `AGENT_PORT` 设置，无需 Docker 端口映射。Caddy 入口监听 `127.0.0.1:8443` 与 `[::1]:8443`，浏览器使用 `https://localhost:8443`；前端开发服务器监听内部 `127.0.0.1:5173`，API 转发使用 backend 的环境变量配置。go2rtc 使用 host 网络，不配置 `ports` 映射；启动命令统一使用本机 1984（API）、8554（RTSP）和 8555（WebRTC）端口。
 
-Agent 的 `BACKEND_URL` 默认 `http://127.0.0.1:3000`，用于后台上下文订阅和只读历史查询；Backend 监听地址或端口自定义时须显式设置该地址。接收不要求模型配置，诊断入口见[Agent README](../apps/agent/README.md#当前数据接收与只读历史客户端)。
+Agent 的 `BACKEND_URL` 默认 `http://127.0.0.1:3000`，用于后台上下文订阅和只读历史查询；Backend 监听地址或端口自定义时须显式设置该地址。接收不要求模型配置，诊断入口见[家庭运行时](household-runtime.md#agent-当前数据与材料历史)。
 
 backend 与 Agent 分别运行在独立进程中，通过 HTTP 通信，各自拥有内存与 JS 主线程。`bun run dev` 和 `bun run start` 统一启动两者，不将 Agent 导入 backend 进程，也不共享家庭状态对象。
 

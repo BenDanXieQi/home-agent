@@ -38,7 +38,7 @@ backend 与 Agent 共用一套错误契约，Web 按错误码显示中文。HTTP
 
 ## 连接检查
 
-聊天输入输出由 [Agent 聊天模块](../../apps/agent/README.md#接口)通过 `@home-agent/agent/assistant/contracts` 导出。
+聊天输入输出由 [Agent 聊天模块](../../apps/agent/src/assistant/contracts.ts)通过 `@home-agent/agent/assistant/contracts` 导出。
 
 连接状态接口完成探测时返回 200，即使外围服务不可用。每个服务返回 `reasonCode` 与可选 `params`；页面生成可读说明。读取连接配置失败返回普通 HTTP 错误。
 
@@ -73,7 +73,7 @@ Web 的 `POST /api/device-history/events` 在读取条件上增加 `delivery=liv
 
 `device_state.data.latest` 只包含属性身份、值、来源证据、质量及时间，不重复家庭／房间、规格 ID、描述、类型、可读性和单位。静态信息由 `household.data.device/specs` 提供，规格中的属性键为 `prop.<siid>.<piid>`；设备的房间归属由设备清单提供。动态属性 schema 从已有属性 schema 派生。
 
-`observations.data` 包含 `as_of/records/member_sightings/sources`；`as_of` 为整理时间。每位成员保留最后出现，同一时刻保留并列来源，不因超过 30 分钟而清空；未知身份按设备与镜头保留最新出现。窗口线索在来源仍保留的最近材料中按摄像头／镜头和类型保留最后一条，重复窗口合并，历史通过专用接口查询。`member_sightings` 每条保存材料 ID、观察起止时间、设备与镜头、主机接收时间依据及当前轻量身份归属（成员、候选／确认／推断状态和修订号），不含身份图片或特征证据；身份撤回标记 unknown。每条观察的 `source` 保存设备与镜头。每条窗口观察使用 `window_id` 引用唯一窗口，使用 `member_sighting_ids` 引用关联成员记录；统一快照不嵌入成员记录正文、检测帧、转写或完整窗口详情。`POST /api/agent/context/material` 使用 `agentMaterialQuerySchema` 的 `{ kind, id }` 按需解析当前绑定下的单个引用；`agentMaterialResponseSchema` 返回当前成员记录或窗口详情，过期／移除返回 404，读取结果不合并进统一快照；等待期间可响应取消和请求截止时间，结果返回前仍核验家庭资格。没有可关联窗口的成员记录形成 `window_id=null` 的独立出现观察。`reasons` 表示窗口选取依据，不是事件结论或说话人归因；窗口级声音和变化线索不复制到各成员的出现观察上。关联规则由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。`sources.member_sightings/perception` 分别包含 `status/read_at/reason/truncated`，表示独立读取与重试状态；统一部分 ready 不表示来源全部成功。交付不调用模型或生成媒体。
+`observations.data` 的字段由 [schema](src/contracts/agent-context.ts) 定义；`as_of` 为整理时间。每位成员保留最后出现，同一时刻保留并列来源，不因超过 30 分钟而清空；未知身份按设备与镜头保留最新出现。窗口线索在来源仍保留的最近材料中按摄像头／镜头和类型保留最后一条，重复窗口合并，历史通过专用接口查询。`media_ranges` 独立提供同镜头连续媒体区间及收集／就绪状态，供媒体分析调度使用，不随最新线索合并；本地检测窗口仅保留为采集证据和材料查询单位。`member_sightings` 每条保存材料 ID、观察起止时间、设备与镜头、主机接收时间依据及当前轻量身份归属（成员、候选／确认／推断状态和修订号），不含身份图片或特征证据；身份撤回标记 unknown。每条观察的 `source` 保存设备与镜头。每条窗口观察使用 `window_id` 引用唯一窗口，使用 `member_sighting_ids` 引用关联成员记录；统一快照不嵌入成员记录正文、检测帧、转写或完整窗口详情。`POST /api/agent/context/material` 使用 `agentMaterialQuerySchema` 的 `{ kind, id }` 按需解析当前绑定下的单个引用；`agentMaterialResponseSchema` 返回当前成员记录或窗口详情，过期／移除返回 404，读取结果不合并进统一快照；等待期间可响应取消和请求截止时间，结果返回前仍核验家庭资格。没有可关联窗口的成员记录形成 `window_id=null` 的独立出现观察。`reasons` 表示窗口选取依据，不是事件结论或说话人归因；窗口级声音和变化线索不复制到各成员的出现观察上。关联规则由[家庭运行时](../../docs/household-runtime.md#agent-当前数据与材料历史)维护。`sources.member_sightings/perception` 分别包含 `status/read_at/reason/truncated`，表示独立读取与重试状态；统一部分 ready 不表示来源全部成功。交付不调用模型或生成媒体。
 
 合并后的每部分包含 `status/read_at/data/reason/truncated`。设备增量消息包含 `status=delta/read_at/data/truncated=false`，不作为独立上下文部分保存；缺少当前家庭的 ready 基线时拒绝增量并重新连接。status 为 `loading/ready/unavailable/failed`，只有 ready 携带 data；read_at 为最近读取尝试完成的 UTC 时间，尚未完成时为 null，ready 必须有完成时间。unavailable 和 failed 给出安全原因，其他状态 reason 为 null；非 ready 的 truncated 为 false。operations 超出条数或字节上限时交付完整记录前缀并标 truncated，其他部分不裁剪记录；时间范围和材料保留不证明历史完整。近期成员投影按 `lastObservedAt/id` 降序读取，统一观察按 `endedAt/id` 降序交付。operations 首条无法容纳或其他部分超出发布容量时报告失败。
 

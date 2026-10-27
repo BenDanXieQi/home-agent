@@ -38,6 +38,7 @@ export function createContextReader(options: {
     unavailableCode: "household_unavailable" as const,
   };
   return {
+    readCurrent,
     readRooms(requestSignal: AbortSignal) {
       return readCurrent(requestSignal, async () => {
         const household = options.receiver.householdPart();

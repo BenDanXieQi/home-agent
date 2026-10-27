@@ -1,5 +1,9 @@
 import { createHost } from "@earendil-works/chord";
-import { createContextSource } from "./context-source";
+import {
+  createContextSource,
+  createMediaReader,
+  createAnalysisWriter,
+} from "./context-source";
 import { memoize, compact } from "es-toolkit";
 import { configureAssistant } from "@home-agent/agent/assistant";
 import {
@@ -13,6 +17,8 @@ import { createContextReceiver } from "@home-agent/agent/context/receiver";
 import { createContextReader } from "@home-agent/agent/context/reader";
 import { configureWorkflows } from "@home-agent/agent/workflows/runtime";
 import { AgentModels, registerAgentModels } from "@home-agent/agent/models";
+import { createMediaAnalysisAgent } from "@home-agent/agent/media-analysis";
+import { createMediaAnalyzer } from "@home-agent/agent/media-analysis/analysis";
 
 export async function createApp(
   config: ReturnType<typeof loadConfig>,
@@ -24,6 +30,7 @@ export async function createApp(
   const workflowConfiguration = configureWorkflows(config);
   const modelRefs = compact([
     config.AGENT_MODEL,
+    config.AGENT_MEDIA_ANALYSIS_MODEL,
     ...workflowConfiguration.modelRefs,
     ...(config.AGENT_SUBAGENT_MODELS ?? []),
   ]);
@@ -39,12 +46,23 @@ export async function createApp(
   const contextSource = createContextSource(config.BACKEND_URL);
   const receiver = createContextReceiver({
     client: contextSource,
-    onReset: () => workflows.reset(),
+    onReset: () => {
+      mediaAnalysisAgent?.reset();
+      return workflows.reset();
+    },
+    onSynchronized: () => {
+      mediaAnalysisAgent?.notify();
+    },
   });
   const contextReader = createContextReader({
     client: contextSource,
     receiver,
   });
+  const mediaAnalysisModel = modelRuntime.findAvailableModel(
+    config.AGENT_MEDIA_ANALYSIS_MODEL,
+  );
+  if (config.AGENT_MEDIA_ANALYSIS_MODEL && !mediaAnalysisModel)
+    throw new Error("Configured media analysis model is unavailable");
   const assistantConfiguration = configureAssistant({
     modelRuntime,
     modelRef: config.AGENT_MODEL,
@@ -74,11 +92,29 @@ export async function createApp(
   signal.throwIfAborted();
   const assistant = assistantHandle.instance;
   const workflows = getServiceInstance(workflowHandle);
+  const mediaAnalysisAgent = mediaAnalysisModel
+    ? createMediaAnalysisAgent({
+        readParts: () => receiver.currentParts(),
+        contextReader,
+        readMedia: createMediaReader(config.BACKEND_URL),
+        saveCompleted: createAnalysisWriter(config.BACKEND_URL),
+        analyze: createMediaAnalyzer({
+          model: mediaAnalysisModel,
+          modelCollection: modelRuntime.modelCollection,
+          prompts: getServiceInstance(runtimeHandle).prompts,
+        }).analyze,
+      })
+    : undefined;
+  if (mediaAnalysisAgent) {
+    mediaAnalysisAgent.start();
+    appResources.defer(() => mediaAnalysisAgent.close());
+  }
 
   appResources.use(receiver);
   const app = createAgentRoutes({
     port: config.AGENT_PORT,
     context: receiver,
+    mediaAnalysis: mediaAnalysisAgent,
     assistant,
     harness: getServiceInstance(runtimeHandle).harness,
     workflows,

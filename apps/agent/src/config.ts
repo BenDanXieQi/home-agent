@@ -31,6 +31,7 @@ export const agentConfigurationSchema = z.object({
   ...promptConfigurationSchema.shape,
   ...workflowConfigurationSchema.shape,
   AGENT_MODEL: optionalModelRefSchema,
+  AGENT_MEDIA_ANALYSIS_MODEL: optionalModelRefSchema,
   AGENT_SUBAGENT_MODELS: blankAsUndefinedTextSchema.pipe(
     modelRefsJsonSchema.optional(),
   ),

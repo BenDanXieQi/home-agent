@@ -41,7 +41,7 @@ Backend 按属性、设备维护规则索引，状态变化更新相关条件，
 
 AI 判断条件和动作选择尚未启用：生成器遇到这些要求会说明限制，规则编辑器不提供新增入口，Backend 拒绝启用含这些配置的规则。即使存在这样的停用定义，也不能通过调用接口或重新加载取得执行资格。
 
-模型调用期限、容量与可观测性配置见 [Agent README](../apps/agent/README.md#接口)。当前生成不调用家庭材料或历史工具，不提供持续调查、主动问询或跨来源情景判断。
+模型与执行配置见 [Workflow 配置](../apps/agent/src/workflows/automation-generation/workflow.ts)，可观测性见[共享追踪说明](../packages/observability/README.md)。当前生成不调用家庭材料或历史工具，不提供持续调查、主动问询或跨来源情景判断。
 
 ## 固定动作与执行记录
 

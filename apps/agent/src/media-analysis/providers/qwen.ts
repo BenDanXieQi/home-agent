@@ -5,8 +5,13 @@ export function buildQwenPayload({
   systemPrompt,
   messages,
   options,
+  payload,
 }: MediaPrompt) {
+  if (typeof payload !== "object" || payload === null)
+    throw new Error("Invalid Qwen SDK request payload");
+
   return {
+    ...payload,
     model: modelId,
     messages: [
       { role: "system", content: systemPrompt },
@@ -34,7 +39,6 @@ export function buildQwenPayload({
         }),
       })),
     ],
-    max_tokens: options.maxTokens,
     temperature: options.temperature,
     top_p: options.topP,
     stream: true,
