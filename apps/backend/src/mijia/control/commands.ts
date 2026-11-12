@@ -133,9 +133,13 @@ export class MijiaCommands {
       if (!queue) {
         queue = new PQueue({ concurrency: 1 });
         this.deviceQueues.set(key, queue);
-        queue.once("idle", () => {
-          this.deviceQueues.delete(key);
-        });
+        queue.addEventListener(
+          "idle",
+          () => {
+            this.deviceQueues.delete(key);
+          },
+          { once: true },
+        );
       }
       const entered = Promise.withResolvers<void>();
       const completed = queue.add(async () => {

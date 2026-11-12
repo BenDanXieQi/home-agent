@@ -4,14 +4,14 @@ import type {
   agentWorkflowInputSchema,
   agentWorkflowStreamContract,
 } from "./contracts.generated";
-import type { ResourceDeclaration, Ref, Self } from "@earendil-works/chord";
 import type { ModelRef } from "@earendil-works/pi-durable";
-import { AgentModels } from "../models";
-import { AgentRuntime, getServiceInstance } from "../runtime";
+import type { initializeModelRuntime } from "../models";
+import type { createAgentRuntime } from "../runtime";
 import type { createContextReader } from "../context/reader";
 
 type WorkflowContext = {
-  self: Self;
+  harness: WorkflowDependencies["harness"];
+  modelRuntime: Awaited<ReturnType<typeof initializeModelRuntime>>;
   modelRef: ModelRef | undefined;
   contextReader: WorkflowDependencies["contextReader"];
 };
@@ -25,10 +25,10 @@ export type WorkflowInstance = {
   close?: (() => Promise<void>) | undefined;
 };
 
-type ModelRuntime = NonNullable<Ref<typeof AgentModels>["instance"]>;
+type ModelRuntime = Awaited<ReturnType<typeof initializeModelRuntime>>;
 
 export type WorkflowDependencies = Pick<
-  NonNullable<Ref<typeof AgentRuntime>["instance"]>,
+  Awaited<ReturnType<typeof createAgentRuntime>>,
   "harness"
 > & {
   model: NonNullable<ReturnType<ModelRuntime["findAvailableModel"]>>;
@@ -37,28 +37,16 @@ export type WorkflowDependencies = Pick<
 
 export function defineWorkflow<T extends WorkflowInstance>(
   create: (dependencies: WorkflowDependencies) => T,
-  { self, modelRef, contextReader }: WorkflowContext,
+  { harness, modelRuntime, modelRef, contextReader }: WorkflowContext,
 ) {
-  const models = self.get(AgentModels, {});
-  const runtime = self.get(AgentRuntime, {});
-  return {
-    version: 1,
-    deps: [models, runtime],
-    open: () => {
-      const { findAvailableModel } = getServiceInstance(models);
-      const model = findAvailableModel(modelRef);
-      if (!model) return { run: undefined };
-      const { harness } = getServiceInstance(runtime);
-      return create({
-        model,
-        harness,
-        contextReader,
-      });
-    },
-    close: async (workflow) => {
-      if ("close" in workflow) await workflow.close?.();
-    },
-  } satisfies ResourceDeclaration<T | { run: undefined }>;
+  const model = modelRuntime.findAvailableModel(modelRef);
+  if (!model) return { run: undefined };
+
+  return create({ model, harness, contextReader });
+}
+
+export async function closeWorkflow(instance: WorkflowInstance) {
+  await instance.close?.();
 }
 
 export async function runWorkflow<Input, Result, Progress>(

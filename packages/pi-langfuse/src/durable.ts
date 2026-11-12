@@ -1,12 +1,16 @@
-import type { Context } from "@earendil-works/chord";
+import type { Context } from "@earendil-works/chord/context";
 import { withCancel } from "@earendil-works/chord/context";
 import {
-  type AgentEventStream,
+  LiveDoc,
+  InboxDoc,
+  NestedCallDoc,
+  type LiveState,
+  type InboxState,
+  type NestedCallState,
   type ConversationId,
   type EntryId,
   type Harness,
   type SubmissionId,
-  watchEvents,
 } from "@earendil-works/pi-durable";
 import {
   type DurableCorrelation,
@@ -50,7 +54,10 @@ export async function createPiLangfuseDurableConversation(
 ) {
   options = { ...options };
   const { context, cancel } = withCancel(options.context);
-  let stream: AgentEventStream | undefined;
+  let viewObservation:
+    | Awaited<ReturnType<Harness["observeConversation"]>>
+    | undefined;
+  const ready = Promise.withResolvers<void>();
   let recorder: DurableRecorder | undefined;
   let releaseRuntime: (() => void) | undefined;
   let releaseCommits: (() => void) | undefined;
@@ -126,11 +133,7 @@ export async function createPiLangfuseDurableConversation(
       await initialization;
       releaseCommits?.();
       releaseCommits = undefined;
-      try {
-        await stream?.stop();
-      } catch {
-        report("observer stop");
-      }
+      viewObservation?.detach();
       await Promise.allSettled([delivery]);
       disposed = true;
       cancel();
@@ -153,14 +156,17 @@ export async function createPiLangfuseDurableConversation(
   const controller = {
     get active() {
       return (
-        !disposePromise && !disposed && !runtime.closed && stream !== undefined
+        !disposePromise &&
+        !disposed &&
+        !runtime.closed &&
+        viewObservation !== undefined
       );
     },
     closed,
     observeSubmission,
     whenSubmissionObserved(id: SubmissionId) {
       if (!controller.active || incomplete) return Promise.resolve(false);
-      return submissionObservations.get(id)?.promise ?? Promise.resolve(false);
+      return submissionObservation(id).promise;
     },
     dispose,
   };
@@ -176,26 +182,100 @@ export async function createPiLangfuseDurableConversation(
       ownsConversation = true;
       const internal = getLangfuseRuntimeInternal(runtime);
       releaseRuntime = internal.registerSession(dispose);
-      releaseCommits = options.harness.subscribeCommits((publication) => {
-        for (const change of publication.changes) {
-          if (
-            change.type !== "submission" ||
-            change.value.conversationId !== options.conversationId
-          )
-            continue;
-          const observation = submissionObservation(change.value.id);
-          if (!stream) observation.resolve(false);
-        }
+      let preparedInputs: readonly SubmissionId[] = [];
+      async function beforeRun(live: LiveState) {
+        const inputs = live.run?.inputs ?? [];
+        if (
+          inputs.length === preparedInputs.length &&
+          inputs.every((id, index) => id === preparedInputs[index])
+        )
+          return;
+
+        preparedInputs = inputs;
+        if (inputs.length) await options.beforeRun?.(inputs);
+      }
+
+      function enqueue(action: () => Promise<void>) {
+        delivery = delivery.then(async () => {
+          await ready.promise;
+          if (disposed) return;
+          try {
+            await action();
+          } catch {
+            report("observer delivery");
+          }
+        });
+      }
+      function ended() {
+        dispose().catch(() => {
+          report("observer disposal");
+        });
+      }
+      const commits = options.harness.observeCommits({
+        advance(publication) {
+          const terminal: SubmissionId[] = [];
+          for (const change of publication.changes) {
+            if (
+              change.type === "submission" &&
+              change.value.conversationId === options.conversationId
+            ) {
+              submissionObservation(change.value.id);
+              enqueue(async () => {
+                await recorder?.submission(change.value, readEntry);
+              });
+              if (
+                change.value.status === "done" ||
+                change.value.status === "unanswered"
+              )
+                terminal.push(change.value.id);
+            } else if (
+              change.type === "document" &&
+              change.kind === "change" &&
+              change.conversationId === options.conversationId &&
+              change.record.kind === NestedCallDoc.definition.kind
+            ) {
+              const state = change.value as NestedCallState;
+              enqueue(async () => {
+                recorder?.nestedResult(state);
+              });
+            }
+          }
+          // A run can settle several inputs in one publication; finish all records first.
+          if (terminal.length)
+            enqueue(async () => {
+              for (const id of terminal)
+                submissionObservation(id).resolve(!incomplete);
+            });
+        },
+        end: ended,
       });
-      const attached = await watchEvents(
-        options.harness,
+      releaseCommits = () => commits.detach();
+      viewObservation = await options.harness.observeConversation(
         options.conversationId,
+        {
+          advance(change) {
+            if (change.kind === "failed") {
+              report("conversation observation");
+              return;
+            }
+            const live = (change.value.docs[LiveDoc.definition.kind] ??
+              {}) as LiveState;
+            enqueue(async () => {
+              await beforeRun(live);
+              await recorder?.view(change.value, live, readEntry);
+            });
+          },
+          end: ended,
+        },
         context,
       );
-      stream = attached;
+      const initial = viewObservation.value;
+      const live = (initial.docs[LiveDoc.definition.kind] ?? {}) as LiveState;
+      const inbox = (initial.docs[InboxDoc.definition.kind] ??
+        {}) as Partial<InboxState>;
       const initialSubmissionIds = new Set([
-        ...(stream.snapshot.run?.inputs ?? []),
-        ...stream.snapshot.inbox.map((item) => item.id),
+        ...(live.run?.inputs ?? []),
+        ...(inbox.items ?? []).map((item) => item.id),
       ]);
       for (const id of initialSubmissionIds)
         submissionObservation(id).resolve(false);
@@ -205,8 +285,7 @@ export async function createPiLangfuseDurableConversation(
         });
         return;
       }
-      if (stream.snapshot.run)
-        await options.beforeRun?.(stream.snapshot.run.inputs);
+      await beforeRun(live);
       if (disposed || runtime.closed) {
         dispose().catch(() => {
           report("observer disposal");
@@ -228,65 +307,7 @@ export async function createPiLangfuseDurableConversation(
         });
         return;
       }
-      recorder.snapshot(stream.snapshot, true);
-      stream.start((events) => {
-        delivery = (async () => {
-          for (const event of events) {
-            if (disposed) return;
-            try {
-              if (event.type === "snapshot") {
-                if (event.run) await options.beforeRun?.(event.run.inputs);
-                if (disposed) return;
-                recorder?.snapshot(event);
-                interruptObservations();
-                const ids = new Set([
-                  ...(recorder?.submissionIds ?? []),
-                  ...(event.run?.inputs ?? []),
-                  ...event.inbox.map((item) => item.id),
-                ]);
-                for (const id of ids) {
-                  await observeSubmission(id);
-                  if (disposed) return;
-                }
-              } else if (event.type === "submission") {
-                await recorder?.submission(event.record, readEntry);
-                if (disposed) return;
-                if (
-                  event.record.status === "done" ||
-                  event.record.status === "unanswered"
-                )
-                  submissionObservation(event.record.id).resolve(!incomplete);
-              } else {
-                if (event.type === "run_start" || event.type === "run_end")
-                  await options.beforeRun?.(event.inputs);
-                if (disposed) return;
-                recorder?.event(event);
-              }
-            } catch {
-              if (!disposed) report("observer delivery");
-            }
-          }
-        })();
-        return delivery;
-      });
-      stream.closed
-        .then(
-          (end) => {
-            if (
-              end.reason === "listener_error" ||
-              end.reason === "session_failed"
-            )
-              report("observer closure");
-            return dispose();
-          },
-          () => {
-            report("observer closure");
-            return dispose();
-          },
-        )
-        .catch(() => {
-          report("observer closure");
-        });
+      recorder.snapshot(initial, live, true);
       for (const id of initialSubmissionIds) {
         await observeSubmission(id);
         if (disposed) return;
@@ -298,7 +319,7 @@ export async function createPiLangfuseDurableConversation(
       });
     }
   }
-  initialization = initialize();
+  initialization = initialize().finally(() => ready.resolve());
   await initialization;
   if (disposePromise) await disposePromise;
   return controller;

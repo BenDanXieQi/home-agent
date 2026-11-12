@@ -1,5 +1,3 @@
-import { ChordError, local, opaque, type Host } from "@earendil-works/chord";
-import { Type } from "typebox";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,25 +13,11 @@ import {
 } from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createObservedHarnessOptions } from "@home-agent/observability/durable";
-import { AgentModels, type initializeModelRuntime } from "./models";
+import type { initializeModelRuntime } from "./models";
 import { createAgentHarness } from "./harness";
 import { createPromptResolver } from "./prompts";
 
-export function getServiceInstance<T>(service: {
-  readonly instance: T | undefined;
-  readonly contract: { readonly name: string };
-}) {
-  const instance = service.instance;
-  if (instance === undefined)
-    throw new ChordError(
-      "not_ready",
-      `Service ${service.contract.name} is not ready`,
-    );
-
-  return instance;
-}
-
-async function createAgentRuntime({
+export async function createAgentRuntime({
   modelRuntime,
   extensions,
   promptConfiguration,
@@ -115,41 +99,4 @@ async function createAgentRuntime({
     close,
     [Symbol.asyncDispose]: close,
   };
-}
-
-export const AgentRuntime = local("home.agent.runtime", {
-  version: 1,
-  input: Type.Object({}),
-  members: {
-    instance: opaque<Awaited<ReturnType<typeof createAgentRuntime>>>(
-      "home.agent.runtime@1",
-    ),
-  },
-});
-
-export function registerAgentRuntime(
-  host: Host,
-  options: Omit<Parameters<typeof createAgentRuntime>[0], "modelRuntime">,
-) {
-  host.serve(
-    AgentRuntime,
-    (_input, _principal, self) => {
-      const modelsHandle = self.get(AgentModels, {});
-
-      const runtime = self.resource("runtime", {
-        version: 1,
-        deps: [modelsHandle],
-        open: ({ signal }) =>
-          createAgentRuntime({
-            ...options,
-            modelRuntime: getServiceInstance(modelsHandle),
-            signal: AbortSignal.any([signal, options.signal]),
-          }),
-        close: (instance) => instance.close(),
-      });
-
-      return { instance: self.expose(runtime) };
-    },
-    { lifetime: "host" },
-  );
 }

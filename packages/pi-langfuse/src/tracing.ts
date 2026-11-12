@@ -1,5 +1,6 @@
 import type {
-  AgentEvent,
+  ToolSlot,
+  NestedToolSlot,
   ConversationId,
   SubmissionId,
 } from "@earendil-works/pi-durable";
@@ -39,14 +40,8 @@ export type ObservationSource =
   | {
       kind: "tool";
       primary: SubmissionId;
-      call: Pick<
-        Extract<AgentEvent, { type: "tool_execution_start" }>,
-        | "taskId"
-        | "toolCallId"
-        | "toolName"
-        | "parentTaskId"
-        | "parentToolCallId"
-      >;
+      call: Pick<ToolSlot, "taskId" | "callId" | "name"> &
+        Partial<Pick<NestedToolSlot, "parentTaskId" | "parentCallId">>;
     };
 
 export interface TraceBackend {

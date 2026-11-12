@@ -1,5 +1,6 @@
 import { Table } from "../../components/Table";
-import { getCoreRowModel, useReactTable } from "@tanstack/react-table";
+import { tableFeatures } from "../../components/table-features";
+import { useTable } from "@tanstack/react-table";
 import { SearchField } from "../../components/SearchField";
 import { JsonData } from "../../components/json/JsonData";
 import { useMemo, useRef, useState } from "react";
@@ -65,8 +66,8 @@ function DataBrowser({ scope }: { scope: string }) {
       })),
     [table?.columns],
   );
-  // oxlint-disable-next-line react/incompatible-library
-  const recordsTable = useReactTable({
+  const recordsTable = useTable({
+    features: tableFeatures,
     data: data?.rows ?? [],
     columns,
     getRowId: rowKey,
@@ -75,10 +76,9 @@ function DataBrowser({ scope }: { scope: string }) {
       columnVisibility: { sourceKey: false },
       expanded: selectedKey ? { [selectedKey]: true } : {},
     },
-    getCoreRowModel: getCoreRowModel(),
   });
-  // oxlint-disable-next-line react/incompatible-library
-  const schemaTable = useReactTable({
+  const schemaTable = useTable({
+    features: tableFeatures,
     data: table?.columns ?? [],
     columns: [
       {
@@ -102,7 +102,6 @@ function DataBrowser({ scope }: { scope: string }) {
         enableSorting: false,
       },
     ],
-    getCoreRowModel: getCoreRowModel(),
   });
   function searchRecords() {
     setInput({ ...input, cursor: null, search: search.trim() });

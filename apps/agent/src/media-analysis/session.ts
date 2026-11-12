@@ -258,7 +258,9 @@ export function createMediaAnalysisSession({
         );
         watch = await conversation.watch(BACKGROUND_CONTEXT);
         await receive(watch.value, conversation);
-        watch.start(async (value) => {
+        watch.start(async (change) => {
+          if (change.kind === "failed") throw change.error;
+          const { value } = change;
           receiving = receive(value, conversation);
           try {
             await receiving;

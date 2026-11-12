@@ -10,7 +10,7 @@ import {
   ConsoleSpanExporter,
   SimpleSpanProcessor,
   type SpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+} from "@opentelemetry/sdk-trace";
 import { z } from "zod";
 import { drainOperations } from "./lifecycle";
 import { AgentTraceMarker, LangfuseAgentSpanProcessor } from "./agent-trace";
@@ -93,16 +93,18 @@ export function initializeTelemetry(serviceName: string) {
   }
   const spanProcessors: SpanProcessor[] = [new AgentTraceMarker()];
   if (exporter === "console") {
-    spanProcessors.push(new SimpleSpanProcessor(new ConsoleSpanExporter()));
+    spanProcessors.push(
+      new SimpleSpanProcessor({ exporter: new ConsoleSpanExporter() }),
+    );
   } else if (customEndpoint) {
     spanProcessors.push(
-      new BatchSpanProcessor(
-        new OTLPTraceExporter({
+      new BatchSpanProcessor({
+        exporter: new OTLPTraceExporter({
           url: customEndpoint,
           timeoutMillis: 10_000,
         }),
-        { scheduledDelayMillis: 1_000 },
-      ),
+        scheduledDelayMillis: 1_000,
+      }),
     );
   }
   if (langfuseEnabled) {

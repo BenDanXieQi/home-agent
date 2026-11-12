@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "httpxy": "0.5.5"
+    "httpxy": "0.5.6"
   }
 }

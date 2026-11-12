@@ -46,10 +46,9 @@ ${names.map((name) => `  agentWorkflowStreamContracts["${name}"].result,`).join(
 `;
 
   const registry = `import { z } from "zod";
-import type { Self } from "@earendil-works/chord";
 import type { Config } from "../config";
 import type { agentWorkflowInputSchema, agentWorkflowStreamContract } from "./contracts.generated";
-import { runWorkflow, type WorkflowDependencies, type WorkflowInstance, type WorkflowRegistry } from "./definition";
+import { runWorkflow, closeWorkflow, type WorkflowInstance, type WorkflowRegistry } from "./definition";
 import { observeWorkflowExecution } from "./observation";
 ${names
   .map(
@@ -67,19 +66,15 @@ ${names.map((_name, index) => `  const modelRef${index} = config[modelConfigurat
   return {
     modelRefs: [${names.map((_name, index) => `modelRef${index}`).join(", ")}],
     extensions: [${names.map((_name, index) => `...extensions${index}`).join(", ")}],
-    createRegistry(self: Self, contextReader: WorkflowDependencies["contextReader"]) {
-  const workflows = {
-${names.map((name, index) => `    "${name}": self.resource("${name}", createWorkflow${index}({ self, modelRef: modelRef${index}, contextReader })),`).join("\n")}
-  };
-  return self.resource("registry", {
-      version: 1,
-      deps: Object.values(workflows),
-      open: () => {
-        const registry = {
-${names.map((name) => `          "${name}": workflows["${name}"].value,`).join("\n")}
-        } satisfies WorkflowRegistry;
+    async createRegistry(dependencies: Omit<Parameters<typeof createWorkflow0>[0], "modelRef">) {
+      await using resources = new AsyncDisposableStack();
+      const registry = {
+${names.map((name, index) => `    "${name}": resources.adopt(createWorkflow${index}({ ...dependencies, modelRef: modelRef${index} }), closeWorkflow),`).join("\n")}
+      } satisfies WorkflowRegistry;
+      const ownedResources = resources.move();
   const instances: WorkflowInstance[] = Object.values(registry);
   return {
+    close: () => ownedResources.disposeAsync(),
     execute: async (input: z.output<typeof agentWorkflowInputSchema>, signal: AbortSignal, receive?: (progress: z.output<typeof agentWorkflowStreamContract.progress>) => Promise<void>) => {
       switch (input.workflow) {
 ${names
@@ -105,8 +100,6 @@ ${names
       if (errors.length) throw new AggregateError(errors, "Workflow reset failed");
     },
   };
-      },
-  });
     },
   };
 }

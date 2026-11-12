@@ -2,7 +2,6 @@ import { identityFeatureSchema } from "../../household/identity/contracts";
 import { prepareOpenCv } from "./opencv-runtime";
 import { selectPetPhotoRegions } from "./pet-regions";
 import { InferenceSession, Tensor } from "onnxruntime-node";
-import cv from "@techstark/opencv-js";
 import sharp from "sharp";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -16,7 +15,7 @@ import { petProfile } from "./processing-version";
 import { iou } from "../tracking/assignment";
 
 export async function createPetModel(directory: string) {
-  await prepareOpenCv();
+  const cv = await prepareOpenCv();
   sharp.concurrency(1);
   const spec = models.models.pet;
   for (const [file, hash] of [

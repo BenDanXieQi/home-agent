@@ -9,6 +9,7 @@ import {
 import { propertySubject, propertyDisplayValue } from "./receipt-presentation";
 import { createAgentDeviceMetadata } from "@home-agent/agent/context/devices";
 import { memo, useMemo, useState } from "react";
+import { tableFeatures } from "../../components/table-features";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Select } from "../../components/Select";
 import { time } from "./presentation";
@@ -41,7 +42,9 @@ export const DevicePart = memo(function DevicePart({
     () => [data.collection.collection],
     [data.collection],
   );
-  const propertyColumns = useMemo<ColumnDef<(typeof rows)[number]>[]>(
+  const propertyColumns = useMemo<
+    ColumnDef<typeof tableFeatures, (typeof rows)[number]>[]
+  >(
     () => [
       {
         id: "room",
@@ -84,7 +87,9 @@ export const DevicePart = memo(function DevicePart({
     ],
     [metadata],
   );
-  const onlineColumns = useMemo<ColumnDef<(typeof data.online)[number]>[]>(
+  const onlineColumns = useMemo<
+    ColumnDef<typeof tableFeatures, (typeof data.online)[number]>[]
+  >(
     () => [
       {
         id: "name",
@@ -102,7 +107,7 @@ export const DevicePart = memo(function DevicePart({
     [metadata],
   );
   const healthColumns = useMemo<
-    ColumnDef<(typeof data.source_health)[string]>[]
+    ColumnDef<typeof tableFeatures, (typeof data.source_health)[string]>[]
   >(
     () => [
       { id: "source", header: "来源", accessorFn: (r) => r.source_id },
@@ -125,7 +130,7 @@ export const DevicePart = memo(function DevicePart({
     [],
   );
   const coverageColumns = useMemo<
-    ColumnDef<(typeof data.device_coverage)[string]>[]
+    ColumnDef<typeof tableFeatures, (typeof data.device_coverage)[string]>[]
   >(
     () => [
       {
@@ -152,7 +157,7 @@ export const DevicePart = memo(function DevicePart({
     [metadata],
   );
   const collectionColumns = useMemo<
-    ColumnDef<typeof data.collection.collection>[]
+    ColumnDef<typeof tableFeatures, typeof data.collection.collection>[]
   >(
     () => [
       {

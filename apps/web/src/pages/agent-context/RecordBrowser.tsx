@@ -1,16 +1,13 @@
 import { Table } from "../../components/Table";
+import { tableFeatures } from "../../components/table-features";
 import { SearchField } from "../../components/SearchField";
 import { useMemo, useState, type ReactNode } from "react";
 import {
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  getFacetedRowModel,
-  getFacetedUniqueValues,
-  useReactTable,
+  useTable,
+  type RowData,
   type ColumnDef,
-  type CellContext,
   type SortingState,
+  type ExpandedState,
 } from "@tanstack/react-table";
 import { SearchSelect } from "../../components/SearchSelect";
 import { Button } from "../../components/Button";
@@ -28,9 +25,7 @@ function fieldText(value: unknown) {
   return JSON.stringify(value) ?? "—";
 }
 
-function DefaultCell({
-  getValue,
-}: Pick<CellContext<unknown, unknown>, "getValue">) {
+function DefaultCell({ getValue }: { getValue: () => unknown }) {
   return fieldText(getValue());
 }
 
@@ -39,7 +34,7 @@ const searchColumnId = "record_search";
 const noFilters: string[] = [];
 const noSorting: SortingState = [];
 
-export function RecordBrowser<T>({
+export function RecordBrowser<T extends RowData>({
   rows,
   identify,
   title,
@@ -59,14 +54,14 @@ export function RecordBrowser<T>({
   describe: (row: T) => string;
   render?: (row: T) => ReactNode;
   rawValue?: (row: T) => unknown;
-  columns?: ColumnDef<T>[];
+  columns?: ColumnDef<typeof tableFeatures, T>[];
   filterColumns?: string[];
   label?: string;
   initialSorting?: SortingState;
 }) {
   const [search, setSearch] = useState("");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const columns = useMemo<ColumnDef<T>[]>(
+  const [expanded, setExpanded] = useState<ExpandedState>({});
+  const columns = useMemo<ColumnDef<typeof tableFeatures, T>[]>(
     () => [
       ...(suppliedColumns ?? [
         { id: "name", header: "名称 / 标识", accessorFn: title },
@@ -81,8 +76,8 @@ export function RecordBrowser<T>({
     ],
     [suppliedColumns, identify, title, describe],
   );
-  // oxlint-disable-next-line react/incompatible-library
-  const table = useReactTable({
+  const table = useTable({
+    features: tableFeatures,
     data: rows,
     columns,
     defaultColumn,
@@ -90,16 +85,12 @@ export function RecordBrowser<T>({
     getRowCanExpand: () => true,
     state: { globalFilter: search.trim(), expanded },
     onGlobalFilterChange: setSearch,
+    onExpandedChange: setExpanded,
     initialState: {
       sorting: initialSorting,
       columnVisibility: { [searchColumnId]: false },
     },
     globalFilterFn: "includesString",
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFacetedRowModel: getFacetedRowModel(),
-    getFacetedUniqueValues: getFacetedUniqueValues(),
   });
   const total = table.getFilteredRowModel().rows.length;
   function collapseDetails() {
@@ -186,7 +177,7 @@ export function RecordBrowser<T>({
               </div>
             );
           })}
-          {table.getState().columnFilters.length || search ? (
+          {table.state.columnFilters.length || search ? (
             <Button
               size="small"
               onClick={() => {
@@ -206,7 +197,7 @@ export function RecordBrowser<T>({
         rowLabel={title}
         onRowClick={(record) => {
           const id = identify(record);
-          setExpanded(expanded[id] ? {} : { [id]: true });
+          setExpanded(expanded === true || expanded[id] ? {} : { [id]: true });
         }}
         onSort={() => {
           collapseDetails();

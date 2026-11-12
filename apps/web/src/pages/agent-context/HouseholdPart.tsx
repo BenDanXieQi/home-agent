@@ -1,4 +1,5 @@
 import { memo, useMemo, useState } from "react";
+import { tableFeatures } from "../../components/table-features";
 import type { ColumnDef } from "@tanstack/react-table";
 import { Select } from "../../components/Select";
 import { ObjectRecords } from "./ObjectRecords";
@@ -46,6 +47,7 @@ const deviceColumns = [
     filterFn: "equalsString",
   },
 ] satisfies ColumnDef<
+  typeof tableFeatures,
   Extract<Parts["household"], { status: "ready" }>["data"]["device"][string]
 >[];
 const roomColumns = [
@@ -61,6 +63,7 @@ const roomColumns = [
     accessorFn: (room) => room.room_id,
   },
 ] satisfies ColumnDef<
+  typeof tableFeatures,
   Extract<Parts["household"], { status: "ready" }>["data"]["room"][string]
 >[];
 

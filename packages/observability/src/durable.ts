@@ -12,8 +12,9 @@ import {
   ProviderDoc,
   type Harness,
   type ConversationId,
-  type ConversationHandle,
   type SubmissionId,
+  type SubmissionDraft,
+  type Submission,
   type HookApi,
   type ToolHookCall,
   type ToolExecutionApi,
@@ -505,18 +506,18 @@ export function createDurableTracing({
         const parentCall =
           source.kind === "tool" &&
           source.call.parentTaskId !== undefined &&
-          source.call.parentToolCallId !== undefined
+          source.call.parentCallId !== undefined
             ? {
                 taskId: source.call.parentTaskId,
-                callId: source.call.parentToolCallId,
+                callId: source.call.parentCallId,
               }
             : undefined;
         if (source.kind === "tool")
           return ensureTool(
             id,
             source.call.taskId,
-            source.call.toolCallId,
-            source.call.toolName,
+            source.call.callId,
+            source.call.name,
             attributes.input,
             run,
             parentCall,
@@ -666,8 +667,14 @@ export function createDurableTracing({
       return observer;
     },
     async submit(
-      conversation: Pick<ConversationHandle, "id" | "submit">,
-      input: Parameters<ConversationHandle["submit"]>[0],
+      conversation: {
+        id: ConversationId;
+        submit: (
+          input: SubmissionDraft,
+          execution: ExecutionContext,
+        ) => Promise<Submission>;
+      },
+      input: SubmissionDraft,
       execution: ExecutionContext,
     ) {
       const requestId = input.requestId ?? randomUUID();

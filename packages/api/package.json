@@ -41,9 +41,9 @@
   },
   "dependencies": {
     "@home-agent/observability": "workspace:*",
-    "eventsource-parser": "4.1.1",
+    "eventsource-parser": "4.1.3",
     "hono": "catalog:",
-    "mutative": "1.3.0",
+    "mutative": "2.0.2",
     "zod": "catalog:"
   },
   "devDependencies": {

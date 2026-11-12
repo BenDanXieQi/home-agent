@@ -1,6 +1,6 @@
 import { identityFeatureSchema } from "../../household/identity/contracts";
 import { prepareOpenCv } from "./opencv-runtime";
-import cv from "@techstark/opencv-js";
+import type { Mat } from "@techstark/opencv-js";
 import { estimate } from "nudged";
 import { InferenceSession, Tensor } from "onnxruntime-node";
 import sharp from "sharp";
@@ -40,7 +40,7 @@ function rejected(reason: string) {
 let detectorFileCreated = false;
 
 export async function createFaceModel(directory: string) {
-  await prepareOpenCv();
+  const cv = await prepareOpenCv();
   sharp.concurrency(1);
   for (const [name, spec] of Object.entries({
     yunet: models.models.yunet,
@@ -115,7 +115,7 @@ export async function createFaceModel(directory: string) {
   }
 
   async function extractFace(
-    image: cv.Mat,
+    image: Mat,
     face: Float32Array,
     includeImage: boolean,
   ) {
@@ -141,7 +141,7 @@ export async function createFaceModel(directory: string) {
     const mean = new cv.Mat();
     const deviation = new cv.Mat();
     const rgb = new cv.Mat();
-    let blob: cv.Mat | undefined;
+    let blob: Mat | undefined;
     try {
       cv.warpAffine(
         image,

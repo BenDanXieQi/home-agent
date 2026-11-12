@@ -18,7 +18,7 @@ function modelOutput(rows: number[][]) {
 function detectionRow(
   classId: number,
   confidence: number,
-  box = [2.5, 2, 0.5, 0.5],
+  box: readonly number[] = [2.5, 2, 0.5, 0.5],
 ) {
   return [
     ...box,

@@ -1,9 +1,13 @@
 import type {
-  AgentEvent,
+  ConversationView,
+  LiveState,
+  ToolSlot,
+  NestedToolSlot,
+  NestedCallState,
+  TaskId,
   ConversationId,
   EntryId,
   EntryRecord,
-  SnapshotEvent,
   SubmissionId,
   SubmissionRecord,
 } from "@earendil-works/pi-durable";
@@ -46,9 +50,11 @@ const SAFE_UNANSWERED_REASONS = new Set([
   "reset",
   "stale",
   "faulted",
-  "missing_task",
-  "task_too_old",
-  "migration_failed",
+  "orphaned",
+  "interrupted",
+  "restart_limit",
+  "nothing_to_answer",
+  "turn_limit",
 ]);
 
 function submissionOutcome(record: SubmissionRecord) {
@@ -116,6 +122,8 @@ export class DurableRecorder {
   >();
   private disposed = false;
   private gaps = 0;
+  private readonly nestedResults = new Map<TaskId, NestedCallState>();
+  private readonly nestedTools = new Map<TaskId, NestedToolSlot>();
 
   constructor(backend: TraceBackend, options: DurableRecorderOptions) {
     this.backend = backend;
@@ -394,7 +402,7 @@ export class DurableRecorder {
     }
   }
 
-  snapshot(snapshot: SnapshotEvent, initial = false) {
+  snapshot(snapshot: ConversationView, live: LiveState, initial = false) {
     if (this.disposed) return;
     for (const entry of snapshot.entries) this.entries.add(entry.id);
     if (!initial) {
@@ -412,7 +420,7 @@ export class DurableRecorder {
           "pi.durable.attachment": "snapshot",
         },
       });
-    const primary = snapshot.run?.inputs[0];
+    const primary = live.run?.inputs[0];
     if (this.run && this.run.primary !== primary)
       this.closeRun(
         "Run boundary not observed; snapshot replaced the observation.",
@@ -421,8 +429,8 @@ export class DurableRecorder {
       this.closeRound(
         "Snapshot replaced generation/tool observation; activity may have been missed.",
       );
-    if (snapshot.run) {
-      this.beginRun(snapshot.run.inputs, true);
+    if (live.run) {
+      this.beginRun(live.run.inputs, true);
       if (this.run)
         this.update(this.run.span, {
           metadata: { "pi.durable.observation_incomplete": true },
@@ -476,6 +484,8 @@ export class DurableRecorder {
     for (const tool of run.tools.values()) this.interrupted(tool, reason);
     run.tools.clear();
     run.toolArguments.clear();
+    this.nestedResults.clear();
+    this.nestedTools.clear();
   }
 
   private closeRun(reason?: string) {
@@ -546,217 +556,206 @@ export class DurableRecorder {
     return run.generation;
   }
 
-  event(event: AgentEvent) {
+  async view(
+    view: ConversationView,
+    live: LiveState,
+    readEntry: (id: EntryId) => Promise<EntryRecord | undefined>,
+  ) {
     if (this.disposed) return;
-    switch (event.type) {
-      case "run_start":
-        this.beginRun(event.inputs);
-        break;
-      case "run_end":
-        if (this.run?.primary === event.inputs[0]) {
-          this.beginRun(event.inputs);
-          this.closeRun();
-        }
-        break;
-      case "message_start":
-        if (event.message.role === "assistant") this.generation();
-        break;
-      case "message_end": {
-        const entry = event.entry;
-        if (this.entries.has(entry.id)) break;
-        this.entries.add(entry.id);
-        const message = entry.model?.[0];
-        if (message?.role !== "assistant") break;
+    if (!this.run && live.run) this.beginRun(live.run.inputs);
 
-        if (this.run && this.options.captureContent !== false) {
-          for (const block of message.content) {
-            if (block.type === "toolCall")
-              this.run.toolArguments.set(
-                block.id,
-                sanitizeTraceValue(block.arguments, true),
-              );
-          }
-        }
+    for (const entry of view.entries) {
+      if (this.entries.has(entry.id)) continue;
+      const message = entry.model?.[0];
+      if (message?.role !== "assistant") continue;
+      this.entries.add(entry.id);
+      if (this.run && this.options.captureContent !== false)
+        for (const block of message.content)
+          if (block.type === "toolCall")
+            this.run.toolArguments.set(
+              block.id,
+              sanitizeTraceValue(block.arguments, true),
+            );
 
-        const generation = this.generation();
-        if (this.run) {
-          this.run.generation = undefined;
-          this.run.generationActive = false;
-        }
-        if (!generation) break;
-        this.end(generation, {
-          output: durableContent(
-            entry.model,
-            this.options.captureContent ?? true,
-          ),
-          model: message.responseModel ?? message.model,
-          ...durableUsage(message.usage),
-          level:
-            message.stopReason === "error"
-              ? "ERROR"
-              : message.stopReason === "aborted"
-                ? "WARNING"
-                : "DEFAULT",
-          metadata: {
-            "pi.durable.entry_id": entry.id,
-            "pi.durable.task_id": entry.byTaskId,
-            "pi.durable.stop_reason": message.stopReason,
-            "pi.durable.provider": message.provider,
-            "pi.durable.response_id": message.responseId,
-          },
-        });
-        break;
+      const generation = this.generation();
+      if (this.run) {
+        this.run.generation = undefined;
+        this.run.generationActive = false;
       }
-      case "tool_execution_start": {
-        if (
-          !this.run ||
-          this.run.tools.has(event.toolCallId) ||
-          this.run.completedTools.has(`${this.run.round}:${event.toolCallId}`)
-        )
-          break;
-        this.run.tools.set(
-          event.toolCallId,
-          this.start(
-            {
-              kind: "tool",
-              primary: this.run.primary,
-              call: event,
-            },
-            (event.parentToolCallId &&
-              this.run.tools.get(event.parentToolCallId)) ||
-              this.run.span,
-            {
-              input:
-                this.options.captureContent === false
-                  ? "[content capture disabled]"
-                  : sanitizeTraceValue(event.args, true),
-              metadata: {
-                "pi.durable.tool_call_id": event.toolCallId,
-                "pi.durable.tool_name": sanitizeTraceValue(event.toolName),
-                "pi.durable.task_id": event.taskId,
-                "pi.durable.parent_tool_call_id": event.parentToolCallId,
-                "pi.durable.parent_task_id": event.parentTaskId,
-                "pi.durable.observed_generation_index": this.run.round,
-              },
-            },
-          ),
+      this.end(generation, {
+        output: durableContent(
+          entry.model,
+          this.options.captureContent ?? true,
+        ),
+        model: message.responseModel ?? message.model,
+        ...durableUsage(message.usage),
+        level:
+          message.stopReason === "error"
+            ? "ERROR"
+            : message.stopReason === "aborted"
+              ? "WARNING"
+              : "DEFAULT",
+        metadata: {
+          "pi.durable.entry_id": entry.id,
+          "pi.durable.task_id": entry.byTaskId,
+          "pi.durable.stop_reason": message.stopReason,
+          "pi.durable.provider": message.provider,
+          "pi.durable.response_id": message.responseId,
+        },
+      });
+    }
+
+    for (const slot of [...(live.tools ?? []), ...(live.nestedTools ?? [])]) {
+      if (!this.run || slot.status === "pending") continue;
+      this.toolStarted(slot);
+      if ("parentCallId" in slot) {
+        this.nestedTools.set(slot.taskId, slot);
+        const state = this.nestedResults.get(slot.taskId);
+        if (state) this.nestedResult(state);
+        else if (slot.status === "done" && !slot.summary) {
+          this.toolFinished(slot);
+          this.nestedTools.delete(slot.taskId);
+        }
+      } else if (slot.status === "done") {
+        this.toolFinished(
+          slot,
+          slot.entry === undefined ? undefined : await readEntry(slot.entry),
         );
-        break;
       }
-      case "tool_execution_end": {
-        const run = this.run;
-        if (!run) break;
-        const key = `${run.round}:${event.toolCallId}`;
-        if (
-          run.completedTools.has(key) ||
-          (event.entry && this.entries.has(event.entry.id))
-        )
-          break;
-        run.completedTools.add(key);
-        if (event.entry) this.entries.add(event.entry.id);
-        const tool =
-          run.tools.get(event.toolCallId) ??
-          this.start(
-            {
-              kind: "tool",
-              primary: run.primary,
-              call: event,
-            },
-            (event.parentToolCallId && run.tools.get(event.parentToolCallId)) ||
-              run.span,
-            {
-              input:
-                this.options.captureContent === false
-                  ? "[content capture disabled]"
-                  : run.toolArguments.get(event.toolCallId),
-              metadata: {
-                "pi.durable.start_not_observed": true,
-                "pi.durable.tool_call_id": event.toolCallId,
-                "pi.durable.tool_name": sanitizeTraceValue(event.toolName),
-                "pi.durable.task_id": event.taskId,
-                "pi.durable.parent_tool_call_id": event.parentToolCallId,
-                "pi.durable.parent_task_id": event.parentTaskId,
-              },
-            },
-          );
-        const message = event.entry?.model?.[0];
-        const result = event.result;
-        const toolMessage =
-          message?.role === "toolResult" ? message : undefined;
-        const hasResult = event.entry !== undefined || result !== undefined;
-        const isError = result?.isError ?? toolMessage?.isError;
-        const details = result?.details ?? toolMessage?.details;
-        const diagnostics =
-          result?.diagnostics ?? durableToolDiagnostics(event.entry);
-        const errorMessage =
-          diagnostics
-            .filter((diagnostic) => diagnostic.severity === "error")
-            .map((diagnostic) => diagnostic.message)
-            .join("\n") ||
-          toolMessage?.content
-            .filter((block) => block.type === "text")
-            .map((block) => block.text)
-            .join("\n") ||
-          (typeof result?.structuredOutput === "string"
-            ? result.structuredOutput
-            : undefined);
+    }
 
-        this.end(tool, {
-          output: result
-            ? this.options.captureContent === false
+    if (this.run && live.runFailure?.inputs.includes(this.run.primary))
+      this.update(this.run.span, {
+        metadata: { "pi.durable.failed_task_id": live.runFailure.taskId },
+      });
+
+    if (this.run && this.run.primary !== live.run?.inputs[0]) this.closeRun();
+    if (live.run) this.beginRun(live.run.inputs);
+    if (live.generation?.retry) {
+      this.end(this.run?.generation, {
+        level: "ERROR",
+        statusMessage: "Provider attempt will retry.",
+        metadata: { "pi.durable.retry_attempt": live.generation.attempt },
+      });
+      if (this.run) {
+        this.run.generation = undefined;
+        this.run.generationActive = false;
+      }
+    } else if (live.generation) this.generation();
+  }
+
+  private toolStarted(slot: ToolSlot | NestedToolSlot) {
+    const run = this.run;
+    if (
+      !run ||
+      run.tools.has(slot.callId) ||
+      run.completedTools.has(`${run.round}:${slot.callId}`)
+    )
+      return;
+    const parent =
+      "parentCallId" in slot ? run.tools.get(slot.parentCallId) : undefined;
+    const args =
+      "arguments" in slot ? slot.arguments : run.toolArguments.get(slot.callId);
+    run.tools.set(
+      slot.callId,
+      this.start(
+        { kind: "tool", primary: run.primary, call: slot },
+        parent ?? run.span,
+        {
+          input:
+            this.options.captureContent === false
               ? "[content capture disabled]"
-              : sanitizeTraceValue(result.structuredOutput, true)
-            : durableContent(
-                event.entry?.model,
-                this.options.captureContent ?? true,
-              ),
-          ...durableUsage(result?.usage ?? toolMessage?.usage),
-          level: isError ? "ERROR" : hasResult ? "DEFAULT" : "WARNING",
-          ...(isError && this.options.captureContent !== false && errorMessage
-            ? { statusMessage: errorMessage }
-            : {}),
+              : sanitizeTraceValue(args, true),
           metadata: {
-            "pi.durable.result_entry_id": event.entry?.id,
-            "pi.durable.result_missing": !hasResult,
-            "pi.durable.tool_duration_ms":
-              result?.durationMs ?? toolMessage?.durationMs,
-            ...(this.options.captureContent !== false && diagnostics.length > 0
+            "pi.durable.tool_call_id": slot.callId,
+            "pi.durable.tool_name": sanitizeTraceValue(slot.name),
+            "pi.durable.task_id": slot.taskId,
+            ...("parentCallId" in slot
               ? {
-                  "pi.durable.tool_diagnostics": sanitizeTraceValue(
-                    diagnostics,
-                    true,
-                  ),
+                  "pi.durable.parent_tool_call_id": slot.parentCallId,
+                  "pi.durable.parent_task_id": slot.parentTaskId,
                 }
               : {}),
-            ...(this.options.captureContent !== false && details !== undefined
-              ? { "pi.durable.tool_details": sanitizeTraceValue(details, true) }
-              : {}),
+            "pi.durable.observed_generation_index": run.round,
           },
-        });
-        run.tools.delete(event.toolCallId);
-        run.toolArguments.delete(event.toolCallId);
-        break;
-      }
-      case "auto_retry_start":
-        this.end(this.run?.generation, {
-          level: "ERROR",
-          statusMessage: "Provider attempt will retry.",
-          metadata: { "pi.durable.retry_attempt": event.attempt },
-        });
-        if (this.run) {
-          this.run.generation = undefined;
-          this.run.generationActive = false;
-        }
-        break;
-      case "task_failed":
-        if (this.run)
-          this.update(this.run.span, {
-            metadata: { "pi.durable.failed_task_id": event.taskId },
-          });
-        break;
-      default:
-        break;
+        },
+      ),
+    );
+  }
+
+  nestedResult(state: NestedCallState) {
+    if (state.taskId === undefined || state.result === undefined) return;
+    const slot = this.nestedTools.get(state.taskId);
+    if (!slot) {
+      this.nestedResults.set(state.taskId, state);
+      return;
     }
+    this.toolFinished(slot, undefined, state.result);
+    this.nestedResults.delete(state.taskId);
+    this.nestedTools.delete(state.taskId);
+  }
+
+  private toolFinished(
+    slot: ToolSlot | NestedToolSlot,
+    entry?: EntryRecord,
+    result?: NestedCallState["result"],
+  ) {
+    const run = this.run;
+    if (!run) return;
+    const key = `${run.round}:${slot.callId}`;
+    if (run.completedTools.has(key)) return;
+    this.toolStarted(slot);
+    run.completedTools.add(key);
+    if (entry) this.entries.add(entry.id);
+    const message = entry?.model?.[0];
+    const toolMessage = message?.role === "toolResult" ? message : undefined;
+    const hasResult = entry !== undefined || result !== undefined;
+    const isError = result?.isError ?? toolMessage?.isError;
+    const details = result?.details ?? toolMessage?.details;
+    const diagnostics = result?.diagnostics ?? durableToolDiagnostics(entry);
+    const errorMessage =
+      diagnostics
+        .filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => diagnostic.message)
+        .join("\n") ||
+      toolMessage?.content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n") ||
+      (typeof result?.structuredOutput === "string"
+        ? result.structuredOutput
+        : undefined);
+    this.end(run.tools.get(slot.callId), {
+      output: result
+        ? this.options.captureContent === false
+          ? "[content capture disabled]"
+          : sanitizeTraceValue(result.structuredOutput, true)
+        : durableContent(entry?.model, this.options.captureContent ?? true),
+      ...durableUsage(result?.usage ?? toolMessage?.usage),
+      level: isError ? "ERROR" : hasResult ? "DEFAULT" : "WARNING",
+      ...(isError && this.options.captureContent !== false && errorMessage
+        ? { statusMessage: errorMessage }
+        : {}),
+      metadata: {
+        "pi.durable.result_entry_id": entry?.id,
+        "pi.durable.result_missing": !hasResult,
+        "pi.durable.tool_duration_ms":
+          result?.durationMs ?? toolMessage?.durationMs,
+        ...(this.options.captureContent !== false && diagnostics.length > 0
+          ? {
+              "pi.durable.tool_diagnostics": sanitizeTraceValue(
+                diagnostics,
+                true,
+              ),
+            }
+          : {}),
+        ...(this.options.captureContent !== false && details !== undefined
+          ? { "pi.durable.tool_details": sanitizeTraceValue(details, true) }
+          : {}),
+      },
+    });
+    run.tools.delete(slot.callId);
+    run.toolArguments.delete(slot.callId);
   }
 
   dispose(reason = "Tracing observer disposed; execution outcome is unknown.") {

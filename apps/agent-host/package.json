@@ -21,7 +21,7 @@
     "@home-agent/observability": "workspace:*",
     "@earendil-works/pi-ai": "catalog:",
     "@earendil-works/chord": "catalog:",
-    "es-toolkit": "^1.52.0",
+    "es-toolkit": "^1.53.2",
     "zod": "catalog:"
   },
   "devDependencies": {

@@ -9,6 +9,7 @@ import {
   type ConversationCreateOptions,
   type ConversationHandle,
   type Harness,
+  type SubmissionDraft,
 } from "@earendil-works/pi-durable";
 import { AppError } from "@home-agent/api/errors";
 import { bindTraceSession, withGenAiContext } from "@home-agent/observability";
@@ -54,10 +55,6 @@ export function createAgentHarness({
     ConversationHandle["id"],
     (() => Promise<void>) | undefined
   >();
-  const nativeSubmitByHandle = new WeakMap<
-    ConversationHandle,
-    ConversationHandle["submit"]
-  >();
   type ManagedPromptOptions = {
     prompt: Omit<Parameters<typeof prompts.resolve>[0], "context"> & {
       userVariables?:
@@ -74,9 +71,7 @@ export function createAgentHarness({
     };
   };
 
-  async function initialize<T extends ConversationHandle>(
-    open: () => Promise<T>,
-  ) {
+  async function initialize<T>(open: () => Promise<T>) {
     if (closed) throw new AppError("request_cancelled");
 
     const pending = attemptAsync(open);
@@ -89,16 +84,14 @@ export function createAgentHarness({
     return conversation;
   }
 
-  async function prepareManagedConversation<
-    Conversation extends ConversationHandle,
-  >({
+  async function prepareManagedConversation({
     conversation,
     agentName,
     sessionId: requestedSessionId,
     context,
     userVariables,
   }: ManagedConversationOptions & {
-    conversation: Conversation;
+    conversation: ConversationHandle;
     context: Context;
     userVariables?: ManagedPromptOptions["prompt"]["userVariables"];
   }) {
@@ -218,11 +211,6 @@ export function createAgentHarness({
       );
     }
 
-    const nativeSubmit =
-      nativeSubmitByHandle.get(conversation) ??
-      conversation.submit.bind(conversation);
-    nativeSubmitByHandle.set(conversation, nativeSubmit);
-
     function assertCanSubmit(execution: Context) {
       execution.abortSignal?.throwIfAborted();
       if (ownedResources.disposed || closed)
@@ -231,9 +219,9 @@ export function createAgentHarness({
 
     const submissionTarget = {
       id: conversation.id,
-      submit(...args: Parameters<ConversationHandle["submit"]>) {
-        assertCanSubmit(args[1]);
-        return nativeSubmit(...args);
+      submit(input: SubmissionDraft, execution: Context) {
+        assertCanSubmit(execution);
+        return conversation.submit(input, execution);
       },
     };
     const variableConversation = {
@@ -241,13 +229,21 @@ export function createAgentHarness({
       commit: unboundConversation.commit.bind(unboundConversation),
     };
 
-    return Object.assign(conversation, {
+    return {
+      id: conversation.id,
+      agent: unboundConversation.agent.bind(unboundConversation),
+      configure: unboundConversation.configure.bind(unboundConversation),
+      compact: unboundConversation.compact.bind(unboundConversation),
+      reset: unboundConversation.reset.bind(unboundConversation),
+      context: unboundConversation.context.bind(unboundConversation),
+      entries: unboundConversation.entries.bind(unboundConversation),
+      fork: unboundConversation.fork.bind(unboundConversation),
+      abort: conversation.abort.bind(conversation),
+      waitForIdle: conversation.waitForIdle.bind(conversation),
+      watch: unboundConversation.watch.bind(unboundConversation),
       sessionId,
       commit: unboundConversation.commit.bind(unboundConversation),
-      async submit(
-        input: Parameters<Conversation["submit"]>[0],
-        execution: Context,
-      ) {
+      async submit(input: SubmissionDraft, execution: Context) {
         assertCanSubmit(execution);
 
         let prepared = input;
@@ -271,7 +267,7 @@ export function createAgentHarness({
       withTraceContext,
       close,
       [Symbol.asyncDispose]: close,
-    });
+    };
   }
 
   async function prepareConversation<
@@ -400,9 +396,9 @@ export function createAgentHarness({
         });
       });
     },
-    prepareManagedConversation<Conversation extends ConversationHandle>(
+    prepareManagedConversation(
       options: ManagedConversationOptions & {
-        conversation: Conversation;
+        conversation: ConversationHandle;
         context: Context;
         prompt?: Pick<ManagedPromptOptions["prompt"], "userVariables">;
       },

@@ -1,0 +1,30 @@
+import {
+  tableFeatures as defineTableFeatures,
+  columnVisibilityFeature,
+  rowExpandingFeature,
+  rowSortingFeature,
+  columnFilteringFeature,
+  globalFilteringFeature,
+  columnFacetingFeature,
+  createFilteredRowModel,
+  createSortedRowModel,
+  createFacetedRowModel,
+  createFacetedUniqueValues,
+  filterFns,
+  sortFns,
+} from "@tanstack/react-table";
+
+export const tableFeatures = defineTableFeatures({
+  columnVisibilityFeature,
+  rowExpandingFeature,
+  rowSortingFeature,
+  columnFilteringFeature,
+  globalFilteringFeature,
+  columnFacetingFeature,
+  filteredRowModel: createFilteredRowModel(),
+  sortedRowModel: createSortedRowModel(),
+  facetedRowModel: createFacetedRowModel(),
+  facetedUniqueValues: createFacetedUniqueValues(),
+  filterFns,
+  sortFns,
+});

@@ -8,7 +8,7 @@ import {
 import {
   NoopSpanProcessor,
   type SpanProcessor,
-} from "@opentelemetry/sdk-trace-base";
+} from "@opentelemetry/sdk-trace";
 import { LangfuseSpanProcessor } from "@langfuse/otel";
 import { genAiContextAttributes } from "./gen-ai";
 import { requestSession, traceSessionId } from "./session";

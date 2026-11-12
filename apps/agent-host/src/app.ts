@@ -1,4 +1,3 @@
-import { createHost } from "@earendil-works/chord";
 import {
   createContextSource,
   createMediaReader,
@@ -7,18 +6,14 @@ import {
 } from "./context-source";
 import { memoize, compact } from "es-toolkit";
 import { configureAssistant } from "@home-agent/agent/assistant";
-import {
-  AgentRuntime,
-  getServiceInstance,
-  registerAgentRuntime,
-} from "@home-agent/agent/runtime";
+import { createAgentRuntime } from "@home-agent/agent/runtime";
 import { createAgentRoutes } from "@home-agent/agent/routes";
 import { MysqlStorage } from "@home-agent/agent/storage/mysql";
 import type { loadConfig } from "./config";
 import { createContextReceiver } from "@home-agent/agent/context/receiver";
 import { createContextReader } from "@home-agent/agent/context/reader";
 import { configureWorkflows } from "@home-agent/agent/workflows/runtime";
-import { AgentModels, registerAgentModels } from "@home-agent/agent/models";
+import { initializeModelRuntime } from "@home-agent/agent/models";
 import { createMediaAnalysisAgent } from "@home-agent/agent/media-analysis";
 import { createMediaAnalysisExtension } from "@home-agent/agent/media-analysis/extension";
 import {
@@ -41,23 +36,13 @@ export async function createApp(
     ...workflowConfiguration.modelRefs,
     ...(config.AGENT_SUBAGENT_MODELS ?? []),
   ]);
-  const services = appResources.adopt(
-    createHost({ name: "home-agent", self: "home-agent" }),
-    (host) => host.close(),
-  );
-  registerAgentModels(services, {
+  const modelRuntime = await initializeModelRuntime({
     modelRefs,
     llamaCpp: config.LLAMA_CPP_BASE_URL
-      ? {
-          baseUrl: config.LLAMA_CPP_BASE_URL,
-          apiKey: config.LLAMA_CPP_API_KEY,
-        }
+      ? { baseUrl: config.LLAMA_CPP_BASE_URL, apiKey: config.LLAMA_CPP_API_KEY }
       : undefined,
     signal,
   });
-  const models = await services.get(AgentModels, {}, { signal });
-  appResources.defer(() => models.release());
-  const modelRuntime = getServiceInstance(models);
 
   const mediaAnalysisModel = modelRuntime.findAvailableModel(
     config.AGENT_MEDIA_ANALYSIS_MODEL,
@@ -73,19 +58,20 @@ export async function createApp(
     modelRef: config.AGENT_MODEL,
     subagentModelRefs: config.AGENT_SUBAGENT_MODELS,
   });
-  registerAgentRuntime(services, {
-    promptConfiguration: config,
-    openMainStorage: () => MysqlStorage.open(config.AGENT_DATABASE_URL),
-    extensions: [
-      ...assistantConfiguration.extensions,
-      ...workflowConfiguration.extensions,
-      mediaConfiguration.extension,
-    ],
-    signal,
-  });
-  const runtimeHandle = await services.get(AgentRuntime, {}, { signal });
-  appResources.defer(() => runtimeHandle.release());
-  const { harness, mainHarness } = getServiceInstance(runtimeHandle);
+  const runtime = appResources.use(
+    await createAgentRuntime({
+      modelRuntime,
+      promptConfiguration: config,
+      openMainStorage: () => MysqlStorage.open(config.AGENT_DATABASE_URL),
+      extensions: [
+        ...assistantConfiguration.extensions,
+        ...workflowConfiguration.extensions,
+        mediaConfiguration.extension,
+      ],
+      signal,
+    }),
+  );
+  const { harness, mainHarness } = runtime;
   const contextSource = createContextSource(config.BACKEND_URL);
   const receiver = createContextReceiver({
     client: contextSource,
@@ -106,20 +92,19 @@ export async function createApp(
     client: contextSource,
     receiver,
   });
-  const assistantHandle = await assistantConfiguration.register(
-    services,
-    signal,
+  const assistant = await assistantConfiguration.create(runtime, signal);
+  appResources.defer(async () => {
+    await assistant?.close();
+  });
+  const workflows = appResources.adopt(
+    await workflowConfiguration.create({
+      harness,
+      modelRuntime,
+      contextReader,
+    }),
+    (instance) => instance.close(),
   );
-  appResources.defer(() => assistantHandle.release());
-  const workflowHandle = await workflowConfiguration.register(
-    services,
-    contextReader,
-    signal,
-  );
-  appResources.defer(() => workflowHandle.release());
   signal.throwIfAborted();
-  const assistant = assistantHandle.instance;
-  const workflows = getServiceInstance(workflowHandle);
   const mediaAnalysisAgent =
     mediaAnalysisModel && mainModel
       ? createMediaAnalysisAgent({

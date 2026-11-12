@@ -20,9 +20,9 @@
     "@earendil-works/pi-durable": "catalog:",
     "@home-agent/api": "workspace:*",
     "@home-agent/observability": "workspace:*",
-    "@langfuse/client": "6.0.1",
+    "@langfuse/client": "6.1.1",
     "@tanstack/pacer": "0.23.1",
-    "es-toolkit": "^1.52.0",
+    "es-toolkit": "^1.53.2",
     "hono": "catalog:",
     "typebox": "catalog:",
     "zod": "catalog:"

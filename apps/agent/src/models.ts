@@ -1,5 +1,3 @@
-import { local, opaque, type Host } from "@earendil-works/chord";
-import { Type } from "typebox";
 import {
   createModels,
   createProvider,
@@ -178,36 +176,4 @@ export async function initializeModelRuntime({
     );
 
   return { modelCollection, findAvailableModel, selectAvailableModels };
-}
-
-export const AgentModels = local("home.agent.models", {
-  version: 1,
-  input: Type.Object({}),
-  members: {
-    instance: opaque<Awaited<ReturnType<typeof initializeModelRuntime>>>(
-      "home.agent.models@1",
-    ),
-  },
-});
-
-export function registerAgentModels(
-  host: Host,
-  options: Parameters<typeof initializeModelRuntime>[0],
-) {
-  host.serve(
-    AgentModels,
-    (_input, _principal, self) => {
-      const models = self.resource("models", {
-        version: 1,
-        open: ({ signal }) =>
-          initializeModelRuntime({
-            ...options,
-            signal: AbortSignal.any([signal, options.signal]),
-          }),
-      });
-
-      return { instance: self.expose(models) };
-    },
-    { lifetime: "host" },
-  );
 }

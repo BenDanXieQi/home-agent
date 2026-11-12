@@ -87,21 +87,41 @@ export class MysqlStorage extends MemoryStorage {
     }
   }
 
-  override async commit(...[writes, context]: Parameters<Storage["commit"]>) {
+  override async commit(
+    ...[batches, receive, context]: Parameters<Storage["commit"]>
+  ) {
     if (this.failure) throw this.failure;
     context.abortSignal?.throwIfAborted();
 
-    const prepared = this.prepareCommit(writes);
+    const seqs: ReturnType<MemoryStorage["prepareCommit"]>["seq"][] = [];
+    let refused: { error: unknown } | undefined;
     try {
-      await this.connection`
-        INSERT INTO agent_commits (session_name, seq, writes)
-        VALUES (${sessionName}, ${prepared.seq}, ${JSON.stringify(prepared.writes)})
-      `;
+      for (const writes of batches) {
+        let prepared;
+        try {
+          prepared = this.prepareCommit(writes);
+        } catch (error) {
+          refused = { error };
+          break;
+        }
+
+        // Each row is one atomic commit; only durable rows enter the read model.
+        await this.connection`
+          INSERT INTO agent_commits (session_name, seq, writes)
+          VALUES (${sessionName}, ${prepared.seq}, ${JSON.stringify(prepared.writes)})
+        `;
+        seqs.push(prepared.apply());
+      }
     } catch (error) {
       this.failure = new Error("MySQL persistence failed", { cause: error });
+      await super.close(BACKGROUND_CONTEXT);
       throw this.failure;
     }
-    return prepared.apply();
+
+    for (const [index, seq] of seqs.entries()) receive(index, seq);
+    return refused === undefined
+      ? { stored: seqs.length }
+      : { stored: seqs.length, refused: refused.error };
   }
 
   override async mintId<I extends Id<string>>() {

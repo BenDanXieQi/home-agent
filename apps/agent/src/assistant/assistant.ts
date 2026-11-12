@@ -1,9 +1,8 @@
-import { local, opaque, type Host, type Ref } from "@earendil-works/chord";
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
 } from "@earendil-works/chord/context";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
   AssistantEntry,
   configure,
@@ -16,7 +15,7 @@ import { CodingTools } from "@earendil-works/pi-durable/tools";
 
 import { readFinalAnswer } from "../utils/final-answer";
 import type { initializeModelRuntime } from "../models";
-import { AgentRuntime, getServiceInstance } from "../runtime";
+import type { createAgentRuntime } from "../runtime";
 import { PromptBindingDoc } from "../prompts";
 
 const assistantPromptName = "household-assistant";
@@ -149,7 +148,7 @@ export function configureAssistant({
   ];
 
   async function createAssistant(
-    runtime: NonNullable<Ref<typeof AgentRuntime>["instance"]>,
+    runtime: Awaited<ReturnType<typeof createAgentRuntime>>,
     signal: AbortSignal,
   ) {
     signal.throwIfAborted();
@@ -177,40 +176,5 @@ export function configureAssistant({
     return conversation;
   }
 
-  const Assistant = local("home.agent.assistant", {
-    version: 1,
-    input: Type.Object({}),
-    members: {
-      instance: opaque<Awaited<ReturnType<typeof createAssistant>>>(
-        "home.agent.assistant@1",
-      ),
-    },
-  });
-  return {
-    extensions,
-    register(host: Host, startupSignal: AbortSignal) {
-      host.serve(
-        Assistant,
-        (_input, _principal, self) => {
-          const runtime = self.get(AgentRuntime, {});
-          const assistant = self.resource("assistant", {
-            version: 1,
-            deps: [runtime],
-            open: ({ signal }) => {
-              return createAssistant(
-                getServiceInstance(runtime),
-                AbortSignal.any([signal, startupSignal]),
-              );
-            },
-            close: async (instance) => {
-              await instance?.close();
-            },
-          });
-          return { instance: self.expose(assistant) };
-        },
-        { lifetime: "host" },
-      );
-      return host.get(Assistant, {}, { signal: startupSignal });
-    },
-  };
+  return { extensions, create: createAssistant };
 }

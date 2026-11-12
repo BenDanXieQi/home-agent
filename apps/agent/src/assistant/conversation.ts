@@ -17,9 +17,7 @@ type ReceiveProgress = (
 export function createConversationInteraction(
   conversation: Pick<
     NonNullable<
-      Awaited<
-        ReturnType<ReturnType<typeof configureAssistant>["register"]>
-      >["instance"]
+      Awaited<ReturnType<ReturnType<typeof configureAssistant>["create"]>>
     >,
     "id" | "commit" | "sessionId" | "submit" | "withTraceContext"
   >,

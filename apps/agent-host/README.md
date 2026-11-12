@@ -18,7 +18,7 @@ bun run --cwd apps/agent-host start
 
 ## 资源生命周期
 
-宿主创建一个 Chord Host（进程内服务与资源管理器），所有消费者使用同一 Agent 运行时，两个主 Agent 共用 MySQL Harness，Workflow 与子 Agent 使用内存 Harness，业务扩展在打开运行时前统一注册，对话显式选择所需扩展。同时配置 `AGENT_MODEL` 和 `AGENT_MEDIA_ANALYSIS_MODEL` 后启用音视频分析 Agent；具体配置与限制见 [Agent README](../agent/README.md#音视频分析-agent)。[Host 适配](src/context-source.ts)负责初次媒体读取、本地录像补看和动态保存，事件提交给整体主助手。
+宿主使用 `AsyncDisposableStack` 管理进程内资源的生命周期，所有消费者使用同一 Agent 运行时，两个主 Agent 共用 MySQL Harness，Workflow 与子 Agent 使用内存 Harness，业务扩展在打开运行时前统一注册，对话显式选择所需扩展。同时配置 `AGENT_MODEL` 和 `AGENT_MEDIA_ANALYSIS_MODEL` 后启用音视频分析 Agent；具体配置与限制见 [Agent README](../agent/README.md#音视频分析-agent)。[Host 适配](src/context-source.ts)负责初次媒体读取、本地录像补看和动态保存，事件提交给整体主助手。
 
 运行标识变化不触发 Agent 任务取消、Workflow 清理或主会话重置。同一家庭的重启、断线或重新授权保留两个主会话的模型上下文，由框架按容量自动压缩；上下文接收端确认切换绑定家庭时，取消旧执行、清理 Workflow 和临时媒体状态并重置所有已保存主会话的模型上下文，包括当前未启用的 Agent，历史条目保留。接收端把最近确认的绑定随主会话保存，暂时未取得绑定时保留比较依据；读取保存的绑定失败时启动失败，恢复任务须等待收到带有当前家庭绑定的完整快照。关闭时先停止上下文接收，等待媒体任务及会话清理，再按依赖关系关闭 Workflow、主助手、Harness 和执行环境并删除临时工作区。关闭单个规划不关闭公共运行时。
 

@@ -3,7 +3,7 @@ import {
   withAbortSignal,
 } from "@earendil-works/chord/context";
 import { contentText } from "@earendil-works/pi-ai";
-import type { Draft } from "@earendil-works/chord";
+import type { Draft } from "@earendil-works/chord/delta";
 import { cloneDeep, pick } from "es-toolkit";
 import {
   AssistantEntry,

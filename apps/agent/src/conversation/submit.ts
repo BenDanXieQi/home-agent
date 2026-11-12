@@ -5,14 +5,20 @@ import {
 } from "@earendil-works/chord/context";
 import {
   ConversationBusy,
-  type ConversationHandle,
+  type InputSubmissionDraft,
 } from "@earendil-works/pi-durable";
+import type { createAgentHarness } from "../harness";
 import { AppError } from "@home-agent/api/errors";
 import { attemptAsync } from "es-toolkit";
 
 export async function submitConversationInput(
-  conversation: Pick<ConversationHandle, "submit" | "abort">,
-  content: Parameters<ConversationHandle["submit"]>[0]["content"],
+  conversation: Pick<
+    Awaited<
+      ReturnType<ReturnType<typeof createAgentHarness>["createConversation"]>
+    >,
+    "submit" | "abort"
+  >,
+  content: InputSubmissionDraft["content"],
   signal: AbortSignal,
 ) {
   signal.throwIfAborted();

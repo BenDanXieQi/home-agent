@@ -6,10 +6,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { flexRender, type Table as TableModel } from "@tanstack/react-table";
+import {
+  flexRender,
+  type RowData,
+  type Table as TableModel,
+} from "@tanstack/react-table";
+import type { tableFeatures } from "./table-features";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronRight } from "lucide-react";
 
-export function Table<T>({
+export function Table<T extends RowData>({
   table,
   label,
   rowLabel,
@@ -19,7 +24,7 @@ export function Table<T>({
   disabled = false,
   empty,
 }: {
-  table: TableModel<T>;
+  table: TableModel<typeof tableFeatures, T>;
   label: string;
   rowLabel: (row: T) => string;
   onRowClick?: (row: T) => void;
@@ -47,6 +52,8 @@ export function Table<T>({
     return () => observer.disconnect();
   }, []);
   const columns = table.getVisibleLeafColumns();
+  const headerGroups = table.getHeaderGroups();
+  const rows = table.getRowModel().rows;
   const interactive = Boolean(onRowClick);
   // oxlint-disable jsx-a11y/no-noninteractive-tabindex
   return (
@@ -63,7 +70,7 @@ export function Table<T>({
       >
         <caption className="sr-only">{label}</caption>
         <thead className="text-xs text-muted">
-          {table.getHeaderGroups().map((group) => (
+          {headerGroups.map((group) => (
             <tr key={group.id}>
               {group.headers.map((header) => (
                 <th
@@ -117,7 +124,7 @@ export function Table<T>({
           ))}
         </thead>
         <tbody>
-          {table.getRowModel().rows.map((row) => {
+          {rows.map((row) => {
             const open = row.getIsExpanded();
             const detailId = `${id}-${encodeURIComponent(row.id)}`;
             return (
@@ -212,7 +219,7 @@ export function Table<T>({
               </Fragment>
             );
           })}
-          {!table.getRowModel().rows.length ? (
+          {!rows.length ? (
             <tr>
               <td
                 colSpan={columns.length + (interactive ? 1 : 0)}
