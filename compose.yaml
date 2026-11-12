@@ -2,6 +2,28 @@ name: home-agent
 include:
   - docker/langfuse/compose.yaml
 services:
+  agent-mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:?Set MYSQL_PORT in the root .env}:3306"
+    environment:
+      MYSQL_DATABASE: home_agent
+      MYSQL_USER: home_agent
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in the root .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in the root .env}
+    volumes:
+      - agent-mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u home_agent -D home_agent -e "SELECT 1" >/dev/null',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
   go2rtc:
     image: home-agent/go2rtc:1.9.14
     build:
@@ -44,3 +66,4 @@ services:
       retries: 20
 volumes:
   postgres-data:
+  agent-mysql-data:

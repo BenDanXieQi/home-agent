@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { infiniteQueryOptions } from "@tanstack/react-query";
 import { z } from "zod";
 import {
   mediaAnalysisEntrySchema,
   mediaAnalysisSnapshotSchema,
+  mediaAgentHistoryPageSchema,
 } from "@home-agent/backend-client";
-import { requestJson } from "../../api/client";
 import { apiErrorSchema } from "@home-agent/api/contracts";
+import { requestJson } from "../../api/client";
 import { RequestError } from "../../api/errors";
 import { requestErrorMessage } from "../../messages/zh-CN";
 
@@ -14,6 +15,30 @@ export type AnalysisEntry = z.infer<typeof mediaAnalysisEntrySchema>;
 export type AnalysisSummary = z.infer<
   typeof mediaAnalysisSnapshotSchema
 >["entries"][number];
+export type MediaAgentHistoryPage = z.infer<typeof mediaAgentHistoryPageSchema>;
+export type MediaAgentHistoryEntry = MediaAgentHistoryPage["entries"][number];
+
+export function mediaAgentHistoryOptions(before: string | null) {
+  return infiniteQueryOptions({
+    queryKey: ["dynamics", "agent-history", before],
+    initialPageParam: before,
+    queryFn: ({ pageParam, signal }) =>
+      requestJson(
+        (client, options) =>
+          client.api.dynamics["agent-history"].$get(
+            { query: pageParam === null ? {} : { before: pageParam } },
+            options,
+          ),
+        mediaAgentHistoryPageSchema,
+        { signal },
+      ),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+    enabled: false,
+    staleTime: Infinity,
+    retry: false,
+    gcTime: 0,
+  });
+}
 
 function useAnalysisStream<T>(path: string, schema: z.ZodType<T>) {
   const [state, setState] = useState<{
@@ -66,26 +91,4 @@ export function useAnalysisDetail(id: string) {
     `/api/dynamics/${encodeURIComponent(id)}/stream`,
     mediaAnalysisEntrySchema,
   );
-}
-
-export function useDynamicsHistory(scope: string) {
-  return useInfiniteQuery({
-    queryKey: ["dynamics-history", scope],
-    initialPageParam: null as { at: number; id: string } | null,
-    queryFn: ({ pageParam, signal }) =>
-      requestJson(
-        (client, options) =>
-          client.api.dynamics.history.$get(
-            {
-              query: pageParam ? { at: pageParam.at, id: pageParam.id } : {},
-            },
-            options,
-          ),
-        undefined,
-        { signal },
-      ),
-    getNextPageParam: (page) => page.next ?? undefined,
-    retry: false,
-    gcTime: 0,
-  });
 }

@@ -32,6 +32,10 @@ export const agentConfigurationSchema = z.object({
   ...workflowConfigurationSchema.shape,
   AGENT_MODEL: optionalModelRefSchema,
   AGENT_MEDIA_ANALYSIS_MODEL: optionalModelRefSchema,
+  LLAMA_CPP_BASE_URL: blankAsUndefinedTextSchema.pipe(
+    z.url({ protocol: /^https?$/ }).optional(),
+  ),
+  LLAMA_CPP_API_KEY: blankAsUndefinedTextSchema,
   AGENT_SUBAGENT_MODELS: blankAsUndefinedTextSchema.pipe(
     modelRefsJsonSchema.optional(),
   ),

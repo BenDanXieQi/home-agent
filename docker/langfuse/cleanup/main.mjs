@@ -167,11 +167,45 @@ async function cleanTraces() {
   );
 }
 
+async function cleanUnusedVideos() {
+  let deleted = 0;
+  let hasMore;
+  do {
+    const response = await fetch(
+      new URL(
+        "/api/internal/playground-media/cleanup",
+        process.env.LANGFUSE_BASE_URL,
+      ),
+      {
+        method: "POST",
+        headers: { authorization, "content-type": "application/json" },
+        body: JSON.stringify({ retentionDays }),
+        signal: AbortSignal.timeout(120_000),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Unused video cleanup failed: ${response.status}`);
+    }
+    const result = await response.json();
+    if (
+      !Number.isSafeInteger(result.deleted) ||
+      result.deleted < 0 ||
+      typeof result.hasMore !== "boolean"
+    ) {
+      throw new Error("Invalid unused video cleanup response.");
+    }
+    deleted += result.deleted;
+    hasMore = result.hasMore;
+  } while (hasMore);
+  console.info(`Unused video cleanup complete: ${deleted} files deleted.`);
+}
+
 await configureStorage();
 
 while (true) {
   try {
     await cleanTraces();
+    await cleanUnusedVideos();
     await writeFile("/tmp/last-success", new Date().toISOString());
     await setTimeout(day);
   } catch (error) {

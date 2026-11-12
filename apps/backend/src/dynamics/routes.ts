@@ -5,6 +5,7 @@ import { z } from "zod";
 import {
   mediaAnalysisCompletedSchema,
   mediaAnalysisInputSchema,
+  mediaAgentHistoryQuerySchema,
 } from "@home-agent/agent/media-analysis/session";
 import { requireLocalAccess } from "@home-agent/api/local-access";
 import { AppError, validationIssues } from "@home-agent/api/errors";
@@ -21,6 +22,7 @@ import { HouseholdError } from "../household/errors";
 import { householdPublicError } from "../household/public-errors";
 import type { createPerceptionService } from "../perception/service";
 import type { createDynamicsRepository } from "./repository";
+import { readAnalysisMedia } from "./media";
 
 const historyQuerySchema = z
   .object({
@@ -34,6 +36,8 @@ export function createDynamicsRoutes({
   household,
   agent,
   perception,
+  recordings,
+  executable,
   agentContext,
   repository,
 }: {
@@ -44,6 +48,8 @@ export function createDynamicsRoutes({
     ReturnType<typeof createPerceptionService>,
     "readAudioRange"
   >;
+  recordings: Parameters<typeof readAnalysisMedia>[0]["recordings"];
+  executable: string;
   agentContext: Pick<ReturnType<typeof createAgentContextService>, "snapshot">;
   repository: ReturnType<typeof createDynamicsRepository> | undefined;
 }) {
@@ -108,7 +114,7 @@ export function createDynamicsRoutes({
       },
     )
     .post(
-      "/audio",
+      "/media",
       requireLocalAccess([port]),
       bodyLimit({
         maxSize: 4096,
@@ -119,21 +125,24 @@ export function createDynamicsRoutes({
         const access = accessHousehold(household, household.epoch);
         const input = c.req.valid("json");
         requireRange(input);
-        if (!input.includeAudio) throw new AppError("invalid_request");
-        const data = await perception.readAudioRange(
-          {
-            ...input.source,
-            scopeEpoch: household.epoch,
-            start: input.startedAt,
-            end: input.endedAt,
-          },
-          c.req.raw.signal,
-        );
+        const result = await readAnalysisMedia({
+          input,
+          scopeEpoch: household.epoch,
+          recordings,
+          perception,
+          executable,
+          signal: c.req.raw.signal,
+        });
         c.req.raw.signal.throwIfAborted();
         access.assertCurrent();
         requireRange(input);
-        return new Response(data, {
-          headers: { "Content-Type": "audio/mp4", "Cache-Control": "no-store" },
+        return new Response(result.data, {
+          headers: {
+            "Content-Type": result.contentType,
+            "Cache-Control": "no-store",
+            "X-Media-Started-At": String(result.startedAt),
+            "X-Media-Ended-At": String(result.endedAt),
+          },
         });
       },
     )
@@ -148,7 +157,6 @@ export function createDynamicsRoutes({
       async (c) => {
         const access = accessHousehold(household, household.epoch);
         const entry = c.req.valid("json");
-        requireRange(entry);
         await requireStorage().save(
           access.identity,
           () => {
@@ -163,6 +171,24 @@ export function createDynamicsRoutes({
     )
     .get("/stream", async (c) =>
       agent.mediaAnalysis("/stream", c.req.raw.signal),
+    )
+    .get(
+      "/agent-history",
+      validator("query", (value) => {
+        const parsed = mediaAgentHistoryQuerySchema.safeParse(value);
+        if (!parsed.success)
+          throw new AppError("invalid_request", {
+            issues: validationIssues(parsed.error),
+          });
+        return parsed.data;
+      }),
+      async (c) =>
+        c.json(
+          await agent.mediaAgentHistory(
+            c.req.valid("query").before,
+            c.req.raw.signal,
+          ),
+        ),
     )
     .get("/:id/stream", async (c) =>
       agent.mediaAnalysis(

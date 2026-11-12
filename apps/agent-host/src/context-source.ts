@@ -7,6 +7,7 @@ import {
 import type { ContextSource } from "@home-agent/agent/context/source";
 import type { createMediaAnalysisAgent } from "@home-agent/agent/media-analysis";
 import { formatMediaTime } from "@home-agent/agent/media-analysis/analysis";
+import type { readCameraMediaSchema } from "@home-agent/agent/media-analysis/extension";
 import { tracedFetch } from "@home-agent/observability";
 import { partial } from "es-toolkit";
 import { readLimitedBytes } from "@home-agent/api/http/read-body";
@@ -43,61 +44,7 @@ export function createMediaReader(backendUrl: string) {
       requestSignal,
       AbortSignal.timeout(30_000),
     ]);
-    const content: Awaited<ReturnType<typeof readMedia>> = [];
-    if (range.kind === "video") {
-      const response = await api.recordings.media.$post(
-        {
-          json: {
-            deviceId: range.source.deviceId,
-            channel: range.source.channel,
-            source: "local",
-            selection: {
-              kind: "range",
-              start: range.startedAt,
-              end: range.endedAt,
-            },
-            output: {
-              kind: "video",
-              codec: "h264",
-              fps: 1,
-              height: 512,
-            },
-          },
-        },
-        { init: { signal } },
-      );
-      if (!response.ok) throw new AppError("perception_media_unavailable");
-      const bytes = await readLimitedBytes(response, 64 * 1024 * 1024, signal);
-      const result = await readRecordingMediaResponse(
-        new Response(bytes, { headers: response.headers }),
-        signal,
-      );
-      const video = result.media[0];
-      if (
-        result.media.length !== 1 ||
-        video?.type !== "video/mp4" ||
-        result.startedAt === undefined ||
-        result.endedAt === undefined
-      )
-        throw new Error("Expected one original recording video");
-      content.push(
-        {
-          type: "text",
-          text: `原片读取区间：${formatMediaTime(result.startedAt)} 至 ${formatMediaTime(result.endedAt)}，视频无音轨。`,
-        },
-        {
-          type: "media",
-          media: {
-            kind: "video",
-            data: new Uint8Array(await video.arrayBuffer()),
-            fps: 1,
-          },
-        },
-      );
-    }
-
-    if (!range.includeAudio) return content;
-    const response = await api.dynamics.audio.$post(
+    const response = await api.dynamics.media.$post(
       {
         json: {
           source: range.source,
@@ -110,23 +57,42 @@ export function createMediaReader(backendUrl: string) {
       { init: { signal } },
     );
     if (!response.ok) throw new AppError("perception_media_unavailable");
+    const contentType = range.kind === "video" ? "video/mp4" : "audio/mpeg";
     const data = await readLimitedBytes(response, 64 * 1024 * 1024, signal);
-    if (!data.length || response.headers.get("content-type") !== "audio/mp4")
-      throw new Error("Expected continuous range audio");
-    content.push(
+    const start = response.headers.get("x-media-started-at");
+    const end = response.headers.get("x-media-ended-at");
+    const startedAt = Number(start);
+    const endedAt = Number(end);
+    if (
+      !data.length ||
+      response.headers.get("content-type") !== contentType ||
+      start === null ||
+      end === null ||
+      !Number.isFinite(startedAt) ||
+      !Number.isFinite(endedAt) ||
+      startedAt >= endedAt
+    )
+      throw new Error("Expected continuous range media");
+
+    const description =
+      range.kind === "audio"
+        ? "仅提供 MP3 音频。"
+        : range.includeAudio
+          ? "视频包含同期音轨，音视频同步精度未知。"
+          : "视频无音轨。";
+    return [
       {
         type: "text",
-        text: `独立声音：${formatMediaTime(range.startedAt)} 至 ${formatMediaTime(range.endedAt)}。`,
+        text: `媒体区间：${formatMediaTime(startedAt)} 至 ${formatMediaTime(endedAt)}。${description}`,
       },
       {
         type: "media",
-        media: {
-          kind: "audio",
-          data,
-        },
+        media:
+          range.kind === "video"
+            ? { kind: "video", data, fps: 1 }
+            : { kind: "audio", data },
       },
-    );
-    return content;
+    ];
   };
   return readMedia;
 }
@@ -152,5 +118,82 @@ export function createAnalysisWriter(backendUrl: string) {
       z.object({ saved: z.literal(true) }),
       { signal, timeoutMs: 15_000, unavailableCode: "agent_unavailable" },
     );
+  };
+}
+
+export function createCameraMediaReader(backendUrl: string) {
+  const api = createBackendClient(backendUrl, {
+    fetch: partial(tracedFetch, { from: "agent", to: "backend" }),
+  }).api;
+  return async (
+    input: z.infer<typeof readCameraMediaSchema>,
+    requestSignal: AbortSignal,
+  ) => {
+    const signal = AbortSignal.any([
+      requestSignal,
+      AbortSignal.timeout(30_000),
+    ]);
+    const response = await api.recordings.media.$post(
+      {
+        json: {
+          deviceId: input.source.deviceId,
+          channel: input.source.channel,
+          source: "local",
+          selection: {
+            kind: "range",
+            start: input.startedAt,
+            end: input.endedAt,
+          },
+          output: { kind: "video", codec: "h264", fps: 1, height: 512 },
+        },
+      },
+      { init: { signal } },
+    );
+    if (!response.ok) throw new AppError("perception_media_unavailable");
+
+    const maxBytes = 64 * 1024 * 1024;
+    const bytes = await readLimitedBytes(
+      response,
+      maxBytes + 64 * 1024,
+      signal,
+    );
+    const { media, startedAt, endedAt, hasAudio } =
+      await readRecordingMediaResponse(
+        new Response(bytes, { headers: response.headers }),
+        signal,
+      );
+    const video = media[0];
+    if (
+      media.length !== 1 ||
+      !video ||
+      video.type !== "video/mp4" ||
+      !video.size ||
+      video.size > maxBytes ||
+      startedAt === undefined ||
+      endedAt === undefined ||
+      !Number.isFinite(startedAt) ||
+      !Number.isFinite(endedAt) ||
+      startedAt >= endedAt ||
+      hasAudio === undefined
+    )
+      throw new Error("Expected one continuous local recording video");
+
+    const data = new Uint8Array(await video.arrayBuffer());
+    signal.throwIfAborted();
+    return {
+      startedAt,
+      endedAt,
+      includeAudio: hasAudio,
+      content: [
+        {
+          type: "text" as const,
+          text: `媒体区间：${formatMediaTime(startedAt)} 至 ${formatMediaTime(endedAt)}。${hasAudio ? "视频包含同期音轨，音视频同步精度未知。" : "视频无音轨。"}`,
+        },
+        {
+          type: "media" as const,
+          media: { kind: "video" as const, data, fps: 1 },
+        },
+      ],
+    };
   };
 }

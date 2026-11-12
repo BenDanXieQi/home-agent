@@ -1,5 +1,6 @@
 import { formatTime } from "../presentation/time";
-import type { WindowListEntry } from "./windows";
+import type { WindowListEntry, WindowMarker } from "./windows";
+import { attributionLabel } from "../members/attribution";
 import type { projectWindowMaterial } from "@home-agent/api/perception/window-observations";
 
 export const visualReasons = {
@@ -20,6 +21,30 @@ export function candidateLabel(window: Pick<WindowListEntry, "gate">) {
   return { video: "画面变化", audio: "声音片段", none: "仅文字" }[
     window.gate.candidate
   ];
+}
+
+export function windowMarkerMembers(entry: WindowMarker) {
+  const attributions = entry.memberAttributions ?? [];
+  const clues = attributions.flatMap((attribution) =>
+    attribution.kind === "known" &&
+    attribution.association.state !== "confirmed"
+      ? [attribution.association]
+      : [],
+  );
+  return {
+    labels: [...new Set(attributions.map(attributionLabel))],
+    clues,
+  };
+}
+
+export function windowMarkerTargets(entry: WindowMarker) {
+  const classes = new Set(entry.detectedClasses);
+  const labels = [];
+  if (classes.has("human")) labels.push("检测到人");
+  if (classes.has("cat") && classes.has("dog")) labels.push("检测到宠物");
+  else if (classes.has("cat")) labels.push("检测到猫");
+  else if (classes.has("dog")) labels.push("检测到狗");
+  return labels.join(" · ");
 }
 
 export const mediaStates = {

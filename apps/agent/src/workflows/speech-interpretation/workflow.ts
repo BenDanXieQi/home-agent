@@ -1,12 +1,16 @@
 import { z } from "zod";
-import {
-  BACKGROUND_CONTEXT,
-  withAbortSignal,
-} from "@earendil-works/chord/context";
 import { speechObservationSchema } from "@home-agent/api/contracts";
 import { AppError } from "@home-agent/api/errors";
-import { defineWorkflow, type WorkflowDependencies } from "../definition";
+import { defineWorkflow } from "../definition";
 import { optionalModelRefSchema } from "../../models";
+import {
+  SpeechInterpretationExtension,
+  speechInterpretationAgentName,
+} from "./extension";
+import { interpretSpeech, speechDialogueResponseSchema } from "./session";
+
+export { speechDecisionSchema } from "./extension";
+export { speechDialogueResponseSchema } from "./session";
 
 export const speechDialogueLimits = Object.freeze({
   contextSegments: 3,
@@ -16,27 +20,6 @@ const assistantNamesSchema = z
   .array(z.string().trim().min(1).max(32))
   .min(1)
   .max(8);
-
-export const speechDecisionSchema = z
-  .object({
-    needsResponse: z.boolean(),
-    isComplete: z.boolean(),
-    category: z.enum([
-      "assistant_request",
-      "conversation",
-      "media",
-      "uncertain",
-    ]),
-    requestText: z.string().trim().min(1).nullable(),
-    reason: z.string().min(1),
-  })
-  .refine(
-    (decision) =>
-      decision.needsResponse === (decision.category === "assistant_request") &&
-      (decision.requestText !== null) ===
-        (decision.needsResponse && decision.isComplete),
-    "Inconsistent speech interpretation",
-  );
 
 export const speechDialogueRequestSchema = z.object({
   id: z.uuid(),
@@ -77,19 +60,13 @@ export function validSpeechDialogueRequest(
   );
 }
 
-export const speechDialogueResponseSchema = z.object({
-  id: z.uuid(),
-  observationId: speechObservationSchema.shape.id,
-  decision: speechDecisionSchema,
-});
-
 export const contract = {
   input: speechDialogueRequestSchema,
   progress: z.never(),
   result: speechDialogueResponseSchema,
 };
 
-export const extensions = [] as const;
+export const extensions = [SpeechInterpretationExtension] as const;
 
 export const modelConfiguration = {
   key: "AGENT_SPEECH_MODEL",
@@ -98,7 +75,10 @@ export const modelConfiguration = {
 
 export const observation = {
   start: (input: z.infer<typeof speechDialogueRequestSchema>) => ({
-    attributes: { "speech.request.id": input.id },
+    attributes: {
+      "gen_ai.agent.name": speechInterpretationAgentName,
+      "speech.request.id": input.id,
+    },
   }),
 };
 
@@ -106,65 +86,11 @@ export function createWorkflow(context: Parameters<typeof defineWorkflow>[1]) {
   return defineWorkflow(createSpeechInterpretationWorkflow, context);
 }
 
-function createSpeechInterpretationWorkflow({
-  model,
-  modelCollection,
-  prompts,
-}: WorkflowDependencies) {
-  async function interpretSpeech(
-    input: z.infer<typeof speechDialogueRequestSchema>,
-    signal: AbortSignal,
-  ) {
-    signal.throwIfAborted();
-
-    const response = await prompts.complete(
-      {
-        name: "speech-interpretation",
-        userVariables: {
-          input: JSON.stringify(formatSpeechForModel(input)),
-        },
-        model,
-        modelCollection,
-        tools: [
-          {
-            name: "interpret_speech",
-            parameters: z.toJSONSchema(speechDecisionSchema),
-            constrainedSampling: {
-              type: "json_schema",
-              strict: "require",
-            },
-          },
-        ],
-      },
-      withAbortSignal(signal, BACKGROUND_CONTEXT),
-    );
-
-    signal.throwIfAborted();
-
-    const calls = response.content.filter((block) => block.type === "toolCall");
-    const [call] = calls;
-    if (
-      !["stop", "toolUse"].includes(response.stopReason) ||
-      calls.length !== 1 ||
-      call?.name !== "interpret_speech"
-    )
-      throw new Error(
-        response.errorMessage ?? "Incomplete speech interpretation",
-      );
-
-    const decision = speechDecisionSchema.parse(call.arguments);
-
-    const result = {
-      id: input.id,
-      observationId: input.current.id,
-      decision,
-    } satisfies z.infer<typeof speechDialogueResponseSchema>;
-
-    return result;
-  }
-
+function createSpeechInterpretationWorkflow(
+  dependencies: Parameters<typeof interpretSpeech>[0],
+) {
   async function run(
-    input: Parameters<typeof interpretSpeech>[0],
+    input: z.infer<typeof speechDialogueRequestSchema>,
     requestSignal: AbortSignal,
   ) {
     requestSignal.throwIfAborted();
@@ -178,31 +104,10 @@ function createSpeechInterpretationWorkflow({
       ),
     ]);
 
-    return interpretSpeech(input, signal);
+    const result = await interpretSpeech(dependencies, input, signal);
+    signal.throwIfAborted();
+    return result;
   }
 
   return { run };
-}
-
-function formatSpeechForModel(
-  input: z.infer<typeof speechDialogueRequestSchema>,
-) {
-  const segmentContext = (segment: typeof input.current) => ({
-    text: segment.text,
-    boundary: segment.boundary,
-    startOffsetMs: Math.round(
-      segment.observedStartAt - input.current.observedStartAt,
-    ),
-    endOffsetMs: Math.round(
-      segment.observedEndAt - input.current.observedStartAt,
-    ),
-  });
-
-  return {
-    assistantNames: input.assistantNames,
-    current: segmentContext(input.current),
-    preceding: input.preceding
-      .toSorted((a, b) => a.startSample - b.startSample)
-      .map(segmentContext),
-  };
 }

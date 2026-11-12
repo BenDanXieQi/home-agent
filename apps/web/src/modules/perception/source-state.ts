@@ -3,6 +3,7 @@ import { perceptionSourceAccessAtom } from "./source-access";
 import { perceptionSnapshotAtom, perceptionSyncedAtom } from "./state";
 import { devicesAtom } from "../devices/state";
 import {
+  householdAtom,
   householdScopeEpochAtom,
   householdSnapshotAtom,
   householdSyncedAtom,
@@ -34,6 +35,7 @@ export function createPerceptionSourceState({
     const device = get(deviceAtom);
     return (
       get(householdSyncedAtom) &&
+      get(householdAtom)?.status === "running" &&
       !!device?.camera &&
       device.channels.includes(target.channel)
     );

@@ -1,0 +1,1272 @@
+diff --git a/packages/shared/src/server/index.ts b/packages/shared/src/server/index.ts
+index 75d482e..ef53290 100644
+--- a/packages/shared/src/server/index.ts
++++ b/packages/shared/src/server/index.ts
+@@ -55,6 +55,7 @@ export * from "./auth/gitHubEnterpriseProvider";
+ export * from "./auth/jumpcloudProvider";
+ export * from "./auth/userProjectRoleAuth";
+ export * from "./llm/llmText";
++export { createUIMessageStreamResponse, toUIMessageStream } from "ai";
+ export * from "./llm/mediaMessages";
+ export * from "./llm/errors";
+ export * from "./llm/utils";
+diff --git a/packages/shared/src/server/media/mediaService.ts b/packages/shared/src/server/media/mediaService.ts
+index 2b4fee6..f2293d9 100644
+--- a/packages/shared/src/server/media/mediaService.ts
++++ b/packages/shared/src/server/media/mediaService.ts
+@@ -9,7 +9,7 @@ import {
+   type MediaContentType,
+   type MediaField,
+ } from "../../domain/media";
+-import { InternalServerError } from "../../errors";
++import { InternalServerError, LangfuseNotFoundError } from "../../errors";
+ import { recordHistogram, recordIncrement } from "../instrumentation";
+ import { getS3MediaStorageClient } from "../s3";
+ import { summarizeS3Error } from "../services/s3SigningDiagnostics";
+@@ -103,6 +103,27 @@ export async function upsertMediaRecord(params: {
+   }
+ }
+ 
++/** Locks media before claiming references or deleting unassociated uploads. */
++export async function lockMediaRecords(
++  tx: Prisma.TransactionClient,
++  projectId: string,
++  mediaIds: string[],
++) {
++  const ids = [...new Set(mediaIds)].sort();
++  if (ids.length === 0) return;
++
++  const records = await tx.$queryRaw<
++    Prisma.MediaGetPayload<{ select: { id: true } }>[]
++  >`
++    SELECT id FROM media
++    WHERE project_id = ${projectId} AND id IN (${Prisma.join(ids)})
++    ORDER BY id FOR UPDATE
++  `;
++  if (records.length !== ids.length) {
++    throw new LangfuseNotFoundError("Media is missing or has expired");
++  }
++}
++
+ /**
+  * Idempotently links an uploaded media row to either an observation or trace.
+  * An `observationId` selects `observation_media`; otherwise `trace_media` is
+@@ -121,23 +142,12 @@ export async function linkMediaToTraceOrObservation(params: {
+   if (observationId) {
+     await prisma.$queryRaw`
+       INSERT INTO "observation_media" (
+-        "id",
+-        "project_id",
+-        "trace_id",
+-        "observation_id",
+-        "media_id",
+-        "field",
+-        "origin"
+-      )
+-      VALUES (
+-        ${randomUUID()},
+-        ${projectId},
+-        ${traceId},
+-        ${observationId},
+-        ${mediaId},
+-        ${field},
+-        ${origin}::"MediaAssociationOrigin"
++        "id", "project_id", "trace_id", "observation_id", "media_id", "field", "origin"
+       )
++      SELECT ${randomUUID()}, ${projectId}, ${traceId}, ${observationId},
++        m.id, ${field}, ${origin}::"MediaAssociationOrigin"
++      FROM media m WHERE m.project_id = ${projectId} AND m.id = ${mediaId}
++      FOR KEY SHARE
+       ON CONFLICT DO NOTHING
+     `;
+     return;
+@@ -145,21 +155,12 @@ export async function linkMediaToTraceOrObservation(params: {
+ 
+   await prisma.$queryRaw`
+     INSERT INTO "trace_media" (
+-      "id",
+-      "project_id",
+-      "trace_id",
+-      "media_id",
+-      "field",
+-      "origin"
+-    )
+-    VALUES (
+-      ${randomUUID()},
+-      ${projectId},
+-      ${traceId},
+-      ${mediaId},
+-      ${field},
+-      ${origin}::"MediaAssociationOrigin"
++      "id", "project_id", "trace_id", "media_id", "field", "origin"
+     )
++    SELECT ${randomUUID()}, ${projectId}, ${traceId}, m.id,
++      ${field}, ${origin}::"MediaAssociationOrigin"
++    FROM media m WHERE m.project_id = ${projectId} AND m.id = ${mediaId}
++    FOR KEY SHARE
+     ON CONFLICT DO NOTHING
+   `;
+ }
+diff --git a/packages/shared/src/server/repositories/dataset-item-media.ts b/packages/shared/src/server/repositories/dataset-item-media.ts
+index 54586df..549faf0 100644
+--- a/packages/shared/src/server/repositories/dataset-item-media.ts
++++ b/packages/shared/src/server/repositories/dataset-item-media.ts
+@@ -5,6 +5,7 @@ import { prisma } from "../../db";
+ import { type DatasetItemMediaField } from "../../domain";
+ import { InvalidRequestError, LangfuseNotFoundError } from "../../errors";
+ import { findMediaReferences } from "../../utils/mediaReferences";
++import { lockMediaRecords } from "../media/mediaService";
+ import {
+   addTagsToCurrentSpan,
+   recordHistogram,
+@@ -175,20 +176,23 @@ export async function declarePendingDatasetItemMedia(props: {
+   // createMany for skipDuplicates: redeclaring the same (item, field, media)
+   // is a no-op against the pending partial unique index (create would throw,
+   // and upsert can't target a partial index).
+-  await prisma.datasetItemMedia.createMany({
+-    data: [
+-      {
+-        projectId: props.projectId,
+-        datasetId: props.datasetId,
+-        datasetItemId: props.datasetItemId,
+-        field: props.field,
+-        mediaId: props.mediaId,
+-        datasetItemValidFrom: null,
+-        jsonPath: null,
+-        referenceString: null,
+-      },
+-    ],
+-    skipDuplicates: true,
++  await prisma.$transaction(async (tx) => {
++    await lockMediaRecords(tx, props.projectId, [props.mediaId]);
++    await tx.datasetItemMedia.createMany({
++      data: [
++        {
++          projectId: props.projectId,
++          datasetId: props.datasetId,
++          datasetItemId: props.datasetItemId,
++          field: props.field,
++          mediaId: props.mediaId,
++          datasetItemValidFrom: null,
++          jsonPath: null,
++          referenceString: null,
++        },
++      ],
++      skipDuplicates: true,
++    });
+   });
+ }
+ 
+@@ -233,6 +237,12 @@ export async function linkDatasetItemMedia(
+   // Hot path: items without media still need the replaceExisting delete.
+   if (rowsToInsert.length === 0 && !replaceExisting) return;
+ 
++  await lockMediaRecords(
++    tx,
++    projectId,
++    rowsToInsert.map((row) => row.mediaId),
++  );
++
+   if (replaceExisting) {
+     await deleteDatasetItemMediaLinks(tx, { projectId, itemVersions: items });
+   }
+diff --git a/web/src/components/ChatMessages/ChatMessageComponent.tsx b/web/src/components/ChatMessages/ChatMessageComponent.tsx
+index 9c6e10f..5738620 100644
+--- a/web/src/components/ChatMessages/ChatMessageComponent.tsx
++++ b/web/src/components/ChatMessages/ChatMessageComponent.tsx
+@@ -3,6 +3,7 @@ import capitalize from "lodash/capitalize";
+ import { GripVertical, MinusCircleIcon } from "@langfuse/icons";
+ import {
+   memo,
++  useMemo,
+   useState,
+   useCallback,
+   useEffect,
+@@ -20,7 +21,13 @@ import {
+ } from "@langfuse/shared";
+ import { Button } from "@/src/components/ui/button";
+ import { Card, CardContent } from "@/src/components/ui/card";
+-import { CodeMirrorEditor } from "@/src/components/editor";
++import {
++  CodeMirrorEditor,
++  createFileDropPasteExtension,
++} from "@/src/components/editor";
++import { Button as ImportButton } from "@/src/components/design-system/Button/Button";
++import { usePlaygroundVideoUpload } from "@/src/features/playground/page/hooks/usePlaygroundVideoUpload";
++import { useMediaTagChips } from "@/src/components/editor/mediaTagWidget";
+ import type { MessagesContext } from "./types";
+ import { useSortable } from "@dnd-kit/sortable";
+ import { cn } from "@/src/utils/tailwind";
+@@ -359,6 +366,10 @@ export const ChatMessageComponent: React.FC<ChatMessageProps> = ({
+                   value={message.content}
+                   onChange={onValueChange}
+                   role={message.role}
++                  enableVideoImport={
++                    Boolean(playgroundContext) &&
++                    message.role === ChatMessageRole.User
++                  }
+                   editorRef={editorRef}
+                   onEditorMount={handleEditorMount}
+                   enableSearchKeymap={!shouldUseMessageSearch}
+@@ -393,6 +404,7 @@ const MemoizedEditor = memo(function MemoizedEditor(props: {
+   editorRef: RefObject<ReactCodeMirrorRef | null>;
+   onEditorMount: () => void;
+   enableSearchKeymap: boolean;
++  enableVideoImport?: boolean;
+ }) {
+   const {
+     value,
+@@ -401,21 +413,71 @@ const MemoizedEditor = memo(function MemoizedEditor(props: {
+     editorRef,
+     onEditorMount,
+     enableSearchKeymap,
++    enableVideoImport = false,
+   } = props;
+   const placeholder = `Enter ${getRoleNamePlaceholder(role)} here.`;
++  const { extension, portals } = useMediaTagChips();
++  const inputRef = useRef<HTMLInputElement>(null);
++  const { uploadFiles, isUploading, error } = usePlaygroundVideoUpload();
++  const extensions = useMemo(
++    () => [
++      extension,
++      ...(enableVideoImport
++        ? [createFileDropPasteExtension({ onFiles: uploadFiles })]
++        : []),
++    ],
++    [extension, enableVideoImport, uploadFiles],
++  );
+ 
+   return (
+-    <CodeMirrorEditor
+-      value={value}
+-      onChange={onChange}
+-      mode="prompt"
+-      className="w-full rounded-md border-0"
+-      editable={true}
+-      lineNumbers={false}
+-      placeholder={placeholder}
+-      editorRef={editorRef}
+-      enableSearchKeymap={enableSearchKeymap}
+-      onEditorMount={onEditorMount}
+-    />
++    <div className="flex w-full min-w-0 flex-col gap-1">
++      <CodeMirrorEditor
++        value={value}
++        onChange={onChange}
++        mode="prompt"
++        className="w-full rounded-md border-0"
++        editable={!isUploading}
++        lineNumbers={false}
++        placeholder={placeholder}
++        editorRef={editorRef}
++        enableSearchKeymap={enableSearchKeymap}
++        onEditorMount={onEditorMount}
++        extensions={extensions}
++      />
++      {enableVideoImport && (
++        <div className="flex flex-wrap items-center gap-2">
++          <input
++            ref={inputRef}
++            type="file"
++            accept="video/mp4,.mp4"
++            multiple
++            className="hidden"
++            aria-label="选择 MP4 视频"
++            onChange={async (event) => {
++              const files = Array.from(event.target.files ?? []);
++              event.target.value = "";
++              const view = editorRef.current?.view;
++              if (view && files.length) await uploadFiles(files, view);
++            }}
++          />
++          <ImportButton
++            text={isUploading ? "正在导入视频…" : "导入视频"}
++            variant="ghost"
++            size="sm"
++            disabled={isUploading}
++            onClick={() => inputRef.current?.click()}
++          />
++          <span className="text-muted-foreground text-xs" role="status">
++            {isUploading ? "正在上传，请稍候" : "也可拖入 MP4 · 最大 100 MiB"}
++          </span>
++          {error && (
++            <span className="text-destructive text-xs" role="alert">
++              {error}
++            </span>
++          )}
++        </div>
++      )}
++      {portals}
++    </div>
+   );
+ });
+diff --git a/web/src/components/editor/mediaTagWidget.tsx b/web/src/components/editor/mediaTagWidget.tsx
+index b9ec0cf..59d1d73 100644
+--- a/web/src/components/editor/mediaTagWidget.tsx
++++ b/web/src/components/editor/mediaTagWidget.tsx
+@@ -141,13 +141,14 @@ class MediaTagWidget extends WidgetType {
+ 
+ function createMediaTagWidgetExtension(store: MediaTagWidgetStore): Extension {
+   const matcher = new MatchDecorator({
+-    // Swallow the surrounding JSON quotes into the replaced range so the chip
+-    // stands in for `"<tag>"` as a whole — otherwise the quotes render around
+-    // it. The tag itself (capture group) is what we classify. Fresh RegExp so
+-    // the shared pattern's lastIndex isn't mutated across uses.
+-    regexp: new RegExp(`"(${MEDIA_REFERENCE_PATTERN.source})"`, "g"),
++    // Include quotes only around a complete JSON string value. References
++    // embedded in text leave the surrounding text and quotes editable.
++    regexp: new RegExp(
++      `"(${MEDIA_REFERENCE_PATTERN.source})"|(${MEDIA_REFERENCE_PATTERN.source})`,
++      "g",
++    ),
+     decoration: (match) => {
+-      const descriptor = classifyMediaValue(match[1]);
++      const descriptor = classifyMediaValue(match[1] ?? match[2]);
+       if (descriptor?.kind !== "langfuseRef") return null;
+       return Decoration.replace({
+         widget: new MediaTagWidget(store, descriptor),
+diff --git a/web/src/features/datasets/components/DatasetItemDetailPage.tsx b/web/src/features/datasets/components/DatasetItemDetailPage.tsx
+index 388319d..c03fbbb 100644
+--- a/web/src/features/datasets/components/DatasetItemDetailPage.tsx
++++ b/web/src/features/datasets/components/DatasetItemDetailPage.tsx
+@@ -39,6 +39,7 @@ import { Skeleton } from "@/src/components/ui/skeleton";
+ import { EditDatasetItemDialog } from "@/src/features/datasets/components/EditDatasetItemDialog";
+ import { useDatasetVersion } from "@/src/features/datasets/hooks/useDatasetVersion";
+ import { toDatasetSchema } from "@/src/features/datasets/utils/datasetItemUtils";
++import { JumpToPlaygroundDropdownMenuController } from "@/src/features/playground";
+ 
+ export const DatasetItemDetailPage = ({
+   activeTab,
+@@ -173,6 +174,23 @@ export const DatasetItemDetailPage = ({
+         },
+         actionButtonsLeft: (
+           <>
++            <JumpToPlaygroundDropdownMenuController
++              source="dataset_item"
++              datasetItem={item.data ?? null}
++            >
++              {({ disabled, title, Trigger }) => (
++                <Trigger asChild>
++                  <Button
++                    variant="outline"
++                    size="sm"
++                    disabled={disabled}
++                    title={title}
++                  >
++                    Test in Playground
++                  </Button>
++                </Trigger>
++              )}
++            </JumpToPlaygroundDropdownMenuController>
+             {item.data?.status && (
+               <Popover
+                 open={isArchivePopoverOpen}
+diff --git a/web/src/features/media/server/index.ts b/web/src/features/media/server/index.ts
+index 738907f..b4cdad8 100644
+--- a/web/src/features/media/server/index.ts
++++ b/web/src/features/media/server/index.ts
+@@ -4,6 +4,7 @@ export {
+   createMediaUploadUrl,
+   getMedia,
+   updateMediaUploadStatus,
++  deleteUnassociatedVideos,
+ } from "@/src/features/media/server/mediaService";
+ export {
+   datasetItemMediaReferenceKey,
+diff --git a/web/src/features/media/server/mediaService.ts b/web/src/features/media/server/mediaService.ts
+index be6ec49..edc68c5 100644
+--- a/web/src/features/media/server/mediaService.ts
++++ b/web/src/features/media/server/mediaService.ts
+@@ -20,6 +20,7 @@ import {
+   getMediaId,
+   getCurrentSpan,
+   linkMediaToTraceOrObservation,
++  lockMediaRecords,
+   logger,
+   recordHistogram,
+   recordIncrement,
+@@ -28,38 +29,33 @@ import {
+ 
+ export async function createMediaUploadUrl(params: {
+   projectId: string;
+-  body: GetMediaUploadUrlQuery;
++  body:
++    | GetMediaUploadUrlQuery
++    | Pick<
++        GetMediaUploadUrlQuery,
++        "contentType" | "contentLength" | "sha256Hash"
++      >;
+ }) {
+   const { projectId, body } = params;
+-  const {
+-    contentType,
+-    contentLength,
+-    sha256Hash,
+-    traceId,
+-    observationId,
+-    datasetId,
+-    datasetItemId,
+-    field,
+-  } = body;
++  const { contentType, contentLength, sha256Hash } = body;
+ 
+   const linkUploadedMedia = (mediaId: string) => {
+-    if (datasetId && datasetItemId) {
++    if ("datasetId" in body && body.datasetId && body.datasetItemId) {
+       return declarePendingDatasetItemMedia({
+         projectId,
+-        datasetId,
+-        datasetItemId,
++        datasetId: body.datasetId,
++        datasetItemId: body.datasetItemId,
+         mediaId,
+-        field: field as DatasetItemMediaField,
++        field: body.field as DatasetItemMediaField,
+       });
+     }
+-    // Validation guarantees a trace context here (traceId + field).
+-    if (traceId && field) {
++    if ("traceId" in body && body.traceId && body.field) {
+       return linkMediaToTraceOrObservation({
+         projectId,
+-        traceId,
+-        observationId,
++        traceId: body.traceId,
++        observationId: body.observationId,
+         mediaId,
+-        field,
++        field: body.field,
+         origin: MediaAssociationOrigin.CLIENT_UPLOAD,
+       });
+     }
+@@ -84,6 +80,10 @@ export async function createMediaUploadUrl(params: {
+         existingMedia.uploadHttpStatus === 201) &&
+       existingMedia.contentType === contentType
+     ) {
++      await prisma.media.update({
++        where: { projectId_id: { projectId, id: mediaId } },
++        data: { updatedAt: new Date() },
++      });
+       await linkUploadedMedia(mediaId);
+ 
+       return GetMediaUploadUrlResponseSchema.parse({
+@@ -184,12 +184,17 @@ export async function updateMediaUploadStatus(params: {
+   const { uploadedAt, uploadHttpStatus, uploadHttpError, uploadTimeMs } = body;
+ 
+   try {
+-    await prisma.media.update({
++    const isSuccessful = uploadHttpStatus === 200 || uploadHttpStatus === 201;
++    const result = await prisma.media.updateMany({
+       where: {
+-        projectId_id: {
+-          projectId,
+-          id: mediaId,
+-        },
++        projectId,
++        id: mediaId,
++        ...(!isSuccessful && {
++          OR: [
++            { uploadHttpStatus: null },
++            { uploadHttpStatus: { notIn: [200, 201] } },
++          ],
++        }),
+       },
+       data: {
+         uploadedAt,
+@@ -201,6 +206,19 @@ export async function updateMediaUploadStatus(params: {
+       },
+     });
+ 
++    if (result.count === 0) {
++      const existingMedia = await prisma.media.findUnique({
++        where: { projectId_id: { projectId, id: mediaId } },
++        select: { id: true },
++      });
++      if (!existingMedia) {
++        throw new LangfuseNotFoundError(
++          `Media asset ${mediaId} not found in project ${projectId}`,
++        );
++      }
++      return;
++    }
++
+     recordIncrement("langfuse.media.upload_http_status", 1, {
+       status_code: uploadHttpStatus,
+     });
+@@ -211,14 +229,7 @@ export async function updateMediaUploadStatus(params: {
+       });
+     }
+   } catch (error) {
+-    if (
+-      error instanceof Prisma.PrismaClientKnownRequestError &&
+-      error.code === "P2025"
+-    ) {
+-      throw new LangfuseNotFoundError(
+-        `Media asset ${mediaId} not found in project ${projectId}`,
+-      );
+-    }
++    if (isBaseError(error)) throw error;
+ 
+     const message = error instanceof Error ? error.message : "";
+     throw new InternalServerError(
+@@ -226,3 +237,71 @@ export async function updateMediaUploadStatus(params: {
+     );
+   }
+ }
++
++/** Reclaims expired uploads that have never acquired a saved reference. */
++export async function deleteUnassociatedVideos(
++  projectId: string,
++  retentionDays: number,
++) {
++  const cutoff = new Date(Date.now() - retentionDays * 86_400_000);
++  const expiredAndUnassociated = Prisma.sql`
++    m.project_id = ${projectId}
++    AND m.content_type = 'video/mp4'
++    AND m.updated_at < ${cutoff}
++    AND NOT EXISTS (
++      SELECT 1 FROM trace_media t
++      WHERE t.project_id = m.project_id AND t.media_id = m.id
++    )
++    AND NOT EXISTS (
++      SELECT 1 FROM observation_media o
++      WHERE o.project_id = m.project_id AND o.media_id = m.id
++    )
++    AND NOT EXISTS (
++      SELECT 1 FROM dataset_item_media d
++      WHERE d.project_id = m.project_id AND d.media_id = m.id
++    )
++  `;
++  const candidates = await prisma.$queryRaw<
++    Prisma.MediaGetPayload<{ select: { id: true } }>[]
++  >`
++    SELECT m.id FROM media m WHERE ${expiredAndUnassociated}
++    ORDER BY m.updated_at, m.id LIMIT 10
++  `;
++
++  let deleted = 0;
++  for (const candidate of candidates) {
++    try {
++      deleted += await prisma.$transaction(
++        async (tx) => {
++          await lockMediaRecords(tx, projectId, [candidate.id]);
++
++          // Recheck after taking the same lock as reference creation.
++          const eligible = await tx.$queryRaw<
++            Prisma.MediaGetPayload<{
++              select: { id: true; bucketPath: true; bucketName: true };
++            }>[]
++          >`
++          SELECT m.id, m.bucket_path AS "bucketPath", m.bucket_name AS "bucketName"
++          FROM media m WHERE m.id = ${candidate.id} AND ${expiredAndUnassociated}
++        `;
++          const media = eligible[0];
++          if (!media) return 0;
++
++          await getMediaStorageServiceClient(media.bucketName).deleteFiles([
++            media.bucketPath,
++          ]);
++          await tx.media.delete({
++            where: { projectId_id: { projectId, id: media.id } },
++          });
++          return 1;
++        },
++        { timeout: 120_000 },
++      );
++    } catch (error) {
++      if (!(error instanceof LangfuseNotFoundError)) throw error;
++      // Another cleanup request already removed this candidate.
++    }
++  }
++
++  return { deleted, hasMore: candidates.length === 10 };
++}
+diff --git a/web/src/features/playground/page/components/JumpToPlaygroundDropdownMenuController.tsx b/web/src/features/playground/page/components/JumpToPlaygroundDropdownMenuController.tsx
+index 9387400..4f90fc1 100644
+--- a/web/src/features/playground/page/components/JumpToPlaygroundDropdownMenuController.tsx
++++ b/web/src/features/playground/page/components/JumpToPlaygroundDropdownMenuController.tsx
+@@ -69,6 +69,10 @@ export type JumpToPlaygroundSourceProps =
+         output: string | null;
+       };
+       analyticsEventName: "trace_detail:test_in_playground_button_click";
++    }
++  | {
++      source: "dataset_item";
++      datasetItem: { id: string; input: unknown } | null;
+     };
+ 
+ type JumpToPlaygroundDropdownMenuControllerProps =
+@@ -84,6 +88,7 @@ type JumpToPlaygroundDropdownMenuControllerProps =
+ export function useJumpToPlayground(
+   props:
+     | Extract<JumpToPlaygroundSourceProps, { source: "prompt" }>
++    | Extract<JumpToPlaygroundSourceProps, { source: "dataset_item" }>
+     | (Omit<
+         Extract<JumpToPlaygroundSourceProps, { source: "generation" }>,
+         "generation"
+@@ -103,8 +108,9 @@ export function useJumpToPlayground(
+   const [includeOutput, setIncludeOutput] = useState(false);
+ 
+   // Generate a stable window ID based on the source data
+-  const sourceId =
+-    props.source === "prompt" ? props.prompt.id : props.generation?.id;
++  let sourceId = props.source === "prompt" ? props.prompt.id : undefined;
++  if (props.source === "dataset_item") sourceId = props.datasetItem?.id;
++  if (props.source === "generation") sourceId = props.generation?.id;
+   const stableWindowId = useMemo(() => {
+     return `playground-${props.source}-${sourceId}`;
+   }, [props.source, sourceId]);
+@@ -139,21 +145,37 @@ export function useJumpToPlayground(
+   const prompt = props.source === "prompt" ? props.prompt : undefined;
+   const generation =
+     props.source === "generation" ? (props.generation ?? undefined) : undefined;
++  const datasetItem =
++    props.source === "dataset_item" ? props.datasetItem : undefined;
+   const capturedState = useMemo(() => {
++    if (datasetItem) {
++      const result = normalizeInput(datasetItem.input);
++      if (!result.success) return null;
++
++      const messages = result.data
++        .map(convertChatMlToPlayground)
++        .filter((message) => message !== null);
++
++      return messages.length > 0
++        ? { messages, tools: extractTools(result.data) }
++        : null;
++    }
+     if (prompt) return parsePrompt(prompt);
+     if (generation) {
+       return parseGeneration(generation, modelToProviderMap, includeOutput);
+     }
+     return null;
+-  }, [prompt, generation, modelToProviderMap, includeOutput]);
++  }, [datasetItem, prompt, generation, modelToProviderMap, includeOutput]);
+   const isAvailable = capturedState !== null;
+ 
+   const handlePlaygroundAction = useCallback(
+     (action: JumpToPlaygroundAction) => {
+       const useFreshPlayground = action === "fresh";
+-      capture(props.analyticsEventName, {
+-        playgroundMode: useFreshPlayground ? "fresh" : "add_to_existing",
+-      });
++      if (props.source !== "dataset_item") {
++        capture(props.analyticsEventName, {
++          playgroundMode: useFreshPlayground ? "fresh" : "add_to_existing",
++        });
++      }
+ 
+       // First, ensure we have state to save
+       if (!capturedState) {
+@@ -207,7 +229,7 @@ export function useJumpToPlayground(
+       capturedState,
+       clearAllCache,
+       projectId,
+-      props.analyticsEventName,
++      props,
+       router,
+       stableWindowId,
+       windowIds,
+@@ -219,7 +241,7 @@ export function useJumpToPlayground(
+     : "Test in LLM playground is not available since messages are not in valid ChatML format or tool calls have been used. If you think this is not correct, please open a GitHub issue.";
+ 
+   const menu =
+-    props.source === "prompt" ? (
++    props.source !== "generation" ? (
+       <JumpToPlaygroundMenu
+         source="prompt"
+         onPlaygroundAction={handlePlaygroundAction}
+diff --git a/web/src/features/playground/page/components/Messages.tsx b/web/src/features/playground/page/components/Messages.tsx
+index 1e3f43e..3a5261a 100644
+--- a/web/src/features/playground/page/components/Messages.tsx
++++ b/web/src/features/playground/page/components/Messages.tsx
+@@ -45,7 +45,8 @@ export const Messages: React.FC<MessagesContext> = (props) => {
+ };
+ 
+ const SubmitButton = () => {
+-  const { handleSubmit, isStreaming } = usePlaygroundContext();
++  const { handleSubmit, isStreaming, isUploadingMedia } =
++    usePlaygroundContext();
+   const defaultStreamingEnabled =
+     env.NEXT_PUBLIC_LANGFUSE_PLAYGROUND_STREAMING_ENABLED_DEFAULT === "true";
+   const [streamingEnabled, setStreamingEnabled] = useLocalStorage(
+@@ -63,8 +64,9 @@ const SubmitButton = () => {
+           );
+         }}
+         loading={isStreaming}
++        disabled={isUploadingMedia}
+       >
+-        <p>Submit</p>
++        <p>{isUploadingMedia ? "正在上传视频…" : "Submit"}</p>
+       </Button>
+       <DropdownMenu>
+         <DropdownMenuTrigger asChild>
+diff --git a/web/src/features/playground/page/context/PlaygroundProvider.tsx b/web/src/features/playground/page/context/PlaygroundProvider.tsx
+--- a/web/src/features/playground/page/context/PlaygroundProvider.tsx
++++ b/web/src/features/playground/page/context/PlaygroundProvider.tsx
+@@ -16,6 +16,7 @@
+ import usePlaygroundCache from "@/src/features/playground/page/hooks/usePlaygroundCache";
+ import { usePostHogClientCapture } from "@/src/features/posthog-analytics";
+ import useProjectIdFromURL from "@/src/hooks/useProjectIdFromURL";
++import { parseSSEBuffer } from "@/src/hooks/useSSEDashboardQuery";
+ import {
+   ChatMessageRole,
+   extractVariables,
+@@ -79,6 +80,8 @@
+ 
+   handleSubmit: (streaming?: boolean) => Promise<void>;
+   isStreaming: boolean;
++  isUploadingMedia: boolean;
++  beginMediaUpload: () => () => void;
+ 
+   // Scroll-into-view for a freshly appended message (LFE-6864). ChatMessages
+   // owns the row/editor registry and registers its scroll helper here; append
+@@ -128,6 +131,17 @@
+   const [outputJson, setOutputJson] = useState("");
+   const [isStreaming, setIsStreaming] = useState(false);
+   const isStreamingRef = useRef(isStreaming);
++  const pendingMediaUploads = useRef(0);
++  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
++  const beginMediaUpload = useCallback(() => {
++    pendingMediaUploads.current += 1;
++    setIsUploadingMedia(true);
++
++    return () => {
++      pendingMediaUploads.current -= 1;
++      setIsUploadingMedia(pendingMediaUploads.current > 0);
++    };
++  }, []);
+   const [tools, setTools] = useState<PlaygroundTool[]>([]);
+   const [structuredOutputSchema, setStructuredOutputSchema] =
+     useState<PlaygroundSchema | null>(null);
+@@ -353,6 +367,15 @@
+ 
+   const handleSubmit: PlaygroundContextType["handleSubmit"] = useCallback(
+     async (streaming = true) => {
++      if (pendingMediaUploads.current > 0) {
++        showErrorToast("视频正在上传", "请等待视频上传完成后再提交。", {
++          operation: "playground.execute",
++          errorOrigin: "frontend",
++          errorCategory: "user_input",
++        });
++        return;
++      }
++
+       try {
+         setIsStreaming(true);
+         setOutput("");
+@@ -391,7 +414,10 @@
+         }
+ 
+         let response = "";
+-        if (tools.length > 0) {
++        if (
++          tools.length > 0 ||
++          finalMessages.some((msg) => msg.type === ChatMessageType.ToolResult)
++        ) {
+           const completion = await getChatCompletionWithTools(
+             projectId,
+             finalMessages,
+@@ -431,9 +457,13 @@
+               modelParams,
+             );
+ 
+-            for await (const token of completionStream) {
+-              response += token;
+-              setOutput(response);
++            for await (const chunk of completionStream) {
++              if (chunk.type === "reasoning-delta") {
++                setOutputReasoning((previous) => previous + chunk.delta);
++              } else {
++                response += chunk.delta;
++                setOutput(response);
++              }
+             }
+           } else {
+             const result = await getChatCompletionNonStreaming(
+@@ -614,6 +644,7 @@
+         isStreamingRef.current = false;
+       },
+       getIsStreaming: () => isStreamingRef.current,
++      getIsUploadingMedia: () => pendingMediaUploads.current > 0,
+       hasModelConfigured: () => {
+         return Boolean(modelParams.provider.value && modelParams.model.value);
+       },
+@@ -762,6 +793,8 @@
+         outputToolCalls,
+         handleSubmit,
+         isStreaming,
++        isUploadingMedia,
++        beginMediaUpload,
+         scrollToMessage,
+         registerScrollToMessage,
+ 
+@@ -866,22 +899,14 @@
+   modelParams: UIModelParams,
+ ) {
+   if (!projectId) {
+-    console.error("Project ID is not set");
+-    return;
++    throw new Error("Project ID is not set");
+   }
+-
+-  const hasToolResults = messages.some(
+-    (msg) => msg.type === ChatMessageType.ToolResult,
+-  );
+ 
+   const body = JSON.stringify({
+     projectId,
+     messages,
+     modelParams: getFinalModelParams(modelParams),
+     streaming: true,
+-    // Include empty tools array if there are tool result messages to ensure processing
+-    // E.g. if tool call was picked up through traces but not defined
+-    ...(hasToolResults && { tools: [] }),
+   });
+ 
+   const result = await fetch(
+@@ -905,17 +930,53 @@
+   }
+ 
+   const decoder = new TextDecoder("utf-8");
++  let buffer = "";
++  let hasText = false;
+   try {
+     while (true) {
+       const { done, value } = await reader.read();
+-      if (done) break;
+-
+-      const token = decoder.decode(value);
+-
+-      yield token;
++      if (done) throw new Error("Completion stream ended unexpectedly");
++
++      buffer += decoder.decode(value, { stream: true });
++      const { events, remaining } = parseSSEBuffer(buffer);
++      buffer = remaining;
++
++      for (const event of events) {
++        if (event.data === "[DONE]") return;
++
++        const chunk: unknown = JSON.parse(event.data);
++        if (typeof chunk !== "object" || chunk === null || !("type" in chunk))
++          continue;
++
++        if (
++          chunk.type === "error" &&
++          "errorText" in chunk &&
++          typeof chunk.errorText === "string"
++        ) {
++          throw new Error(`Completion failed: ${chunk.errorText}`);
++        }
++        if (
++          chunk.type === "finish" &&
++          "finishReason" in chunk &&
++          chunk.finishReason === "length" &&
++          !hasText
++        ) {
++          throw new Error(
++            "Output token limit reached before the model produced an answer. Thinking tokens share this limit. Increase Output token limit or reduce the model's reasoning budget.",
++          );
++        }
++        if (
++          (chunk.type === "text-delta" || chunk.type === "reasoning-delta") &&
++          "delta" in chunk &&
++          typeof chunk.delta === "string"
++        ) {
++          if (chunk.type === "text-delta" && chunk.delta.length > 0) {
++            hasText = true;
++          }
++          yield { type: chunk.type, delta: chunk.delta };
++        }
++      }
+     }
+-  } catch (error) {
+-    throw error;
+   } finally {
+     reader.releaseLock();
+   }
+diff --git a/web/src/features/playground/page/hooks/useWindowCoordination.ts b/web/src/features/playground/page/hooks/useWindowCoordination.ts
+index e6f1216..843efa5 100644
+--- a/web/src/features/playground/page/hooks/useWindowCoordination.ts
++++ b/web/src/features/playground/page/hooks/useWindowCoordination.ts
+@@ -110,6 +110,15 @@ export const useWindowCoordination = (): WindowCoordinationReturn => {
+       return;
+     }
+ 
++    if (registeredWindows.some((handle) => handle.getIsUploadingMedia())) {
++      showErrorToast("视频正在上传", "请等待所有视频上传完成后再执行。", {
++        operation: "playground.execute",
++        errorOrigin: "frontend",
++        errorCategory: "user_input",
++      });
++      return;
++    }
++
+     // Check if any windows are already executing
+     const alreadyExecuting = registeredWindows.some((handle) =>
+       handle.getIsStreaming(),
+diff --git a/web/src/features/playground/page/types.ts b/web/src/features/playground/page/types.ts
+index 80a458c..a9672c0 100644
+--- a/web/src/features/playground/page/types.ts
++++ b/web/src/features/playground/page/types.ts
+@@ -59,6 +59,7 @@ export interface PlaygroundHandle {
+   stopExecution: () => void;
+   /** Getter for current streaming state */
+   getIsStreaming: () => boolean;
++  getIsUploadingMedia: () => boolean;
+   /** Getter for whether a model is configured */
+   hasModelConfigured: () => boolean;
+ }
+diff --git a/web/src/features/playground/server/chatCompletionHandler.ts b/web/src/features/playground/server/chatCompletionHandler.ts
+index 7802d5c..1654133 100644
+--- a/web/src/features/playground/server/chatCompletionHandler.ts
++++ b/web/src/features/playground/server/chatCompletionHandler.ts
+@@ -11,6 +11,8 @@ import { validateChatCompletionBody } from "./validateChatCompletionBody";
+ 
+ import { env } from "@/src/env.mjs";
+ import {
++  compileLangfuseMediaMessages,
++  createUIMessageStreamResponse,
+   createLLMOutput,
+   createLLMToolSet,
+   generateLLMText,
+@@ -21,6 +23,7 @@ import {
+   mapLegacyLLMCompletionParams,
+   resolveLlmApiKey,
+   streamLLMText,
++  toUIMessageStream,
+ } from "@langfuse/shared/src/server";
+ import * as opentelemetry from "@opentelemetry/api";
+ 
+@@ -95,11 +98,21 @@ export default async function chatCompletionHandler(req: NextRequest) {
+             })
+           : messages;
+ 
+-      const completionParams = mapLegacyLLMCompletionParams({
+-        connection: llmApiKey,
+-        messages: fixedMessages,
+-        modelParams,
+-      });
++      const { providerMessages, traceMessages } =
++        await compileLangfuseMediaMessages({
++          projectId: body.projectId,
++          messages: fixedMessages,
++          adapter: llmApiKey.adapter,
++        });
++      const completionParams = {
++        ...mapLegacyLLMCompletionParams({
++          connection: llmApiKey,
++          messages: fixedMessages,
++          modelParams,
++        }),
++        messages: providerMessages,
++        traceInput: traceMessages,
++      };
+       const nonStreamingCompletionParams = {
+         ...completionParams,
+         timeout: getClientInitiatedNonStreamingLlmTimeoutMs(),
+@@ -138,15 +151,17 @@ export default async function chatCompletionHandler(req: NextRequest) {
+ 
+       if (streaming) {
+         const completion = await streamLLMText(completionParams);
+-        return new Response(
+-          completion.textStream.pipeThrough(new TextEncoderStream()),
+-          {
+-            status: 200,
+-            headers: {
+-              "Content-Type": "text/plain; charset=utf-8",
++        return createUIMessageStreamResponse({
++          stream: toUIMessageStream({
++            stream: completion.stream,
++            onError(error) {
++              const message =
++                getLLMErrorInfo(error)?.message ?? "An internal error occurred";
++              logger.error("Failed to stream chat completion", { message });
++              return message;
+             },
+-          },
+-        );
++          }),
++        });
+       }
+       const completion = await generateLLMText(nonStreamingCompletionParams);
+       return NextResponse.json({
+diff --git a/web/src/server/api/routers/media.ts b/web/src/server/api/routers/media.ts
+index 4b30ee2..56d307b 100644
+--- a/web/src/server/api/routers/media.ts
++++ b/web/src/server/api/routers/media.ts
+@@ -8,7 +8,10 @@ import {
+ } from "@/src/server/api/trpc";
+ import { TRPCError } from "@trpc/server";
+ import {
+-  type MediaContentType,
++  createMediaUploadUrl,
++  MediaContentType,
++  PatchMediaBodySchema,
++  updateMediaUploadStatus,
+   type MediaReturnType,
+ } from "@/src/features/media/server";
+ import { type MediaEnabledFields } from "@/src/features/media/validation";
+@@ -18,6 +21,79 @@ import { InvalidRequestError } from "@langfuse/shared";
+ import { logger } from "@langfuse/shared/src/server";
+ 
+ export const mediaRouter = createTRPCRouter({
++  getPlaygroundUploadUrl: protectedProjectProcedure
++    .input(
++      z.object({
++        projectId: z.string(),
++        contentType: z.literal(MediaContentType.MP4),
++        contentLength: z
++          .number()
++          .positive()
++          .int()
++          .max(
++            Math.min(
++              100 * 1024 * 1024,
++              env.LANGFUSE_S3_MEDIA_MAX_CONTENT_LENGTH,
++            ),
++          ),
++        sha256Hash: z.string().regex(/^[A-Za-z0-9+/=]{44}$/),
++      }),
++    )
++    .mutation(async ({ input, ctx }) => {
++      throwIfNoProjectAccess({
++        session: ctx.session,
++        projectId: input.projectId,
++        scope: "playground:execute",
++      });
++
++      const result = await createMediaUploadUrl({
++        projectId: input.projectId,
++        body: input,
++      });
++
++      return {
++        ...result,
++        uploadHeaders: { "x-amz-checksum-sha256": input.sha256Hash },
++      };
++    }),
++  markPlaygroundUploadComplete: protectedProjectProcedure
++    .input(
++      PatchMediaBodySchema.extend({
++        projectId: z.string(),
++        mediaId: z.string(),
++      }),
++    )
++    .mutation(async ({ input, ctx }) => {
++      throwIfNoProjectAccess({
++        session: ctx.session,
++        projectId: input.projectId,
++        scope: "playground:execute",
++      });
++
++      const media = await ctx.prisma.media.findUnique({
++        where: {
++          projectId_id: {
++            projectId: input.projectId,
++            id: input.mediaId,
++          },
++        },
++        select: { contentType: true },
++      });
++      if (media?.contentType !== MediaContentType.MP4) {
++        throw new TRPCError({
++          code: "NOT_FOUND",
++          message: "Video upload not found",
++        });
++      }
++
++      await updateMediaUploadStatus({
++        projectId: input.projectId,
++        mediaId: input.mediaId,
++        body: input,
++      });
++
++      return { success: true as const };
++    }),
+   resolveExternalMedia: protectedProjectProcedure
+     .input(z.object({ projectId: z.string(), uri: z.string() }))
+     .query(async ({ input, ctx }) => {
+diff --git a/web/src/utils/chatml/playgroundConverter.ts b/web/src/utils/chatml/playgroundConverter.ts
+index 188b9cd..ab99f15 100644
+--- a/web/src/utils/chatml/playgroundConverter.ts
++++ b/web/src/utils/chatml/playgroundConverter.ts
+@@ -5,6 +5,7 @@ import {
+   ChatMessageType,
+   isOpenAITextContentPart,
+   isOpenAIImageContentPart,
++  findMediaReferences,
+   type ChatMessage,
+   type PlaceholderMessage,
+ } from "@langfuse/shared";
+@@ -28,6 +29,23 @@ function contentToString(content: unknown): string {
+     for (const item of content) {
+       if (isOpenAITextContentPart(item)) {
+         textParts.push(item.text);
++        continue;
++      }
++
++      const isMediaPart =
++        typeof item === "string" ||
++        (item !== null &&
++          typeof item === "object" &&
++          "type" in item &&
++          typeof item.type === "string" &&
++          ["image_url", "video_url", "input_audio", "file"].includes(
++            item.type,
++          ));
++      if (!isMediaPart) return JSON.stringify(content);
++
++      const media = findMediaReferences(item);
++      if (media.length > 0) {
++        textParts.push(...media.map((reference) => reference.referenceString));
+       } else if (isOpenAIImageContentPart(item)) {
+         textParts.push("[Image]");
+       } else if (
+@@ -37,6 +55,8 @@ function contentToString(content: unknown): string {
+         item.type === "input_audio"
+       ) {
+         textParts.push("[Audio]");
++      } else {
++        return JSON.stringify(content);
+       }
+     }
+ 
+diff --git a/web/src/features/playground/page/hooks/usePlaygroundVideoUpload.ts b/web/src/features/playground/page/hooks/usePlaygroundVideoUpload.ts
+new file mode 100644
+index 0000000..4c02e23
+--- /dev/null
++++ b/web/src/features/playground/page/hooks/usePlaygroundVideoUpload.ts
+@@ -0,0 +1,105 @@
++import { Sha256 } from "@aws-crypto/sha256-browser";
++import { useCallback, useRef, useState } from "react";
++import { type EditorView } from "@uiw/react-codemirror";
++
++import useProjectIdFromURL from "@/src/hooks/useProjectIdFromURL";
++import { api } from "@/src/utils/api";
++import { MediaContentType } from "@/src/features/media";
++import { useOptionalPlaygroundContext } from "@/src/features/playground/page/context/PlaygroundProvider";
++
++export function usePlaygroundVideoUpload() {
++  const projectId = useProjectIdFromURL();
++  const beginMediaUpload = useOptionalPlaygroundContext()?.beginMediaUpload;
++  const { mutateAsync: getUploadUrl } =
++    api.media.getPlaygroundUploadUrl.useMutation();
++  const { mutateAsync: markUploadComplete } =
++    api.media.markPlaygroundUploadComplete.useMutation();
++  const busy = useRef(false);
++  const [isUploading, setIsUploading] = useState(false);
++  const [error, setError] = useState<string | null>(null);
++
++  const uploadFiles = useCallback(
++    async (files: File[], view: EditorView, anchor?: number) => {
++      if (
++        busy.current ||
++        !projectId ||
++        !beginMediaUpload ||
++        !view.dom.isConnected
++      )
++        return;
++      busy.current = true;
++      const finishMediaUpload = beginMediaUpload();
++      setIsUploading(true);
++      setError(null);
++
++      let position = anchor ?? view.state.selection.main.from;
++      try {
++        for (const file of files) {
++          if (
++            file.type !== "video/mp4" &&
++            !(file.type === "" && /\.mp4$/i.test(file.name))
++          ) {
++            throw new Error("请选择 MP4 视频。");
++          }
++          if (file.size === 0 || file.size > 100 * 1024 * 1024) {
++            throw new Error("视频不能为空，且不能超过 100 MiB。");
++          }
++
++          const hash = new Sha256();
++          hash.update(new Uint8Array(await file.arrayBuffer()));
++          const digest = await hash.digest();
++          const sha256Hash = btoa(String.fromCharCode(...digest));
++          const { mediaId, uploadUrl, uploadHeaders } = await getUploadUrl({
++            projectId,
++            contentType: MediaContentType.MP4,
++            contentLength: file.size,
++            sha256Hash,
++          });
++
++          if (uploadUrl) {
++            const startedAt = Date.now();
++            const response = await fetch(uploadUrl, {
++              method: "PUT",
++              headers: { "Content-Type": "video/mp4", ...uploadHeaders },
++              body: file,
++              signal: AbortSignal.timeout(120_000),
++            });
++            await markUploadComplete({
++              projectId,
++              mediaId,
++              uploadedAt: new Date(),
++              uploadHttpStatus: response.status,
++              uploadTimeMs: Date.now() - startedAt,
++            });
++            if (!response.ok) {
++              throw new Error(
++                `视频上传失败（HTTP ${response.status}），请重试。`,
++              );
++            }
++          }
++
++          if (!view.dom.isConnected) return;
++          position = Math.min(position, view.state.doc.length);
++          const reference = `@@@langfuseMedia:type=video/mp4|id=${mediaId}|source=bytes@@@`;
++          const insert = `\n${reference}\n`;
++          view.dispatch({
++            changes: { from: position, insert },
++            selection: { anchor: position + insert.length },
++          });
++          position += insert.length;
++        }
++      } catch (cause) {
++        setError(
++          cause instanceof Error ? cause.message : "视频导入失败，请重试。",
++        );
++      } finally {
++        busy.current = false;
++        setIsUploading(false);
++        finishMediaUpload();
++      }
++    },
++    [projectId, beginMediaUpload, getUploadUrl, markUploadComplete],
++  );
++
++  return { uploadFiles, isUploading, error };
++}
+diff --git a/web/src/pages/api/internal/playground-media/cleanup.ts b/web/src/pages/api/internal/playground-media/cleanup.ts
+new file mode 100644
+index 0000000..eefd900
+--- /dev/null
++++ b/web/src/pages/api/internal/playground-media/cleanup.ts
+@@ -0,0 +1,20 @@
++import { z } from "zod";
++
++import { deleteUnassociatedVideos } from "@/src/features/media/server";
++import { createAuthedProjectAPIRoute } from "@/src/features/public-api/server/createAuthedProjectAPIRoute";
++import { withMiddlewares } from "@/src/features/public-api/server/withMiddlewares";
++import { ForbiddenError } from "@langfuse/shared";
++
++export default withMiddlewares({
++  POST: createAuthedProjectAPIRoute({
++    name: "Clean up unused Playground videos",
++    action: "media:create",
++    bodySchema: z.object({ retentionDays: z.number().int().min(3) }),
++    responseSchema: z.object({ deleted: z.number(), hasMore: z.boolean() }),
++    fn: async ({ body, auth }) => {
++      if (auth.scope.accessLevel !== "project") throw new ForbiddenError();
++
++      return deleteUnassociatedVideos(auth.scope.projectId, body.retentionDays);
++    },
++  }),
++});

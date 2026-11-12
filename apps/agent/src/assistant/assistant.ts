@@ -1,5 +1,4 @@
 import { local, opaque, type Host, type Ref } from "@earendil-works/chord";
-import { randomUUID } from "node:crypto";
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
@@ -21,6 +20,7 @@ import { AgentRuntime, getServiceInstance } from "../runtime";
 import { PromptBindingDoc } from "../prompts";
 
 const assistantPromptName = "household-assistant";
+export const householdAgentName = "家庭主Agent";
 
 export function configureAssistant({
   modelRuntime,
@@ -38,7 +38,7 @@ export function configureAssistant({
     ...(subagentModelRefs ?? []),
   ]);
 
-  const sessionId = randomUUID();
+  let sessionId: string | undefined;
   let assistantRuntime: Parameters<typeof createAssistant>[0];
 
   const subagentExtension = defineExtension({
@@ -61,14 +61,20 @@ export function configureAssistant({
         replay: "safe",
         execute: async (args, api, context) => {
           const { harness } = assistantRuntime;
-          const childExtensions = (await api.agent(context)).extensions.filter(
+          const parentAgent = await api.agent(context);
+          const childExtensions = parentAgent.extensions.filter(
             (extension) => extension.name !== subagentExtension.name,
           );
-          const childId = await api.commit(async (tx) => {
-            const existing = (
-              await tx.scanConversations({ ownerTaskId: api.taskId }, 1)
-            ).items[0];
-            if (existing) return existing.id;
+          const parentPromptState = await api.snapshot(
+            PromptBindingDoc,
+            api.conversationId,
+            context,
+          );
+          const parentPrompt = parentPromptState?.prompt;
+          if (!parentPrompt)
+            throw new Error("The parent conversation has no managed prompt");
+
+          const childId = await harness.commit(async (tx) => {
             const childModel =
               args.model === undefined
                 ? undefined
@@ -76,41 +82,32 @@ export function configureAssistant({
             if (args.model !== undefined && !childModel)
               throw new Error("The requested subagent model is not configured");
 
-            const parentPromptState = await tx.doc(
-              PromptBindingDoc,
-              api.conversationId,
-            );
-            if (!parentPromptState.prompt)
-              throw new Error("The parent conversation has no managed prompt");
-
             const childConversation = await tx.createConversation({
-              ownership: { kind: "task", taskId: api.taskId },
+              ownership: { kind: "ownerless" },
             });
             const childPromptState = await tx.doc(
               PromptBindingDoc,
               childConversation.id,
             );
-            childPromptState.prompt = parentPromptState.prompt;
+            childPromptState.prompt = parentPrompt;
 
+            const delegatedModel = childModel
+              ? { provider: childModel.provider, modelId: childModel.id }
+              : parentAgent.model;
             await configure(tx, childConversation.id, {
-              ...(childModel
-                ? {
-                    model: {
-                      provider: childModel.provider,
-                      modelId: childModel.id,
-                    },
-                  }
-                : {}),
+              ...(delegatedModel ? { model: delegatedModel } : {}),
+              ...(parentAgent.cwd ? { cwd: parentAgent.cwd } : {}),
+              thinkingLevel: parentAgent.thinkingLevel,
               extensions: childExtensions,
             });
             return childConversation.id;
           }, context);
-          const child = await api.conversation(childId, context);
+          const child = await harness.conversation(childId, context);
           if (!child)
             throw new Error("The delegated conversation is unavailable");
           await using conversation = await harness.prepareManagedConversation({
             conversation: child,
-            agentName: "household-assistant",
+            agentName: "家庭子Agent",
             sessionId,
             context,
           });
@@ -126,7 +123,7 @@ export function configureAssistant({
           const settled = await submission.wait(context);
           if (settled.status !== "done" || settled.type !== "input")
             throw new Error("The delegated task did not complete");
-          const entry = await api.commit(
+          const entry = await harness.commit(
             (tx) => tx.entry(AssistantEntry, settled.answer),
             context,
           );
@@ -158,11 +155,10 @@ export function configureAssistant({
     signal.throwIfAborted();
     if (!model) return undefined;
     const startupContext = withAbortSignal(signal, BACKGROUND_CONTEXT);
-    const { harness, workspacePath } = runtime;
+    const { mainHarness, workspacePath } = runtime;
     assistantRuntime = runtime;
-    return harness.root(startupContext, {
-      agentName: "household-assistant",
-      sessionId,
+    const conversation = await mainHarness.root(startupContext, {
+      agentName: householdAgentName,
       prompt: { name: assistantPromptName },
       agent: {
         model: { provider: model.provider, modelId: model.id },
@@ -170,6 +166,15 @@ export function configureAssistant({
         extensions,
       },
     });
+    await conversation.configure(
+      {
+        model: { provider: model.provider, modelId: model.id },
+        cwd: workspacePath,
+      },
+      startupContext,
+    );
+    sessionId = conversation.sessionId;
+    return conversation;
   }
 
   const Assistant = local("home.agent.assistant", {

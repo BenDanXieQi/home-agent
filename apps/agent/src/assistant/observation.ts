@@ -1,34 +1,27 @@
 import {
   observeAgentOperation,
   telemetryStatus,
-  withGenAiContext,
   type Span,
 } from "@home-agent/observability";
+import { householdAgentName } from "./assistant";
 
 export function observeConversationRequest(
-  input: { message: string; sessionId: string; conversationId: number },
+  input: { message: string },
   execute: () => Promise<string>,
 ) {
-  return withGenAiContext(
+  return observeAgentOperation(
+    householdAgentName,
+    { task: input.message },
+    execute,
     {
-      "session.id": input.sessionId,
-      "gen_ai.conversation.id": String(input.conversationId),
+      onStart: (span) => {
+        recordMessage(span, "user", input.message);
+      },
+      onComplete: (span, answer) => {
+        recordMessage(span, "assistant", answer);
+        return { answer };
+      },
     },
-    () =>
-      observeAgentOperation(
-        "household-assistant",
-        { task: input.message },
-        execute,
-        {
-          onStart: (span) => {
-            recordMessage(span, "user", input.message);
-          },
-          onComplete: (span, answer) => {
-            recordMessage(span, "assistant", answer);
-            return { answer };
-          },
-        },
-      ),
   );
 }
 

@@ -21,12 +21,12 @@ Home Agent 是一个本地运行的家庭助手项目。backend 提供有来源�
 ## 当前能力
 
 - 米家登录与授权恢复、家庭选择、设备清单保存、设备规格准备、后台属性采集和带质量的当前值查询已实现。设备状态历史保存原生属性、在线通知与设备清单在线值，提供按时间、设备和记录类型筛选的只读查询。Web 可在 `/devices` 按房间查看设备和最近属性报告，在 `/device-logs` 读取、比较与导出历史报告。
-- Web 提供 Agent 聊天、成员资料与识别参考管理、家庭数据库浏览。Agent 使用 pi-durable，独立接收模块自动接收家庭上下文，并支持只读查询三类历史；主聊天模型尚未接入这些材料、家庭业务工具或持久会话。
+- Web 提供 Agent 聊天、成员资料与识别参考管理、家庭数据库浏览。Agent 使用 pi-durable，独立接收模块自动接收家庭上下文，并支持只读查询三类历史；家庭和媒体主 Agent 的会话保存到 MySQL，主聊天模型尚未接入这些材料或家庭业务工具。
 - 本地检测、人宠跟踪、参考身份关联及可修订的成员出现记录已接入；人体短期外观归因已启用，准确率与生命周期仍有专项验收限制。摄像头预览、筛选窗口、短期媒体、音频分析与本地语音转写已提供，具体使用与验证范围见[感知说明](docs/perception.md)。
 - 音视频分析 Agent 合并连续媒体区间并调用模型生成中文描述；Web `/dynamics` 展示待分析池、流式过程、实际媒体和已保存的动态历史，配置与限制见[Agent](apps/agent/README.md#音视频分析-agent)。
 - 语音判断只识别转写是否构成完整助手请求。持续职责、到期通知、Agent 多模态调查、长期记忆及设备控制闭环尚未接入，不能从已有接口或计划推定可用。
 
-当前仅供可信本机使用，每实例运行一个家庭。Agent 接收器在资格改变时清空内存数据；聊天复用进程内主会话，重启后清空，尚未接入家庭资料或设备工具。
+当前仅供可信本机使用，每实例运行一个家庭。Agent 接收器在资格改变时清空内存数据；聊天复用 MySQL 主会话，Agent 重启后恢复；家庭上下文版本变化时重置模型上下文，尚未接入家庭资料或设备工具。
 
 ## 当前服务分工
 
@@ -35,7 +35,7 @@ Home Agent 是一个本地运行的家庭助手项目。backend 提供有来源�
 | 模块              | 已实现职责                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------- |
 | `apps/backend`    | 来源接入、设备事实、成员与身份接纳、感知和媒体、动态历史、语音交付、聊天转发与 Web 静态托管 |
-| `apps/agent`      | Agent 业务实现、workflow Schema、进程内主会话、音视频分析及上下文接收与读取能力             |
+| `apps/agent`      | Agent 业务实现、workflow Schema、持久主会话、音视频分析及上下文接收与读取能力               |
 | `apps/agent-host` | Agent 进程启动、依赖装配、Backend RPC 适配与服务启停                                        |
 | `apps/web`        | 登录、设备与房间、成员、摄像头、分析与动态、设备日志、数据库浏览、聊天和设置                |
 | go2rtc            | 摄像头取流与浏览器媒体连接                                                                  |
@@ -53,7 +53,7 @@ bun run setup
 
 安装依赖时，Bun 会应用仓库中的 [pi-ai 补丁](patches/@earendil-works%252Fpi-ai@1.2.0.patch)，为 MiMo 普通接口及 CN／SGP／AMS Token Plan 模型设置 `supportsDeveloperRole: false`，使 Pi 将系统指令发送为 `system`。其他供应商仍使用 Pi 自身的协议配置；升级 pi-ai 时须核对并保留这项行为。
 
-编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。使用对话 API 时还需配置 `AGENT_MODEL`（`provider/modelId`）和所选提供商的认证，原生凭据与模型清单说明见[Agent 模型配置](apps/agent/README.md#模型配置)。
+编辑生成的 `.env`，使 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码一致。`POSTGRES_PORT` 设置 Docker 数据库的宿主机端口，须与 `DATABASE_URL` 中的端口一致；若本机 5432 已被占用，可将两处端口设为 5433。两个主 Agent 另用 MySQL：填写 `MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PORT` 与匹配的 `AGENT_DATABASE_URL`；示例见 `.env.example`。使用对话 API 时还需配置 `AGENT_MODEL`（`provider/modelId`）和所选提供商的认证，原生凭据与模型清单说明见[Agent 模型配置](apps/agent/README.md#模型配置)。
 
 ```sh
 bun run dev

@@ -29,10 +29,9 @@ type ModelRuntime = NonNullable<Ref<typeof AgentModels>["instance"]>;
 
 export type WorkflowDependencies = Pick<
   NonNullable<Ref<typeof AgentRuntime>["instance"]>,
-  "harness" | "workspacePath" | "prompts"
+  "harness"
 > & {
   model: NonNullable<ReturnType<ModelRuntime["findAvailableModel"]>>;
-  modelCollection: ModelRuntime["modelCollection"];
   contextReader: ReturnType<typeof createContextReader>;
 };
 
@@ -46,17 +45,13 @@ export function defineWorkflow<T extends WorkflowInstance>(
     version: 1,
     deps: [models, runtime],
     open: () => {
-      const { findAvailableModel, modelCollection } =
-        getServiceInstance(models);
+      const { findAvailableModel } = getServiceInstance(models);
       const model = findAvailableModel(modelRef);
       if (!model) return { run: undefined };
-      const { harness, workspacePath, prompts } = getServiceInstance(runtime);
+      const { harness } = getServiceInstance(runtime);
       return create({
         model,
-        modelCollection,
         harness,
-        workspacePath,
-        prompts,
         contextReader,
       });
     },

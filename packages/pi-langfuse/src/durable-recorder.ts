@@ -389,7 +389,8 @@ export class DurableRecorder {
         ...state.content,
         ...outcome,
       });
-      this.settleRun(record.id);
+      for (const [primary, settling] of this.settlingRuns)
+        if (settling.run.inputs.includes(record.id)) this.settleRun(primary);
     }
   }
 
@@ -506,15 +507,25 @@ export class DurableRecorder {
     const settling = this.settlingRuns.get(primary);
     const submission = this.submissions.get(primary);
     if (!settling || !submission?.terminal || !submission.outcome) return;
+    const submissions = settling.run.inputs.map((id) =>
+      this.submissions.get(id),
+    );
+    if (submissions.some((state) => !state?.terminal)) return;
+
     this.settlingRuns.delete(primary);
     this.completedRuns.add(primary);
-    const content = submission.content;
-    submission.content = {};
+    const input =
+      this.options.captureContent === false
+        ? "[content capture disabled]"
+        : submissions.flatMap((state) =>
+            Array.isArray(state?.content.input) ? state.content.input : [],
+          );
     this.end(
       settling.run.span,
-      { ...content, ...submission.outcome },
+      { input, output: submission.content.output, ...submission.outcome },
       settling.endTime,
     );
+    for (const state of submissions) if (state) state.content = {};
   }
 
   private generation() {
@@ -542,7 +553,10 @@ export class DurableRecorder {
         this.beginRun(event.inputs);
         break;
       case "run_end":
-        if (this.run?.primary === event.inputs[0]) this.closeRun();
+        if (this.run?.primary === event.inputs[0]) {
+          this.beginRun(event.inputs);
+          this.closeRun();
+        }
         break;
       case "message_start":
         if (event.message.role === "assistant") this.generation();

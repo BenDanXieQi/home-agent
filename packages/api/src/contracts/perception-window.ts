@@ -6,6 +6,7 @@ import {
   identityFrameSnapshotSchema,
   speechObservationSchema,
   petSoundAnalysisSchema,
+  memberAttributionSnapshotSchema,
 } from "./perception";
 import { mediaFrameTimeSchema, frameFingerprintSchema } from "./media";
 
@@ -163,11 +164,16 @@ export const windowListEntrySchema = windowDetailSchema
       )
       .max(40),
   });
-export const windowMarkerSchema = windowSummarySchema.pick({
-  id: true,
-  startedAt: true,
-  endedAt: true,
-});
+export const windowMarkerSchema = windowSummarySchema
+  .pick({ id: true, startedAt: true, endedAt: true })
+  .extend({
+    observation: windowSummarySchema.nullish(),
+    detectedClasses: z
+      .array(trackingObservationSchema.shape.tracks.element.shape.className)
+      .max(3)
+      .optional(),
+    memberAttributions: z.array(memberAttributionSnapshotSchema).optional(),
+  });
 export const windowListSchema = z.object({
   markers: z.array(windowMarkerSchema),
   next: z.object({ before: z.number(), beforeId: z.uuid() }).nullable(),

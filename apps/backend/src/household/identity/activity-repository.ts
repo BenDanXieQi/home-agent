@@ -51,6 +51,34 @@ export const memberSightingPositionSchema = z.strictObject({
   id: z.uuid(),
 });
 
+export async function readMemberActivitiesInRange(
+  tx: Transaction,
+  source: Pick<
+    z.infer<typeof memberActivityDataSchema>,
+    "deviceId" | "channel"
+  >,
+  start: number,
+  end: number,
+) {
+  await lockIdentityMembers(tx, "shared");
+  const firstObservedAt = sql<number>`(${contextRecords.data}->>'firstObservedAt')::numeric`;
+  const lastObservedAt = sql<number>`(${contextRecords.data}->>'lastObservedAt')::numeric`;
+  const rows = await tx
+    .select({ data: contextRecords.data })
+    .from(contextRecords)
+    .where(
+      and(
+        memberSightingTopic,
+        eq(sql`${contextRecords.data}->>'deviceId'`, source.deviceId),
+        eq(sql`${contextRecords.data}->>'channel'`, String(source.channel)),
+        lt(firstObservedAt, end),
+        gte(lastObservedAt, start),
+      ),
+    )
+    .orderBy(lastObservedAt, contextRecords.id);
+  return rows.map((row) => memberActivityDataSchema.parse(row.data));
+}
+
 async function sightingRecords(
   tx: Transaction,
   rows: (typeof contextRecords.$inferSelect)[],

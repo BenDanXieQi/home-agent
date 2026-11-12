@@ -8,6 +8,7 @@ import { applySpatialDraftOperations, spatialDraftUpdateSchema } from "./draft";
 import { spatialLayoutSchema } from "@home-agent/api/spatial";
 
 export const spatialPlanningPromptName = "spatial-planning";
+export const spatialPlanningAgentName = "空间规划Agent";
 
 export const spatialPlanningStateSchema = z.strictObject({
   questions: z.array(z.string().trim().min(1)),

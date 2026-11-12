@@ -32,21 +32,49 @@ export function matchesWindowMarker(
 }
 
 export function windowMarkers(
-  entries: readonly z.infer<typeof windowMarkerSchema>[],
+  entries: readonly (z.infer<typeof windowMarkerSchema> | Window)[],
 ) {
   const markers: z.infer<typeof windowMarkerSchema>[] = [];
   for (const entry of entries.toSorted(compareWindowPosition)) {
+    const evidence = "frames" in entry ? windowMarkerEvidence(entry) : entry;
     const previous = markers.at(-1);
-    if (previous && entry.startedAt <= previous.endedAt)
+    if (previous && entry.startedAt <= previous.endedAt) {
       previous.endedAt = Math.max(previous.endedAt, entry.endedAt);
-    else
+      previous.detectedClasses = [
+        ...new Set([
+          ...(previous.detectedClasses ?? []),
+          ...(evidence.detectedClasses ?? []),
+        ]),
+      ];
+    } else
       markers.push({
         id: entry.id,
         startedAt: entry.startedAt,
         endedAt: entry.endedAt,
+        observation: evidence.observation,
+        detectedClasses: evidence.detectedClasses,
       });
   }
   return markers;
+}
+
+function windowMarkerEvidence(entry: Window) {
+  const classes = entry.frames.flatMap((frame) => [
+    ...(frame.tracks ?? [])
+      .filter((track) => track.state === "measured")
+      .map((track) => track.className),
+    ...(frame.detections ?? []).flatMap((detection) =>
+      detection.className === "human" ||
+      detection.className === "cat" ||
+      detection.className === "dog"
+        ? [detection.className]
+        : [],
+    ),
+  ]);
+  return {
+    observation: entry,
+    detectedClasses: [...new Set(classes)],
+  };
 }
 
 export function createWindowHistoryMatcher(

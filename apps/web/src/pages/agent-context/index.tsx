@@ -291,6 +291,9 @@ export default function AgentContextPage() {
             <Notice tone="warning">
               接收连接异常：{data.connection.last_error.reason} ·{" "}
               {time(data.connection.last_error.at)}
+              {data.connection.last_error.message ? (
+                <p>{data.connection.last_error.message}</p>
+              ) : null}
             </Notice>
           ) : null}
           {tab === "receipts" ? (

@@ -258,6 +258,10 @@ export function createIdentityMatching(db: Database) {
       return pets && members?.length
         ? {
             members: members.map(({ memberId, name }) => ({ memberId, name })),
+            hasReferences:
+              current?.members.some(
+                (member) => member.enabled && member.className === className,
+              ) ?? false,
           }
         : null;
     },

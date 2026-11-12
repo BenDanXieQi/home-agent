@@ -13,6 +13,10 @@ export function attributionTime(value: number) {
 export function associationLabel(
   association: ReturnType<typeof memberAssociationSchema.parse>,
 ) {
+  if (association.basis === "pet" && association.state === "inferred") {
+    const score = association.evidence[0]?.score;
+    if (score == null || score <= 0) return "宠物身份未确认";
+  }
   return association.state === "confirmed"
     ? `系统识别为${association.memberName}`
     : `可能是${association.memberName}`;
@@ -49,7 +53,10 @@ export function associationReason(
   if (association.basis === "pet") {
     if (association.state === "confirmed")
       return `多次猫狗参考照片的特征比对结果支持这是${name}。`;
-    return `猫狗参考照片一起比较后，${name}的特征匹配分数最高，但还不能确认。`;
+    const score = association.evidence[0]?.score;
+    if (score == null || score <= 0) return "照片比对未能确认宠物身份。";
+    const species = association.className === "dog" ? "狗" : "猫";
+    return `与${species}的参考照片比对，最接近${name}（相似度 ${score.toFixed(3)}），尚未确认身份。`;
   }
   const recognition = "人脸";
   if (association.state === "confirmed")

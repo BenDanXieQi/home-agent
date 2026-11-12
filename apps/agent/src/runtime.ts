@@ -8,7 +8,11 @@ import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
 } from "@earendil-works/chord/context";
-import { Harness, MemoryStorage } from "@earendil-works/pi-durable";
+import {
+  Harness,
+  MemoryStorage,
+  type Storage,
+} from "@earendil-works/pi-durable";
 import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createObservedHarnessOptions } from "@home-agent/observability/durable";
 import { AgentModels, type initializeModelRuntime } from "./models";
@@ -33,11 +37,13 @@ async function createAgentRuntime({
   modelRuntime,
   extensions,
   promptConfiguration,
+  openMainStorage,
   signal,
 }: {
   modelRuntime: Awaited<ReturnType<typeof initializeModelRuntime>>;
   extensions: Parameters<typeof createObservedHarnessOptions>[0]["extensions"];
   promptConfiguration: Parameters<typeof createPromptResolver>[0];
+  openMainStorage: () => Promise<Storage>;
   signal: AbortSignal;
 }) {
   signal.throwIfAborted();
@@ -56,40 +62,45 @@ async function createAgentRuntime({
     (instance) => instance.cleanup(BACKGROUND_CONTEXT),
   );
 
-  const { observationExtension, extensionRegistry, ...harnessOptions } =
-    createObservedHarnessOptions({
-      sourceModelCollection: modelRuntime.modelCollection,
-      extensions,
-    });
-  const frameworkExtensions = [observationExtension];
-  const piHarness = resources.adopt(
-    await Harness.open(
-      new MemoryStorage(),
-      {
-        ...harnessOptions,
-        env: () => env,
-        onReport: (error) => {
-          console.error("Agent runtime report:", error);
+  async function openHarness(storage: Storage) {
+    resources.adopt(storage, (instance) => instance.close(BACKGROUND_CONTEXT));
+    const { observationExtension, extensionRegistry, ...harnessOptions } =
+      createObservedHarnessOptions({
+        sourceModelCollection: modelRuntime.modelCollection,
+        extensions,
+      });
+    const frameworkExtensions = [observationExtension];
+    const piHarness = resources.adopt(
+      await Harness.open(
+        storage,
+        {
+          ...harnessOptions,
+          env: () => env,
+          onReport: (error) => {
+            console.error("Agent runtime report:", error);
+          },
+          settings: {
+            extensions: frameworkExtensions,
+            stream: { maxRetries: 0 },
+            retry: { enabled: false, maxRetries: 0 },
+          },
         },
-        settings: {
-          extensions: frameworkExtensions,
-          stream: { maxRetries: 0 },
-          retry: { enabled: false, maxRetries: 0 },
-        },
-      },
-      withAbortSignal(signal, BACKGROUND_CONTEXT),
-    ),
-    (instance) => instance.close(BACKGROUND_CONTEXT),
-  );
+        withAbortSignal(signal, BACKGROUND_CONTEXT),
+      ),
+      (instance) => instance.close(BACKGROUND_CONTEXT),
+    );
+    return resources.use(
+      createAgentHarness({
+        harness: piHarness,
+        frameworkExtensions,
+        extensionRegistry,
+        prompts,
+      }),
+    );
+  }
 
-  const harness = resources.use(
-    createAgentHarness({
-      harness: piHarness,
-      frameworkExtensions,
-      extensionRegistry,
-      prompts,
-    }),
-  );
+  const harness = await openHarness(new MemoryStorage());
+  const mainHarness = await openHarness(await openMainStorage());
 
   signal.throwIfAborted();
 
@@ -99,6 +110,7 @@ async function createAgentRuntime({
   return {
     workspacePath,
     harness,
+    mainHarness,
     prompts,
     close,
     [Symbol.asyncDispose]: close,

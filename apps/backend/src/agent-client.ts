@@ -16,6 +16,7 @@ import {
   agentReceiptQuerySchema,
 } from "@home-agent/agent/context/contracts";
 import { requestJson } from "@home-agent/api/http/request-json";
+import { mediaAgentHistoryPageSchema } from "@home-agent/agent/media-analysis/session";
 import {
   bindTraceSession,
   tracedFetch,
@@ -88,6 +89,14 @@ export function createAgentClient(options: {
   }
 
   return {
+    mediaAgentHistory(before: string | undefined, signal: AbortSignal) {
+      const query = new URLSearchParams(before === undefined ? {} : { before });
+      return request(
+        `/api/media-analysis/history?${query.toString()}`,
+        mediaAgentHistoryPageSchema,
+        signal,
+      );
+    },
     async mediaAnalysis(path: string, signal: AbortSignal) {
       const url = new URL(
         `/api/media-analysis${path}`,

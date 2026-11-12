@@ -43,24 +43,20 @@ export function associateMembers(
     );
   }
   return observation.tracks.flatMap((track) => {
-    const petEvidence = track.evidence.filter((evidence) => {
-      const candidate = evidence.bestMemberId
-        ? members.get(evidence.bestMemberId)
-        : undefined;
-      return (
-        candidate &&
-        candidate.className !== "human" &&
-        evidence.score !== null &&
-        evidence.observedAt <= now &&
-        evidence.observedAt + evidenceTtlMs > now
-      );
-    });
-    const rankedEvidence =
-      petEvidence.toSorted(
+    const rankedEvidence = track.evidence
+      .filter(
+        (evidence) =>
+          evidence.bestMemberId !== null &&
+          members.has(evidence.bestMemberId) &&
+          evidence.score !== null &&
+          evidence.observedAt <= now &&
+          evidence.observedAt + evidenceTtlMs > now,
+      )
+      .toSorted(
         (a, b) =>
           (b.score ?? -Infinity) - (a.score ?? -Infinity) ||
           b.observedAt - a.observedAt,
-      )[0] ?? track.evidence.at(-1);
+      )[0];
     const rankedMember = rankedEvidence?.bestMemberId
       ? members.get(rankedEvidence.bestMemberId)
       : undefined;
@@ -70,8 +66,7 @@ export function associateMembers(
       rankedMember &&
       rankedName !== undefined &&
       rankedEvidence.score !== null &&
-      rankedEvidence.observedAt <= now &&
-      rankedEvidence.observedAt + evidenceTtlMs > now
+      rankedEvidence.score > 0
         ? {
             member: rankedMember,
             memberName: rankedName,

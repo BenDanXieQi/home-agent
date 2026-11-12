@@ -1,13 +1,12 @@
 import { withConversationProgress } from "../../conversation/progress";
 import { z } from "zod";
-import { attemptAsync, memoize } from "es-toolkit";
+import { memoize } from "es-toolkit";
 import {
   BACKGROUND_CONTEXT,
-  awaitWithContext,
   withAbortSignal,
   type Context,
 } from "@earendil-works/chord/context";
-import { ConversationBusy, LiveDoc } from "@earendil-works/pi-durable";
+import { LiveDoc } from "@earendil-works/pi-durable";
 import { AppError } from "@home-agent/api/errors";
 import type { WorkflowDependencies } from "../definition";
 import {
@@ -15,9 +14,11 @@ import {
   SpatialPlanningExtension,
   spatialPlanningStateSchema,
   spatialPlanningPromptName,
+  spatialPlanningAgentName,
 } from "./extension";
 import type { spatialPlanningInputSchema } from "./workflow";
 import { conversationProgressSchema } from "../../conversation/contracts";
+import { submitConversationInput } from "../../conversation/submit";
 
 export const spatialPlanningSnapshotSchema = spatialPlanningStateSchema.extend({
   session_id: z.uuid(),
@@ -62,7 +63,7 @@ export async function createSpatialPlanningSession({
 
   const conversation = await harness.createConversation(
     {
-      agentName: "spatial-planning",
+      agentName: spatialPlanningAgentName,
       prompt: {
         name: spatialPlanningPromptName,
         systemVariables: { mijia_rooms: JSON.stringify(mijiaRooms) },
@@ -132,28 +133,12 @@ export async function createSpatialPlanningSession({
     ];
     if (closed) throw new AppError("not_found");
 
-    const [submitError, submission] = await attemptAsync(() =>
-      submit({ type: "input", content, whenBusy: "reject" }, context),
+    await submitConversationInput(
+      { submit, abort: (execution) => conversation.abort(execution) },
+      content,
+      signal,
     );
-    if (submitError instanceof ConversationBusy)
-      throw new AppError("workflow_busy");
-    if (submission === null) throw submitError;
-
-    const completion = submission.wait(BACKGROUND_CONTEXT).then((settled) => {
-      if (settled.status !== "done" || settled.type !== "input")
-        throw new AppError("agent_execution_failed");
-      return readState(BACKGROUND_CONTEXT);
-    });
-    const drained = Promise.allSettled([completion]);
-    const [error, snapshot] = await attemptAsync(() =>
-      awaitWithContext(completion, context),
-    );
-    if (signal.aborted)
-      await conversation.abort(BACKGROUND_CONTEXT).finally(() => drained);
-
-    if (snapshot === null) throw error;
-    signal.throwIfAborted();
-    return snapshot;
+    return readState(context);
   }
 
   async function message({

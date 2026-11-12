@@ -55,7 +55,6 @@ export function windowListOptions({
     range.end === undefined;
   return queryOptions({
     ...windowQueryPolicy,
-    staleTime: latest ? 0 : Infinity,
     queryKey: [...windowQueryScope(source.scopeEpoch), "list", source],
     queryFn: ({ signal }) =>
       requestJson(
@@ -77,7 +76,12 @@ export function windowListOptions({
         windowListSchema,
         { signal },
       ),
-    refetchInterval: (query) => (latest && !query.state.error ? 4000 : false),
+    staleTime: (query) => (latest || query.state.error ? 0 : Infinity),
+    refetchInterval: (query) =>
+      latest &&
+      (!query.state.error || windowQueryPolicy.retry(0, query.state.error))
+        ? 4000
+        : false,
   });
 }
 

@@ -13,6 +13,7 @@ import { LogEventsSkeleton } from "./skeletons";
 import { presentLogEntry } from "./presentation";
 import type { useDeviceSelection } from "./use-device-selection";
 import type { useLogComparison } from "./use-log-comparison";
+import { useReadingSnapshot } from "../../utils/use-reading-snapshot";
 
 export const LogReader = memo(function LogReader({
   entries,
@@ -53,13 +54,10 @@ export const LogReader = memo(function LogReader({
     [entries, search],
   );
   const readingKey = JSON.stringify([queryKey, query, comparing]);
-  const [savedReading, setReading] = useState<{
-    key: string;
-    rows: LogEntry[];
-  } | null>(null);
+  const { snapshot, freeze, resume } = useReadingSnapshot(rows, readingKey);
   const reading = useMemo(() => {
-    if (savedReading?.key !== readingKey) return null;
-    const frozen = savedReading.rows;
+    if (!snapshot) return null;
+    const frozen = snapshot;
     const last = frozen.at(-1);
     const boundary = last ? rows.findIndex((row) => row.id === last.id) : -1;
     if (boundary < 0 || boundary === rows.length - 1) return frozen;
@@ -68,10 +66,10 @@ export const LogReader = memo(function LogReader({
       .slice(boundary + 1)
       .filter((row) => !retained.has(row.id));
     return older.length ? [...frozen, ...older] : frozen;
-  }, [savedReading, readingKey, rows]);
-  if (savedReading && savedReading.key !== readingKey) setReading(null);
+  }, [snapshot, rows]);
   const changeReading = (value: boolean) => {
-    setReading(value ? { key: readingKey, rows: reading ?? rows } : null);
+    if (value) freeze(reading ?? rows);
+    else resume();
   };
   const latest = useMemo(
     () => (deviceId && !comparing ? latestLogValues(entries) : []),

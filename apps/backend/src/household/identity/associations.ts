@@ -51,11 +51,7 @@ export function createMemberAssociations(
               item.trackId === track.trackId &&
               item.className === track.className,
           );
-          if (
-            directAssociation &&
-            (directAssociation.state !== "inferred" ||
-              directAssociation.basis === "pet")
-          )
+          if (directAssociation)
             return [memberAssociationSchema.parse(directAssociation)];
           if (
             track.className !== "human" &&
@@ -63,7 +59,7 @@ export function createMemberAssociations(
             track.measuredBox
           ) {
             const pet = matching?.petCandidates(track.className);
-            if (pet?.members.length === 1)
+            if (pet?.members.length === 1 && !pet.hasReferences)
               return [
                 memberAssociationSchema.parse({
                   run,
@@ -162,9 +158,7 @@ export function createMemberAssociations(
                 }),
               ];
           }
-          return directAssociation
-            ? [memberAssociationSchema.parse(directAssociation)]
-            : [];
+          return [];
         });
         next.set(
           run.runId,

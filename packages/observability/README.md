@@ -32,6 +32,12 @@ LANGFUSE_SECRET_KEY=你的项目密钥
 
 使用 trace ID 排查一次调用，使用 Session 查看同一会话的多轮记录。响应头 `x-trace-id` 和 Backend 日志中的 `trace_id` 可用于关联。显式设置 `OTEL_PROPAGATORS` 时须保留 `tracecontext` 与 `baggage`。
 
+一次 Agent 执行对应一条问答记录，模型和工具调用作为子级观测。提交状态保存在仍在记录的关联执行或请求的元数据中；没有可写的关联记录时，单独保存不含问答内容的提交诊断记录。合并执行的多条输入按接纳顺序汇总。后台执行没有请求父级时独立建 Trace。
+
+所有 Agent 会话的观测 ID 使用“提示词名称:业务会话 ID”。Sessions 可按 `household-assistant:`、`spatial-planning:`、`automation-generation:`、`speech-interpretation:`、`media-agent:` 和 `media-analysis-agent:` 前缀筛选对应功能。家庭子 Agent 沿用家庭主会话分组。
+
+Agent、工作流请求及其模型、工具记录统一按执行者写入 Trace Tags；家庭主子 Agent 分别使用“家庭主Agent”和“家庭子Agent”。同一追踪中的主子调用可能合并标签，精确区分会话应使用 ID 前缀。命名与标签随新执行上报，历史记录不会自动改名。
+
 HTTP 记录不自动采集请求和响应正文；Langfuse 的输入输出筛选可能隐藏这些记录。模型输入输出和详细错误受内容采集开关控制，提示词版本管理见[提示词说明](../../docs/agent/prompt-management.md)。用量以供应商实际返回为准，缺失时不估算；自定义模型价格需在 Langfuse 中配置。
 
 评测需要开启内容采集，并显式映射任务、结果和 `metadata.evaluation_context` 中的材料。本包不创建评测器或评分。请求取消、追踪中断及历史缺口可能使材料不完整；Session 分组不保证任务恢复或历史完整。

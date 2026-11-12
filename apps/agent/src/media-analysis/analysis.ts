@@ -1,13 +1,21 @@
-import type { ImageContent, TextContent, Models } from "@earendil-works/pi-ai";
+import type {
+  ImageContent,
+  TextContent,
+  Provider,
+} from "@earendil-works/pi-ai";
+import {
+  AssistantEntry,
+  LiveDoc,
+  type ConversationHandle,
+} from "@earendil-works/pi-durable";
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,
 } from "@earendil-works/chord/context";
-import { withGenAiContext } from "@home-agent/observability";
-import {
-  promptGenerationAttributes,
-  type createPromptResolver,
-} from "../prompts";
+import type { z } from "zod";
+import type { createAgentHarness } from "../harness";
+import { withConversationProgress } from "../conversation/progress";
+import type { conversationProgressSchema } from "../conversation/contracts";
 import { readFinalAnswer } from "../utils/final-answer";
 import { buildMimoPayload } from "./providers/mimo";
 import { buildQwenPayload } from "./providers/qwen";
@@ -41,104 +49,183 @@ export type MediaAnalysisInput = {
       }
   )[];
   signal: AbortSignal;
-  receive?: (kind: "reply" | "reasoning", delta: string) => void;
 };
 
 export type MediaPrompt = {
-  modelId: string;
-  systemPrompt: string;
-  messages: { role: "user"; content: MediaAnalysisInput["content"] }[];
-  signal: AbortSignal;
-  options: {
-    maxTokens: number;
-    temperature: number;
-    topP: number;
-    timeoutMs: number;
-  };
+  media: Extract<MediaAnalysisInput["content"][number], { type: "media" }>[];
   payload: unknown;
 };
 
-export function createMediaAnalyzer({
-  model,
-  modelCollection,
-  prompts,
-}: {
-  model: Parameters<Models["completeSimple"]>[0];
-  modelCollection: Models;
-  prompts: ReturnType<typeof createPromptResolver>;
-}) {
-  const buildPayload =
-    model.api === "google-generative-ai"
-      ? buildGeminiPayload
-      : model.api === "openai-completions"
-        ? model.provider.startsWith("xiaomi")
-          ? buildMimoPayload
-          : model.provider.startsWith("qwen")
-            ? buildQwenPayload
-            : undefined
-        : undefined;
-  if (!buildPayload)
-    throw new Error("Configured model API does not support media analysis");
+const conversationMedia = new Map<
+  ConversationHandle["id"],
+  { media: MediaPrompt["media"]; requests: Map<AbortSignal, () => void> }
+>();
+const requestMedia = new WeakMap<AbortSignal, MediaPrompt["media"]>();
 
-  return {
-    analyze: async ({ content, signal, receive }: MediaAnalysisInput) => {
-      const prompt = await prompts.resolve({
-        name: "media-analysis-agent",
-        context: withAbortSignal(signal, BACKGROUND_CONTEXT),
-      });
-      const messages = [{ role: "user" as const, content }];
-      const options = {
-        maxTokens: 4096,
-        temperature: 0.1,
-        topP: 0.95,
-        timeoutMs: 120_000,
-      };
-      const response = await withGenAiContext(
-        promptGenerationAttributes(prompt.binding),
-        async () => {
-          const stream = modelCollection.streamSimple(
-            model,
-            {
-              systemPrompt: prompt.systemPrompt,
-              messages: [
-                {
-                  role: "user",
-                  content: content.filter((block) => block.type !== "media"),
-                  timestamp: Date.now(),
-                },
-              ],
-            },
-            {
-              ...options,
-              signal,
-              sessionId: crypto.randomUUID(),
-              maxRetries: 0,
-              ...(prompt.config.thinkingLevel === "off"
-                ? {}
-                : { reasoning: prompt.config.thinkingLevel }),
-              onPayload: (payload) =>
-                buildPayload({
-                  modelId: model.id,
-                  systemPrompt: prompt.systemPrompt,
-                  messages,
-                  signal,
-                  options,
-                  payload,
-                }),
-            },
-          );
-          for await (const event of stream) {
-            if (event.type === "text_delta") receive?.("reply", event.delta);
-            if (event.type === "thinking_delta")
-              receive?.("reasoning", event.delta);
-          }
-          return stream.result();
-        },
-      );
-      signal.throwIfAborted();
-      if (response.stopReason !== "stop")
-        throw new Error(response.errorMessage ?? "Incomplete media analysis");
-      return readFinalAnswer(response);
-    },
+export function associateConversationMedia(
+  conversationId: ConversationHandle["id"],
+  content: MediaAnalysisInput["content"],
+) {
+  const association = {
+    media: content.filter((block) => block.type === "media"),
+    requests: new Map<AbortSignal, () => void>(),
   };
+  conversationMedia.set(conversationId, association);
+
+  return () => {
+    conversationMedia.delete(conversationId);
+    for (const release of association.requests.values()) release();
+  };
+}
+
+export function bindMediaRequest(
+  conversationId: ConversationHandle["id"],
+  signal: AbortSignal | undefined,
+) {
+  const association = conversationMedia.get(conversationId);
+  if (!association || !signal) return;
+  signal.throwIfAborted();
+
+  const release = () => {
+    requestMedia.delete(signal);
+    association.requests.delete(signal);
+    signal.removeEventListener("abort", release);
+  };
+  requestMedia.set(signal, association.media);
+  association.requests.set(signal, release);
+  signal.addEventListener("abort", release, { once: true });
+}
+
+export function releaseMediaRequest(signal: AbortSignal | undefined) {
+  if (!signal) return;
+  requestMedia.delete(signal);
+  for (const association of conversationMedia.values())
+    association.requests.get(signal)?.();
+}
+
+export async function analyzeMediaConversation({
+  harness,
+  conversation,
+  content,
+  signal,
+  requestId,
+  onProgress,
+}: MediaAnalysisInput & {
+  harness: ReturnType<typeof createAgentHarness>;
+  conversation: Awaited<
+    ReturnType<
+      ReturnType<typeof createAgentHarness>["prepareManagedConversation"]
+    >
+  >;
+  requestId: string;
+  onProgress?:
+    | ((
+        progress: z.infer<typeof conversationProgressSchema>,
+        reasoning: string,
+      ) => Promise<void>)
+    | undefined;
+}) {
+  const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+  const release = associateConversationMedia(conversation.id, content);
+  let reasoning = "";
+  try {
+    return await withConversationProgress(
+      harness,
+      {
+        conversation,
+        signal,
+        onProgress: onProgress
+          ? async (progress) => {
+              const currentReasoning = await conversation.commit(async (tx) => {
+                const live = await tx.doc(LiveDoc, conversation.id);
+                if (!live.generation?.message) return null;
+                return live.generation.message.content
+                  .filter((block) => block.type === "thinking")
+                  .map((block) => block.thinking)
+                  .join("");
+              }, context);
+              if (currentReasoning !== null) reasoning = currentReasoning;
+              await onProgress(progress, reasoning);
+            }
+          : undefined,
+      },
+      async ({ signal: progressSignal, submit }) => {
+        const requestContext = withAbortSignal(progressSignal, context);
+        const submission = await submit(
+          {
+            type: "input",
+            content: content.filter((block) => block.type !== "media"),
+            requestId,
+          },
+          requestContext,
+        );
+        const settled = await submission.wait(requestContext);
+        if (settled.status !== "done" || settled.type !== "input")
+          throw new Error(
+            settled.status === "unanswered" &&
+              typeof settled.detail === "string"
+              ? settled.detail
+              : "Media analysis did not complete",
+          );
+
+        return conversation.commit(async (tx) => {
+          const entry = await tx.entry(AssistantEntry, settled.answer);
+          const message = entry?.model?.[0];
+          const reply = readFinalAnswer(
+            message?.role === "assistant" ? message : undefined,
+          );
+          const task = entry?.byTaskId && (await tx.task(entry.byTaskId));
+          if (message?.role !== "assistant" || task?.endedAt === undefined)
+            throw new Error("Media analysis has no completion time");
+
+          return {
+            reply,
+            reasoning: message.content
+              .filter((block) => block.type === "thinking")
+              .map((block) => block.thinking)
+              .join(""),
+            completedAt: task.endedAt,
+          };
+        }, requestContext);
+      },
+    );
+  } finally {
+    release();
+  }
+}
+
+export function withMediaProvider(provider: Provider) {
+  return {
+    ...provider,
+    streamSimple: (model, transcript, options) => {
+      const media = options?.signal && requestMedia.get(options.signal);
+      if (!media?.length)
+        return provider.streamSimple(model, transcript, options);
+
+      return provider.streamSimple(model, transcript, {
+        ...options,
+        onPayload: async (payload, requestModel) => {
+          const buildPayload =
+            model.api === "google-generative-ai"
+              ? buildGeminiPayload
+              : model.api === "openai-completions"
+                ? model.provider.startsWith("xiaomi")
+                  ? buildMimoPayload
+                  : model.provider.startsWith("qwen") ||
+                      model.provider === "llamacpp"
+                    ? buildQwenPayload
+                    : undefined
+                : undefined;
+          if (!buildPayload)
+            throw new Error(
+              "Configured model API does not support media analysis",
+            );
+
+          const adapted = buildPayload({ payload, media });
+          const replacement = await options?.onPayload?.(adapted, requestModel);
+          return replacement === undefined ? adapted : replacement;
+        },
+      });
+    },
+  } satisfies Provider;
 }

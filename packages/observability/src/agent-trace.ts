@@ -46,9 +46,15 @@ export class AgentTraceMarker extends NoopSpanProcessor {
   override onStart(...args: Parameters<SpanProcessor["onStart"]>) {
     const [span, parent] = args;
     const parentSpan = trace.getSpan(parent);
+    const inherited = genAiContextAttributes(parent);
+    const agentName =
+      span.attributes["gen_ai.agent.name"] ?? inherited["gen_ai.agent.name"];
+    if (typeof agentName === "string")
+      span.setAttribute("gen_ai.agent.name", agentName);
+
     const sessionId =
       traceSessionId(span.attributes["session.id"]) ??
-      traceSessionId(genAiContextAttributes(parent)["session.id"]) ??
+      traceSessionId(inherited["session.id"]) ??
       requestSession(parent)?.id;
     if (sessionId) span.setAttribute("session.id", sessionId);
     if (
@@ -66,10 +72,16 @@ export class LangfuseAgentSpanProcessor extends LangfuseSpanProcessor {
   override onEnd(span: Parameters<SpanProcessor["onEnd"]>[0]) {
     if (span.attributes[attribute] !== true) return;
 
+    const agentName = span.attributes["gen_ai.agent.name"];
     // Langfuse replaces media in place; other exporters retain their own input.
     super.onEnd({
       ...span,
-      attributes: { ...span.attributes },
+      attributes: {
+        ...span.attributes,
+        ...(typeof agentName === "string" && {
+          "langfuse.trace.tags": [agentName],
+        }),
+      },
       spanContext: () => span.spanContext(),
     });
   }

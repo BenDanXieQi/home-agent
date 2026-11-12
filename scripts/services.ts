@@ -160,7 +160,7 @@ async function runBun(commandArgs: string[]) {
     throw new Error(`命令失败：bun ${commandArgs.join(" ")}`);
 }
 async function prepareDatabase() {
-  await runDocker([...up, "db"]);
+  await runDocker([...up, "db", "agent-mysql"]);
   await runBun(["run", "--cwd", "apps/backend", "db:migrate"]);
   await runBun(["run", "--cwd", "apps/backend", "db:check"]);
 }

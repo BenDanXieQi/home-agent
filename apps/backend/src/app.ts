@@ -76,7 +76,10 @@ type AppDependencies = {
     Parameters<typeof createRecordingService>[0],
     "directory" | "executable" | "resolveWindow"
   >;
-  environment: Pick<Environment, "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS">;
+  environment: Pick<
+    Environment,
+    "BACKEND_PORT" | "BACKEND_REQUEST_TIMEOUT_MS" | "PERCEPTION_FFMPEG_PATH"
+  >;
   connectionStore: ConnectionStore;
   household: HouseholdRuntime;
   mijiaService: MijiaService;
@@ -271,6 +274,8 @@ export function createApp({
         household,
         agent,
         perception,
+        recordings: recordingMedia,
+        executable: environment.PERCEPTION_FFMPEG_PATH,
         agentContext,
         repository: dynamicsRepository,
       }),

@@ -21,12 +21,10 @@ export function createConversationInteraction(
         ReturnType<ReturnType<typeof configureAssistant>["register"]>
       >["instance"]
     >,
-    "id" | "commit" | "sessionId" | "submit"
+    "id" | "commit" | "sessionId" | "submit" | "withTraceContext"
   >,
   harness: Parameters<typeof withConversationProgress>[0],
 ) {
-  const { sessionId } = conversation;
-
   async function submitMessage(
     message: string,
     requestSignal: AbortSignal,
@@ -89,13 +87,10 @@ export function createConversationInteraction(
       signal: AbortSignal,
       receive?: ReceiveProgress,
     ) =>
-      observeConversationRequest(
-        {
-          message,
-          sessionId,
-          conversationId: conversation.id,
-        },
-        () => submitAndWait(message, signal, receive),
+      conversation.withTraceContext(() =>
+        observeConversationRequest({ message }, () =>
+          submitAndWait(message, signal, receive),
+        ),
       ),
   };
 }

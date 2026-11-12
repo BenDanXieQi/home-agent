@@ -1,4 +1,4 @@
-import type { Models, Tool, UserMessage } from "@earendil-works/pi-ai";
+import type { Tool, UserMessage } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { LangfuseClient, ChatPromptClient } from "@langfuse/client";
 import { awaitWithContext, type Context } from "@earendil-works/chord/context";
@@ -12,7 +12,6 @@ import {
   type PromptSection,
 } from "@earendil-works/pi-durable";
 import { MODEL_THINKING_LEVELS } from "@earendil-works/pi-ai/providers/model-schema";
-import { withGenAiContext } from "@home-agent/observability";
 import {
   langfuseConfigurationSchema,
   langfuseConnection,
@@ -190,58 +189,7 @@ export function createPromptResolver(
     };
   }
 
-  async function complete(
-    {
-      name,
-      systemVariables,
-      userVariables,
-      model,
-      modelCollection,
-      tools,
-    }: Omit<Parameters<typeof resolve>[0], "context"> & {
-      userVariables: PromptVariables<[context: Context]>;
-      model: Parameters<Models["completeSimple"]>[0];
-      modelCollection: Models;
-      tools: Omit<Tool, "description">[];
-    },
-    context: Context,
-  ) {
-    const prompt = await resolve({
-      name,
-      systemVariables,
-      context,
-    });
-    const variables = await resolvePromptVariables(userVariables, context);
-    context.abortSignal?.throwIfAborted();
-
-    return withGenAiContext(promptGenerationAttributes(prompt.binding), () =>
-      modelCollection.completeSimple(
-        model,
-        {
-          systemPrompt: prompt.systemPrompt,
-          messages: [
-            {
-              role: "user",
-              content: compileDirectInput(prompt.binding, variables),
-              timestamp: Date.now(),
-            },
-          ],
-          tools: tools.map((tool) =>
-            applyPromptTool(tool, prompt.config.tools),
-          ),
-        },
-        {
-          ...(context.abortSignal ? { signal: context.abortSignal } : {}),
-          maxRetries: 0,
-          ...(prompt.config.thinkingLevel === "off"
-            ? {}
-            : { reasoning: prompt.config.thinkingLevel }),
-        },
-      ),
-    );
-  }
-
-  return { resolve, complete, close: async () => client?.shutdown() };
+  return { resolve, close: async () => client?.shutdown() };
 }
 
 type PromptBinding = Awaited<
@@ -259,26 +207,6 @@ export const PromptBindingDoc = defineDoc<{
   checkpointWhen: () => false,
   initial: () => ({}),
 });
-
-function compileDirectInput(binding: PromptBinding, variables: VariableValues) {
-  const [input] = binding.inputMessages;
-  if (binding.inputMessages.length !== 1 || !input || input.role !== "user")
-    throw new Error(
-      `Direct chat prompt ${binding.name} must contain system messages followed by one user template`,
-    );
-
-  const [message] = chatMessagesSchema.parse(
-    compilePromptMessages(
-      { name: binding.name, version: binding.version, prompt: [input] },
-      variables,
-    ),
-  );
-  if (!message) throw new Error(`Missing managed user prompt: ${binding.name}`);
-  return [{ type: "text", text: message.content }] satisfies Exclude<
-    UserMessage["content"],
-    string
-  >;
-}
 
 export function validateConversationPrompt(binding: PromptBinding) {
   const [input] = binding.inputMessages;

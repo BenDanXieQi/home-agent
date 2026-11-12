@@ -28,7 +28,7 @@ export function configureWorkflows(
         Workflows,
         (_input, _principal, self) => {
           const registry = configuration.createRegistry(self, contextReader);
-          return { instance: createWorkflows(registry) };
+          return { instance: createWorkflows(registry, contextReader) };
         },
         { lifetime: "host" },
       );
@@ -41,10 +41,15 @@ function createWorkflows(
   workflows: ReturnType<
     ReturnType<typeof configureWorkflowRegistry>["createRegistry"]
   >,
+  contextReader: WorkflowDependencies["contextReader"],
 ) {
   return {
-    run: (...args: Parameters<typeof workflows.value.execute>) =>
-      workflows.value.execute(...args),
+    run: (
+      ...[input, signal, receive]: Parameters<typeof workflows.value.execute>
+    ) =>
+      contextReader.readCurrent(signal, (currentSignal) =>
+        workflows.value.execute(input, currentSignal, receive),
+      ),
     reset: () => workflows.value.reset(),
   };
 }

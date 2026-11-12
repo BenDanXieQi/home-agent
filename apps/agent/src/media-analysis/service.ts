@@ -3,61 +3,87 @@ import { setTimeout as delay } from "node:timers/promises";
 import {
   mediaAnalysisEntrySchema,
   mediaAnalysisCompletedSchema,
+  createMediaAnalysisSession,
+  mediaAgentHistoryPageSchema,
+  mediaAnalysisRecordingSchema,
+  mediaAnalysisSummaryKind,
 } from "./session";
 import type { z } from "zod";
 import { attemptAsync, memoize } from "es-toolkit";
+import { AsyncQueuer } from "@tanstack/pacer/async-queuer";
 import type { agentContextDataSchemas } from "@home-agent/api/agent-context";
 import { AppError } from "@home-agent/api/errors";
 import {
-  observeAgentOperation,
-  withGenAiContext,
-} from "@home-agent/observability";
+  BACKGROUND_CONTEXT,
+  withAbortSignal,
+} from "@earendil-works/chord/context";
 import { createAgentDeviceMetadata } from "../context/devices";
-import type { createContextReader } from "../context/reader";
 import type { createContextReceiver } from "../context/receiver";
 import { observationBinding, observationTarget } from "../context/spatial";
-import {
-  formatMediaTime,
-  type createMediaAnalyzer,
-  type MediaAnalysisInput,
-} from "./analysis";
-
-const audioOnlyAnalysisEnabled = false;
+import { formatMediaTime, type MediaAnalysisInput } from "./analysis";
+import type {
+  createMediaAnalysisExtension,
+  mediaAnalysisTaskInputSchema,
+  readCameraMediaSchema,
+} from "./extension";
+import type { conversationProgressSchema } from "../conversation/contracts";
 
 export function createMediaAnalysisAgent({
   readParts,
-  contextReader,
+  harness,
+  model,
+  extension,
   analyze,
   readMedia,
+  readCameraMedia,
   saveCompleted,
 }: {
   readParts: ReturnType<typeof createContextReceiver>["currentParts"];
-  contextReader: Pick<ReturnType<typeof createContextReader>, "readCurrent">;
   saveCompleted: (
     entry: z.infer<typeof mediaAnalysisCompletedSchema>,
     signal: AbortSignal,
   ) => Promise<void>;
-  analyze: ReturnType<typeof createMediaAnalyzer>["analyze"];
+  harness: Parameters<typeof createMediaAnalysisSession>[0]["harness"];
+  model: Parameters<typeof createMediaAnalysisSession>[0]["model"];
+  extension: Parameters<typeof createMediaAnalysisSession>[0]["extension"];
+  analyze: ReturnType<typeof createMediaAnalysisExtension>["analyze"];
   readMedia: (
     range: z.infer<typeof mediaAnalysisEntrySchema>,
     signal: AbortSignal,
   ) => Promise<MediaAnalysisInput["content"]>;
+  readCameraMedia: (
+    input: z.infer<typeof readCameraMediaSchema>,
+    signal: AbortSignal,
+  ) => Promise<{
+    content: MediaAnalysisInput["content"];
+    startedAt: number;
+    endedAt: number;
+    includeAudio: boolean;
+  }>;
 }) {
   const admitted = new Map<
     string,
-    { through: number; expiresAt: number; pendingId: string | undefined }
+    Pick<
+      z.infer<typeof mediaAnalysisEntrySchema>,
+      | "id"
+      | "source"
+      | "kind"
+      | "includeAudio"
+      | "startedAt"
+      | "endedAt"
+      | "readableUntil"
+    >
   >();
   const entries = new Map<string, z.infer<typeof mediaAnalysisEntrySchema>>();
+  let history: z.infer<typeof mediaAgentHistoryPageSchema> = {
+    entries: [],
+    nextCursor: null,
+  };
   const listeners = new Map<string, Set<() => void>>();
-  let currentMedia:
-    | {
-        id: string;
-        blocks: Extract<
-          MediaAnalysisInput["content"][number],
-          { type: "media" }
-        >[];
-      }
-    | undefined;
+  const mediaInputs = new Map<
+    string,
+    Extract<MediaAnalysisInput["content"][number], { type: "media" }>[]
+  >();
 
   function publish(id: string, list = true) {
     for (const listener of listeners.get(id) ?? []) listener();
@@ -65,13 +91,42 @@ export function createMediaAnalysisAgent({
   }
 
   function snapshot() {
+    const background = readBackground();
+    const now = Date.now();
+    const targets =
+      background?.spatial.observation_bindings.flatMap((binding) => {
+        if (!binding.enabled || binding.channel === null) return [];
+
+        const target = observationTarget(
+          background.spatial,
+          { deviceId: binding.device_id, channel: binding.channel },
+          now,
+        );
+        return target ? [{ id: target.id, name: target.name }] : [];
+      }) ?? [];
     return {
       enabled: true,
+      history,
+      observationTargets: [
+        ...new Map(targets.map((target) => [target.id, target])).values(),
+      ],
       entries: [...entries.values()].map(
-        ({ reply, reasoning: _reasoning, media: _media, ...entry }) => ({
-          ...entry,
-          summary: reply.slice(0, 240),
-        }),
+        ({ reply, reasoning: _reasoning, media: _media, ...entry }) => {
+          const target =
+            background &&
+            observationTarget(
+              background.spatial,
+              entry.source,
+              entry.startedAt,
+            );
+          return {
+            ...entry,
+            summary: reply.slice(0, 240),
+            observationTarget: target
+              ? { id: target.id, name: target.name }
+              : null,
+          };
+        },
       ),
     };
   }
@@ -89,86 +144,175 @@ export function createMediaAnalysisAgent({
 
   function trim() {
     const settled = [...entries.values()].filter((entry) =>
-      ["completed", "failed", "expired"].includes(entry.status),
+      ["completed", "failed", "expired", "skipped"].includes(entry.status),
     );
-    for (const entry of settled.slice(0, Math.max(0, settled.length - 30)))
+    for (const entry of settled.slice(0, Math.max(0, settled.length - 30))) {
       entries.delete(entry.id);
+      mediaInputs.delete(entry.id);
+    }
   }
   let started = false;
-  let running: Promise<void> | undefined;
-  let controller: AbortController | undefined;
-  let generation = 0;
   let closed = false;
+  const lifecycle = new AbortController();
+  let rangeRequests = new AbortController();
   let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  const session = createMediaAnalysisSession({
+    harness,
+    model,
+    extension,
+    onHistory(value) {
+      history = value;
+      publish("*", false);
+    },
+  });
+  const concurrency = 5;
+  const queue = new AsyncQueuer(runRange, {
+    concurrency,
+    maxSize: 0,
+    started: false,
+    asyncRetryerOptions: { maxAttempts: 1 },
+    getIsExpired: (id) => {
+      const entry = entries.get(id);
+      return (
+        !entry || entry.status !== "queued" || Date.now() >= entry.readableUntil
+      );
+    },
+    onExpire: (id) => {
+      if (entries.get(id)?.status === "queued") expire(id);
+    },
+    onReject: (id, queuer) => {
+      update(id, {
+        status: "skipped",
+        error: `待分析区间超过 ${queuer.options.maxSize} 个，已优先保留较新的媒体，本区间已跳过`,
+      });
+    },
+    onError: analysisFailed,
+    onSettled: (id, queuer) => {
+      if (mediaInputs.has(id)) {
+        const activeItems = queuer.peekActiveItems();
+
+        for (const mediaId of mediaInputs.keys()) {
+          const status = entries.get(mediaId)?.status;
+          if (
+            mediaId !== id &&
+            !activeItems.includes(mediaId) &&
+            (status === "completed" || status === "failed")
+          )
+            mediaInputs.delete(mediaId);
+        }
+      }
+      if (!readBackground()) queuer.stop();
+    },
+  });
+
+  function expire(id: string) {
+    update(id, { status: "expired", error: "媒体已过期，未进行分析" });
+  }
 
   function admit() {
     const now = Date.now();
-    for (const [id, range] of admitted) {
-      if (now >= range.expiresAt) admitted.delete(id);
-    }
     for (const entry of entries.values()) {
       if (
         ["collecting", "queued"].includes(entry.status) &&
         now >= entry.readableUntil
       )
-        update(entry.id, {
-          status: "expired",
-          error: "媒体已过期，未进行分析",
-        });
+        expire(entry.id);
     }
+
     const observations = readParts()?.observations;
     const ranges: z.infer<
       typeof agentContextDataSchemas.observations
     >["media_ranges"] =
       observations?.status === "ready" ? observations.data.media_ranges : [];
     for (const {
-      id: rangeId,
+      id: _rangeId,
       ready,
       settledAt: _settledAt,
       ...range
     } of ranges) {
-      if (range.kind === "audio" && !audioOnlyAnalysisEnabled) continue;
-      if (now >= range.readableUntil) continue;
-      const admission = admitted.get(rangeId) ?? {
-        through: range.startedAt,
-        expiresAt: range.readableUntil,
-        pendingId: undefined,
-      };
-      admitted.set(rangeId, admission);
-      admission.expiresAt = range.readableUntil;
-      if (range.endedAt <= admission.through) continue;
-      const pending = admission.pendingId && entries.get(admission.pendingId);
+      if (range.kind === "audio" || now >= range.readableUntil) continue;
+      const covered = [...admitted.values()]
+        .filter(
+          (entry) =>
+            entry.source.deviceId === range.source.deviceId &&
+            entry.source.channel === range.source.channel &&
+            entry.kind === range.kind &&
+            entry.includeAudio === range.includeAudio &&
+            entry.startedAt < range.endedAt &&
+            entry.endedAt > range.startedAt,
+        )
+        .toSorted((a, b) => a.startedAt - b.startedAt);
       const status = ready ? ("queued" as const) : ("collecting" as const);
-      if (pending && ["collecting", "queued"].includes(pending.status)) {
-        update(pending.id, { ...range, startedAt: admission.through, status });
-        continue;
+      function enqueue(startedAt: number, endedAt: number) {
+        const background = readBackground();
+        const camera = createAgentDeviceMetadata(background?.household).device({
+          device_id: range.source.deviceId,
+        });
+        const target =
+          background &&
+          observationTarget(background.spatial, range.source, startedAt);
+        const id = crypto.randomUUID();
+        entries.set(id, {
+          ...range,
+          id,
+          startedAt,
+          endedAt,
+          queuedAt: now,
+          status,
+          deviceName: camera.device_name ?? "摄像头",
+          location: target?.name ?? camera.room_name ?? "未知位置",
+          analysisStartedAt: null,
+          completedAt: null,
+          reply: "",
+          reasoning: "",
+          error: null,
+          media: [],
+        });
+        admitted.set(id, {
+          id,
+          source: range.source,
+          kind: range.kind,
+          includeAudio: range.includeAudio,
+          startedAt,
+          endedAt,
+          readableUntil: range.readableUntil,
+        });
+        publish(id);
       }
-      const background = readBackground();
-      const camera = createAgentDeviceMetadata(background?.household).device({
-        device_id: range.source.deviceId,
-      });
-      const target =
-        background &&
-        observationTarget(background.spatial, range.source, admission.through);
-      const id = crypto.randomUUID();
-      admission.pendingId = id;
-      entries.set(id, {
-        ...range,
-        id,
-        startedAt: admission.through,
-        queuedAt: now,
-        status,
-        deviceName: camera.device_name ?? "摄像头",
-        location: target?.name ?? camera.room_name ?? "未知位置",
-        analysisStartedAt: null,
-        completedAt: null,
-        reply: "",
-        reasoning: "",
-        error: null,
-        media: [],
-      });
-      publish(id);
+
+      // Window IDs change as old windows leave a range; track accepted time instead.
+      let through = range.startedAt;
+      for (const [index, entry] of covered.entries()) {
+        entry.readableUntil = Math.max(
+          entry.readableUntil,
+          range.readableUntil,
+        );
+        if (entry.startedAt > through) enqueue(through, entry.startedAt);
+        const pending = entries.get(entry.id);
+        if (pending && ["collecting", "queued"].includes(pending.status)) {
+          const patch = {
+            ...range,
+            startedAt: Math.max(entry.startedAt, range.startedAt),
+            endedAt: Math.min(
+              range.endedAt,
+              covered[index + 1]?.startedAt ?? range.endedAt,
+            ),
+            status,
+          };
+          Object.assign(entry, patch);
+          update(entry.id, patch);
+        }
+        through = Math.max(through, entry.endedAt);
+      }
+      if (through < range.endedAt) enqueue(through, range.endedAt);
     }
+
+    // A range's earliest deadline must not discard coverage of its readable tail.
+    if (observations?.status === "ready")
+      for (const [id, entry] of admitted) {
+        if (now >= entry.readableUntil) admitted.delete(id);
+      }
+
     trim();
     clearTimeout(expiryTimer);
     const deadlines = [...entries.values()]
@@ -176,7 +320,10 @@ export function createMediaAnalysisAgent({
       .map((entry) => entry.readableUntil);
     if (deadlines.length)
       expiryTimer = setTimeout(
-        admit,
+        () => {
+          admit();
+          schedule();
+        },
         Math.max(1, Math.min(...deadlines) - Date.now()),
       );
   }
@@ -197,28 +344,44 @@ export function createMediaAnalysisAgent({
     };
   }
 
-  async function analyzeRange(
-    id: string,
+  async function readInput(
+    input: z.infer<typeof mediaAnalysisTaskInputSchema>,
     signal: AbortSignal,
-    {
-      members,
-      spatial,
-      household,
-    }: NonNullable<ReturnType<typeof readBackground>>,
   ) {
-    const range = detail(id);
-    const media = await readMedia(range, signal);
     signal.throwIfAborted();
+    const background = readBackground();
+    if (!background) throw new AppError("household_unavailable");
+    const { members, spatial, household } = background;
+    const mediaInput =
+      input.kind === "initial"
+        ? {
+            content: await readMedia(input.range, signal),
+            startedAt: input.range.startedAt,
+            endedAt: input.range.endedAt,
+            includeAudio: input.range.includeAudio,
+          }
+        : await readCameraMedia(input.request, signal);
+    signal.throwIfAborted();
+    const range = {
+      source:
+        input.kind === "initial" ? input.range.source : input.request.source,
+      startedAt: mediaInput.startedAt,
+      endedAt: mediaInput.endedAt,
+    };
+    const media = mediaInput.content;
     const blocks = media.filter((block) => block.type === "media");
-    currentMedia = { id, blocks };
-    update(id, {
-      status: "analyzing",
-      media: blocks.map((block, index) => ({
-        index,
-        kind: block.media.kind,
-        contentType: block.media.kind === "video" ? "video/mp4" : "audio/mp4",
-      })),
-    });
+    if (input.kind === "initial") {
+      mediaInputs.set(input.range.id, blocks);
+      update(input.range.id, {
+        status: "analyzing",
+        media: blocks.map((block, index) => ({
+          index,
+          kind: block.media.kind,
+          contentType:
+            block.media.kind === "video" ? "video/mp4" : "audio/mpeg",
+        })),
+      });
+    }
 
     const devices = createAgentDeviceMetadata(household);
     const spaceName = (spaceId: string) =>
@@ -228,16 +391,17 @@ export function createMediaAnalysisAgent({
     const camera = devices.device({ device_id: source.deviceId });
     const binding = observationBinding(spatial, source, at);
     const target = observationTarget(spatial, source, at);
-    update(id, {
-      deviceName: camera.device_name ?? "摄像头",
-      location: target?.name ?? camera.room_name ?? "未知位置",
-    });
+    if (input.kind === "initial")
+      update(input.range.id, {
+        deviceName: camera.device_name ?? "摄像头",
+        location: target?.name ?? camera.room_name ?? "未知位置",
+      });
     const content: MediaAnalysisInput["content"] = [
       {
         type: "text",
         text: [
           "时间约定：以下日期和时刻均按服务运行环境的本地时区标注，包含 GMT 偏移；描述事件时使用所标注的时区。",
-          `本次实际输入：${blocks.some((block) => block.media.kind === "video") ? "包含视频画面" : "未提供画面"}；${blocks.some((block) => block.media.kind === "audio") ? "包含音频" : "未提供声音"}。`,
+          `本次实际输入：${blocks.some((block) => block.media.kind === "video") ? "包含视频画面" : "未提供画面"}；实际时间和音轨状态见媒体说明。`,
           "以下是背景资料，不是本次事件的观察结果。",
           "家庭成员资料（不表示本次在场）：",
           ...members.map(
@@ -260,52 +424,86 @@ export function createMediaAnalysisAgent({
       },
       ...media,
     ];
-    const sessionId = crypto.randomUUID();
-    const reply = await withGenAiContext(
-      { "session.id": sessionId, "gen_ai.conversation.id": sessionId },
-      () =>
-        observeAgentOperation(
-          "media-analysis-agent",
-          content.filter((block) => block.type === "text"),
-          () =>
-            analyze({
-              content,
-              signal,
-              receive: (kind, delta) => {
-                signal.throwIfAborted();
-                const entry = entries.get(id);
-                if (entry) update(id, { [kind]: entry[kind] + delta }, false);
-              },
-            }),
-          {
-            onStart: (span) => {
-              span.setAttribute(
-                "home_agent.media_analysis.media_count",
-                blocks.length,
-              );
-            },
-            onComplete: (_span, result) => result,
-          },
-        ),
-    );
+    return {
+      content,
+      recording: {
+        id: input.kind === "initial" ? input.range.id : crypto.randomUUID(),
+        ...range,
+        kind: input.kind === "initial" ? input.range.kind : "video",
+        includeAudio: mediaInput.includeAudio,
+        deviceName: camera.device_name ?? "摄像头",
+        location: target?.name ?? camera.room_name ?? "未知位置",
+        observationTarget: target ? { id: target.id, name: target.name } : null,
+        question: input.kind === "initial" ? null : input.request.question,
+      } satisfies Omit<
+        z.infer<typeof mediaAnalysisRecordingSchema>,
+        "reply" | "reasoning" | "analysisStartedAt" | "completedAt"
+      >,
+    };
+  }
+
+  async function onProgress(
+    input: z.infer<typeof mediaAnalysisTaskInputSchema>,
+    progress: z.infer<typeof conversationProgressSchema>,
+    reasoning: string,
+  ) {
+    if (input.kind === "initial")
+      update(input.range.id, { reply: progress.reply, reasoning }, false);
+  }
+
+  async function analyzeRange(id: string, signal: AbortSignal) {
+    const conversation = await session.current(signal);
     signal.throwIfAborted();
-    update(id, { status: "saving", reply });
+    const context = withAbortSignal(signal, BACKGROUND_CONTEXT);
+    const recording = await analyze(
+      { kind: "initial", range: detail(id) },
+      signal,
+    );
+    const { reply } = recording;
     const completed = mediaAnalysisCompletedSchema.parse({
       ...entries.get(id),
+      ...recording,
       status: "completed",
-      completedAt: Date.now(),
     });
-    await saveCompleted(completed, signal);
+    update(id, { ...completed, status: "saving" });
     signal.throwIfAborted();
-    update(id, completed);
+    const results = await Promise.allSettled([
+      conversation.submit(
+        {
+          type: "input",
+          whenBusy: "followUp",
+          requestId: `media-summary:${id}`,
+          entry: {
+            kind: mediaAnalysisSummaryKind,
+            data: recording,
+          },
+          content: [
+            `摄像头：${completed.deviceName}；镜头来源：${JSON.stringify(completed.source)}；位置：${completed.location}；时间：${formatMediaTime(completed.startedAt)} 至 ${formatMediaTime(completed.endedAt)}。`,
+            reply,
+          ].join("\n"),
+        },
+        context,
+      ),
+      saveCompleted(completed, signal),
+    ]);
+    const errors = results.flatMap((result, index) => {
+      if (result.status === "fulfilled") return [];
+      const reason =
+        result.reason instanceof Error ? result.reason.message : "未知错误";
+      return [
+        `${index === 0 ? "概述提交失败" : "分析结果保存失败"}：${reason.slice(0, 2048)}`,
+      ];
+    });
+    update(id, {
+      ...completed,
+      error: errors.length ? errors.join("\n") : null,
+    });
     trim();
   }
 
-  async function runRange(
-    id: string,
-    background: NonNullable<ReturnType<typeof readBackground>>,
-  ) {
-    const rangeGeneration = generation;
+  async function runRange(id: string) {
+    if (entries.get(id)?.status !== "queued" || !readBackground()) return;
+
     update(id, {
       status: "preparing",
       analysisStartedAt: Date.now(),
@@ -314,44 +512,36 @@ export function createMediaAnalysisAgent({
       reasoning: "",
       media: [],
     });
-    const lifecycle = new AbortController();
-    controller = lifecycle;
     const requestSignal = AbortSignal.any([
       lifecycle.signal,
+      rangeRequests.signal,
       AbortSignal.timeout(120_000),
     ]);
-    let contextSignal: AbortSignal | undefined;
-    const [error] = await attemptAsync(() =>
-      contextReader.readCurrent(requestSignal, (signal) => {
-        contextSignal = signal;
-        return analyzeRange(id, signal, background);
-      }),
-    );
-    if (controller === lifecycle) controller = undefined;
-    if (rangeGeneration !== generation || closed || !error) return;
-
-    const disconnected =
-      !requestSignal.aborted && (!contextSignal || contextSignal.aborted);
-    if (disconnected && entries.has(id))
-      update(id, {
-        status: "queued",
-        reply: "",
-        reasoning: "",
-        media: [],
-        analysisStartedAt: null,
+    const [error] = await attemptAsync(() => analyzeRange(id, requestSignal));
+    if (error)
+      throw new Error(error instanceof Error ? error.message : "未知错误", {
+        cause: error,
       });
-    else {
-      const stage = entries.get(id)?.status;
-      const reason = error instanceof Error ? error.message : "未知错误";
-      const label =
-        stage === "saving"
-          ? "分析结果保存失败"
-          : stage === "analyzing"
-            ? "模型分析失败"
-            : "媒体读取失败";
+  }
+
+  function analysisFailed(error: Error, id: string) {
+    if (closed) return;
+
+    const stage = entries.get(id)?.status;
+    if (stage === "completed") return;
+    if (stage === "saving") {
+      const entry = detail(id);
+      update(id, {
+        status: "completed",
+        completedAt: entry.completedAt ?? Date.now(),
+        error: "概述提交失败：分析请求已取消\n分析结果保存失败：分析请求已取消",
+      });
+      trim();
+    } else {
+      const label = stage === "analyzing" ? "模型分析失败" : "媒体读取失败";
       update(id, {
         status: "failed",
-        error: `${label}：${reason.slice(0, 2048)}`,
+        error: `${label}：${error.message.slice(0, 2048)}`,
       });
       console.error("Media analysis range failed:", error);
       trim();
@@ -359,46 +549,75 @@ export function createMediaAnalysisAgent({
   }
 
   function schedule() {
-    if (!started || closed || running) return;
-    const background = readBackground();
-    if (!background) return;
-    admit();
-    const entry = [...entries.values()].find(
-      (item) => item.status === "queued",
+    if (!started || closed) return;
+
+    queue.stop();
+    const household = readParts()?.household;
+    if (household?.status !== "ready") return;
+
+    const cameraCount = Object.values(household.data.device).reduce(
+      (total, device) =>
+        total +
+        (device.camera && !device.archived ? device.channels.length : 0),
+      0,
     );
-    if (!entry) return;
-    const { id } = entry;
-    for (const admission of admitted.values()) {
-      if (admission.pendingId !== id) continue;
-      admission.through = entry.endedAt;
-      admission.pendingId = undefined;
+    queue.setOptions({ maxSize: cameraCount * 10 });
+    queue.clear();
+    // Rebuild only pending work: ranges can extend or arrive out of order.
+    const pending = [...entries.values()]
+      .filter((entry) => entry.status === "queued")
+      .toSorted((a, b) => b.endedAt - a.endedAt || b.queuedAt - a.queuedAt);
+    const ready = readBackground() !== undefined;
+    for (const entry of pending) {
+      if (Date.now() >= entry.readableUntil) {
+        expire(entry.id);
+        continue;
+      }
+
+      // Capacity counts waiting items; fill free execution slots before dropping any.
+      if (
+        ready &&
+        queue.store.state.isFull &&
+        queue.peekActiveItems().length < concurrency
+      ) {
+        queue.start();
+        queue.stop();
+      }
+      queue.addItem(entry.id);
     }
-    running = runRange(id, background).finally(() => {
-      running = undefined;
-      schedule();
-    });
+    trim();
+    if (ready) queue.start();
   }
 
-  function reset() {
-    generation++;
-    controller?.abort(new AppError("request_cancelled"));
-    controller = undefined;
-    clearTimeout(expiryTimer);
-    admitted.clear();
-    entries.clear();
-    currentMedia = undefined;
-    for (const callbacks of listeners.values())
-      for (const listener of callbacks) listener();
+  async function drain() {
+    const drained = Promise.withResolvers<void>();
+    const subscription = queue.store.subscribe(({ activeItems }) => {
+      if (!activeItems.length) drained.resolve();
+    });
+    if (!queue.peekActiveItems().length) drained.resolve();
+
+    try {
+      await drained.promise;
+    } finally {
+      subscription.unsubscribe();
+    }
   }
 
   const close = memoize(async () => {
     closed = true;
     clearTimeout(expiryTimer);
-    controller?.abort(new AppError("request_cancelled"));
-    await running;
-    currentMedia = undefined;
+    queue.stop();
+    queue.clear();
+    lifecycle.abort(new AppError("request_cancelled"));
+    const results = await Promise.allSettled([drain(), session.close()]);
+    mediaInputs.clear();
     for (const callbacks of listeners.values())
       for (const listener of callbacks) listener();
+    const errors = results.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (errors.length)
+      throw new AggregateError(errors, "Media Agent close failed");
   });
 
   function detail(id: string) {
@@ -437,7 +656,7 @@ export function createMediaAnalysisAgent({
         if (
           id &&
           "status" in value &&
-          ["completed", "failed", "expired"].includes(value.status)
+          ["completed", "failed", "expired", "skipped"].includes(value.status)
         )
           return value;
         await delay(100, undefined, { signal });
@@ -452,19 +671,24 @@ export function createMediaAnalysisAgent({
 
   return {
     snapshot,
+    history(before: string | undefined, signal: AbortSignal) {
+      return session.history(before, signal);
+    },
     detail,
     watch,
+    readInput,
+    onProgress,
     media(id: string, index: number) {
-      const block =
-        currentMedia?.id === id ? currentMedia.blocks[index] : undefined;
+      const block = mediaInputs.get(id)?.[index];
       if (!block) throw new AppError("not_found");
       return {
         data: block.media.data,
-        contentType: block.media.kind === "video" ? "video/mp4" : "audio/mp4",
+        contentType: block.media.kind === "video" ? "video/mp4" : "audio/mpeg",
       };
     },
-    start() {
+    async start() {
       if (closed) throw new AppError("request_cancelled");
+      await session.current(lifecycle.signal);
       started = true;
       admit();
       schedule();
@@ -473,8 +697,20 @@ export function createMediaAnalysisAgent({
       if (!started || closed) return;
       admit();
       schedule();
+      publish("*", false);
     },
-    reset,
     close,
+    async reset() {
+      clearTimeout(expiryTimer);
+      queue.stop();
+      queue.clear();
+      rangeRequests.abort(new AppError("request_cancelled"));
+      await drain();
+      entries.clear();
+      admitted.clear();
+      mediaInputs.clear();
+      rangeRequests = new AbortController();
+      publish("*", false);
+    },
   };
 }

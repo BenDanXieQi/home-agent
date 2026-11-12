@@ -257,7 +257,7 @@ export async function createPiLangfuseDurableConversation(
                 )
                   submissionObservation(event.record.id).resolve(!incomplete);
               } else {
-                if (event.type === "run_start")
+                if (event.type === "run_start" || event.type === "run_end")
                   await options.beforeRun?.(event.inputs);
                 if (disposed) return;
                 recorder?.event(event);

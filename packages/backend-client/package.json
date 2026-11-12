@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "hono": "catalog:",
+    "zod": "catalog:",
     "@home-agent/agent": "workspace:*"
   },
   "devDependencies": {

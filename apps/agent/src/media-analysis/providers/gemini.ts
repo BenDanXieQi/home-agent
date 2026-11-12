@@ -1,50 +1,47 @@
 import type { MediaPrompt } from "../analysis";
 
-export function buildGeminiPayload({
-  modelId,
-  systemPrompt,
-  messages,
-  signal,
-  options,
-  payload,
-}: MediaPrompt) {
+export function buildGeminiPayload({ media: blocks, payload }: MediaPrompt) {
   if (
     typeof payload !== "object" ||
     payload === null ||
-    !("config" in payload) ||
-    typeof payload.config !== "object" ||
-    payload.config === null
+    !("contents" in payload) ||
+    !Array.isArray(payload.contents)
   )
     throw new Error("Invalid Gemini SDK request payload");
 
+  const contents: unknown[] = payload.contents;
+  const index = contents.findLastIndex(
+    (message) =>
+      typeof message === "object" &&
+      message !== null &&
+      "role" in message &&
+      message.role === "user",
+  );
+  const message = contents[index];
+  if (
+    typeof message !== "object" ||
+    message === null ||
+    !("parts" in message) ||
+    !Array.isArray(message.parts)
+  )
+    throw new Error("Expected a Gemini user message for media");
+
   return {
     ...payload,
-    model: modelId,
-    contents: messages.map(({ role, content }) => ({
-      role,
-      parts: content.map((block) => {
-        if (block.type === "media") {
-          const { media } = block;
+    contents: contents.with(index, {
+      ...message,
+      parts: [
+        ...message.parts,
+        ...blocks.map(({ media }) => {
           const data = media.data.toBase64();
           return media.kind === "video"
             ? {
                 inlineData: { mimeType: "video/mp4", data },
                 videoMetadata: { fps: media.fps },
               }
-            : { inlineData: { mimeType: "audio/mp4", data } };
-        }
-        if (block.type === "text") return { text: block.text };
-        return { inlineData: { mimeType: block.mimeType, data: block.data } };
-      }),
-    })),
-    config: {
-      ...payload.config,
-      systemInstruction: systemPrompt,
-      abortSignal: signal,
-      httpOptions: { timeout: options.timeoutMs },
-      maxOutputTokens: options.maxTokens,
-      temperature: options.temperature,
-      topP: options.topP,
-    },
+            : { inlineData: { mimeType: "audio/mpeg", data } };
+        }),
+      ],
+    }),
   };
 }

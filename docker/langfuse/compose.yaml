@@ -76,7 +76,9 @@ services:
       retries: 10
   langfuse-web:
     <<: *langfuse-service
-    image: docker.langfuse.com/langfuse/langfuse:4.64.0
+    image: home-agent/langfuse-web:4.70.1
+    build:
+      context: .
     depends_on: *langfuse-dependencies
     environment:
       <<: *langfuse-environment
@@ -106,7 +108,10 @@ services:
       start_period: 60s
   langfuse-worker:
     <<: *langfuse-service
-    image: docker.langfuse.com/langfuse/langfuse-worker:4.64.0
+    image: home-agent/langfuse-worker:4.70.1
+    build:
+      context: .
+      target: worker-runtime
     depends_on: *langfuse-dependencies
     environment: *langfuse-environment
   langfuse-cleanup:

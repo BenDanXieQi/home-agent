@@ -9,7 +9,10 @@ import {
   recordingRangesOptions,
   type RecordingMediaInput,
 } from "./originals";
-import { recordingUnavailableText } from "./presentation";
+import {
+  recordingLookupUnavailableText,
+  recordingUnavailableText,
+} from "./presentation";
 import { useRecordingPlayback } from "./use-recording-playback";
 
 function dateInput(at: number) {
@@ -38,20 +41,22 @@ export function RecordingRangePlayer({
   observedAt?: number | undefined;
   autoPlay?: boolean;
 }) {
-  const [request, setRequest] = useState(() =>
-    initialStart !== undefined && initialEnd !== undefined
-      ? {
-          start: initialStart,
-          end: initialEnd,
-          at:
-            observedAt !== undefined &&
-            initialStart <= observedAt &&
-            observedAt < initialEnd
-              ? observedAt
-              : initialStart,
-        }
-      : undefined,
-  );
+  const [request, setRequest] = useState(() => {
+    if (initialStart === undefined || initialEnd === undefined)
+      return undefined;
+    const focusAt =
+      observedAt !== undefined &&
+      initialStart <= observedAt &&
+      observedAt < initialEnd
+        ? observedAt
+        : initialStart;
+    return {
+      start: initialStart - 30_000,
+      end: initialEnd + 30_000,
+      at: focusAt - 30_000,
+      focusAt,
+    };
+  });
   const [start, setStart] = useState<string>();
   const [end, setEnd] = useState<string>();
   const [error, setError] = useState<string>();
@@ -75,14 +80,29 @@ export function RecordingRangePlayer({
     staleTime: Infinity,
     gcTime: 0,
   });
-  const localCovered =
-    request !== undefined &&
-    ranges.data?.ranges.some(
-      (range) => range.start <= request.start && range.end >= request.end,
-    );
+  const locating =
+    request !== undefined && request.at === request.focusAt - 30_000;
+  const localRange = request
+    ? ranges.data?.ranges.find(
+        (range) =>
+          (range.start <= request.at && request.at < range.end) ||
+          (locating &&
+            range.start <= request.focusAt &&
+            request.focusAt < range.end),
+      )
+    : undefined;
+  const localCovered = localRange !== undefined;
+  const readAt = request
+    ? Math.max(request.at, localRange?.start ?? request.at)
+    : undefined;
+  const availabilityAt = request
+    ? locating
+      ? [request.at, request.focusAt]
+      : [request.at]
+    : [];
   const availabilityQuery = recordingAvailabilityOptions(
     playbackTarget && request && !localCovered && !ranges.isPending
-      ? { ...playbackTarget, at: [request.at] }
+      ? { ...playbackTarget, at: availabilityAt }
       : undefined,
   );
   const availabilityOptions = {
@@ -103,8 +123,9 @@ export function RecordingRangePlayer({
   });
   const clip =
     availability.data?.status === "ready"
-      ? availability.data.matches.find((match) => match.at === request?.at)
-          ?.clip
+      ? (availability.data.matches.find((match) => match.clip !== null)?.clip ??
+        availability.data.matches.find((match) => match.at === request?.at)
+          ?.clip)
       : undefined;
   const availableRange = ranges.data?.ranges.at(-1);
   const defaultEnd = availableRange?.end;
@@ -116,16 +137,17 @@ export function RecordingRangePlayer({
   const endAt = request?.end ?? defaultEnd;
   const startValue = start ?? (startAt === undefined ? "" : dateInput(startAt));
   const endValue = end ?? (endAt === undefined ? "" : dateInput(endAt));
-  const localEnd = request
-    ? Math.min(request.at + 30_000, request.end)
-    : undefined;
+  const localEnd =
+    request && readAt !== undefined && localRange
+      ? Math.min(readAt + 30_000, request.end, localRange.end)
+      : undefined;
   const localQuery = originalMediaOptions(
     scope,
-    localCovered && request && localEnd !== undefined
+    localCovered && readAt !== undefined && localEnd !== undefined
       ? {
           ...target,
           source: "local",
-          selection: { kind: "range", start: request.at, end: localEnd },
+          selection: { kind: "range", start: readAt, end: localEnd },
           output: { kind: "video", codec: "h264" },
         }
       : undefined,
@@ -136,7 +158,7 @@ export function RecordingRangePlayer({
   };
   const local = useQuery({
     ...localOptions,
-    enabled: active && !!localCovered,
+    enabled: active && localCovered,
   });
   const localFile = local.data?.media[0];
   const playback = useRecordingPlayback(
@@ -214,7 +236,7 @@ export function RecordingRangePlayer({
               : playback.state?.state === "revoked"
                 ? "录像访问资格已失效。"
                 : availability.data?.status === "unavailable"
-                  ? "摄像头原片暂不可读取。"
+                  ? recordingLookupUnavailableText[availability.data.reason]
                   : clip === null
                     ? "所选时间存在录像缺口，无法继续播放。"
                     : active &&
@@ -225,25 +247,28 @@ export function RecordingRangePlayer({
                       ? "摄像头 SD 录像当前不可读取。"
                       : undefined);
 
-  function constrainPlayback(node: HTMLVideoElement) {
-    if (!request || mediaStart === undefined || node.readyState < 1) return;
-    if (localFile) {
-      if (completed && node.currentTime < node.duration) setCompleted(false);
-      return;
-    }
-    const first = Math.max(0, (request.start - mediaStart) / 1000);
-    const last = (request.end - mediaStart) / 1000;
-    if (first >= node.duration) {
-      node.pause();
-      setError("所选时间未被原片覆盖，无法播放。");
-      return;
-    }
-    if (node.currentTime < first) node.currentTime = first;
-    else if (node.currentTime >= last) {
-      node.pause();
-      if (node.currentTime > last) node.currentTime = last;
-      setCompleted(true);
-    } else if (completed) setCompleted(false);
+  function updatePlaybackProgress(node: HTMLVideoElement) {
+    if (completed && node.currentTime < node.duration) setCompleted(false);
+  }
+
+  function browse(direction: "before" | "after") {
+    if (!request || mediaStart === undefined || busy) return;
+    const boundary =
+      direction === "before" ? mediaStart : localFile ? localEnd : clip?.endAt;
+    if (boundary === undefined) return;
+    const startedAt = direction === "before" ? boundary - 60_000 : boundary;
+    const endedAt = direction === "before" ? boundary : boundary + 60_000;
+    setError(undefined);
+    setCompleted(false);
+    setPlayRequested(true);
+    setStart(undefined);
+    setEnd(undefined);
+    setRequest({
+      start: startedAt,
+      end: endedAt,
+      at: startedAt,
+      focusAt: startedAt,
+    });
   }
 
   return (
@@ -263,19 +288,17 @@ export function RecordingRangePlayer({
           onLoadedMetadata={(event) => {
             if (!request || mediaStart === undefined) return;
             const node = event.currentTarget;
-            const offset = localFile
-              ? 0
-              : Math.max(0, (request.at - mediaStart) / 1000);
+            const offset = Math.max(0, (request.at - mediaStart) / 1000);
             if (!Number.isFinite(node.duration) || offset >= node.duration) {
               node.pause();
-              setError("所选时间未被原片覆盖，无法播放。");
+              setError("所选时间未被录像覆盖，无法播放。");
               return;
             }
             node.currentTime = offset;
           }}
-          onTimeUpdate={(event) => constrainPlayback(event.currentTarget)}
-          onSeeking={(event) => constrainPlayback(event.currentTarget)}
-          onPlay={(event) => constrainPlayback(event.currentTarget)}
+          onTimeUpdate={(event) => updatePlaybackProgress(event.currentTarget)}
+          onSeeking={(event) => updatePlaybackProgress(event.currentTarget)}
+          onPlay={(event) => updatePlaybackProgress(event.currentTarget)}
           onEnded={(event) => {
             if (!active || !request || mediaStart === undefined) return;
             // The final local frame can cover more than the requested range.
@@ -284,15 +307,21 @@ export function RecordingRangePlayer({
               : mediaStart + event.currentTarget.currentTime * 1000;
             if (
               (playedUntil !== undefined && playedUntil >= request.end) ||
-              (localFile && localEnd === request.end)
+              (localFile
+                ? localEnd === request.end
+                : clip && clip.endAt >= request.end)
             ) {
               setCompleted(true);
               return;
             }
             setCompleted(false);
             const nextAt = localFile ? localEnd : clip?.endAt;
-            if (nextAt === undefined || nextAt >= request.end) {
-              setError("原片时间信息与实际时长不一致，无法到达所选结束时间。");
+            if (
+              nextAt === undefined ||
+              nextAt <= request.at ||
+              nextAt >= request.end
+            ) {
+              setError("录像时间信息与实际时长不一致，无法到达所选结束时间。");
               return;
             }
             setPlayRequested(true);
@@ -304,11 +333,34 @@ export function RecordingRangePlayer({
         />
         {!resource && !localFile ? (
           <p className="px-4 text-center text-sm">
-            {request && !failure ? "正在加载录像…" : "选择时间回看录像"}
+            {request
+              ? failure
+                ? "所选录像无法播放"
+                : "正在加载录像…"
+              : "选择时间回看录像"}
           </p>
         ) : null}
       </div>
-      {completed ? <StatusNotice>所选录像已播放完。</StatusNotice> : null}
+      {completed ? (
+        <StatusNotice>本次录像已播放完，可继续向后查看。</StatusNotice>
+      ) : null}
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        <Button
+          disabled={!active || busy || mediaStart === undefined}
+          onClick={() => browse("before")}
+        >
+          向前查看
+        </Button>
+        <Button
+          disabled={!active || busy || mediaStart === undefined}
+          onClick={() => browse("after")}
+        >
+          继续向后看
+        </Button>
+        <p className="text-xs text-muted">
+          可拖动查看当前录像全程，或向前、向后查看更早和更晚的录像。
+        </p>
+      </div>
       {failure ? <Notice tone="error">{failure}</Notice> : null}
       <form
         className="space-y-3"
@@ -349,7 +401,12 @@ export function RecordingRangePlayer({
             } else retry();
             return;
           }
-          setRequest({ start: startedAt, end: endedAt, at: startedAt });
+          setRequest({
+            start: startedAt,
+            end: endedAt,
+            at: startedAt,
+            focusAt: startedAt,
+          });
         }}
       >
         <div className="flex flex-wrap items-end gap-3 text-sm [&_input]:min-h-10 [&_input]:rounded-lg [&_input]:border [&_input]:border-line [&_input]:bg-surface [&_input]:px-2">

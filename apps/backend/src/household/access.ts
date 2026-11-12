@@ -6,8 +6,8 @@ export function accessHousehold(household: HouseholdRuntime, scope: string) {
   const current = snapshot.projection.household.household;
   const assertCurrent = () => {
     const latest = household.snapshot();
-    if (latest.scope_epoch !== scope || !household.ready)
-      throw new HouseholdError("stale_session");
+    if (latest.scope_epoch !== scope) throw new HouseholdError("stale_session");
+    if (!household.ready) throw new HouseholdError("invalid_state");
   };
   assertCurrent();
   if (!current.account_id || !current.home_id)

@@ -29,6 +29,7 @@ import {
 } from "./schema";
 import { HouseholdError } from "../../household/errors";
 import { lockTransaction } from "../../db/transaction-outcome";
+import { readMemberActivitiesInRange } from "../../household/identity/activity-repository";
 
 const markerLock = (deviceId: string, channel: number) =>
   JSON.stringify(["perception_markers", deviceId, channel]);
@@ -192,8 +193,40 @@ export function createWindowHistoryRepository(db: Database) {
           sql<number>`greatest(${markers.startedAt}, ${cutoff})`.mapWith(
             Number,
           );
+        const overlapping = and(
+          eq(records.deviceId, markers.deviceId),
+          eq(records.channel, markers.channel),
+          lt(records.startedAt, markers.endedAt),
+          gt(records.endedAt, startedAt),
+          gt(records.expiresAt, Date.now()),
+        );
+        const observation = tx
+          .select({ summary: records.summary })
+          .from(records)
+          .where(overlapping)
+          .orderBy(asc(records.startedAt), asc(records.id))
+          .limit(1);
+        const detectedClasses = tx
+          .select({
+            classes: sql`coalesce(jsonb_agg(distinct detection.class_name), '[]'::jsonb)`,
+          })
+          .from(records)
+          .innerJoin(
+            sql`jsonb_array_elements(
+              jsonb_path_query_array(${records.summary}, '$.frames[*].tracks[*] ? (@.state == "measured").className') ||
+              jsonb_path_query_array(${records.summary}, '$.frames[*].detections[*].className')
+            ) as detection(class_name)`,
+            sql`detection.class_name in ('"human"'::jsonb, '"cat"'::jsonb, '"dog"'::jsonb)`,
+          )
+          .where(overlapping);
         const spans = await tx
-          .select({ id: markers.id, startedAt, endedAt: markers.endedAt })
+          .select({
+            id: markers.id,
+            startedAt,
+            endedAt: markers.endedAt,
+            observation: sql`(${observation})`,
+            detectedClasses: sql`(${detectedClasses})`,
+          })
           .from(markers)
           .where(
             and(
@@ -213,7 +246,34 @@ export function createWindowHistoryRepository(db: Database) {
           )
           .orderBy(desc(markers.startedAt), desc(markers.id))
           .limit(51);
-        return spans.map((row) => windowMarkerSchema.parse(row));
+        const activities = spans.length
+          ? await readMemberActivitiesInRange(
+              tx,
+              query,
+              Math.min(...spans.map((row) => row.startedAt)),
+              Math.max(...spans.map((row) => row.endedAt)),
+            )
+          : [];
+        return spans.map((row) => {
+          const attributions = new Map(
+            activities
+              .filter(
+                (activity) =>
+                  activity.firstObservedAt < row.endedAt &&
+                  activity.lastObservedAt >= row.startedAt,
+              )
+              .map(({ attribution: { current } }) => [
+                current.kind === "known"
+                  ? current.association.memberId
+                  : "unknown",
+                current,
+              ]),
+          );
+          return windowMarkerSchema.parse({
+            ...row,
+            memberAttributions: [...attributions.values()],
+          });
+        });
       });
     },
     history(

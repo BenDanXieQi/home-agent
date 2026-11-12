@@ -33,7 +33,7 @@ Backend 按属性、设备维护规则索引，状态变化更新相关条件，
 
 ## 自然语言生成
 
-页面调用 Backend 公共 `POST /api/workflows`，指定 `workflow="automation-generation"`。Backend 从当前家庭的已加载规格准备设备能力，经 Agent 公共 workflow 入口执行一次结构化模型调用，返回前重新检查家庭资格和当前设备能力。取消或关闭使在途请求失效。
+页面调用 Backend 公共 `POST /api/workflows`，指定 `workflow="automation-generation"`。Backend 从当前家庭的已加载规格准备设备能力，经 Agent 公共 workflow 入口在独立的 Pi Durable 会话中生成结构化草稿，会话在本次请求结束后关闭，返回前重新检查家庭资格和当前设备能力。取消或关闭使在途请求失效。
 
 模型上下文按设备分组，保留属性和动作参数约束。缺少阈值、设备或动作时机存在歧义时返回澄清问题，不擅自补成可执行规则。请求超过上限时拒绝，不截断能力。页面展示草稿说明、待确认问题及补充输入；生成后的草稿仍需人工审阅。
 

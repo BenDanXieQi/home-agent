@@ -67,6 +67,7 @@ function newTrack(
     lastSeenAt: at,
     attemptedAt: -Infinity,
     samples: [] as ReturnType<typeof sampleEvidence>[],
+    rankedSamples: [] as ReturnType<typeof sampleEvidence>[],
     confirmedLabel: null as string | null,
     confirmedAt: null as number | null,
     everConfirmed: false,
@@ -126,6 +127,9 @@ export function createIdentityAnalysis(
       track.samples = track.samples.filter(
         (sample) => clock - sample.clock < config.evidenceTtlMs,
       );
+      track.rankedSamples = track.rankedSamples.filter(
+        (sample) => clock - sample.clock < config.evidenceTtlMs,
+      );
       if (!track.samples.some((sample) => sample.label !== null))
         track.conflict = false;
       if (
@@ -144,12 +148,20 @@ export function createIdentityAnalysis(
   }
   function describe(track: ReturnType<typeof newTrack>) {
     const latest = track.samples.at(-1);
+    const strongest = track.rankedSamples[0];
+    const samples =
+      strongest && !track.samples.includes(strongest)
+        ? [
+            strongest,
+            ...track.samples.slice(-(identityLimits.samplesPerTrack - 1)),
+          ].toSorted((a, b) => a.clock - b.clock)
+        : track.samples;
     const label =
       track.confirmedLabel ??
       track.samples.findLast((previous) => previous.label !== null)?.label ??
       null;
     const supporting = label
-      ? track.samples.filter((sample) => sample.label === label)
+      ? samples.filter((sample) => sample.label === label)
       : [];
     const latestSupport = supporting.at(-1);
     const scores = (latestSupport ?? latest)?.scores ?? [];
@@ -175,14 +187,14 @@ export function createIdentityAnalysis(
               : latest
                 ? latest.reason
                 : "no_fresh_identity_sample",
-      samples: track.samples.length,
+      samples: samples.length,
       supportingSamples: supporting.length,
       score: best?.score ?? null,
       margin: best ? best.score - (scores[1]?.score ?? -1) : null,
       firstSeenAt: track.firstSeenAt,
       lastSeenAt: track.lastSeenAt,
       lastEvidenceAt: latest?.at ?? null,
-      evidence: track.samples.map((sample) => ({
+      evidence: samples.map((sample) => ({
         provenance: sample.provenance,
         observedAt: sample.at,
         label: sample.label,
@@ -210,6 +222,7 @@ export function createIdentityAnalysis(
       references = next ? createReferences(next) : null;
       for (const track of tracks.values()) {
         track.samples = [];
+        track.rankedSamples = [];
         track.confirmedLabel = null;
         track.confirmedAt = null;
         track.conflict = false;
@@ -368,6 +381,9 @@ export function createIdentityAnalysis(
         )
           continue;
         if (
+          track.rankedSamples.some(
+            (previous) => previous.cropSha256 === sample.cropSha256,
+          ) ||
           track.samples.some(
             (previous) => previous.cropSha256 === sample.cropSha256,
           )
@@ -394,6 +410,13 @@ export function createIdentityAnalysis(
           clock,
           at,
         );
+        const score = evidence.scores[0]?.score;
+        if (score !== undefined && score > 0) {
+          track.rankedSamples = track.rankedSamples.filter(
+            (previous) => previous.scores[0]!.score > score,
+          );
+          track.rankedSamples.push(evidence);
+        }
         statistics.acceptedSamples++;
         const previousLabel =
           track.confirmedLabel ??

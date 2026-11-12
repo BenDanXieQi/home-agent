@@ -8,7 +8,7 @@ bun run stop                   # 停止应用和依赖，保留数据
 bun run status                 # 查看运行状态
 ```
 
-`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时检查本机接口；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。数据库结构由 Drizzle 当前初始化基线建立，已登记应用的 SQL 不重复执行；基线变化后，已有数据库需先备份，再重建并按当前基线初始化，启动命令不会自动清库。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
+`bun run dev` 启动或重载本项目的 Caddy HTTPS 入口，并逐项补齐未启动的服务：Web、backend、Agent 的端口已占用时，通过 `lsof` 和 `ps` 核对监听进程的工作目录、运行入口和进程身份，只跳过本项目对应的应用；其他项目占用端口或无法确认归属时明确报错；所选模式的 go2rtc 已运行时检查本机接口；数据库通过 Compose 启动并等待健康检查通过，随后初始化当前数据库结构并检查，成功后才启动 HTTPS 入口和应用。Backend 使用 PostgreSQL，两个主 Agent 使用独立的本地 MySQL 实例；连接配置见根目录 `.env.example`。Backend 数据库结构由 Drizzle 当前初始化基线建立，已登记应用的 SQL 不重复执行；基线变化后，已有数据库需先备份，再重建并按当前基线初始化，启动命令不会自动清库。进程归属检查不代表应用健康；本机须提供 `lsof` 和 `ps`。全部已启动时命令正常退出。按 Ctrl+C 只停止当前命令新启动的应用，`bun run stop` 停止本项目的 HTTPS 入口、记录的所有开发进程及依赖，不终止单独手动启动的应用。
 
 新启动的应用使用带服务名前缀的连续日志输出，Agent 重载保留已有日志。启动命令等待 Web `/`、backend `/api/health` 和 Agent `/health` 返回成功响应，逐项显示就绪；120 秒内仍未就绪时，列出失败应用及最近的探测错误，以非零退出码结束，并停止本次新启动的应用、移除对应进程记录，保留已有应用与依赖。此检查只确认启动时的 HTTP 接口可用，不代表模型、米家或摄像头就绪。运行中修改代码导致错误时，监听进程可能继续等待修正，须查看对应服务的错误日志；命令仍在运行不表示服务仍然健康。
 
@@ -34,16 +34,19 @@ macOS 的 Docker 模式会检查 `http://127.0.0.1:1984/api`；接口不可达�
 
 服务仅面向可信本机，尚无用户认证。数据库与 go2rtc 管理端口限制在本机访问，不应暴露到公网。摄像头用法与限制见[米家与摄像头](mijia.md)，构建说明见 [go2rtc](../docker/go2rtc/README.md)。
 
-生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库结构需事先准备；本机数据库准备可直接运行 `bun run db:init`，它自动启动并等待数据库就绪，不启动 go2rtc 或应用。使用外部数据库部署时，执行 `bun run --cwd apps/backend db:migrate`，再运行 `bun run --cwd apps/backend db:check`，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
+生产模式使用 `bun run start`，构建后把入口切到生产页面并启动 backend 和 Agent，访问 <https://localhost:8443/>；依赖服务与数据库结构需事先准备；本机数据库准备可直接运行 `bun run db:init`，它自动启动并等待 PostgreSQL 和 Agent MySQL 就绪，不启动 go2rtc 或应用。MySQL 表由 Agent 启动时创建，数据保存在 `agent-mysql-data` 卷中；单独启动可运行 `docker compose up -d --wait agent-mysql`。使用外部数据库部署时，执行 `bun run --cwd apps/backend db:migrate`，再运行 `bun run --cwd apps/backend db:check`，不通过本机服务管理脚本。开发与生产共用入口端口，切换模式会替换页面提供方式，不同时启动两套入口。
 
 ## 可选的本地 Langfuse
 
 Langfuse 提供 Agent 提示词版本管理，并展示模型与工具调用的追踪。它和 PostgreSQL、ClickHouse（追踪分析数据库）、Redis（任务队列）及 MinIO（对象存储）一起属于根目录的 `home-agent` Compose 项目，在 Docker Desktop 中显示于同一服务组。默认不启用，不下载或启动这些可选服务；内部各服务仍使用独立容器。需要 Docker Compose 2.20+ 的 `include` 能力。
 
-Web 与 Worker 镜像统一固定为 `4.64.0`，Client SDK 固定为 `6.0.1`；SDK 6 要求服务端至少 `4.59.0`。更新时先备份 PostgreSQL、ClickHouse、对象存储和队列数据，再将两个镜像改为同一稳定版本并拉取、重建。服务启动会自动应用数据库迁移；升级依据见[官方升级说明](https://langfuse.com/self-hosting/upgrade)。
+Web 与 Worker 基于 `4.70.1`，Client SDK 固定为 `6.0.1`；SDK 6 要求服务端至少 `4.59.0`。Web 在官方源码上应用 `docker/langfuse/playground.patch`，支持把 Dataset item 或追踪中的已存储视频带入 Playground 调试；也可在 Playground 的 User 消息中拖入 MP4，或点击“导入视频”选择文件，单文件最大 100 MiB（同时受服务端媒体大小配置限制）。媒体以可预览的标签保留，实际支持的格式由所选模型适配器决定。Web 与 Worker 通过 Compose 本地构建，构建时建议为 Docker 分配至少 16 GB 内存。更新时同步调整源码、补丁与两个镜像的版本并重建。服务启动会自动应用数据库迁移；升级依据见[官方升级说明](https://langfuse.com/self-hosting/upgrade)。
+
+Experiment 使用官方媒体处理能力：把已存储的视频引用字符串放在 Dataset item Input 的顶层 `video` 字段，背景文本放在 `context` 字段；创建 Chat Prompt，在 User 消息中填写 `{{context}}` 和 `{{video}}`，再通过 Run experiment 选择 Dataset、提示词版本和支持视频的模型。无需重新上传视频；模型调用仅使用提示词引用的字段。现有 `messages` 内的嵌套字段不会自动映射为模板变量。当前 OpenAI 兼容适配器的独立音频输入仅支持 WAV/MP3；只调试视频时，移除输入中的 M4A 音频引用。
 
 ```sh
-docker compose pull langfuse-web langfuse-worker
+docker compose build langfuse-web
+docker compose pull langfuse-worker
 docker compose up -d --wait --wait-timeout 180 langfuse-entry langfuse-worker
 ```
 
@@ -74,9 +77,9 @@ OTEL_INCLUDE_CONTENT=true
 
 `bun run status` 显示所有依赖容器；`bun run stop` 包括已启用的 Langfuse，即使已清空 profile 也会停止其容器，并保留数据卷。关闭本地展示时先停止服务，再清空 `COMPOSE_PROFILES` 并设置 `OTEL_TRACES_EXPORTER=none`，然后重新启动。不要使用 `docker compose down -v`，它会删除数据库和追踪数据卷。
 
-本地部署默认保留最近 7 天的追踪及原始事件，可通过 `LANGFUSE_RETENTION_DAYS` 修改（至少 3 天），修改后重建 `langfuse-cleanup`。清理容器随本地入口启动，启动时及之后每 24 小时调用官方批量删除接口，清理过期 Trace（一次完整调用的追踪记录）及关联数据；仍有近期开始或结束的观测记录时保留整个 Trace。Langfuse Worker 异步删除相关媒体，仅移除没有其他 Trace 或数据集引用的文件。未关联到观测记录的媒体不在此清理范围内；提示词与数据集不受影响。删除不可恢复，停止容器期间不执行清理，重新启动后补做。可用 `docker compose logs langfuse-cleanup` 查看执行结果。
+本地部署默认保留最近 7 天的追踪及原始事件，可通过 `LANGFUSE_RETENTION_DAYS` 修改（至少 3 天），修改后重建 `langfuse-cleanup`。清理容器随本地入口启动，启动时及之后每 24 小时调用官方批量删除接口，清理过期 Trace（一次完整调用的追踪记录）及关联数据；仍有近期开始或结束的观测记录时保留整个 Trace。Langfuse Worker 异步删除相关媒体，仅移除没有其他 Trace 或数据集引用的文件。清理容器还会回收超过同一保留期、且没有 Trace、观测记录或数据集关联的 MP4 上传，包括未提交的 Playground 视频草稿；从最近一次导入或上传结果更新计时，重新导入会续期，仅打开或编辑草稿不会续期。提示词与数据集不受影响。删除不可恢复，停止容器期间不执行清理，重新启动后补做。可用 `docker compose logs langfuse-cleanup` 查看执行结果。
 
-原始事件仅对 MinIO 的 `events/` 前缀设置过期规则，不给 `media/` 设置独立过期规则；ClickHouse 的事件文件索引采用相同保留期，系统日志保留 7 天，容器日志轮转。过期删除与数据库空间回收在后台进行，不保证立即释放磁盘，也不是固定容量上限。依据见官方[存储增长建议](https://langfuse.com/self-hosting/configuration/scaling)、[对象存储生命周期](https://langfuse.com/self-hosting/deployment/infrastructure/blobstorage#bucket-lifecycle-policies)与[数据删除](https://langfuse.com/docs/administration/data-deletion)。官方[项目数据保留](https://langfuse.com/docs/administration/data-retention)为自托管企业版功能，此 OSS 部署使用独立清理容器调用公开接口。
+原始事件仅对 MinIO 的 `events/` 前缀设置过期规则，不给 `media/` 设置独立过期规则；ClickHouse 的事件文件索引采用相同保留期，系统日志保留 7 天，容器日志轮转。过期删除与数据库空间回收在后台进行，不保证立即释放磁盘，也不是固定容量上限。依据见官方[存储增长建议](https://langfuse.com/self-hosting/configuration/scaling)、[对象存储生命周期](https://langfuse.com/self-hosting/deployment/infrastructure/blobstorage#bucket-lifecycle-policies)与[数据删除](https://langfuse.com/docs/administration/data-deletion)。官方[项目数据保留](https://langfuse.com/docs/administration/data-retention)为自托管企业版功能，此 OSS 部署使用独立清理容器调用官方追踪接口及本地视频回收接口。
 
 单独准备本机部署依赖时，用 `docker compose up -d --build --wait langfuse-entry langfuse-worker` 启动已配置的 Langfuse，再按生产运行说明启动应用；`bun run start` 不管理 Docker 依赖。此配置依据 [Langfuse 官方 Compose](https://langfuse.com/self-hosting/deployment/docker-compose) 与[启动初始化](https://langfuse.com/self-hosting/administration/headless-initialization)，容器启动、健康检查、初始化账号登录及项目页面已在本机验证；普通聊天及工具失败追踪已通过本机 Observations API（观测记录查询接口）核验，其余验证范围见[追踪链路](../packages/observability/README.md#追踪链路)。
 

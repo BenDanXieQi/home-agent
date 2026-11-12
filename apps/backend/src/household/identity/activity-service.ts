@@ -171,6 +171,7 @@ export function createMemberActivityService(
       const pet = perception.petCandidates(current.association.className);
       return (
         pet?.members.length === 1 &&
+        !pet.hasReferences &&
         pet.members[0]?.memberId === current.association.memberId
       );
     }

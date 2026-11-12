@@ -66,6 +66,8 @@ export function createHumanTracker(allocateId = createTrackIds()) {
       );
       if (
         displacement >= Math.min(10, Math.hypot(d.w, d.h) * 0.05) ||
+        Math.abs(d.w - t.box.w) >= t.box.w * 0.05 ||
+        Math.abs(d.h - t.box.h) >= t.box.h * 0.05 ||
         tracks.some((other) => other !== t && iou(other.box, d) >= 0.3) ||
         humans.some((other) => other !== d && iou(t.box, other) >= 0.3)
       )
@@ -94,6 +96,19 @@ export function createHumanTracker(allocateId = createTrackIds()) {
       throw new Error("Stale tracking update");
     const remaining = new Set(input.humans.map((_, i) => i));
     const matched = new Map<number, number>();
+    const appearanceCosts = new Map(
+      tracks.map((track) => [
+        track.id,
+        features.map((feature, index) =>
+          feature &&
+          track.features.length &&
+          (!input.cached[index] || input.cached[index]?.trackId === track.id)
+            ? cosine(track.features, feature)
+            : Infinity,
+        ),
+      ]),
+    );
+
     for (const seen of [...new Set(tracks.map((t) => t.lastSeen))].toSorted(
       (a, b) => b - a,
     )) {
@@ -101,13 +116,20 @@ export function createHumanTracker(allocateId = createTrackIds()) {
       const indices = [...remaining];
       const costs = group.map((t) =>
         indices.map((i) => {
-          const feature = features[i];
-          const cached = input.cached[i];
-          return feature &&
-            t.features.length &&
-            (!cached || cached.trackId === t.id) &&
+          const appearances = appearanceCosts.get(t.id)!;
+          const cost = appearances[i]!;
+          const uniqueAppearance =
+            t.lastStep === step - 1 &&
+            input.appearanceEligible[i] &&
+            cost <= 0.2 &&
+            appearances.every((other, index) => index === i || other > 0.2) &&
+            tracks.every(
+              (other) =>
+                other.id === t.id || appearanceCosts.get(other.id)![i]! > 0.2,
+            );
+          return uniqueAppearance ||
             distance(t.state, input.humans[i]!) <= 9.4877
-            ? cosine(t.features, feature)
+            ? cost
             : Infinity;
         }),
       );

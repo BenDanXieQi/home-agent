@@ -50,10 +50,14 @@ export function WindowMedia({
         />
       ) : (
         <StatusNotice>
-          {state ? mediaStates[state] : "正在查询声音…"}
+          {windowRequestUnavailable(error)
+            ? "此观察的声音已不可读取。"
+            : state
+              ? mediaStates[state]
+              : "正在查询声音…"}
         </StatusNotice>
       )}
-      {error ? (
+      {error && !windowRequestUnavailable(error) ? (
         <Notice tone="error">{requestErrorMessage(error)}</Notice>
       ) : null}
       {query.isError && !windowRequestUnavailable(error) ? (

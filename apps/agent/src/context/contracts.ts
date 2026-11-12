@@ -32,7 +32,13 @@ export const agentReceiptQuerySchema = z
 export const agentReceiverConnectionSchema = z.object({
   status: z.enum(["stopped", "connecting", "connected", "disconnected"]),
   synchronized: z.boolean(),
-  last_error: z.object({ reason: z.string(), at: z.iso.datetime() }).nullable(),
+  last_error: z
+    .object({
+      reason: z.string(),
+      message: z.string().nullable(),
+      at: z.iso.datetime(),
+    })
+    .nullable(),
 });
 export const agentReceivedContextSchema = agentContextSnapshotSchema.extend({
   context_bytes: z.number().int().nonnegative(),

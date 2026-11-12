@@ -2,6 +2,7 @@ import { z } from "zod";
 import { agentConfigurationSchema } from "@home-agent/agent/config";
 
 const environmentSchema = agentConfigurationSchema.extend({
+  AGENT_DATABASE_URL: z.url({ protocol: /^mysql$/ }),
   BACKEND_URL: z.url({ protocol: /^https?$/ }).default("http://127.0.0.1:3000"),
   AGENT_HOST: z.string().min(1).default("127.0.0.1"),
   AGENT_PORT: z.coerce.number().int().min(1).max(65535).default(1811),

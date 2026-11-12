@@ -5,7 +5,10 @@ import { genAiMessages } from "@home-agent/observability";
 import { optionalModelRefSchema } from "../../models";
 import { defineWorkflow } from "../definition";
 import { spatialLayoutSchema } from "@home-agent/api/spatial";
-import { SpatialPlanningExtension } from "./extension";
+import {
+  SpatialPlanningExtension,
+  spatialPlanningAgentName,
+} from "./extension";
 import {
   createSpatialPlanningSession,
   spatialPlanningResultSchema,
@@ -53,6 +56,7 @@ export const observation = {
     if (input.action !== "message") return undefined;
     return {
       attributes: {
+        "gen_ai.agent.name": spatialPlanningAgentName,
         "home_agent.spatial.image_count": input.images.length,
         ...(input.session_id && {
           "gen_ai.conversation.id": input.session_id,

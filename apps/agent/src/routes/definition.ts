@@ -1,6 +1,7 @@
 import { createFactory } from "hono/factory";
 import type { createConversationInteraction } from "../assistant/conversation";
 import type { createContextReceiver } from "../context/receiver";
+import type { createContextReader } from "../context/reader";
 import type { configureWorkflows } from "../workflows";
 
 import type { createMediaAnalysisAgent } from "../media-analysis/service";
@@ -14,6 +15,7 @@ export type RouteContext = {
     ReturnType<typeof createContextReceiver>,
     "snapshot" | "receiptIndex" | "journalId" | "receipt"
   >;
+  contextReader: Pick<ReturnType<typeof createContextReader>, "readCurrent">;
   assistant: Parameters<typeof createConversationInteraction>[0] | undefined;
   harness: Parameters<typeof createConversationInteraction>[1];
   workflows: Pick<

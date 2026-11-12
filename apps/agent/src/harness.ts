@@ -5,6 +5,7 @@ import {
 import { cleanupSessionResources } from "@earendil-works/pi-ai";
 import {
   ProviderDoc,
+  type Cursor,
   type ConversationCreateOptions,
   type ConversationHandle,
   type Harness,
@@ -95,12 +96,10 @@ export function createAgentHarness({
     agentName,
     sessionId: requestedSessionId,
     context,
-    traceIdentitySource,
     userVariables,
   }: ManagedConversationOptions & {
     conversation: Conversation;
     context: Context;
-    traceIdentitySource: "session" | "conversation";
     userVariables?: ManagedPromptOptions["prompt"]["userVariables"];
   }) {
     if (conversationClosers.has(conversation.id))
@@ -151,9 +150,17 @@ export function createAgentHarness({
     );
     if (!unboundConversation)
       throw new Error("The managed conversation is unavailable");
-    resources.defer(() =>
-      unboundConversation.abort(BACKGROUND_CONTEXT, { background: true }),
-    );
+    resources.defer(async () => {
+      // A failed attachment must not resume restored work during cleanup.
+      if (!conversationClosers.get(conversation.id)) return;
+
+      if ((await harness.inspect(BACKGROUND_CONTEXT)).scheduling === "paused")
+        return;
+
+      await unboundConversation.abort(BACKGROUND_CONTEXT, {
+        background: true,
+      });
+    });
 
     const agent = await unboundConversation.agent(context);
     const promptExtension = createPromptExtension({
@@ -184,10 +191,14 @@ export function createAgentHarness({
 
     providerSessionId = provider.sessionId;
     const sessionId = requestedSessionId ?? providerSessionId;
-    const traceConversationId =
-      traceIdentitySource === "session" ? sessionId : String(conversation.id);
-    bindTraceSession(sessionId);
-    await tracing.attach(conversation.id, sessionId, traceConversationId);
+    const observationSessionId = `${prompt.name}:${sessionId}`;
+    const traceConversationId = providerSessionId;
+    bindTraceSession(observationSessionId);
+    await tracing.attach(
+      conversation.id,
+      observationSessionId,
+      traceConversationId,
+    );
 
     context.abortSignal?.throwIfAborted();
     if (closed) throw new AppError("request_cancelled");
@@ -199,7 +210,8 @@ export function createAgentHarness({
     function withTraceContext<T>(run: () => T) {
       return withGenAiContext(
         {
-          "session.id": sessionId,
+          "gen_ai.agent.name": agentName,
+          "session.id": observationSessionId,
           "gen_ai.conversation.id": traceConversationId,
         },
         run,
@@ -231,6 +243,7 @@ export function createAgentHarness({
 
     return Object.assign(conversation, {
       sessionId,
+      commit: unboundConversation.commit.bind(unboundConversation),
       async submit(
         input: Parameters<Conversation["submit"]>[0],
         execution: Context,
@@ -291,6 +304,31 @@ export function createAgentHarness({
     };
   }
 
+  async function resetConversations(context: Context) {
+    const { tasks } = await harness.inspect(context);
+    await Promise.all(
+      tasks.map(({ record }) => harness.abortTask(record.id, context)),
+    );
+
+    // Include stored conversations whose Agent is currently disabled.
+    let cursor: Cursor | undefined;
+    do {
+      const page = await harness.commit(
+        (tx) => tx.scanConversations({}, 256, cursor),
+        context,
+      );
+      for (const { id } of page.items) {
+        const conversation = await harness.conversation(id, context);
+        if (!conversation)
+          throw new Error("The stored conversation is unavailable");
+
+        await conversation.abort(context, { background: true });
+        await conversation.reset(undefined, context);
+      }
+      cursor = page.next;
+    } while (cursor);
+  }
+
   const close = memoize(async () => {
     closed = true;
     await Promise.allSettled(pendingInitializations);
@@ -309,6 +347,10 @@ export function createAgentHarness({
   });
 
   return {
+    resetConversations,
+    commit: harness.commit.bind(harness),
+    conversation: harness.conversation.bind(harness),
+    resume: () => harness.resume(),
     watchDoc: harness.watchDoc.bind(harness),
     createConversation(
       {
@@ -330,7 +372,6 @@ export function createAgentHarness({
           agentName,
           sessionId,
           context,
-          traceIdentitySource: "session",
           userVariables: options.prompt.userVariables,
         });
       });
@@ -355,7 +396,6 @@ export function createAgentHarness({
           agentName,
           sessionId,
           context,
-          traceIdentitySource: "conversation",
           userVariables: options.prompt.userVariables,
         });
       });
@@ -371,7 +411,6 @@ export function createAgentHarness({
         prepareManagedConversation({
           ...options,
           userVariables: options.prompt?.userVariables,
-          traceIdentitySource: "conversation",
         }),
       );
     },

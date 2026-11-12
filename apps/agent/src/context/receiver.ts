@@ -12,9 +12,30 @@ import {
 } from "@home-agent/api/agent-context";
 import { consumeEventStream } from "@home-agent/api/http/event-stream";
 import { AppError } from "@home-agent/api/errors";
+import { defineDoc } from "@earendil-works/pi-durable";
+import {
+  BACKGROUND_CONTEXT,
+  withAbortSignal,
+} from "@earendil-works/chord/context";
+import type { createAgentHarness } from "../harness";
+import type { agentReceiverConnectionSchema } from "./contracts";
+
+const ContextLifecycleDoc = defineDoc<{
+  binding?: Pick<
+    z.infer<typeof agentContextScopeSchema>,
+    "account_id" | "home_id"
+  >;
+}>({
+  kind: "home.context-lifecycle",
+  version: 1,
+  scope: "session",
+  initial: () => ({}),
+  checkpointWhen: () => true,
+});
 
 export function createContextReceiver(options: {
   client: Pick<ContextSource, "stream">;
+  harness: Pick<ReturnType<typeof createAgentHarness>, "commit">;
   onReset?: () => Promise<void>;
   onSynchronized?: () => void;
 }) {
@@ -22,13 +43,14 @@ export function createContextReceiver(options: {
   let heartbeatAt: string | null = null;
   const partNames = Object.keys(agentContextPartsSchema.shape);
   let scope: z.infer<typeof agentContextScopeSchema> | null = null;
-  let acceptedEpoch: string | null | undefined;
+  let accepted = ContextLifecycleDoc.definition.initial();
   let parts: z.infer<typeof agentContextSnapshotSchema>["parts"] = {};
   let status: "stopped" | "connecting" | "connected" | "disconnected" =
     "stopped";
   let synchronized = false;
   let receivedAt: string | null = null;
-  let lastError: { reason: string; at: string } | null = null;
+  let lastError: z.infer<typeof agentReceiverConnectionSchema>["last_error"] =
+    null;
   let nextErrorLogAt = 0;
   let connectionGeneration = 0;
   let reads = new AbortController();
@@ -72,17 +94,32 @@ export function createContextReceiver(options: {
     }
     receivedAt = now;
     const next = message.data.scope;
-    if (scope?.scope_epoch !== next?.scope_epoch) {
+    const binding = next
+      ? { account_id: next.account_id, home_id: next.home_id }
+      : accepted.binding;
+    const bindingChanged =
+      binding !== undefined &&
+      accepted.binding !== undefined &&
+      (binding.account_id !== accepted.binding.account_id ||
+        binding.home_id !== accepted.binding.home_id);
+    if ((scope !== null && next === null) || bindingChanged) {
       reads.abort(new AppError("request_cancelled"));
       reads = new AbortController();
       receipts.clear();
       parts = {};
       synchronized = false;
     }
-    const nextEpoch = next?.scope_epoch ?? null;
-    if (acceptedEpoch !== nextEpoch) {
-      await options.onReset?.();
-      acceptedEpoch = nextEpoch;
+    if (bindingChanged) await options.onReset?.();
+
+    if (
+      binding !== undefined &&
+      (bindingChanged || accepted.binding === undefined)
+    ) {
+      await options.harness.commit(async (tx) => {
+        const state = await tx.doc(ContextLifecycleDoc);
+        state.binding = binding;
+      }, BACKGROUND_CONTEXT);
+      accepted = { binding };
     }
     if (signal.aborted || generation !== connectionGeneration) return false;
     const previous = { scope, parts };
@@ -101,7 +138,7 @@ export function createContextReceiver(options: {
       Buffer.byteLength(event.data),
       previous,
     );
-    if (synchronized) options.onSynchronized?.();
+    if (currentSignal()) options.onSynchronized?.();
     return synchronized;
   }
 
@@ -111,6 +148,7 @@ export function createContextReceiver(options: {
       const generation = ++connectionGeneration;
       resetConnection("connecting");
       let failureReason = "request_failed";
+      let failure: unknown;
       try {
         await consumeEventStream(
           {
@@ -135,13 +173,16 @@ export function createContextReceiver(options: {
             },
           },
           async (event) => {
+            failureReason = "receive_failed";
             if (await receiveEvent(event, signal, generation))
               retryMs = agentContextPolicy.reconnectInitialMs;
+            failureReason = "stream_failed";
           },
         );
         failureReason = "stream_ended";
       } catch (error) {
         if (signal.aborted) return;
+        failure = error;
         if (error instanceof DOMException && error.name === "TimeoutError")
           failureReason = "timeout";
         else if (error instanceof z.ZodError) failureReason = "invalid_event";
@@ -150,11 +191,19 @@ export function createContextReceiver(options: {
       if (signal.aborted || generation !== connectionGeneration) return;
       resetConnection("disconnected");
       const now = Date.now();
-      lastError = { reason: failureReason, at: new Date(now).toISOString() };
+      lastError = {
+        reason: failureReason,
+        message:
+          failure instanceof Error
+            ? `${failure.name}: ${failure.message}`.slice(0, 2048)
+            : null,
+        at: new Date(now).toISOString(),
+      };
       if (now >= nextErrorLogAt) {
         console.warn("Household context subscription failed", {
           reason: failureReason,
           retry_ms: retryMs,
+          error: failure,
         });
         nextErrorLogAt = now + agentContextPolicy.reconnectMaxMs;
       }
@@ -175,8 +224,6 @@ export function createContextReceiver(options: {
     await subscriptionPromise;
     subscriptionPromise = undefined;
     controller = undefined;
-    acceptedEpoch = undefined;
-    await options.onReset?.();
   }
 
   return {
@@ -207,13 +254,35 @@ export function createContextReceiver(options: {
         received_at: receivedAt,
       };
     },
-    start() {
+    async start(signal: AbortSignal) {
       if (subscriptionPromise) return;
+
+      accepted = await options.harness.commit(
+        async (tx) => {
+          const { binding } = await tx.doc(ContextLifecycleDoc);
+          if (!binding) return {};
+
+          return {
+            binding: {
+              account_id: binding.account_id,
+              home_id: binding.home_id,
+            },
+          };
+        },
+        withAbortSignal(signal, BACKGROUND_CONTEXT),
+      );
+      signal.throwIfAborted();
+
       controller = new AbortController();
-      subscriptionPromise = subscribeContext(controller.signal).catch(() => {
-        resetConnection("disconnected");
-        console.error("Household context receiver stopped unexpectedly");
-      });
+      subscriptionPromise = subscribeContext(controller.signal).catch(
+        (error) => {
+          resetConnection("disconnected");
+          console.error(
+            "Household context receiver stopped unexpectedly",
+            error,
+          );
+        },
+      );
     },
     stop,
     [Symbol.asyncDispose]: stop,

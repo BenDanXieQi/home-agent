@@ -61,6 +61,21 @@ type CompactionTraceInput = {
   execution: CompactionInvocation[2];
 };
 
+function metadataAttributes(metadata: ObservationAttributes["metadata"] = {}) {
+  return Object.fromEntries(
+    Object.entries(metadata)
+      .filter(([, value]) => value !== undefined)
+      .map(([key, value]) => [
+        key,
+        typeof value === "string" ||
+        typeof value === "number" ||
+        typeof value === "boolean"
+          ? value
+          : JSON.stringify(value),
+      ]),
+  );
+}
+
 class DurableObservation {
   readonly span;
   readonly kind;
@@ -73,6 +88,9 @@ class DurableObservation {
   private readonly onEnd:
     | ((observation: DurableObservation) => void)
     | undefined;
+  private readonly onUpdate:
+    | ((attributes: ObservationAttributes) => void)
+    | undefined;
   private readonly ownsEvaluation: boolean;
   private readonly call:
     | { id: string; name: string; arguments: unknown }
@@ -84,6 +102,7 @@ class DurableObservation {
     parent: Context,
     options: {
       onEnd?: (observation: DurableObservation) => void;
+      onUpdate?: (attributes: ObservationAttributes) => void;
       call?: { id: string; name: string; arguments: unknown };
       ownsEvaluation?: boolean;
     } = {},
@@ -94,6 +113,7 @@ class DurableObservation {
     this.parent = parent;
     this.finish = span ? beginOperation() : undefined;
     this.onEnd = options.onEnd;
+    this.onUpdate = options.onUpdate;
     this.call = options.call;
     this.ownsEvaluation = options.ownsEvaluation ?? false;
   }
@@ -113,23 +133,12 @@ class DurableObservation {
     this.span?.addLink({ context: target });
   }
   update(attributes: ObservationAttributes) {
+    if (this.ended) return this;
+    this.onUpdate?.(attributes);
+
     const span = this.span;
-    if (this.ended || !span?.isRecording()) return this;
-    const metadata = attributes.metadata ?? {};
-    span.setAttributes(
-      Object.fromEntries(
-        Object.entries(metadata)
-          .filter(([, value]) => value !== undefined)
-          .map(([key, value]) => [
-            key,
-            typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "boolean"
-              ? value
-              : JSON.stringify(value),
-          ]),
-      ),
-    );
+    if (!span?.isRecording()) return this;
+    span.setAttributes(metadataAttributes(attributes.metadata));
     if (telemetryStatus().includeContent) {
       for (const field of ["input", "output"] as const) {
         const value = attributes[field];
@@ -376,11 +385,7 @@ export function createDurableTracing({
         "pi.durable.primary_submission_id": primary,
         "pi.durable.inputs": JSON.stringify(inputs),
       };
-      const span = tracer.startSpan(
-        `invoke_agent ${agentName}`,
-        { attributes },
-        parent,
-      );
+      const span = tracer.startSpan(agentName, { attributes }, parent);
       let evaluation = combineEvaluationContexts(parents, parent);
       const ownsEvaluation = !hasEvaluationContext(evaluation);
       if (ownsEvaluation)
@@ -534,23 +539,67 @@ export function createDurableTracing({
         (requestId === undefined ? undefined : origins.get(requestId)) ??
         inputParents.get(source.id) ??
         ROOT_CONTEXT;
-      const span = tracer.startSpan(
-        "pi.durable.submission",
-        { attributes: correlation(id) },
-        nativeParent,
-      );
+      const startedAt = new Date().toISOString();
+      const metadata = metadataAttributes(attributes.metadata);
+      let level = attributes.level ?? "DEFAULT";
+      let statusMessage = attributes.statusMessage;
       return new DurableObservation(
-        span,
+        undefined,
         "span",
         correlation(id),
         nativeParent,
-        requestId !== undefined
-          ? {
-              onEnd: () => {
-                origins.delete(requestId);
-              },
+        {
+          onUpdate: (update) => {
+            Object.assign(metadata, metadataAttributes(update.metadata));
+            level = update.level ?? level;
+            statusMessage = update.statusMessage ?? statusMessage;
+          },
+          onEnd: () => {
+            const run = [...runs.values()].find(
+              (candidate) =>
+                candidate.correlation["pi.durable.conversation_id"] === id &&
+                candidate.inputIds.has(source.id),
+            );
+            const parentSpan = trace.getSpan(nativeParent);
+            const span = run?.span?.isRecording()
+              ? run.span
+              : parentSpan?.isRecording()
+                ? parentSpan
+                : undefined;
+            const submissionMetadata = {
+              ...metadata,
+              "pi.durable.submission_started_at": startedAt,
+            };
+            if (span) {
+              span.setAttribute(
+                `pi.durable.submission.${source.id}`,
+                JSON.stringify(submissionMetadata),
+              );
+            } else {
+              const diagnostic = tracer.startSpan(
+                "pi.durable.submission",
+                {
+                  startTime: new Date(startedAt),
+                  attributes: correlation(id),
+                },
+                nativeParent,
+              );
+              new DurableObservation(
+                diagnostic,
+                "span",
+                correlation(id),
+                nativeParent,
+              )
+                .update({
+                  metadata: submissionMetadata,
+                  level,
+                  ...(statusMessage !== undefined && { statusMessage }),
+                })
+                .end();
             }
-          : {},
+            if (requestId !== undefined) origins.delete(requestId);
+          },
+        },
       ).update(attributes);
     },
     forceFlush: flushTelemetry,
